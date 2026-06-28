@@ -1,0 +1,4 @@
+http://prowlarr.homelab.lan {
+  import localSubnets
+	reverse_proxy @localSubnets http://prowlarr:9696
+}

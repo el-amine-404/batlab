@@ -1,0 +1,4 @@
+http://uptimekuma.homelab.lan {
+  import localSubnets
+	reverse_proxy @localSubnets http://uptime-kuma:3001
+}

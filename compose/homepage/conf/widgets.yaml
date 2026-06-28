@@ -1,0 +1,29 @@
+---
+# For configuration options and examples, please see:
+# https://gethomepage.dev/configs/info-widgets/
+
+- resources:
+    cpu: true
+    memory: true
+    disk: /
+
+- search:
+    provider: google
+    target: _blank
+
+- openmeteo:
+    label: Temara
+    latitude: 33.9263
+    longitude: -6.9122
+    timezone: Africa/Casablanca
+    units: metric
+    cache: 5
+    format:
+      maximumFractionDigits: 1
+
+- datetime:
+    text_size: xl
+    format:
+      dateStyle: short
+      timeStyle: short
+      hour12: true

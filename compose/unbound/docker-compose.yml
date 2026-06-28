@@ -1,0 +1,23 @@
+services:
+  unbound:
+    image: ${IMAGE_UNBOUND}:${TAG_UNBOUND}
+    container_name: unbound
+    restart: unless-stopped
+    volumes:
+      - ${CONFIGS_ROOT}/unbound/conf/unbound.conf:/opt/unbound/etc/unbound/unbound.conf
+    ports:
+      - 127.0.0.1:5335:5335/udp
+      - 127.0.0.1:5335:5335/tcp
+    networks:
+      home_server:
+        ipv4_address: 172.19.255.254
+
+    healthcheck:
+      test: ["CMD-SHELL", "drill -p 5335 google.com @127.0.0.1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  home_server:
+    external: true

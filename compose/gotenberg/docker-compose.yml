@@ -1,0 +1,43 @@
+name: ${GOTENBERG_PROJECT_NAME}
+services:
+  gotenberg:
+    image: ${IMAGE_GOTENBERG}:${TAG_GOTENBERG}
+    container_name: gotenberg
+    restart: unless-stopped
+    ports:
+      - ${HOST_LOOPBACK_IP}:${GOTENBERG_HTTP_PORT}:3000
+    networks:
+      - home_server
+    mem_limit: 5gb
+    mem_reservation: 2gb
+    memswap_limit: 5gb
+    mem_swappiness: 0
+    cpus: 1.0
+    ulimits:
+      nofile:
+        soft: 8192
+        hard: 16384
+      nproc: 1024
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+      - /run
+      # - /var/run # somtimes
+    healthcheck:
+      # to see if the healthcheck is OK
+      # docker inspect --format='{{json .State.Health}}' <MY_CONTAINER> | jq
+      # watch docker ps
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+networks:
+  home_server:
+    external: true
+    name: home_server

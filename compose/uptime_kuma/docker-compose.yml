@@ -1,0 +1,28 @@
+services:
+  uptime-kuma:
+    image: ${IMAGE_UPTIMEKUMA}:${TAG_UPTIMEKUMA}
+    container_name: uptime-kuma
+    restart: unless-stopped
+    ports:
+      - ${HOST_LOOPBACK_IP}:${UPTIMEKUMA_HTTP_PORT}:3001
+    volumes:
+      - ${VOLUMES_ROOT}/uptime-kuma/data:/app/data
+      # Optional: Allows Kuma to monitor container status directly
+      # - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - home_server
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001"]
+      interval: 30s
+      retries: 3
+      start_period: 10s
+      timeout: 5s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  home_server:
+    external: true

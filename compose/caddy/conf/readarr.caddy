@@ -1,0 +1,4 @@
+http://readarr.homelab.lan {
+  import localSubnets
+	reverse_proxy @localSubnets http://gluetun:8787
+}

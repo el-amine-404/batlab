@@ -1,0 +1,4 @@
+http://portainer.homelab.lan {
+  import localSubnets
+	reverse_proxy @localSubnets http://portainer-ce:9000
+}

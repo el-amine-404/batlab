@@ -1,0 +1,4 @@
+http://radarr.homelab.lan {
+  import localSubnets
+	reverse_proxy @localSubnets http://gluetun:7878
+}

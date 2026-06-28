@@ -1,0 +1,4 @@
+http://filebrowser.homelab.lan {
+  import localSubnets
+	reverse_proxy @localSubnets http://filebrowser:80
+}

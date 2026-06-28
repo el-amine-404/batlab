@@ -1,0 +1,57 @@
+name: ${HOMEPAGE_PROJECT_NAME}
+services:
+  homepage:
+    image: ${IMAGE_HOMEPAGE}:${TAG_HOMEPAGE}
+    container_name: homepage
+    restart: unless-stopped
+    user: "${PUID}:${PGID}"
+    ports:
+      - ${HOST_LOOPBACK_IP}:${HOMEPAGE_HTTP_PORT}:3000
+    volumes:
+      - ${CONFIGS_ROOT}/homepage/conf:/app/config
+      - ${VOLUMES_ROOT}/homepage/icons:/app/public/icons
+      - ${VOLUMES_ROOT}/homepage/images:/app/public/images
+      - ${VOLUMES_ROOT}/homepage/logs:/app/config/logs
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - HOMEPAGE_ALLOWED_HOSTS=homepage.homelab.lan
+      - TZ=${TZ}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    networks:
+      - home_server
+    mem_limit: 1gb
+    mem_reservation: 500m
+    memswap_limit: 1gb
+    mem_swappiness: 0
+    cpus: 0.8
+    ulimits:
+      nofile:
+        soft: 4096
+        hard: 8192
+      nproc: 4096
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "--no-check-certificate",
+          "--tries=1",
+          "--spider",
+          "http://127.0.0.1:3000/",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+networks:
+  home_server:
+    external: true
+    name: home_server

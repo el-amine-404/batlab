@@ -1,0 +1,44 @@
+name: ${JELLYFIN_PROJECT_NAME}
+services:
+  jellyfin:
+    image: ${IMAGE_JELLYFIN}:${TAG_JELLYFIN}
+    container_name: jellyfin
+    restart: unless-stopped
+    user: ${PUID}:${PGID}
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - JELLYFIN_PublishedServerUrl=http://jellyfin.homelab.lan
+      - JELLYFIN_CONFIG_DIR=/config
+      - JELLYFIN_DATA_DIR=/server_data
+      - JELLYFIN_LOG_DIR=/log
+    volumes:
+      - ${CONFIGS_ROOT}/jellyfin/conf:/config
+      - ${VOLUMES_ROOT}/jellyfin/data:/server_data
+      - ${VOLUMES_ROOT}/jellyfin/cache:/cache
+      - ${VOLUMES_ROOT}/jellyfin/log:/log
+      - ${DATA_ROOT}:/data:ro
+      - /etc/localtime:/etc/localtime:ro
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8096/"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    networks:
+      - home_server
+    devices:
+      - /dev/dri/renderD128:/dev/dri/renderD128
+      - /dev/dri/card0:/dev/dri/card0
+    group_add:
+      - "992"
+      - "44"
+networks:
+  home_server:
+    external: true
+    name: home_server

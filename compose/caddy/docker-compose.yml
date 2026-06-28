@@ -1,0 +1,33 @@
+name: ${CADDY_PROJECT_NAME}
+services:
+  caddy:
+    image: ${IMAGE_CADDY}:${TAG_CADDY}
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - ${CADDY_HTTP_PORT}:80
+      - ${CADDY_HTTPS_PORT}:443
+      - ${CADDY_HTTP3_PORT}:443/udp
+    volumes:
+      - ${CONFIGS_ROOT}/caddy/conf:/etc/caddy:ro
+      - ${SITES_ROOT}/caddy/site:/srv:ro
+      - ${VOLUMES_ROOT}/caddy/data:/data
+      - ${VOLUMES_ROOT}/caddy/config:/config
+      - /etc/localtime:/etc/localtime:ro
+    user: ${PUID}:${PGID}
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    networks:
+      - home_server
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:2019/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+networks:
+  home_server:
+    external: true
+    name: home_server

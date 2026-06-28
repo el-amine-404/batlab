@@ -1,0 +1,43 @@
+# This repo is config-only. Runtime data lives OUTSIDE it on the server at the
+# absolute /mnt/docker-volumes (DBs, TLS keys, VPN state) and is backed up via
+# Restic (see BACKUP.md). These guards just stop an in-repo copy from sneaking in.
+mnt/
+/srv/
+
+# Environments & secrets -------------------------------------------------------
+# The real env file lives next to .env.example and carries live secrets
+# (WireGuard key, DB password). Only the .example template is tracked.
+.env
+**/.env
+!**/.env.example
+
+# Belt-and-braces: never track credential material regardless of location.
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cert
+*_rsa
+*_ed25519
+*.kdbx
+secrets/
+**/secrets.*
+local/
+*.local
+!*.local.example
+
+# Service runtime artifacts (generated under compose/ at deploy time) ----------
+logs/
+.cache
+compose/netdata/conf/
+
+# OS / editor ephemera ---------------------------------------------------------
+*.log
+.DS_Store
+.directory
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

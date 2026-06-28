@@ -1,0 +1,4 @@
+http://homepage.homelab.lan {
+  import localSubnets
+	reverse_proxy @localSubnets http://homepage:3000
+}

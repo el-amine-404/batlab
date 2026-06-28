@@ -1,0 +1,25 @@
+services:
+  netdata:
+    image: ${IMAGE_NETDATA}:${TAG_NETDATA}
+    container_name: netdata
+    pid: host
+    network_mode: host
+    restart: unless-stopped
+    cap_add:
+      - SYS_PTRACE
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    volumes:
+      - ${CONFIGS_ROOT}/netdata/conf:/etc/netdata
+      - ${VOLUMES_ROOT}/netdata/lib:/var/lib/netdata
+      - ${VOLUMES_ROOT}/netdata/cache:/var/cache/netdata
+      - /:/host/root:ro,rslave
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/passwd:/host/etc/passwd:ro
+      - /etc/group:/host/etc/group:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /run/dbus:/run/dbus:ro
+      - /etc/os-release:/host/etc/os-release:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro

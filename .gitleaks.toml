@@ -1,0 +1,25 @@
+# gitleaks configuration -- extends the bundled default ruleset.
+#
+# Picked up automatically by both the pre-commit hook and the gitleaks GitHub
+# Action (they look for .gitleaks.toml at the repo root).
+#
+# This repo should never contain real secrets: every secret lives in
+# srv/docker-compose/.env (gitignored) and runtime state lives under mnt/
+# (gitignored). gitleaks is the backstop in case that ever slips.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = """
+.env.example ships placeholder values (your_*_here) so it is safe by design.
+Homepage/Jellyfin sample configs carry commented-out example tokens.
+"""
+paths = [
+  '''compose/\.env\.example$''',
+  '''compose/homepage/conf/proxmox\.yaml$''',
+  '''compose/homepage/conf/docker\.yaml$''',
+]
+regexes = [
+  '''your_[a-z_]+_here''',
+]

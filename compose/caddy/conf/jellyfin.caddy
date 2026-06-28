@@ -1,0 +1,4 @@
+http://jellyfin.homelab.lan {
+  import localSubnets
+	reverse_proxy @localSubnets http://jellyfin:8096
+}

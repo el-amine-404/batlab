@@ -1,0 +1,20 @@
+name: adguardhome
+services:
+  adguardhome:
+    image: ${IMAGE_ADGUARD}:${TAG_ADGUARD}
+    container_name: adguardhome
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ${CONFIGS_ROOT}/adguardhome/conf:/opt/adguardhome/conf
+      - ${VOLUMES_ROOT}/adguardhome/data:/opt/adguardhome/work
+    network_mode: host
+    environment:
+      - TZ=${TZ}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/control/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

@@ -1,0 +1,36 @@
+# Lean, secrets-focused pre-commit setup.
+#
+#   Install the git hook:   pre-commit install
+#   Run against everything:  pre-commit run --all-files
+#   Bump hook versions:      pre-commit autoupdate
+#
+# The headline hooks are gitleaks + detect-private-key: this repo's #1 rule is
+# "never commit a secret". The rest are cheap hygiene checks.
+
+minimum_pre_commit_version: "3.5.0"
+
+repos:
+  # -- General hygiene & footguns ---------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+      - id: check-yaml
+        # docker-compose / homepage configs use multi-doc + custom tags
+        args: ["--allow-multiple-documents"]
+      - id: check-json
+      # Block accidentally committing runtime data / media / backups.
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+      # Hard stop on TLS/SSH private keys (caddy, portainer, wireguard, etc.).
+      - id: detect-private-key
+
+  # -- Secret scanning (primary guardrail) ------------------------------------
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks

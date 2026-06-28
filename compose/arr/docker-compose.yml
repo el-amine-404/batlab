@@ -1,0 +1,277 @@
+name: potato-arr
+services:
+
+  bazarr:
+    image: ${IMAGE_BAZARR}:${TAG_BAZARR}
+    container_name: bazarr
+    depends_on:
+      gluetun:
+        condition: service_healthy
+        restart: true
+    volumes:
+      - ${VOLUMES_ROOT}/bazarr:/config
+      - ${DATA_ROOT}:/data
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - TZ=${TZ}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    network_mode: service:gluetun
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-L", "-f", "http://localhost:6767" ]
+      interval: 45s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    cpus: 0.5
+    mem_limit: 1gb
+    mem_reservation: 512mb
+    mem_swappiness: 0
+    memswap_limit: 1gb
+
+  gluetun:
+    image: ${IMAGE_GLUETUN}:${TAG_GLUETUN}
+    container_name: gluetun
+    volumes:
+      - ${VOLUMES_ROOT}/gluetun:/gluetun
+    environment:
+      - VPN_SERVICE_PROVIDER=protonvpn
+      - VPN_TYPE=wireguard
+      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
+      - SERVER_COUNTRIES=Spain
+      - VPN_PORT_FORWARDING=on
+      - TZ=${TZ}
+      - BLOCK_MALICIOUS=on
+      - BLOCK_ADS=on
+      - BLOCK_SURVEILLANCE=on
+    networks:
+      - home_server
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "/gluetun-entrypoint", "healthcheck" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+      start_interval: 60s
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+
+  lidarr:
+    image: ${IMAGE_LIDARR}:${TAG_LIDARR}
+    container_name: lidarr
+    depends_on:
+      gluetun:
+        condition: service_healthy
+        restart: true
+    volumes:
+      - ${VOLUMES_ROOT}/lidarr:/config
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - TZ=${TZ}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    network_mode: service:gluetun
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8686/ping" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    cpus: 0.5
+    mem_limit: 1gb
+    mem_reservation: 512mb
+    mem_swappiness: 0
+    memswap_limit: 1gb
+
+  prowlarr:
+    image: ${IMAGE_PROWLARR}:${TAG_PROWLARR}
+    container_name: prowlarr
+    depends_on:
+      gluetun:
+        condition: service_healthy
+        restart: true
+    volumes:
+      - ${VOLUMES_ROOT}/prowlarr:/config
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - TZ=${TZ}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9696/ping" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    cpus: 0.5
+    mem_limit: 1gb
+    mem_reservation: 256mb
+    mem_swappiness: 0
+    memswap_limit: 1gb
+    networks:
+      - home_server
+
+  qbittorrent:
+    image: ${IMAGE_QBITTORRENT}:${TAG_QBITTORRENT}
+    container_name: qbittorrent
+    depends_on:
+      gluetun:
+        condition: service_healthy
+        restart: true
+    volumes:
+      - ${VOLUMES_ROOT}/qbittorrent:/config
+      - ${DATA_ROOT}:/data
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - WEBUI_PORT=${QBITTORRENT_WEBUI_PORT}
+    network_mode: service:gluetun
+    restart: unless-stopped
+    healthcheck:
+      test: ping -c 1 www.google.com || exit 1
+      interval: 60s
+      retries: 3
+      start_period: 20s
+      timeout: 10s
+    cpus: 0.8
+    mem_limit: 3gb
+    mem_reservation: 1gb
+    mem_swappiness: 0
+    memswap_limit: 3gb
+    ulimits:
+      nofile:
+        soft: 4096
+        hard: 8192
+      nproc: 4096
+
+  radarr:
+    image: ${IMAGE_RADARR}:${TAG_RADARR}
+    container_name: radarr
+    depends_on:
+      gluetun:
+        condition: service_healthy
+        restart: true
+    volumes:
+      - ${VOLUMES_ROOT}/radarr:/config
+      - ${DATA_ROOT}:/data
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - TZ=${TZ}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    network_mode: service:gluetun
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:7878/ping" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    cpus: 0.5
+    mem_limit: 1gb
+    mem_reservation: 512mb
+    mem_swappiness: 0
+    memswap_limit: 1gb
+
+
+  readarr:
+    image: ${IMAGE_READARR}:${TAG_READARR}
+    container_name: readarr
+    depends_on:
+      gluetun:
+        condition: service_healthy
+        restart: true
+    volumes:
+      - ${VOLUMES_ROOT}/readarr:/config
+      - ${DATA_ROOT}:/data
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    network_mode: service:gluetun
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8787/ping" ]
+      interval: 45s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    cpus: 0.5
+    mem_limit: 1gb
+    mem_reservation: 512mb
+    mem_swappiness: 0
+    memswap_limit: 1gb
+
+  recyclarr:
+    image: ${IMAGE_RECYCLARR}:${TAG_RECYCLARR}
+    container_name: recyclarr
+    read_only: true
+    tmpfs: /tmp
+    security_opt:
+      - no-new-privileges:true
+    user: ${PUID}:${PGID}
+    networks:
+      - home_server
+    volumes:
+      - ${VOLUMES_ROOT}/recyclarr:/config
+    environment:
+      - TZ=${TZ}
+      - CRON_SCHEDULE=@daily
+      - RECYCLARR_CREATE_CONFIG=true
+
+  sonarr:
+    image: ${IMAGE_SONARR}:${TAG_SONARR}
+    container_name: sonarr
+    depends_on:
+      gluetun:
+        condition: service_healthy
+        restart: true
+    volumes:
+      - ${VOLUMES_ROOT}/sonarr:/config
+      - ${DATA_ROOT}:/data
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    network_mode: service:gluetun
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8989/ping" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    cpus: 0.5
+    mem_limit: 1gb
+    mem_reservation: 512mb
+    mem_swappiness: 0
+    memswap_limit: 1gb
+
+  flaresolverr:
+    image: ${IMAGE_FLARESOLVERR}:${TAG_FLARESOLVERR}
+    container_name: flaresolverr
+    environment:
+      - LOG_LEVEL=info
+      - LOG_HTML=false
+      - CAPTCHA_SOLVER=none
+      - TZ=${TZ}
+    restart: unless-stopped
+    network_mode: service:gluetun
+    depends_on:
+      gluetun:
+        condition: service_healthy
+        restart: true
+
+networks:
+  home_server:
+    external: true
+    name: home_server

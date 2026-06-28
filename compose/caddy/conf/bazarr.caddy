@@ -1,0 +1,4 @@
+http://bazarr.homelab.lan {
+  import localSubnets
+	reverse_proxy @localSubnets http://gluetun:6767
+}

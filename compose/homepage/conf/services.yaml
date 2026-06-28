@@ -1,0 +1,104 @@
+---
+# For configuration options and examples, please see:
+# https://gethomepage.dev/configs/services/
+
+- Infrastructure:
+    - Portainer:
+        icon: portainer
+        href: http://portainer.homelab.lan
+        description: Container Management
+        siteMonitor: http://portainer-ce:9000
+        statusStyle: "dot"
+
+- Observability:
+    - Dozzle:
+        icon: dozzle
+        href: http://dozzle.homelab.lan
+        description: Real-time Log Viewer
+        siteMonitor: http://dozzle:8080
+        statusStyle: "dot"
+    - Uptime Kuma:
+        icon: uptime-kuma
+        href: http://uptimekuma.homelab.lan/status/potato-homelab
+        description: Service Monitor
+        siteMonitor: http://uptime-kuma:3001
+        statusStyle: "dot"
+    - Netdata:
+        icon: netdata
+        href: http://netdata.homelab.lan
+        description: Real-time Metrics
+        siteMonitor: http://192.168.1.3:19999
+        statusStyle: "dot"
+
+
+- Utilities:
+    - FileBrowser:
+        icon: filebrowser
+        href: http://filebrowser.homelab.lan
+        description: Web File Manager
+        siteMonitor: http://filebrowser:80
+        statusStyle: "dot"
+    - Gotenberg:
+        icon: gotenberg
+        href: http://gotenberg.homelab.lan
+        description: PDF Conversion API
+        ping: http://gotenberg:3000
+        statusStyle: "dot"
+
+- Network:
+    - AdGuard Home:
+        icon: adguard-home
+        href: http://adh.homelab.lan
+        description: Network-wide Ad Blocking
+        siteMonitor: http://192.168.1.3:3000
+        statusStyle: "dot"
+
+- Media:
+    - Jellyfin:
+        icon: jellyfin
+        href: http://jellyfin.homelab.lan
+        description: Software Media System
+        siteMonitor: http://jellyfin:8096
+        statusStyle: "dot"
+    - Sonarr:
+        icon: sonarr
+        href: http://sonarr.homelab.lan
+        description: TV Show Management
+        siteMonitor: http://gluetun:8989
+        statusStyle: "dot"
+    - Radarr:
+        icon: radarr
+        href: http://radarr.homelab.lan
+        description: Movie Management
+        siteMonitor: http://gluetun:7878
+        statusStyle: "dot"
+    - Lidarr:
+        icon: lidarr
+        href: http://lidarr.homelab.lan
+        description: Music Management
+        siteMonitor: http://gluetun:8686
+        statusStyle: "dot"
+    - Readarr:
+        icon: readarr
+        href: http://readarr.homelab.lan
+        description: Book Management
+        siteMonitor: http://gluetun:8787
+        statusStyle: "dot"
+    - Prowlarr:
+        icon: prowlarr
+        href: http://prowlarr.homelab.lan
+        description: Indexer Manager
+        siteMonitor: http://prowlarr:9696
+        statusStyle: "dot"
+    - Bazarr:
+        icon: bazarr
+        href: http://bazarr.homelab.lan
+        description: Subtitle Manager
+        siteMonitor: http://gluetun:6767
+        statusStyle: "dot"
+    - qBittorrent:
+        icon: qbittorrent
+        href: http://qbittorrent.homelab.lan
+        description: Torrent Client
+        siteMonitor: http://gluetun:8080
+        statusStyle: "dot"
