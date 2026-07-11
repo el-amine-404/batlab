@@ -54,6 +54,7 @@ help:
 	@echo "  make shell"
 	@echo "  make validate"
 	@echo "  make clean"
+	@echo "  make new"
 	@echo ""
 
 confirm:
@@ -282,3 +283,26 @@ clean: confirm
 	docker image prune -f
 	docker container prune -f
 	docker volume prune
+
+new:
+	@test -n "$(STACK)" || { \
+		echo "Usage: make new STACK=<service>"; \
+		exit 1; \
+	}
+
+	@test ! -d compose/$(STACK) || { \
+		echo "Stack already exists."; \
+		exit 1; \
+	}
+
+	@mkdir -p compose/$(STACK)/conf
+	@ln -s ../.env compose/$(STACK)/.env
+
+	@SERVICE_UPPER=$$(echo "$(STACK)" | tr '[:lower:]-' '[:upper:]_'); \
+	sed \
+		-e "s/__SERVICE__/$(STACK)/g" \
+		-e "s/__SERVICE_UPPER__/$$SERVICE_UPPER/g" \
+		templates/docker-compose.yml.tpl \
+		> compose/$(STACK)/docker-compose.yml
+
+	@echo "Created compose/$(STACK)"
