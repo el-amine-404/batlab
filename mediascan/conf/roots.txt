@@ -1,0 +1,8 @@
+# One absolute path per line. Missing paths are skipped, so this file can also
+# list trees that do not exist yet.
+/mnt/storage/data/media
+/mnt/storage/data/torrents
+
+# Immich manages its own upload store and is not part of the arr library.
+# Uncomment to sweep it as well.
+# /mnt/storage/data/immich

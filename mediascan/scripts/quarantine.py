@@ -137,8 +137,16 @@ def main():
 
     stamp = time.strftime("%Y-%m-%d")
     records = []
+    handled = set()
     for path, reason in targets:
+        # A scanner reports every hardlink it finds, but the first move already
+        # took all of them, so the rest are done rather than missing.
+        if path in handled:
+            print(f"ALREADY {path}\n       moved with an earlier hardlink in this run")
+            continue
+
         record = quarantine_one(path, root, quarantine, stamp, index, reason, arguments.apply)
+        handled.update(record.get("links", []))
         records.append(record)
 
         if record.get("error"):

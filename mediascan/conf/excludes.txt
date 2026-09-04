@@ -1,0 +1,5 @@
+# Subtrees the sweep walks past. One absolute path per line, matched exactly.
+
+# Phone clips are short and often silent, which is normal for them and not for
+# a film or an episode.
+/mnt/storage/data/media/photos
