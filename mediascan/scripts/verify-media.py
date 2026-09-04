@@ -8,8 +8,15 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, asdict
+
+# Remediation replaces a file, so it is limited to verdicts that mean the file
+# is wrong rather than merely unusual. A short runtime or a missing audio track
+# can both be legitimate, and an attachment is a quarantine matter.
+REMEDIABLE = ("UNREADABLE", "NOT_VIDEO", "RESOLUTION", "CODEC", "BITRATE")
 
 VIDEO_SUFFIXES = frozenset(
     (".mkv", ".mp4", ".avi", ".mov", ".m4v", ".ts", ".m2ts", ".wmv", ".flv", ".webm", ".mpg", ".mpeg")
@@ -198,6 +205,87 @@ def walk(roots, excludes, newer_than):
                 yield path
 
 
+def arr_request(base, key, endpoint, method="GET", payload=None):
+    body = json.dumps(payload).encode() if payload is not None else None
+    request = urllib.request.Request(
+        f"{base.rstrip('/')}/api/v3/{endpoint}",
+        data=body,
+        method=method,
+        headers={"X-Api-Key": key, "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        received = response.read()
+    return json.loads(received) if received else {}
+
+
+def to_arr_path(path, mappings):
+    for host, container in mappings:
+        if path.startswith(host):
+            return container + path[len(host):]
+    return path
+
+
+def remediate_radarr(base, key, path, apply_changes):
+    for movie in arr_request(base, key, "movie"):
+        movie_file = movie.get("movieFile") or {}
+        if movie_file.get("path") != path:
+            continue
+        if not apply_changes:
+            return f"would delete movieFile {movie_file['id']} and re-search {movie['title']}"
+        arr_request(base, key, f"moviefile/{movie_file['id']}", method="DELETE")
+        arr_request(base, key, "command", method="POST",
+                    payload={"name": "MoviesSearch", "movieIds": [movie["id"]]})
+        return f"deleted movieFile {movie_file['id']} and re-searched {movie['title']}"
+    return None
+
+
+def remediate_sonarr(base, key, path, apply_changes):
+    for series in arr_request(base, key, "series"):
+        if not path.startswith(series["path"].rstrip("/") + os.sep):
+            continue
+        for episode_file in arr_request(base, key, f"episodefile?seriesId={series['id']}"):
+            if episode_file.get("path") != path:
+                continue
+            episodes = [
+                e["id"] for e in arr_request(base, key, f"episode?seriesId={series['id']}")
+                if e.get("episodeFileId") == episode_file["id"]
+            ]
+            if not apply_changes:
+                return f"would delete episodeFile {episode_file['id']} and re-search {len(episodes)} episode(s)"
+            arr_request(base, key, f"episodefile/{episode_file['id']}", method="DELETE")
+            if episodes:
+                arr_request(base, key, "command", method="POST",
+                            payload={"name": "EpisodeSearch", "episodeIds": episodes})
+            return f"deleted episodeFile {episode_file['id']} and re-searched {len(episodes)} episode(s)"
+    return None
+
+
+def remediate(findings, apply_changes, mappings):
+    services = (
+        (os.environ.get("RADARR_URL"), os.environ.get("RADARR_API_KEY"), remediate_radarr),
+        (os.environ.get("SONARR_URL"), os.environ.get("SONARR_API_KEY"), remediate_sonarr),
+    )
+    if not any(base and key for base, key, _ in services):
+        print("Remediation needs RADARR_URL/RADARR_API_KEY or SONARR_URL/SONARR_API_KEY.", file=sys.stderr)
+        return
+
+    print("\nRemediation:" if apply_changes else "\nRemediation (dry run):")
+    for finding in findings:
+        if not any(problem.startswith(REMEDIABLE) for problem in finding.problems):
+            continue
+        outcome = None
+        for base, key, handler in services:
+            if not (base and key):
+                continue
+            try:
+                outcome = handler(base, key, to_arr_path(finding.path, mappings), apply_changes)
+            except (urllib.error.URLError, OSError, KeyError) as error:
+                outcome = f"failed: {error}"
+            if outcome:
+                break
+        print(f"  {finding.path}\n       {outcome or 'no matching movie or episode in Radarr/Sonarr'}")
+
+
 def marker_time(path):
     try:
         return os.path.getmtime(path)
@@ -215,6 +303,14 @@ def main():
     parser.add_argument("--jobs", type=int, default=2)
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--quiet", action="store_true", help="only print files with problems")
+    parser.add_argument("--remediate", action="store_true",
+                        help="delete flagged files and re-search them via Radarr/Sonarr")
+    parser.add_argument("--remediate-dry-run", action="store_true",
+                        help="report what --remediate would do without changing anything")
+    # The arr containers mount DATA_ROOT at /data, so the paths they report are
+    # not the paths on the host and never match without translation.
+    parser.add_argument("--arr-path-map", action="append", default=[], metavar="HOST=CONTAINER",
+                        help="translate a host path prefix to the arr container prefix (repeatable)")
     arguments = parser.parse_args()
 
     newer_than = marker_time(arguments.marker) if arguments.marker else 0.0
@@ -244,6 +340,15 @@ def main():
             print(f"       {problem}")
 
     print(f"\nInspected {len(findings)} file(s); {len(flagged)} flagged.")
+
+    if flagged and (arguments.remediate or arguments.remediate_dry_run):
+        mappings = []
+        for mapping in arguments.arr_path_map:
+            host, _, container = mapping.partition("=")
+            if not container:
+                parser.error(f"--arr-path-map needs HOST=CONTAINER, got {mapping!r}")
+            mappings.append((host.rstrip("/"), container.rstrip("/")))
+        remediate(flagged, arguments.remediate, mappings)
 
     if arguments.marker:
         os.makedirs(os.path.dirname(arguments.marker) or ".", exist_ok=True)
