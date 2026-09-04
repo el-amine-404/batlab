@@ -8,7 +8,7 @@ radarr:
       type: movie
 
     quality_profiles:
-      - trash_id: fd161a61e3ab826d3a22d53f935696dd  # Remux + WEB 2160p
+      - trash_id: d1d310673359205736b4b84acd5ea8c8  # Remux 2160p (Combined)
         name: Movies
         reset_unmatched_scores:
           enabled: true
@@ -17,6 +17,10 @@ radarr:
       add:
         - trash_id: 9d5acd8f1da78dfbae788182f7605200  # [Audio] Audio Formats
         - trash_id: ef20e67b95a381fb3bc6d1f06ea24f46  # [HDR Formats] HDR
+        # select_all pulls in Scene, Obfuscated, Retags and No-RlsGroup, which
+        # the guide ships as opt-in rather than default.
+        - trash_id: a3ac6af01d78e4f21fcb75f601ac96df  # [Unwanted] Unwanted Formats
+          select_all: true
 
     media_naming:
       folder: jellyfin-tmdb
