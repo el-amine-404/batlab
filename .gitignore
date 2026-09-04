@@ -36,6 +36,10 @@ compose/netdata/conf/
 compose/adguardhome/conf/
 compose/jellyfin/conf/
 
+# Python bytecode from running the mediascan scripts in place.
+__pycache__/
+*.pyc
+
 # OS / editor ephemera ---------------------------------------------------------
 *.log
 .DS_Store
