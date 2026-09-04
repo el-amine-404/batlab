@@ -126,6 +126,12 @@
           url: http://gluetun:8080
           username: "{{HOMEPAGE_VAR_QBIT_USER}}"
           password: "{{HOMEPAGE_VAR_QBIT_PASS}}"
+    - Cleanuparr:
+        icon: cleanuparr
+        href: http://cleanuparr.homelab.lan
+        description: Download Queue Cleaner
+        siteMonitor: http://cleanuparr:11011
+        statusStyle: "dot"
 
 - Network:
     - AdGuard Home:

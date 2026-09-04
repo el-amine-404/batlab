@@ -32,6 +32,42 @@ services:
       retries: 3
       start_period: 60s
 
+  cleanuparr:
+    image: ${IMAGE_CLEANUPARR}:${TAG_CLEANUPARR}
+    container_name: cleanuparr
+    volumes:
+      - ${VOLUMES_ROOT}/cleanuparr:/config
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - TZ=${TZ}
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - PORT=${CLEANUPARR_WEBUI_PORT}
+    networks:
+      - home_server
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+      - FOWNER
+    healthcheck:
+      test: [ "CMD", "curl", "-L", "-f", "http://localhost:${CLEANUPARR_WEBUI_PORT}" ]
+      interval: 45s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    cpus: 0.5
+    mem_limit: 512mb
+    mem_reservation: 128mb
+    mem_swappiness: 0
+    memswap_limit: 512mb
+
   gluetun:
     image: ${IMAGE_GLUETUN}:${TAG_GLUETUN}
     container_name: gluetun

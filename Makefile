@@ -179,6 +179,7 @@ setup: check-env
 		$(VOLUMES_ROOT)/portainer \
 		$(VOLUMES_ROOT)/uptime-kuma/data \
 		$(VOLUMES_ROOT)/bazarr \
+		$(VOLUMES_ROOT)/cleanuparr \
 		$(VOLUMES_ROOT)/lidarr \
 		$(VOLUMES_ROOT)/prowlarr \
 		$(VOLUMES_ROOT)/qbittorrent \
@@ -218,6 +219,7 @@ setup: check-env
 		$(VOLUMES_ROOT)/jellyfin/log \
 		$(VOLUMES_ROOT)/navidrome/data \
 		$(VOLUMES_ROOT)/bazarr \
+		$(VOLUMES_ROOT)/cleanuparr \
 		$(VOLUMES_ROOT)/lidarr \
 		$(VOLUMES_ROOT)/prowlarr \
 		$(VOLUMES_ROOT)/qbittorrent \
