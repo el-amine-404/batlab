@@ -1,0 +1,11 @@
+[Unit]
+Description=Sweep the Batlab media library every night
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+Persistent=true
+RandomizedDelaySec=15m
+Unit=batlab-mediascan-sweep.service
+
+[Install]
+WantedBy=timers.target

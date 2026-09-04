@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Batlab deep media verification every week
+
+[Timer]
+OnCalendar=Sun *-*-* 07:00:00
+Persistent=true
+RandomizedDelaySec=30m
+Unit=batlab-mediascan-deep.service
+
+[Install]
+WantedBy=timers.target

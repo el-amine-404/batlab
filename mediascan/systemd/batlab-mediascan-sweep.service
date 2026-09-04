@@ -1,0 +1,16 @@
+[Unit]
+Description=Sweep the Batlab media library for unexpected and unsafe files
+Wants=network-online.target
+After=network-online.target docker.service clamav-daemon.service
+RequiresMountsFor=/mnt/storage/data
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/home/potato/batlab/mediascan/scripts/sweep.sh
+Nice=19
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target
