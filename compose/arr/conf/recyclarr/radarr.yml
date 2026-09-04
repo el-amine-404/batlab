@@ -13,6 +13,18 @@ radarr:
         reset_unmatched_scores:
           enabled: true
 
+      - trash_id: 9ca12ea80aa55ef916e3751f4b874151  # Remux + WEB 1080p
+        name: Movies 1080p
+        reset_unmatched_scores:
+          enabled: true
+        qualities:
+          - name: Remux-1080p
+          - name: Bluray-1080p
+          - name: WEB 1080p
+            qualities:
+              - WEBDL-1080p
+              - WEBRip-1080p
+
     custom_format_groups:
       add:
         - trash_id: 9d5acd8f1da78dfbae788182f7605200  # [Audio] Audio Formats
@@ -21,6 +33,31 @@ radarr:
         # the guide ships as opt-in rather than default.
         - trash_id: a3ac6af01d78e4f21fcb75f601ac96df  # [Unwanted] Unwanted Formats
           select_all: true
+        # Bluray-1080p is absent from the 1080p template, so that profile gets no
+        # release-group tiers with it.
+        - trash_id: b2f2af430f73f3ad1f9948f33e0f0cf8  # [Release Groups] HQ
+          select_all: true
+          assign_scores_to:
+            - name: Movies 1080p
+
+    custom_formats:
+      # The guide ships channel counts unscored. Small values break ties between
+      # two lossless releases without outranking the audio format itself.
+      - trash_ids:
+          - e77382bcfeba57cb83744c9c5449b401  # 7.1 Surround
+        assign_scores_to:
+          - name: Movies 1080p
+            score: 30
+      - trash_ids:
+          - 6fd7b090c3f7317502ab3b63cc7f51e3  # 6.1 Surround
+        assign_scores_to:
+          - name: Movies 1080p
+            score: 20
+      - trash_ids:
+          - 77ff61788dfe1097194fd8743d7b4524  # 5.1 Surround
+        assign_scores_to:
+          - name: Movies 1080p
+            score: 10
 
     media_naming:
       folder: jellyfin-tmdb
