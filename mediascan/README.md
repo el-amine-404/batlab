@@ -12,12 +12,36 @@ as JSON reports and, optionally, moved into quarantine. Nothing is ever deleted.
 | `verify-media.py` | 32 s for 160 files | containers that are not video, or that contradict their filename |
 | `verify-subtitles.py` | 1 s for 98 files | subtitles carrying markup that can fetch or execute |
 | `scan-clamav.sh` | minutes, incremental | known malware in files clamd will actually read |
+| `scan-virustotal.py` | one lookup per new carrier | files other people have already reported as malicious |
+| `scan-yara.sh` | optional, off unless rules are set | matches against your own YARA rules |
 | `deep-verify.py` | hours, rate limited | corruption that only appears when the file is read through |
+| `watch.sh` | instant, per file | everything above, the moment a file lands |
 
 `verify-media.py` reads container headers, so a 1 GB file and an 80 GB file both
 cost about a second. `deep-verify.py` is the only script that reads whole files
 or decodes frames, which is why it runs weekly against a rotating slice rather
 than the whole library.
+
+## Replaces the older media-scan.sh
+
+This supersedes `batdots/scripts/user/media-scan.sh` and its two systemd user
+units, which were stopped and removed. Everything it did is here, with three
+corrections.
+
+It quarantined any video shorter than 180 seconds, had no way to exempt a
+directory, and was pointed at the whole of `media/`. That moved 283 phone clips
+and 6 anime openings out of the library. Here the duration floor is 60 seconds,
+`conf/excludes.txt` exempts subtrees from both the sweep and the watcher, and
+quarantine is a dry run until `MEDIASCAN_QUARANTINE_APPLY=1`.
+
+Its VirusTotal design was right and is kept as it was: the SHA-256 is sent, the
+file never is, and a hash nobody has submitted comes back "unknown" rather than
+"clean". Added on top is a verdict cache, so a rerun does not spend quota
+re-asking about files it has already seen.
+
+Its warning about a scanner that cannot read files reporting everything clean is
+kept too, as a hard precondition: `scan-clamav.sh` scans a known-positive EICAR
+file first and refuses to report a clean run if clamd fails to detect it.
 
 ## Sizing, measured on this host
 
@@ -78,12 +102,14 @@ Install the units:
 sudo install -m 644 mediascan/systemd/*.service mediascan/systemd/*.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now batlab-mediascan-sweep.timer batlab-mediascan-deep.timer
+sudo systemctl enable --now batlab-mediascan-watch.service
 ```
 
 ## Running by hand
 
 ```bash
 sudo mediascan/scripts/sweep.sh                     # nightly checks, reports only
+sudo mediascan/scripts/watch.sh                     # real-time, runs as a service
 sudo mediascan/scripts/deep.sh --no-demux           # sample-decode new imports only
 sudo mediascan/scripts/deep.sh --no-samples         # demux this week's slice only
 ```

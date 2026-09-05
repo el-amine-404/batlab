@@ -61,3 +61,26 @@ read_exclude_list() {
     printf -- '--exclude\n%s\n' "$path"
   done <"$file"
 }
+
+# Notifications are best-effort: a scan that found something must not fail
+# because the webhook was unreachable.
+mediascan_notify() {
+  local title="$1" body="$2"
+
+  if [[ -n "${MEDIASCAN_DISCORD_WEBHOOK:-}" ]]; then
+    local payload
+    payload="$(python3 -c 'import json,sys; print(json.dumps({"content": sys.argv[1] + "\n" + sys.argv[2][:1800]}))' "$title" "$body")"
+    curl -sS -m 15 -H "Content-Type: application/json" -d "$payload" \
+      "$MEDIASCAN_DISCORD_WEBHOOK" >/dev/null 2>&1 || true
+    return 0
+  fi
+
+  if [[ -n "${MEDIASCAN_PUSHOVER_TOKEN:-}" && -n "${MEDIASCAN_PUSHOVER_USER:-}" ]]; then
+    curl -sS -m 15 \
+      --form-string "token=$MEDIASCAN_PUSHOVER_TOKEN" \
+      --form-string "user=$MEDIASCAN_PUSHOVER_USER" \
+      --form-string "title=$title" \
+      --form-string "message=$body" \
+      https://api.pushover.net/1/messages.json >/dev/null 2>&1 || true
+  fi
+}

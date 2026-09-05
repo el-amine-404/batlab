@@ -23,7 +23,23 @@ mapfile -t roots < <(read_path_list "$MEDIASCAN_DIR/conf/roots.txt")
 
 candidates="$(mktemp)"
 infected="$(mktemp)"
-trap 'rm -f "$candidates" "$infected"' EXIT
+selftest="$(mktemp -d)"
+trap 'rm -rf "$candidates" "$infected" "$selftest"' EXIT
+
+# An engine that cannot read the files it is handed reports every one of them
+# as clean, which looks identical to a successful scan. Prove detection works
+# on a known positive before trusting a clean result.
+# shellcheck disable=SC2016  # the EICAR string is literal; $EICAR must not expand
+printf '%s' 'X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' >"$selftest/eicar.com"
+chmod 0644 "$selftest/eicar.com"
+# clamdscan reports a detection with exit status 1, which pipefail would turn
+# into a pipeline failure, so the result is captured before it is examined.
+selftest_output="$(clamdscan --fdpass --no-summary --infected "$selftest/eicar.com" 2>/dev/null || true)"
+if ! grep -q "FOUND" <<<"$selftest_output"; then
+  echo "clamd did not detect the EICAR test file; refusing to report a clean scan." >&2
+  echo "  Check that clamav-daemon is running and can read through --fdpass." >&2
+  exit 2
+fi
 
 find_arguments=("${roots[@]}" -type f -size -"$MAX_SIZE" -not -path "$MEDIASCAN_QUARANTINE/*")
 if [[ "${MEDIASCAN_CLAMAV_INCREMENTAL:-1}" == "1" && -f "$MARKER" ]]; then

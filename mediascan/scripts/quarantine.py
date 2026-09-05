@@ -128,6 +128,17 @@ def main():
         targets += [(os.path.normpath(p), r) for p, r in load_jsonl(arguments.from_jsonl, prefixes)]
 
     targets = [(p, r) for p, r in targets if not p.startswith(quarantine + os.sep)]
+
+    # Several engines can flag the same file; keep one entry carrying every
+    # reason rather than one entry per engine.
+    merged = {}
+    for path, reason in targets:
+        if path in merged:
+            if reason not in merged[path]:
+                merged[path] += f"; {reason}"
+        else:
+            merged[path] = reason
+    targets = list(merged.items())
     if not targets:
         print("Nothing to quarantine.")
         return 0
