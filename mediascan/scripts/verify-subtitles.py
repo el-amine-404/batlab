@@ -110,6 +110,11 @@ def verify(path):
 def walk(roots, excludes):
     suffixes = TEXT_SUFFIXES | BINARY_SUFFIXES
     for root in roots:
+        # The watcher hands us one finished file at a time, not a tree.
+        if os.path.isfile(root):
+            if os.path.splitext(root)[1].lower() in suffixes:
+                yield root
+            continue
         for directory, subdirectories, names in os.walk(root):
             subdirectories[:] = [
                 d for d in subdirectories if os.path.join(directory, d) not in excludes

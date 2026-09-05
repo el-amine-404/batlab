@@ -1,0 +1,18 @@
+[Unit]
+Description=Watch the Batlab media tree and check files as they arrive
+Wants=network-online.target
+After=network-online.target docker.service
+RequiresMountsFor=/mnt/storage/data
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/home/potato/batlab/mediascan/scripts/watch.sh
+Restart=on-failure
+RestartSec=30
+Nice=19
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target

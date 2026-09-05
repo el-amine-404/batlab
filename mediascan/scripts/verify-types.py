@@ -11,6 +11,18 @@ from dataclasses import dataclass, field, asdict
 
 BATCH = 400
 
+# Extensions that have no business in a media tree. Checked by name as well as
+# by content, because `file` cannot identify a truncated or empty carrier and
+# reports it as data.
+DANGEROUS_SUFFIXES = frozenset((
+    ".exe", ".scr", ".bat", ".cmd", ".com", ".pif", ".msi", ".js", ".jse", ".vbs", ".vbe",
+    ".ps1", ".psm1", ".jar", ".lnk", ".sh", ".run", ".app", ".dll", ".sys", ".reg",
+    ".hta", ".wsf", ".cpl", ".gadget", ".sct",
+))
+
+# Incomplete downloads are renamed once they finish, so judging them is noise.
+PARTIAL_SUFFIXES = frozenset((".part", ".!qb", ".!ut", ".tmp", ".crdownload", ".partial", ".parts"))
+
 EXECUTABLE_MIMES = frozenset((
     "application/x-dosexec",
     "application/vnd.microsoft.portable-executable",
@@ -92,8 +104,11 @@ def classify(path, size, mime, ignored_suffixes):
     suffix = os.path.splitext(path)[1].lower()
     finding = Finding(path=path, size=size, suffix=suffix, mime=mime)
 
-    if suffix in ignored_suffixes:
+    if suffix in ignored_suffixes or suffix in PARTIAL_SUFFIXES:
         return finding
+
+    if suffix in DANGEROUS_SUFFIXES:
+        finding.problems.append(f"DANGEROUS_NAME: {suffix} does not belong in a media tree")
 
     if mime in EXECUTABLE_MIMES:
         finding.problems.append(f"EXECUTABLE: content is {mime}")
@@ -113,6 +128,13 @@ def classify(path, size, mime, ignored_suffixes):
 
 def walk(roots, excludes):
     for root in roots:
+        # The watcher hands us one finished file at a time, not a tree.
+        if os.path.isfile(root):
+            try:
+                yield root, os.path.getsize(root)
+            except OSError:
+                pass
+            continue
         for directory, subdirectories, names in os.walk(root):
             subdirectories[:] = [
                 d for d in subdirectories if os.path.join(directory, d) not in excludes
