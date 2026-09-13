@@ -20,6 +20,7 @@ services:
       - ${VOLUMES_ROOT}/netdata/cache:/var/cache/netdata
       - ${CONFIGS_ROOT}/netdata/alerts/health_alarm_notify.conf:/etc/netdata/health_alarm_notify.conf:ro
       - ${CONFIGS_ROOT}/netdata/alerts/batlab.conf:/etc/netdata/health.d/batlab.conf:ro
+      - ${CONFIGS_ROOT}/netdata/alerts/cpu.conf:/etc/netdata/health.d/cpu.conf:ro
       - /:/host/root:ro,rslave
       - /etc/localtime:/etc/localtime:ro
       - /etc/passwd:/host/etc/passwd:ro
