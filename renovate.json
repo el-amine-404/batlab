@@ -47,6 +47,13 @@
       "versioning": "regex:^v?(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)(?:\\.(?<build>\\d+))?(?:_v\\d+\\.\\d+\\.\\d+)?-ls(?<revision>\\d+)$"
     },
     {
+      "description": "Jellyfin moved to two-part tags (12.0) beside timestamped builds and date-named nightlies; accept only X.Y or X.Y.Z releases",
+      "matchPackageNames": [
+        "jellyfin/jellyfin"
+      ],
+      "versioning": "regex:^(?<major>\\d{1,3})\\.(?<minor>\\d{1,3})(?:\\.(?<patch>\\d{1,3}))?$"
+    },
+    {
       "description": "Readarr only publishes nightly tags and the project is retired",
       "matchPackageNames": [
         "lscr.io/linuxserver/readarr"
