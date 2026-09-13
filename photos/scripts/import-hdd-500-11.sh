@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2059,SC2016,SC2029  # colour codes in formats; remote commands are quoted on purpose
+# shellcheck disable=SC2059,SC2016,SC2029  # colour codes live in printf formats; remote snippets are quoted with %q on purpose
 # Copies the HDD_500_11 family archive from this laptop into lab1's photo and
 # file trees. Safe to interrupt and re-run: finished files are skipped, partial
 # ones resume. Nothing is ever deleted on either side.
@@ -8,6 +8,9 @@
 #   photos/scripts/import-hdd-500-11.sh --dry-run    plan only
 #   photos/scripts/import-hdd-500-11.sh --verify-only
 #   photos/scripts/import-hdd-500-11.sh --yes --skip-verify
+#
+# Verify before organize-media.py renames anything in photos/library: after a
+# rename the two sides are meant to differ.
 
 set -Eeuo pipefail
 
@@ -31,6 +34,10 @@ readonly JOBS=(
 readonly COMMON_FILTERS=("--exclude=._*" "--exclude=.DS_Store" "--exclude=Thumbs.db" "--exclude=desktop.ini"
   "--exclude=/.Spotlight-V100" "--exclude=/System Volume Information")
 
+# Destination content that legitimately exists without a source counterpart:
+# folders that predate the import and what organize-media.py adds later.
+readonly VERIFY_PROTECT=("--filter=P /_to-merge/" "--filter=P /.organize/" "--filter=P *.xmp")
+
 if [[ -t 1 ]]; then
   B=$'\e[1m' D=$'\e[2m' R=$'\e[31m' G=$'\e[32m' Y=$'\e[33m' C=$'\e[36m' N=$'\e[0m'
 else
@@ -50,22 +57,33 @@ for argument in "$@"; do
     --verify-only) VERIFY_ONLY=1 ;;
     --skip-verify) SKIP_VERIFY=1 ;;
     -y | --yes) ASSUME_YES=1 ;;
-    -h | --help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '3,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) fail "unknown option: $argument" ;;
   esac
 done
+((VERIFY_ONLY && SKIP_VERIFY)) && fail "--verify-only and --skip-verify contradict each other"
+
+# Values reach remote shells and rsync arguments, so only plain names and paths are accepted.
+[[ "$REMOTE" =~ ^[A-Za-z0-9._@-]+$ ]] || fail "REMOTE must be a plain SSH host alias: $REMOTE"
+[[ "$DATA" =~ ^/[A-Za-z0-9._/-]+$ ]] || fail "DATA must be an absolute path of letters, digits, . _ - and /: $DATA"
 
 install -d -m 700 "$STATE_DIR"
-RUN_ID="$(date +%Y%m%d-%H%M%S)"
+exec 8>"$STATE_DIR/.lock"
+flock -n 8 || fail "another import is already running (lock: $STATE_DIR/.lock)"
+
+RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
 readonly RUN_ID
 readonly LOG="$STATE_DIR/$RUN_ID.log"
-# Unix sockets cap paths at 108 bytes, so the shared connection lives in the runtime dir.
-readonly CONTROL="${XDG_RUNTIME_DIR:-/tmp}/batlab-import-%C"
+readonly WORK="$STATE_DIR/$RUN_ID"
+install -d -m 700 "$WORK"
+# Unix sockets cap paths at 108 bytes, and each run owns its connection.
+readonly CONTROL="${XDG_RUNTIME_DIR:-/tmp}/batlab-import-$$-%C"
 readonly SSH_OPTS=(-o ControlMaster=auto -o "ControlPath=$CONTROL" -o ControlPersist=15m
-  -o Compression=no -o ServerAliveInterval=15 -c aes128-gcm@openssh.com -x)
+  -o Compression=no -o ServerAliveInterval=15 -o BatchMode=yes -c aes128-gcm@openssh.com -x)
 readonly RSYNC_SSH="ssh ${SSH_OPTS[*]}"
 
-remote() { ssh "${SSH_OPTS[@]}" "$REMOTE" "$@"; }
+remote() { ssh -n "${SSH_OPTS[@]}" "$REMOTE" "$@"; }
+quoted() { printf '%q' "$1"; }
 
 rsync_base() {
   local job_filters="$1"
@@ -84,12 +102,30 @@ rsync_base() {
   )
 }
 
+ACTIVE_PID="" GUARD_PID=""
+
+stop_active() {
+  if [[ -n "$GUARD_PID" ]]; then
+    kill "$GUARD_PID" 2>/dev/null || true
+    wait "$GUARD_PID" 2>/dev/null || true
+    GUARD_PID=""
+  fi
+  if [[ -n "$ACTIVE_PID" ]] && kill -0 "$ACTIVE_PID" 2>/dev/null; then
+    # A process paused by the thermal guard ignores TERM until it is resumed.
+    kill -CONT "$ACTIVE_PID" 2>/dev/null || true
+    kill -TERM "$ACTIVE_PID" 2>/dev/null || true
+    wait "$ACTIVE_PID" 2>/dev/null || true
+  fi
+  ACTIVE_PID=""
+}
+
 cleanup() {
-  if [[ -n "${GUARD_PID:-}" ]]; then kill "$GUARD_PID" 2>/dev/null || true; fi
+  stop_active
   ssh "${SSH_OPTS[@]}" -O exit "$REMOTE" 2>/dev/null || true
+  rm -rf "$WORK"
 }
 trap cleanup EXIT
-trap 'printf "\n${Y}Interrupted.${N} Re-run the same command to resume; finished files are kept.\n"; exit 130' INT TERM
+trap 'printf "\n${Y}Interrupted.${N} Re-run the same command to resume; finished files are kept.\n"; exit 130' INT TERM HUP
 
 remote_temperature() {
   remote 'for h in /sys/class/hwmon/hwmon*; do [ "$(cat $h/name 2>/dev/null)" = k10temp ] && { echo $(( $(cat $h/temp1_input) / 1000 )); exit; }; done; echo 0'
@@ -98,22 +134,70 @@ remote_temperature() {
 # Pauses the running rsync with SIGSTOP when the server runs hot and resumes it
 # once it cools. lab1 has powered off from sustained heat before.
 thermal_guard() {
-  local rsync_pid="$1" paused=0 temp
-  while kill -0 "$rsync_pid" 2>/dev/null; do
+  local target_pid="$1" paused=0 temp
+  trap 'kill -CONT "$target_pid" 2>/dev/null; exit 0' TERM
+  while kill -0 "$target_pid" 2>/dev/null; do
     temp="$(remote_temperature 2>/dev/null || echo 0)"
+    [[ "$temp" =~ ^[0-9]+$ ]] || temp=0
     if ((paused == 0 && temp >= HOT_C)); then
-      kill -STOP "$rsync_pid" 2>/dev/null || true
+      kill -STOP "$target_pid" 2>/dev/null || true
       paused=1
       printf "\n  ${Y}⏸  server CPU at %s °C, pausing until %s °C${N}\n" "$temp" "$COOL_C"
       echo "$(date -Is) paused at ${temp}C" >>"$LOG"
     elif ((paused == 1 && temp <= COOL_C)); then
-      kill -CONT "$rsync_pid" 2>/dev/null || true
+      kill -CONT "$target_pid" 2>/dev/null || true
       paused=0
       printf "\n  ${G}▶  server CPU at %s °C, resuming${N}\n" "$temp"
       echo "$(date -Is) resumed at ${temp}C" >>"$LOG"
     fi
-    sleep 20
+    # Backgrounded so the TERM trap runs at once instead of after the sleep.
+    sleep 20 &
+    wait $! || true
   done
+}
+
+# Runs one rsync in the background under the thermal guard and returns its exit
+# status. With an output file, only rsync's stdout goes there; the spinner stays
+# on the terminal so it can never be mistaken for rsync output.
+run_guarded() {
+  local spinner_label="$1" output="$2"
+  shift 2
+  if [[ -n "$output" ]]; then
+    "$@" >"$output" 2>>"$LOG" &
+  else
+    "$@" &
+  fi
+  ACTIVE_PID=$!
+  thermal_guard "$ACTIVE_PID" &
+  GUARD_PID=$!
+  if [[ -n "$spinner_label" ]]; then
+    local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0 begun=$SECONDS
+    while kill -0 "$ACTIVE_PID" 2>/dev/null; do
+      printf "\r  ${C}%s${N} %s %4d s" "${spin:i++%${#spin}:1}" "$spinner_label" $((SECONDS - begun))
+      sleep 0.2
+    done
+  fi
+  local status=0
+  wait "$ACTIVE_PID" || status=$?
+  ACTIVE_PID=""
+  kill "$GUARD_PID" 2>/dev/null || true
+  wait "$GUARD_PID" 2>/dev/null || true
+  GUARD_PID=""
+  return "$status"
+}
+
+has_xxh128() { grep -A2 -i '^checksum list' <<<"$1" | grep -qw xxh128; }
+
+# Every destination must be creatable: its nearest existing ancestor has to be
+# writable for a copy and readable for a verification.
+check_destinations() {
+  local access="$1" job name src dest filters script=""
+  for job in "${JOBS[@]}"; do
+    IFS='|' read -r name src dest filters <<<"$job"
+    script+="d=$(quoted "$DATA/$dest"); while [ ! -e \"\$d\" ]; do d=\$(dirname \"\$d\"); done; "
+    script+="[ -d \"\$d\" ] && [ -$access \"\$d\" ] && [ -x \"\$d\" ] || { echo $(quoted "$name"):\"\$d\"; exit 1; }; "
+  done
+  remote "$script"
 }
 
 printf "${B}Import HDD_500_11 → %s:%s${N}\n" "$REMOTE" "$DATA"
@@ -122,115 +206,129 @@ note "log: $LOG"
 title "1. Preflight"
 [[ -d "$SOURCE/MEMORIES" ]] || fail "$SOURCE is not mounted or has no MEMORIES folder"
 ok "source mounted: $SOURCE ($(findmnt -no FSTYPE --target "$SOURCE"))"
-rsync_new_enough() { [[ "$1" =~ version\ 3\.([2-9]|[1-9][0-9]) ]]; }
-rsync_new_enough "$(rsync --version)" || fail "local rsync is older than 3.2"
+has_xxh128 "$(rsync --version)" || fail "local rsync does not support xxh128 checksums"
 remote true 2>/dev/null || fail "cannot reach $REMOTE over SSH without a password"
-ok "SSH connection to $REMOTE (shared, aes128-gcm, no compression)"
-rsync_new_enough "$(remote 'rsync --version')" || fail "server rsync is older than 3.2"
-ok "rsync ≥ 3.2 on both sides (xxh128 checksums)"
-remote "mountpoint -q '$DATA'" || fail "$DATA is not mounted on $REMOTE; is the data disk connected?"
+ok "SSH connection to $REMOTE (this run's own, aes128-gcm, no compression)"
+has_xxh128 "$(remote 'rsync --version')" || fail "server rsync does not support xxh128 checksums"
+ok "both rsyncs support xxh128"
+remote "mountpoint -q $(quoted "$DATA")" || fail "$DATA is not mounted on $REMOTE; is the data disk connected?"
 ok "$DATA is mounted on the server"
-remote "test -w '$DATA/photos/library' && test -w '$DATA/files'" || fail "photos/library or files is not writable on $REMOTE"
-ok "destination folders writable"
-free_bytes="$(remote "df -B1 --output=avail '$DATA' | tail -1 | tr -d ' '")"
-ok "free space on the data disk: $(human "$free_bytes")"
+if ((VERIFY_ONLY)); then
+  denied="$(check_destinations r)" || fail "destination not readable on $REMOTE: $denied"
+  ok "every destination readable"
+else
+  denied="$(check_destinations w)" || fail "destination not writable on $REMOTE: $denied"
+  ok "every destination writable (${#JOBS[@]} steps)"
+fi
 ok "server CPU temperature: $(remote_temperature) °C (pause at $HOT_C, resume at $COOL_C)"
 
-title "2. Plan" "(what still has to be copied)"
-total_bytes=0 total_files=0
-printf "  ${B}%-13s %-40s %-32s %9s %9s${N}\n" STEP FROM TO FILES SIZE
-for job in "${JOBS[@]}"; do
-  IFS='|' read -r name src dest filters <<<"$job"
-  rsync_base "$filters"
-  stats="$(rsync "${RSYNC_ARGS[@]}" --dry-run --stats "$SOURCE/$src" "$REMOTE:$DATA/$dest" 2>>"$LOG")"
-  files="$(awk -F': ' '/Number of regular files transferred/ {gsub(/,/,"",$2); print $2}' <<<"$stats")"
-  bytes="$(awk -F': ' '/Total transferred file size/ {gsub(/[, a-z]/,"",$2); print $2}' <<<"$stats")"
-  total_files=$((total_files + ${files:-0}))
-  total_bytes=$((total_bytes + ${bytes:-0}))
-  printf "  %-13s %-40s %-32s %9s %9s\n" "$name" "${src:0:40}" "${dest:0:32}" "${files:-0}" "$(human "${bytes:-0}")"
-done
-printf "  ${B}%-13s %-40s %-32s %9s %9s${N}\n" TOTAL "" "" "$total_files" "$(human "$total_bytes")"
-((total_bytes < free_bytes)) || fail "not enough free space on the server"
-if ((total_bytes > 0)); then
-  note "at the data disk's ~30 MB/s this takes about $((total_bytes / 30000000 / 60)) min"
-fi
+if ((VERIFY_ONLY == 0)); then
+  free_bytes="$(remote "df -B1 --output=avail $(quoted "$DATA") | tail -1 | tr -d ' '")"
+  ok "free space on the data disk: $(human "$free_bytes")"
 
-((DRY_RUN)) && { printf "\n${G}Dry run only, nothing copied.${N}\n"; exit 0; }
-
-if ((VERIFY_ONLY == 0 && total_bytes > 0)); then
-  if ((ASSUME_YES == 0)); then
-    printf "\n  Copy %s in %s files? Nothing is deleted on either side. [y/N] " "$(human "$total_bytes")" "$total_files"
-    read -r answer
-    [[ "$answer" =~ ^[yY]$ ]] || { echo "  Aborted."; exit 1; }
-  fi
-
-  title "3. Copy" "(each file is checksummed as it lands)"
-  started=$SECONDS
-  step=0
+  title "2. Plan" "(what still has to be copied)"
+  total_bytes=0 total_files=0
+  printf "  ${B}%-13s %-40s %-32s %9s %9s${N}\n" STEP FROM TO FILES SIZE
   for job in "${JOBS[@]}"; do
-    step=$((step + 1))
     IFS='|' read -r name src dest filters <<<"$job"
-    printf "\n  ${B}[%d/%d] %s${N}  ${D}%s → %s${N}\n" "$step" "${#JOBS[@]}" "$name" "$src" "$dest"
     rsync_base "$filters"
-    rsync "${RSYNC_ARGS[@]}" --no-inc-recursive --info=progress2,stats1 --log-file="$LOG" \
-      "$SOURCE/$src" "$REMOTE:$DATA/$dest" &
-    rsync_pid=$!
-    thermal_guard "$rsync_pid" &
-    GUARD_PID=$!
-    if ! wait "$rsync_pid"; then
-      kill "$GUARD_PID" 2>/dev/null || true
-      fail "step $name failed; see $LOG, then re-run to resume"
-    fi
-    kill "$GUARD_PID" 2>/dev/null || true
-    GUARD_PID=""
+    stats="$(rsync "${RSYNC_ARGS[@]}" --dry-run --stats "$SOURCE/$src" "$REMOTE:$DATA/$dest" 2>>"$LOG")" \
+      || fail "could not plan step $name; see $LOG"
+    files="$(awk -F': ' '/Number of regular files transferred/ {gsub(/,/,"",$2); print $2}' <<<"$stats")"
+    bytes="$(awk -F': ' '/Total transferred file size/ {gsub(/[, a-z]/,"",$2); print $2}' <<<"$stats")"
+    [[ "$files" =~ ^[0-9]+$ && "$bytes" =~ ^[0-9]+$ ]] || fail "could not read rsync statistics for step $name"
+    total_files=$((total_files + files))
+    total_bytes=$((total_bytes + bytes))
+    printf "  %-13s %-40s %-32s %9s %9s\n" "$name" "${src:0:40}" "${dest:0:32}" "$files" "$(human "$bytes")"
   done
-  elapsed=$((SECONDS - started))
-  ok "copied $(human "$total_bytes") in $((elapsed / 60)) min $((elapsed % 60)) s"
-elif ((VERIFY_ONLY == 0)); then
-  title "3. Copy"
-  ok "nothing left to copy"
+  printf "  ${B}%-13s %-40s %-32s %9s %9s${N}\n" TOTAL "" "" "$total_files" "$(human "$total_bytes")"
+  ((total_bytes < free_bytes)) || fail "not enough free space on the server"
+  ((total_bytes > 0)) && note "at the data disk's ~30 MB/s this takes about $((total_bytes / 30000000 / 60)) min"
+
+  ((DRY_RUN)) && { printf "\n${G}Dry run only, nothing copied.${N}\n"; exit 0; }
+
+  if ((total_bytes > 0)); then
+    if ((ASSUME_YES == 0)); then
+      printf "\n  Copy %s in %s files? Nothing is deleted on either side. [y/N] " "$(human "$total_bytes")" "$total_files"
+      read -r answer
+      [[ "$answer" =~ ^[yY]$ ]] || { echo "  Aborted."; exit 1; }
+    fi
+
+    title "3. Copy" "(each file is checksummed as it lands)"
+    started=$SECONDS
+    step=0
+    for job in "${JOBS[@]}"; do
+      step=$((step + 1))
+      IFS='|' read -r name src dest filters <<<"$job"
+      printf "\n  ${B}[%d/%d] %s${N}  ${D}%s → %s${N}\n" "$step" "${#JOBS[@]}" "$name" "$src" "$dest"
+      rsync_base "$filters"
+      run_guarded "" "" rsync "${RSYNC_ARGS[@]}" --no-inc-recursive --info=progress2,stats1 --log-file="$LOG" \
+        "$SOURCE/$src" "$REMOTE:$DATA/$dest" || fail "step $name failed (rsync exit $?); see $LOG, then re-run to resume"
+    done
+    elapsed=$((SECONDS - started))
+    ok "copied $(human "$total_bytes") in $((elapsed / 60)) min $((elapsed % 60)) s"
+  else
+    title "3. Copy"
+    ok "nothing left to copy"
+  fi
 fi
 
 ((SKIP_VERIFY)) && { printf "\n${Y}Verification skipped.${N} Run with --verify-only later.\n"; exit 0; }
 
-title "4. Verify" "(full xxh128 comparison of every file on both sides)"
+title "4. Verify" "(xxh128 content, missing files and files only on the server)"
 note "reads everything again on both disks; expect roughly as long as the copy"
-mismatch_file="$STATE_DIR/$RUN_ID.mismatches"
-: >"$mismatch_file"
+report="$STATE_DIR/$RUN_ID.verify.tsv"
+printf "step\tproblem\tpath\n" >"$report"
+problems=0
 step=0
 for job in "${JOBS[@]}"; do
   step=$((step + 1))
   IFS='|' read -r name src dest filters <<<"$job"
   rsync_base "$filters"
+  itemized="$WORK/verify-$name"
+  label="$(printf '[%d/%d] %-13s' "$step" "${#JOBS[@]}" "$name")"
   begun=$SECONDS
-  rsync "${RSYNC_ARGS[@]}" --checksum --dry-run --out-format='%n' "$SOURCE/$src" "$REMOTE:$DATA/$dest" \
-    2>>"$LOG" | grep -v '/$' >"$STATE_DIR/verify-$name" &
-  verify_pid=$!
-  thermal_guard "$verify_pid" &
-  GUARD_PID=$!
-  spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-  i=0
-  while kill -0 "$verify_pid" 2>/dev/null; do
-    printf "\r  ${C}%s${N} [%d/%d] %-13s %4d s" "${spin:i++%${#spin}:1}" "$step" "${#JOBS[@]}" "$name" $((SECONDS - begun))
-    sleep 0.2
-  done
-  wait "$verify_pid" || true
-  kill "$GUARD_PID" 2>/dev/null || true
-  GUARD_PID=""
-  count="$(wc -l <"$STATE_DIR/verify-$name")"
-  if ((count == 0)); then
-    printf "\r  ${G}✔${N} [%d/%d] %-13s identical on both sides (%d s)\n" "$step" "${#JOBS[@]}" "$name" $((SECONDS - begun))
-  else
-    printf "\r  ${R}✘${N} [%d/%d] %-13s %d file(s) differ\n" "$step" "${#JOBS[@]}" "$name" "$count"
-    sed "s#^#$name: #" "$STATE_DIR/verify-$name" >>"$mismatch_file"
+  # rsync writes straight to a file so its own exit status is what gets checked;
+  # --delete in a dry run is what reports files that exist only on the server.
+  if ! run_guarded "$label" "$itemized" rsync "${RSYNC_ARGS[@]}" "${VERIFY_PROTECT[@]}" --checksum --delete --dry-run \
+    --itemize-changes --out-format='%i|%n' "$SOURCE/$src" "$REMOTE:$DATA/$dest"; then
+    printf "\r  ${R}✘${N} %s could not be verified; see %s\n" "$label" "$LOG"
+    printf "%s\tverification did not complete\t-\n" "$name" >>"$report"
+    problems=$((problems + 1))
+    continue
   fi
-  rm -f "$STATE_DIR/verify-$name"
+  # Item codes: <f or >f a file whose content or presence differs, cd a missing
+  # directory, *deleting something only on the server. Attribute-only lines are
+  # not differences in content.
+  found="$(awk -F'|' -v step="$name" '
+    $1 ~ /^\*deleting/          { print step "\tonly on server\t" $2; next }
+    $1 ~ /^[<>]f\+\+\+\+/       { print step "\tmissing on server\t" $2; next }
+    $1 ~ /^[<>]f/               { print step "\tcontent differs\t" $2; next }
+    $1 ~ /^cd\+\+\+\+/          { print step "\tmissing folder on server\t" $2; next }
+  ' "$itemized")"
+  partials="$(remote "find $(quoted "$DATA/$dest") -type d -name .rsync-partial 2>/dev/null | head -5" || true)"
+  if [[ -n "$partials" ]]; then
+    found+="${found:+$'\n'}$(awk -v step="$name" '{ print step "\tleftover partial transfer\t" $0 }' <<<"$partials")"
+  fi
+  if [[ -z "$found" ]]; then
+    printf "\r  ${G}✔${N} %s identical on both sides (%d s)\n" "$label" $((SECONDS - begun))
+  else
+    count="$(wc -l <<<"$found")"
+    printf "\r  ${R}✘${N} %s %d difference(s)\n" "$label" "$count"
+    printf "%s\n" "$found" >>"$report"
+    problems=$((problems + count))
+  fi
 done
 
-if [[ -s "$mismatch_file" ]]; then
-  printf "\n${R}${B}Verification failed${N} for %s file(s), listed in %s\n" "$(wc -l <"$mismatch_file")" "$mismatch_file"
-  printf "Re-run without --verify-only to recopy them, then verify again.\n"
+if ((problems)); then
+  printf "\n${R}${B}Verification failed${N}: %d problem(s), listed in %s\n" "$problems" "$report"
+  grep -qP '\t(missing|leftover)' "$report" &&
+    printf "Missing files and partial transfers: run the import again (without --verify-only), then verify.\n"
+  grep -qP '\tcontent differs\t' "$report" &&
+    printf "Differing content with the same size and time is not recopied by a re-run: find which side is\nright, and delete the bad server copy to have the next run copy it again.\n"
+  grep -qP '\tonly on server\t' "$report" &&
+    printf "Files only on the server are never deleted by this script; review them by hand.\n"
   exit 2
 fi
-rm -f "$mismatch_file"
+rm -f "$report"
 printf "\n${G}${B}All files verified.${N} The HDD is still untouched; keep it until offsite backup exists.\n"
