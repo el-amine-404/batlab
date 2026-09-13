@@ -10,4 +10,5 @@ source "$SCRIPT_DIR/common.sh"
 load_restic_config
 require_command restic
 
+restic unlock
 restic check --read-data-subset="${RESTIC_CHECK_SUBSET:-1/7}"

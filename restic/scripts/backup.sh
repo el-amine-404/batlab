@@ -32,6 +32,11 @@ if ((${#paths[@]} == 0)); then
   exit 1
 fi
 
+# A run killed mid-way (reboot, the data disk dropping) leaves its lock behind,
+# and the exclusive lock prune needs would then fail every night. Without
+# --remove-all this only clears locks whose process is gone or that went stale.
+restic unlock
+
 restic backup \
   --tag automated \
   --exclude-file "$RESTIC_DIR/conf/excludes.txt" \
