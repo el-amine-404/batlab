@@ -55,7 +55,9 @@ run_check "Subtitles" python3 "$SCRIPT_DIR/verify-subtitles.py" "${roots[@]}" \
 run_check "ClamAV" "$SCRIPT_DIR/scan-clamav.sh"
 run_check "YARA" "$SCRIPT_DIR/scan-yara.sh"
 
-if [[ -n "${VT_API_KEY:-}" ]]; then
+# The example config ships a your_*_here placeholder; with it every lookup fails
+# with 401 after a 16 s pause each, burning hours for nothing.
+if [[ -n "${VT_API_KEY:-}" && "$VT_API_KEY" != your_*_here ]]; then
   run_check "VirusTotal" python3 "$SCRIPT_DIR/scan-virustotal.py" "${roots[@]}" \
     "${excludes[@]}" --exclude "$MEDIASCAN_QUARANTINE" \
     --report "$VIRUSTOTAL_REPORT" --cache "$MEDIASCAN_STATE_DIR/virustotal-cache.json" \
