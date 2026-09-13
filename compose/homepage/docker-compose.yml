@@ -40,11 +40,11 @@ services:
       - PGID=${PGID}
     networks:
       - home_server
-    mem_limit: 1gb
-    mem_reservation: 500m
-    memswap_limit: 1gb
+    mem_limit: ${HOMEPAGE_MEM_LIMIT:?set in hosts/<profile>/compose.env}
+    mem_reservation: ${HOMEPAGE_MEM_RESERVATION:?set in hosts/<profile>/compose.env}
+    memswap_limit: ${HOMEPAGE_MEM_LIMIT:?set in hosts/<profile>/compose.env}
     mem_swappiness: 0
-    cpus: 0.8
+    cpus: ${HOMEPAGE_CPUS:?set in hosts/<profile>/compose.env}
     ulimits:
       nofile:
         soft: 4096

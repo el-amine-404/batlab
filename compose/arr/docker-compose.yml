@@ -63,11 +63,11 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
-    cpus: 0.5
-    mem_limit: 512mb
-    mem_reservation: 128mb
+    cpus: ${CLEANUPARR_CPUS:?set in hosts/<profile>/compose.env}
+    mem_limit: ${CLEANUPARR_MEM_LIMIT:?set in hosts/<profile>/compose.env}
+    mem_reservation: ${CLEANUPARR_MEM_RESERVATION:?set in hosts/<profile>/compose.env}
     mem_swappiness: 0
-    memswap_limit: 512mb
+    memswap_limit: ${CLEANUPARR_MEM_LIMIT:?set in hosts/<profile>/compose.env}
 
   gluetun:
     image: ${IMAGE_GLUETUN}:${TAG_GLUETUN}

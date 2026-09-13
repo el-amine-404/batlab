@@ -6,7 +6,7 @@ as JSON reports and, optionally, moved into quarantine. Nothing is ever deleted.
 
 ## What each check does
 
-| Script | Cost on this host | Finds |
+| Script | Cost on lab1 | Finds |
 | --- | --- | --- |
 | `verify-types.py` | 142 s for 4.7k files | executables, scripts, archives, and extensions whose content does not match |
 | `verify-media.py` | 32 s for 160 files | containers that are not video, or that contradict their filename |
@@ -43,7 +43,7 @@ Its warning about a scanner that cannot read files reporting everything clean is
 kept too, as a hard precondition: `scan-clamav.sh` scans a known-positive EICAR
 file first and refuses to report a clean run if clamd fails to detect it.
 
-## Sizing, measured on this host
+## Sizing, measured on lab1
 
 ```
 ffprobe header, 80 GB file          1 s
@@ -105,6 +105,9 @@ sudo systemctl enable --now batlab-mediascan-sweep.timer batlab-mediascan-deep.t
 sudo systemctl enable --now batlab-mediascan-watch.service
 ```
 
+Then install the host drop-ins, if the profile has any, as described in
+`hosts/<profile>/README.md`.
+
 ## Running by hand
 
 ```bash
@@ -140,9 +143,13 @@ python3 mediascan/scripts/verify-media.py /mnt/storage/data/media \
   --remediate-dry-run --arr-path-map /mnt/storage/data=/data
 ```
 
-## Thermal note
+## Host limits
 
-This host has shut down under sustained all-core load. Every unit runs at
-`Nice=19` with idle I/O scheduling, and the deep pass is additionally capped at
-`CPUQuota=200%` with a two-hour budget. Do not remove those limits, and do not
-build test fixtures by encoding video on this machine.
+The units run at `Nice=19` with idle I/O on every machine. Anything sized for a
+particular host, such as a CPU quota or a temperature cutoff for the deep pass,
+is a systemd drop-in under `hosts/<profile>/systemd/`; lab1's is described in
+`hosts/lab1/README.md`. `deep.sh` stops starting new files above
+`MEDIASCAN_MAX_CPU_TEMP` read from the hwmon sensor named in
+`MEDIASCAN_CPU_TEMP_SENSOR`, and does nothing when they are unset.
+
+Do not build test fixtures by encoding video on a machine that overheats.

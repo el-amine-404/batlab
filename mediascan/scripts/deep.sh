@@ -23,4 +23,6 @@ exec python3 "$SCRIPT_DIR/deep-verify.py" "${roots[@]}" \
   --fraction "${MEDIASCAN_DEEP_FRACTION:-4}" \
   --sample-seconds "${MEDIASCAN_DEEP_SAMPLE_SECONDS:-10}" \
   --time-budget "${MEDIASCAN_DEEP_TIME_BUDGET:-7200}" \
+  --max-cpu-temp "${MEDIASCAN_MAX_CPU_TEMP:-0}" \
+  --cpu-temp-sensor "${MEDIASCAN_CPU_TEMP_SENSOR:-}" \
   "$@"

@@ -29,10 +29,10 @@ services:
       - no-new-privileges:true
     healthcheck:
       disable: false
-    mem_limit: 4gb
-    mem_reservation: 1gb
+    mem_limit: ${IMMICH_SERVER_MEM_LIMIT:?set in hosts/<profile>/compose.env}
+    mem_reservation: ${IMMICH_SERVER_MEM_RESERVATION:?set in hosts/<profile>/compose.env}
     mem_swappiness: 0
-    memswap_limit: 4gb
+    memswap_limit: ${IMMICH_SERVER_MEM_LIMIT:?set in hosts/<profile>/compose.env}
 
   immich-machine-learning:
     image: ${IMAGE_IMMICH_ML}:${TAG_IMMICH}
@@ -48,10 +48,10 @@ services:
       - no-new-privileges:true
     healthcheck:
       disable: false
-    mem_limit: 3gb
-    mem_reservation: 512mb
+    mem_limit: ${IMMICH_ML_MEM_LIMIT:?set in hosts/<profile>/compose.env}
+    mem_reservation: ${IMMICH_ML_MEM_RESERVATION:?set in hosts/<profile>/compose.env}
     mem_swappiness: 0
-    memswap_limit: 3gb
+    memswap_limit: ${IMMICH_ML_MEM_LIMIT:?set in hosts/<profile>/compose.env}
 
   immich-redis:
     image: ${IMAGE_IMMICH_REDIS}:${TAG_IMMICH_REDIS}
@@ -69,10 +69,10 @@ services:
       interval: 30s
       timeout: 5s
       retries: 5
-    mem_limit: 256mb
-    mem_reservation: 64mb
+    mem_limit: ${IMMICH_REDIS_MEM_LIMIT:?set in hosts/<profile>/compose.env}
+    mem_reservation: ${IMMICH_REDIS_MEM_RESERVATION:?set in hosts/<profile>/compose.env}
     mem_swappiness: 0
-    memswap_limit: 256mb
+    memswap_limit: ${IMMICH_REDIS_MEM_LIMIT:?set in hosts/<profile>/compose.env}
 
   immich-db:
     image: ${IMAGE_IMMICH_POSTGRES}:${TAG_IMMICH_POSTGRES}
@@ -96,10 +96,10 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
-    mem_limit: 2gb
-    mem_reservation: 512mb
+    mem_limit: ${IMMICH_DB_MEM_LIMIT:?set in hosts/<profile>/compose.env}
+    mem_reservation: ${IMMICH_DB_MEM_RESERVATION:?set in hosts/<profile>/compose.env}
     mem_swappiness: 0
-    memswap_limit: 2gb
+    memswap_limit: ${IMMICH_DB_MEM_LIMIT:?set in hosts/<profile>/compose.env}
 
 networks:
   home_server:

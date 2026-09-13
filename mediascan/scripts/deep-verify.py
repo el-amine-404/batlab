@@ -92,6 +92,20 @@ def marker_time(path):
         return 0.0
 
 
+def cpu_temperature(sensor):
+    for hwmon in sorted(os.listdir("/sys/class/hwmon")):
+        base = os.path.join("/sys/class/hwmon", hwmon)
+        try:
+            with open(os.path.join(base, "name"), encoding="utf-8") as handle:
+                if handle.read().strip() != sensor:
+                    continue
+            with open(os.path.join(base, "temp1_input"), encoding="utf-8") as handle:
+                return int(handle.read().strip()) / 1000
+        except (OSError, ValueError):
+            continue
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("roots", nargs="+")
@@ -108,7 +122,15 @@ def main():
     parser.add_argument("--timeout", type=int, default=3600)
     parser.add_argument("--time-budget", type=int, default=0,
                         help="stop starting new files after this many seconds (0 means no limit)")
+    parser.add_argument("--max-cpu-temp", type=float, default=0,
+                        help="stop starting new files once this sensor reads above this many C (0 means off)")
+    parser.add_argument("--cpu-temp-sensor", default="",
+                        help="hwmon name whose temp1_input is compared against --max-cpu-temp")
     arguments = parser.parse_args()
+
+    if arguments.max_cpu_temp and cpu_temperature(arguments.cpu_temp_sensor) is None:
+        print(f"No readable hwmon sensor named {arguments.cpu_temp_sensor!r}; refusing to run without the temperature guard.")
+        return 2
 
     excludes = [os.path.normpath(e) for e in arguments.exclude]
     paths = sorted(walk(arguments.roots, excludes))
@@ -133,11 +155,18 @@ def main():
     started = time.monotonic()
     findings = {}
     budget_hit = False
+    too_hot = False
+    last_reading = None
 
     for path, kind in [(p, "sample") for p in sample_set] + [(p, "demux") for p in demux_set]:
         if arguments.time_budget and time.monotonic() - started > arguments.time_budget:
             budget_hit = True
             break
+        if arguments.max_cpu_temp:
+            last_reading = cpu_temperature(arguments.cpu_temp_sensor)
+            if last_reading is None or last_reading > arguments.max_cpu_temp:
+                too_hot = True
+                break
 
         finding = findings.setdefault(path, Finding(path=path))
         began = time.monotonic()
@@ -166,8 +195,12 @@ def main():
     print(f"\nChecked {len(results)} file(s) in {elapsed / 60:.1f} min; {len(flagged)} flagged.")
     if budget_hit:
         print(f"Stopped early: time budget of {arguments.time_budget}s reached.")
+    if too_hot:
+        reading = "unreadable" if last_reading is None else f"{last_reading:.1f} C"
+        print(f"Stopped early: CPU {reading}, limit {arguments.max_cpu_temp:g} C.")
 
-    if arguments.marker and not budget_hit and not arguments.no_samples:
+    stopped_early = budget_hit or too_hot
+    if arguments.marker and not stopped_early and not arguments.no_samples:
         os.makedirs(os.path.dirname(arguments.marker) or ".", exist_ok=True)
         with open(arguments.marker, "w", encoding="utf-8") as handle:
             handle.write("")

@@ -11,9 +11,6 @@ Group=root
 ExecStart=/home/potato/batlab/mediascan/scripts/deep.sh
 Nice=19
 IOSchedulingClass=idle
-# Decoding is the only part of this suite that can hold every core at 100% for
-# hours, which this chassis does not survive. Two cores leaves thermal headroom.
-CPUQuota=200%
 
 [Install]
 WantedBy=multi-user.target

@@ -21,7 +21,8 @@ services:
       - ${CONFIGS_ROOT}/netdata/alerts/health_alarm_notify.conf:/etc/netdata/health_alarm_notify.conf:ro
       - ${CONFIGS_ROOT}/netdata/alerts/batlab.conf:/etc/netdata/health.d/batlab.conf:ro
       - ${CONFIGS_ROOT}/netdata/alerts/cpu.conf:/etc/netdata/health.d/cpu.conf:ro
-      - ${CONFIGS_ROOT}/netdata/alerts/go.d-docker.conf:/etc/netdata/go.d/docker.conf:ro
+      - ../../hosts/${HOST_PROFILE:?set HOST_PROFILE in compose/.env}/netdata/cpu-temperature.conf:/etc/netdata/health.d/host-cpu-temperature.conf:ro
+      - ../../hosts/${HOST_PROFILE:?set HOST_PROFILE in compose/.env}/netdata/go.d-docker.conf:/etc/netdata/go.d/docker.conf:ro
       - /:/host/root:ro,rslave
       - /etc/localtime:/etc/localtime:ro
       - /etc/passwd:/host/etc/passwd:ro
@@ -55,8 +56,8 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
-    cpus: 1.5
-    mem_limit: 1gb
-    mem_reservation: 512m
+    cpus: ${NETDATA_CPUS:?set in hosts/<profile>/compose.env}
+    mem_limit: ${NETDATA_MEM_LIMIT:?set in hosts/<profile>/compose.env}
+    mem_reservation: ${NETDATA_MEM_RESERVATION:?set in hosts/<profile>/compose.env}
     mem_swappiness: 0
-    memswap_limit: 1gb
+    memswap_limit: ${NETDATA_MEM_LIMIT:?set in hosts/<profile>/compose.env}

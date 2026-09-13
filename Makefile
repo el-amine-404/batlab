@@ -9,7 +9,12 @@ NET ?= home_server
 NET_SUBNET ?= 172.19.0.0/16
 NET_GATEWAY ?= 172.19.0.1
 
-DC := docker compose --env-file $(ENV)
+# Capacity limits sized for one machine live in hosts/<profile>/compose.env and
+# override nothing in $(ENV); compose refuses to render without them.
+HOST_PROFILE ?= $(shell sed -n 's/^HOST_PROFILE=//p' $(ENV) 2>/dev/null)
+HOST_ENV := hosts/$(HOST_PROFILE)/compose.env
+
+DC := docker compose --env-file $(ENV) --env-file $(HOST_ENV)
 
 # Auto-discover stacks
 STACKS := $(sort $(patsubst compose/%/docker-compose.yml,%,$(wildcard compose/*/docker-compose.yml)))
@@ -80,6 +85,8 @@ list:
 
 check-env:
 	@test -f $(ENV) || (echo "Missing $(ENV)" && exit 1)
+	@test -n "$(HOST_PROFILE)" || (echo "HOST_PROFILE is not set in $(ENV)" && exit 1)
+	@test -f $(HOST_ENV) || (echo "Missing $(HOST_ENV)" && exit 1)
 
 check-all-confirm:
 	@if [ -z "$(STACK)" ]; then \
