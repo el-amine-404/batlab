@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Batlab watchdog heartbeat every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=batlab-watchdog-heartbeat.service
+
+[Install]
+WantedBy=timers.target

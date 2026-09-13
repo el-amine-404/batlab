@@ -10,8 +10,12 @@ services:
       - SYS_ADMIN
     security_opt:
       - apparmor:unconfined
+    environment:
+      - DISCORD_WEBHOOK_ALERTS=${DISCORD_WEBHOOK_ALERTS}
     volumes:
       - ${CONFIGS_ROOT}/netdata/conf:/etc/netdata
+      - ${CONFIGS_ROOT}/netdata/alerts/health_alarm_notify.conf:/etc/netdata/health_alarm_notify.conf:ro
+      - ${CONFIGS_ROOT}/netdata/alerts/batlab.conf:/etc/netdata/health.d/batlab.conf:ro
       - ${VOLUMES_ROOT}/netdata/lib:/var/lib/netdata
       - ${VOLUMES_ROOT}/netdata/cache:/var/cache/netdata
       - /:/host/root:ro,rslave

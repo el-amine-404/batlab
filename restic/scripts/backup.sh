@@ -12,6 +12,9 @@ source "$SCRIPT_DIR/common.sh"
 load_restic_config
 require_command restic
 
+healthcheck_ping start
+trap 'healthcheck_ping "$?"' EXIT
+
 "$SCRIPT_DIR/dump-databases.sh"
 
 paths=()

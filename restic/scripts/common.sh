@@ -27,6 +27,11 @@ load_restic_config() {
   install -d -m 700 "${RESTIC_CACHE_DIR:-/var/cache/batlab-restic}"
 }
 
+healthcheck_ping() {
+  [[ -n "${RESTIC_HEALTHCHECK_URL:-}" ]] || return 0
+  curl -fsS -m 10 --retry 3 -o /dev/null "$RESTIC_HEALTHCHECK_URL/$1" || true
+}
+
 require_command() {
   command -v "$1" >/dev/null 2>&1 || {
     echo "Required command not found: $1" >&2

@@ -1,0 +1,13 @@
+[Unit]
+Description=Stop data-disk containers when booting without /mnt/storage/data
+Wants=docker.service
+After=docker.service mnt-storage-data.mount
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/home/potato/batlab/watchdog/scripts/data-guard.sh boot
+
+[Install]
+WantedBy=multi-user.target

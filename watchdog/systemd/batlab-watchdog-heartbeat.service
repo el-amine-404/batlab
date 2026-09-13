@@ -1,0 +1,12 @@
+[Unit]
+Description=Self-test the Batlab server and ping healthchecks.io
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/home/potato/batlab/watchdog/scripts/heartbeat.sh
+TimeoutStartSec=2min
+TimeoutStopSec=30s

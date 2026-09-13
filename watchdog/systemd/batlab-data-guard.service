@@ -1,0 +1,16 @@
+[Unit]
+Description=Run data-disk containers only while /mnt/storage/data is mounted
+Wants=docker.service
+After=docker.service mnt-storage-data.mount
+BindsTo=mnt-storage-data.mount
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=root
+Group=root
+ExecStart=/home/potato/batlab/watchdog/scripts/data-guard.sh start
+ExecStop=/home/potato/batlab/watchdog/scripts/data-guard.sh stop
+
+[Install]
+WantedBy=mnt-storage-data.mount
