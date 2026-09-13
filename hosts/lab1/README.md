@@ -31,6 +31,7 @@ Measured: `qwen3:4b` at 1.09 tokens/s; a 10 s 1080p x265 sample decode takes
 | CPU temperature alert | `netdata/cpu-temperature.conf` | critical above 85 C on `k10temp` | powered off from sustained heat | Sensor name differs per CPU (`coretemp` on Intel); keep an alert, adjust the line |
 | Netdata docker collector | `netdata/go.d-docker.conf` | off | each poll walks containerd on Docker 29; held two cores at 75% and the CPU at 85 C | Try it enabled and watch `app.dockerd` CPU |
 | Deep media pass limits | `systemd/batlab-mediascan-deep.service.d/limits.conf` | 1 core, stop above 85 C | decode heats the chassis past its limit | Drop the file, or loosen it |
+| Photo organiser and import temperature guard | command-line flags | `organize-media.py plan --max-cpu-temp 85 --cpu-temp-sensor k10temp`; `import-hdd-500-11.sh` pauses at 88 C | metadata reading and transfers run for hours | Drop the flags |
 | Cleanuparr schedules | Cleanuparr database, see `cleanuparr.md` | queue 10 min, malware 5 min, seeker 30 min | CPU and heat | Defaults are fine |
 | Data disk on USB 2.0 port | physical | USB 2.0 port, not the blue ones | the JMS578 bridge resets under sustained writes over USB 3 | Use SATA or a proper enclosure |
 | No battery | physical | healthchecks.io heartbeat catches outages | mains blips power it off | A UPS; keep the heartbeat |

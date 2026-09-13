@@ -78,47 +78,7 @@ can be supplied as arguments or named options; run it with `--help` for details.
 
 ## Rename an independent photo archive
 
-`rename-media-by-creation-time.py` creates names such as
-`2017-11-18_21h-49m-59s.jpg` from embedded creation metadata. Same-second
-collisions receive `_02`, `_03`, and so on. Apple HEIC/JPG/MOV companions with
-the same media-group identifier receive one shared capture-time stem, even when
-the motion video starts a few seconds before the still image.
-
-The default command only creates a durable plan; it does not rename media:
-
-```bash
-compose/immich/scripts/rename-media-by-creation-time.py plan \
-  --sample 25 \
-  /mnt/storage/data/media/photos/amine/iphone-import-2026-09-01/originals
-```
-
-Sample mode selects a deterministic, extension-aware subset and deliberately
-does not generate an apply or rollback command. After reviewing the sample,
-create the full actionable plan:
-
-```bash
-compose/immich/scripts/rename-media-by-creation-time.py plan \
-  /mnt/storage/data/media/photos/amine/iphone-import-2026-09-01/originals
-```
-
-The printed state directory contains:
-
-- `plan.tsv`: a reviewable old-name to new-name mapping and timestamp source;
-- `manifest.json` and `manifest.sha256`: the immutable recovery record;
-- `apply.sh`: a typed-confirmation, two-phase, no-overwrite rename;
-- `rollback.sh`: a self-contained route back to every original filename;
-- `tool.py`: the exact tool version that created the plan.
-
-Review `plan.tsv`, then run the generated `apply.sh`. Use its neighboring
-`rollback.sh` to restore the old names, or `tool.py status STATE_DIRECTORY` to
-reconcile every planned inode after an interruption. Applying and rolling back
-change directory entries only; they never rewrite media or embedded metadata.
-
-Planning prefers original capture metadata and Apple `CreationDate`, then the
-existing timestamp prefix. Files without a trustworthy time are skipped, and
-apply refuses a plan containing skips unless they are explicitly accepted.
-Filesystem modification time is used only with `--allow-mtime-fallback`.
-
-Only the selected directory is scanned by default. Add `--recursive` for nested
-directories. The tool deliberately refuses paths inside Immich's managed
-`immich/library` and `immich/upload` trees.
+Naming the archive by capture time, including time zones, fake dates and
+reversible XMP sidecars, is handled by `photos/scripts/organize-media.py`;
+see `photos/README.md`. Run it before Immich indexes the archive, since a
+rename later looks to Immich like a deletion followed by a new asset.
