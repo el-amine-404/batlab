@@ -1,12 +1,18 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
-  "enabledManagers": ["custom.regex"],
+  "extends": [
+    "config:recommended"
+  ],
+  "enabledManagers": [
+    "custom.regex"
+  ],
   "customManagers": [
     {
       "customType": "regex",
       "description": "IMAGE_X / TAG_X pairs in compose/versions.env",
-      "managerFilePatterns": ["/^compose/versions\\.env$/"],
+      "managerFilePatterns": [
+        "/^compose/versions\\.env$/"
+      ],
       "matchStrings": [
         "IMAGE_[A-Z0-9_]+=(?<depName>[^\\s]+)\\nTAG_[A-Z0-9_]+=(?<currentValue>[^@\\s]+)(?:@(?<currentDigest>sha256:[a-f0-9]{64}))?"
       ],
@@ -15,24 +21,36 @@
     }
   ],
   "dependencyDashboard": true,
-  "labels": ["dependencies"],
+  "labels": [
+    "dependencies"
+  ],
   "semanticCommits": "disabled",
   "commitMessagePrefix": "chore:",
-  "commitMessageAction": "update",
-  "commitMessageTopic": "{{depName}}",
-  "commitMessageExtra": "to {{newValue}}",
   "minimumReleaseAge": "3 days",
   "prConcurrentLimit": 5,
   "prHourlyLimit": 2,
   "packageRules": [
     {
+      "description": "Commit and PR titles: the exact tag written to versions.env, no added v prefix; placed in a rule so it overrides the docker preset",
+      "matchDatasources": [
+        "docker"
+      ],
+      "commitMessageAction": "update",
+      "commitMessageTopic": "{{depName}}",
+      "commitMessageExtra": "to {{newValue}}"
+    },
+    {
       "description": "linuxserver.io tags carry a build suffix (-lsNNN) and, for qBittorrent, the libtorrent version",
-      "matchPackageNames": ["lscr.io/linuxserver/**"],
+      "matchPackageNames": [
+        "lscr.io/linuxserver/**"
+      ],
       "versioning": "regex:^v?(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)(?:\\.(?<build>\\d+))?(?:_v\\d+\\.\\d+\\.\\d+)?-ls(?<revision>\\d+)$"
     },
     {
       "description": "Readarr only publishes nightly tags and the project is retired",
-      "matchPackageNames": ["lscr.io/linuxserver/readarr"],
+      "matchPackageNames": [
+        "lscr.io/linuxserver/readarr"
+      ],
       "enabled": false
     },
     {
@@ -54,15 +72,23 @@
         "louislam/uptime-kuma",
         "amir20/dozzle"
       ],
-      "matchUpdateTypes": ["minor", "patch"],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
       "automerge": true,
       "automergeType": "pr"
     },
     {
       "description": "Major updates always need a human, whatever the image",
-      "matchUpdateTypes": ["major"],
+      "matchUpdateTypes": [
+        "major"
+      ],
       "automerge": false,
-      "labels": ["dependencies", "major"]
+      "labels": [
+        "dependencies",
+        "major"
+      ]
     }
   ]
 }

@@ -140,7 +140,7 @@ main() {
   fi
 
   mapfile -t allowed < <(grep -vE '^\s*(#|$)' "$SCRIPT_DIR/../conf/auto-services.txt")
-  local failures=0 stack_file stack
+  local failures=0 checked=0 changed=0 stack_file stack
 
   for stack_file in compose/*/docker-compose.yml; do
     stack="$(basename "$(dirname "$stack_file")")"
@@ -149,7 +149,9 @@ main() {
       state="$(docker inspect -f '{{.State.Status}}' "$container" 2>/dev/null || echo missing)"
       [[ "$state" == "running" ]] || continue
       running_image="$(docker inspect -f '{{.Config.Image}}' "$container")"
+      checked=$((checked + 1))
       [[ "$running_image" == "$desired" ]] && continue
+      changed=$((changed + 1))
 
       if printf '%s\n' "${allowed[@]}" | grep -qxF "$service"; then
         if seen "$service $desired" failed; then
@@ -172,6 +174,7 @@ for name, svc in json.load(sys.stdin)["services"].items():
 ')
   done
 
+  echo "Checked $checked running service(s): $changed differ from the checkout, $failures failed."
   ((failures == 0))
 }
 
