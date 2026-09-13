@@ -37,6 +37,7 @@ services:
     container_name: cleanuparr
     volumes:
       - ${VOLUMES_ROOT}/cleanuparr:/config
+      - ${DATA_ROOT}/torrents:/data/torrents:ro
       - /etc/localtime:/etc/localtime:ro
     environment:
       - TZ=${TZ}
