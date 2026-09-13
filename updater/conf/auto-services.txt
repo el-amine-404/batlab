@@ -1,0 +1,20 @@
+# Compose services the updater recreates on its own when their image changes.
+# Keep in step with the automerge packageRule in renovate.json: an image that
+# Renovate merges but is not listed here is only reported, never deployed.
+# Stopped containers are never started by the updater.
+
+homepage
+jellyfin
+seerr
+sonarr
+radarr
+prowlarr
+bazarr
+qbittorrent
+cleanuparr
+recyclarr
+flaresolverr
+navidrome
+filebrowser
+uptime-kuma
+dozzle
