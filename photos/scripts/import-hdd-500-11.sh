@@ -10,16 +10,22 @@
 #   photos/scripts/import-hdd-500-11.sh --yes --skip-verify
 #
 # Verify before organize-media.py renames anything in photos/library: after a
-# rename the two sides are meant to differ.
+# rename the two sides are meant to differ. The end of every copy or verification
+# is posted to Discord through DISCORD_WEBHOOK_ALERTS in compose/.env.
 
 set -Eeuo pipefail
 
 readonly SOURCE="${SOURCE:-/media/amine/HDD_500_11}"
+# The drive's filesystem UUID, so a different disk or a plain folder at the same
+# path is refused. Empty skips the check.
+readonly SOURCE_UUID="${SOURCE_UUID-76FE-D87B}"
 readonly REMOTE="${REMOTE:-my-homelab}"
 readonly DATA="${DATA:-/mnt/storage/data}"
 readonly STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/batlab-import/hdd-500-11"
 readonly HOT_C="${HOT_C:-88}"
 readonly COOL_C="${COOL_C:-80}"
+REPO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+readonly REPO_DIR
 
 # name | source (relative to SOURCE) | destination (relative to DATA) | extra rsync filters
 readonly JOBS=(
@@ -34,9 +40,18 @@ readonly JOBS=(
 readonly COMMON_FILTERS=("--exclude=._*" "--exclude=.DS_Store" "--exclude=Thumbs.db" "--exclude=desktop.ini"
   "--exclude=/.Spotlight-V100" "--exclude=/System Volume Information")
 
-# Destination content that legitimately exists without a source counterpart:
-# folders that predate the import and what organize-media.py adds later.
-readonly VERIFY_PROTECT=("--filter=P /_to-merge/" "--filter=P /.organize/" "--filter=P *.xmp")
+# Library content that legitimately exists without a source counterpart: folders
+# that predate the import and what organize-media.py adds later. Every other
+# step must match its source exactly.
+readonly LIBRARY_PROTECT=("--filter=P /_to-merge/" "--filter=P /.organize/" "--filter=P *.xmp")
+
+# Only regular files and folders are imported. Dry runs list symlinks, devices and
+# special files so they are reported instead of being skipped silently.
+readonly LIST_NON_REGULAR=(--links --devices --specials)
+
+# Turns NUL-separated remote paths into lines, escaping tabs and newlines the way
+# rsync does, so a path never spans or splits a report row.
+readonly ESCAPE_LINES='sed -z '\''s/\t/\\#011/g; s/\n/\\#012/g'\'' | tr "\0" "\n"'
 
 if [[ -t 1 ]]; then
   B=$'\e[1m' D=$'\e[2m' R=$'\e[31m' G=$'\e[32m' Y=$'\e[33m' C=$'\e[36m' N=$'\e[0m'
@@ -45,12 +60,13 @@ else
 fi
 
 ok() { printf "  ${G}✔${N} %s\n" "$*"; }
-fail() { printf "  ${R}✘${N} %s\n" "$*" >&2; exit 1; }
+fail() { FAILURE="$*"; printf "  ${R}✘${N} %s\n" "$*" >&2; exit 1; }
 note() { printf "  ${D}%s${N}\n" "$*"; }
 title() { printf "\n${B}${C}━━ %s ${N}${D}%s${N}\n" "$1" "${2:-}"; }
 human() { numfmt --to=iec --suffix=B --format="%.1f" "$1"; }
 
 DRY_RUN=0 VERIFY_ONLY=0 SKIP_VERIFY=0 ASSUME_YES=0
+FAILURE="" NOTIFY=0 OUTCOME="" STARTED=$SECONDS
 for argument in "$@"; do
   case "$argument" in
     --dry-run) DRY_RUN=1 ;;
@@ -119,8 +135,41 @@ stop_active() {
   ACTIVE_PID=""
 }
 
+notify_discord() {
+  local status="$1" title color result
+  ((NOTIFY)) || return 0
+  local webhook="${IMPORT_DISCORD_WEBHOOK:-$(sed -n 's/^DISCORD_WEBHOOK_ALERTS=//p' "$REPO_DIR/compose/.env" 2>/dev/null | tail -n 1)}"
+  [[ "$webhook" == http* ]] || return 0
+  case "$status" in
+    0) title="🟢 HDD_500_11 import finished" color=3066993 result="${OUTCOME:-done}" ;;
+    2) title="🔴 HDD_500_11 import: verification failed" color=15158332 result="$OUTCOME" ;;
+    130) title="🟠 HDD_500_11 import interrupted" color=15105570 result="re-run the same command to resume" ;;
+    *) title="🔴 HDD_500_11 import failed" color=15158332 result="${FAILURE:-exit $status}" ;;
+  esac
+  local elapsed=$((SECONDS - STARTED)) payload
+  payload="$(python3 -c '
+import datetime, json, socket, sys
+title, color, pairs = sys.argv[1], int(sys.argv[2]), sys.argv[3:]
+host = socket.gethostname()
+fields = [{"name": "Host", "value": host, "inline": True}]
+fields += [{"name": n, "value": (v or "-")[:1000], "inline": False} for n, v in zip(pairs[::2], pairs[1::2])]
+print(json.dumps({
+    "username": "import on " + host,
+    "avatar_url": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/immich.png",
+    "embeds": [{"title": title, "color": color, "fields": fields,
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()}],
+}))' "$title" "$color" \
+    "Destination" "$REMOTE:$DATA" \
+    "Result" "$result" \
+    "Duration" "$((elapsed / 3600)) h $((elapsed % 3600 / 60)) min" \
+    "Log" "$LOG")" || return 0
+  curl -sS -m 15 -H "Content-Type: application/json" -d "$payload" "$webhook" >/dev/null 2>&1 || true
+}
+
 cleanup() {
+  local status=$?
   stop_active
+  notify_discord "$status"
   ssh "${SSH_OPTS[@]}" -O exit "$REMOTE" 2>/dev/null || true
   rm -rf "$WORK"
 }
@@ -204,8 +253,14 @@ printf "${B}Import HDD_500_11 → %s:%s${N}\n" "$REMOTE" "$DATA"
 note "log: $LOG"
 
 title "1. Preflight"
-[[ -d "$SOURCE/MEMORIES" ]] || fail "$SOURCE is not mounted or has no MEMORIES folder"
-ok "source mounted: $SOURCE ($(findmnt -no FSTYPE --target "$SOURCE"))"
+mountpoint -q "$SOURCE" || fail "$SOURCE is not a mount point; is the drive plugged in and mounted?"
+if [[ -n "$SOURCE_UUID" ]]; then
+  source_uuid="$(findmnt -no UUID --mountpoint "$SOURCE")"
+  [[ "$source_uuid" == "$SOURCE_UUID" ]] ||
+    fail "$SOURCE holds filesystem ${source_uuid:-without a UUID}, not HDD_500_11 ($SOURCE_UUID)"
+fi
+[[ -d "$SOURCE/MEMORIES" ]] || fail "$SOURCE has no MEMORIES folder"
+ok "source mounted: $SOURCE ($(findmnt -no FSTYPE,UUID --mountpoint "$SOURCE" | tr -s ' '))"
 has_xxh128 "$(rsync --version)" || fail "local rsync does not support xxh128 checksums"
 remote true 2>/dev/null || fail "cannot reach $REMOTE over SSH without a password"
 ok "SSH connection to $REMOTE (this run's own, aes128-gcm, no compression)"
@@ -221,6 +276,11 @@ else
   ok "every destination writable (${#JOBS[@]} steps)"
 fi
 ok "server CPU temperature: $(remote_temperature) °C (pause at $HOT_C, resume at $COOL_C)"
+if [[ -n "${IMPORT_DISCORD_WEBHOOK:-}" ]] || grep -q '^DISCORD_WEBHOOK_ALERTS=https://' "$REPO_DIR/compose/.env" 2>/dev/null; then
+  ok "Discord notification when the run ends"
+else
+  note "no DISCORD_WEBHOOK_ALERTS in compose/.env; the end of the run is not posted to Discord"
+fi
 
 if ((VERIFY_ONLY == 0)); then
   free_bytes="$(remote "df -B1 --output=avail $(quoted "$DATA") | tail -1 | tr -d ' '")"
@@ -228,12 +288,17 @@ if ((VERIFY_ONLY == 0)); then
 
   title "2. Plan" "(what still has to be copied)"
   total_bytes=0 total_files=0
+  non_regular="$STATE_DIR/$RUN_ID.non-regular.txt"
+  : >"$non_regular"
   printf "  ${B}%-13s %-40s %-32s %9s %9s${N}\n" STEP FROM TO FILES SIZE
   for job in "${JOBS[@]}"; do
     IFS='|' read -r name src dest filters <<<"$job"
     rsync_base "$filters"
-    stats="$(rsync "${RSYNC_ARGS[@]}" --dry-run --stats "$SOURCE/$src" "$REMOTE:$DATA/$dest" 2>>"$LOG")" \
-      || fail "could not plan step $name; see $LOG"
+    listing="$WORK/plan-$name"
+    rsync "${RSYNC_ARGS[@]}" "${LIST_NON_REGULAR[@]}" --dry-run --stats --out-format='%i %n' \
+      "$SOURCE/$src" "$REMOTE:$DATA/$dest" >"$listing" 2>>"$LOG" || fail "could not plan step $name; see $LOG"
+    awk -v step="$name" '/^[<>ch.][LDS]/ { print step ": " substr($0, 13) }' "$listing" >>"$non_regular"
+    stats="$(<"$listing")"
     files="$(awk -F': ' '/Number of regular files transferred/ {gsub(/,/,"",$2); print $2}' <<<"$stats")"
     bytes="$(awk -F': ' '/Total transferred file size/ {gsub(/[, a-z]/,"",$2); print $2}' <<<"$stats")"
     [[ "$files" =~ ^[0-9]+$ && "$bytes" =~ ^[0-9]+$ ]] || fail "could not read rsync statistics for step $name"
@@ -242,6 +307,11 @@ if ((VERIFY_ONLY == 0)); then
     printf "  %-13s %-40s %-32s %9s %9s\n" "$name" "${src:0:40}" "${dest:0:32}" "$files" "$(human "$bytes")"
   done
   printf "  ${B}%-13s %-40s %-32s %9s %9s${N}\n" TOTAL "" "" "$total_files" "$(human "$total_bytes")"
+  if [[ -s "$non_regular" ]]; then
+    head -5 "$non_regular" | sed 's/^/    /'
+    fail "the source has $(wc -l <"$non_regular") symlink(s) or special file(s), which are never imported; replace them with real files or remove them (full list: $non_regular)"
+  fi
+  rm -f "$non_regular"
   ((total_bytes < free_bytes)) || fail "not enough free space on the server"
   ((total_bytes > 0)) && note "at the data disk's ~30 MB/s this takes about $((total_bytes / 30000000 / 60)) min"
 
@@ -253,6 +323,7 @@ if ((VERIFY_ONLY == 0)); then
       read -r answer
       [[ "$answer" =~ ^[yY]$ ]] || { echo "  Aborted."; exit 1; }
     fi
+    NOTIFY=1
 
     title "3. Copy" "(each file is checksummed as it lands)"
     started=$SECONDS
@@ -267,13 +338,19 @@ if ((VERIFY_ONLY == 0)); then
     done
     elapsed=$((SECONDS - started))
     ok "copied $(human "$total_bytes") in $((elapsed / 60)) min $((elapsed % 60)) s"
+    OUTCOME="copied $(human "$total_bytes") in $total_files files"
   else
     title "3. Copy"
     ok "nothing left to copy"
   fi
 fi
 
-((SKIP_VERIFY)) && { printf "\n${Y}Verification skipped.${N} Run with --verify-only later.\n"; exit 0; }
+((SKIP_VERIFY)) && {
+  OUTCOME="${OUTCOME:-nothing to copy}; verification skipped"
+  printf "\n${Y}Verification skipped.${N} Run with --verify-only later.\n"
+  exit 0
+}
+NOTIFY=1
 
 title "4. Verify" "(xxh128 content, missing files and files only on the server)"
 note "reads everything again on both disks; expect roughly as long as the copy"
@@ -285,28 +362,34 @@ for job in "${JOBS[@]}"; do
   step=$((step + 1))
   IFS='|' read -r name src dest filters <<<"$job"
   rsync_base "$filters"
+  protect=()
+  [[ "$name" == library ]] && protect=("${LIBRARY_PROTECT[@]}")
   itemized="$WORK/verify-$name"
   label="$(printf '[%d/%d] %-13s' "$step" "${#JOBS[@]}" "$name")"
   begun=$SECONDS
   # rsync writes straight to a file so its own exit status is what gets checked;
   # --delete in a dry run is what reports files that exist only on the server.
-  if ! run_guarded "$label" "$itemized" rsync "${RSYNC_ARGS[@]}" "${VERIFY_PROTECT[@]}" --checksum --delete --dry-run \
-    --itemize-changes --out-format='%i|%n' "$SOURCE/$src" "$REMOTE:$DATA/$dest"; then
+  if ! run_guarded "$label" "$itemized" rsync "${RSYNC_ARGS[@]}" "${protect[@]}" "${LIST_NON_REGULAR[@]}" \
+    --checksum --delete --dry-run --out-format='%i %n' "$SOURCE/$src" "$REMOTE:$DATA/$dest"; then
     printf "\r  ${R}✘${N} %s could not be verified; see %s\n" "$label" "$LOG"
     printf "%s\tverification did not complete\t-\n" "$name" >>"$report"
     problems=$((problems + 1))
     continue
   fi
-  # Item codes: <f or >f a file whose content or presence differs, cd a missing
-  # directory, *deleting something only on the server. Attribute-only lines are
-  # not differences in content.
-  found="$(awk -F'|' -v step="$name" '
-    $1 ~ /^\*deleting/          { print step "\tonly on server\t" $2; next }
-    $1 ~ /^[<>]f\+\+\+\+/       { print step "\tmissing on server\t" $2; next }
-    $1 ~ /^[<>]f/               { print step "\tcontent differs\t" $2; next }
-    $1 ~ /^cd\+\+\+\+/          { print step "\tmissing folder on server\t" $2; next }
+  # Each line is an 11-character item code, a space, then the path. rsync escapes
+  # tabs, newlines and other unprintable bytes in paths as \#ooo, so a path always
+  # stays on its line. Codes: <f or >f a file whose content or presence differs,
+  # cd a missing directory, L/D/S a symlink, device or special file, *deleting
+  # something only on the server. Attribute-only lines are not differences.
+  found="$(awk -v step="$name" '
+    { code = substr($0, 1, 11); path = substr($0, 13) }
+    code ~ /^\*deleting/          { print step "\tonly on server\t" path; next }
+    code ~ /^[<>ch.][LDS]/        { print step "\tnot a regular file, never imported\t" path; next }
+    code ~ /^[<>]f\+\+\+\+/       { print step "\tmissing on server\t" path; next }
+    code ~ /^[<>]f/               { print step "\tcontent differs\t" path; next }
+    code ~ /^cd\+\+\+\+/          { print step "\tmissing folder on server\t" path; next }
   ' "$itemized")"
-  partials="$(remote "find $(quoted "$DATA/$dest") -type d -name .rsync-partial 2>/dev/null | head -5" || true)"
+  partials="$(remote "find $(quoted "$DATA/$dest") -type d -name .rsync-partial -print0 2>/dev/null | head -zn 5 | $ESCAPE_LINES" || true)"
   if [[ -n "$partials" ]]; then
     found+="${found:+$'\n'}$(awk -v step="$name" '{ print step "\tleftover partial transfer\t" $0 }' <<<"$partials")"
   fi
@@ -321,6 +404,7 @@ for job in "${JOBS[@]}"; do
 done
 
 if ((problems)); then
+  OUTCOME="${OUTCOME:+$OUTCOME; }$problems problem(s), listed in $report"
   printf "\n${R}${B}Verification failed${N}: %d problem(s), listed in %s\n" "$problems" "$report"
   grep -qP '\t(missing|leftover)' "$report" &&
     printf "Missing files and partial transfers: run the import again (without --verify-only), then verify.\n"
@@ -328,7 +412,10 @@ if ((problems)); then
     printf "Differing content with the same size and time is not recopied by a re-run: find which side is\nright, and delete the bad server copy to have the next run copy it again.\n"
   grep -qP '\tonly on server\t' "$report" &&
     printf "Files only on the server are never deleted by this script; review them by hand.\n"
+  grep -qP '\tnot a regular file' "$report" &&
+    printf "Symlinks and special files are never imported: replace them with real files on the source, or remove them.\n"
   exit 2
 fi
 rm -f "$report"
+OUTCOME="${OUTCOME:+$OUTCOME; }all files verified"
 printf "\n${G}${B}All files verified.${N} The HDD is still untouched; keep it until offsite backup exists.\n"

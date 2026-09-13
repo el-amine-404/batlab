@@ -87,8 +87,11 @@ another tool is skipped rather than overwritten.
 ## Importing a drive
 
 `scripts/import-hdd-500-11.sh` copied the HDD_500_11 archive from the laptop.
-It is resumable, pauses when lab1's CPU runs hot, checksums every file as it
-lands, and ends with a full xxh128 comparison of both sides:
+It refuses any disk but HDD_500_11 (by filesystem UUID), is resumable, pauses
+when lab1's CPU runs hot, checksums every file as it lands, and ends with a full
+xxh128 comparison of both sides. Symlinks and special files stop the run instead
+of being skipped. The end of every copy or verification is posted to Discord
+through `DISCORD_WEBHOOK_ALERTS` in `compose/.env`:
 
 ```bash
 photos/scripts/import-hdd-500-11.sh --dry-run    # plan only
