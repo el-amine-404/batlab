@@ -26,9 +26,15 @@ fi
 rm -f -- "$PAPERLESS_TMP"
 trap 'rm -f -- "$PAPERLESS_TMP"' EXIT
 
+# A stopped Postgres leaves consistent files in its volume, which the snapshot
+# already includes. The dump only matters while the database is live, and a
+# stack stopped to save RAM must not abort the whole backup.
 if [[ "$(docker inspect --format '{{.State.Running}}' "$PAPERLESS_DB_CONTAINER" 2>/dev/null || true)" != true ]]; then
-  echo "Paperless database container is not running: $PAPERLESS_DB_CONTAINER" >&2
-  exit 1
+  echo "Skipping Paperless export: $PAPERLESS_DB_CONTAINER is not running, its volume is backed up as-is" >&2
+  if [[ -e "$PAPERLESS_DUMP" ]]; then
+    echo "The previous $PAPERLESS_DUMP from $(date -r "$PAPERLESS_DUMP" '+%F %R') stays in the snapshot" >&2
+  fi
+  exit 0
 fi
 
 docker exec "$PAPERLESS_DB_CONTAINER" sh -ceu '

@@ -15,6 +15,11 @@ format PostgreSQL dump from `paperless-db`. The raw database volume remains in
 the backup as a temporary second recovery path. It can be excluded later, after
 a database restore has been tested successfully.
 
+When `paperless-db` is stopped, the export is skipped rather than failing the
+backup: a cleanly stopped database is consistent on disk, so the raw volume is
+the recovery path, and the previous dump stays in the snapshot. Do not exclude
+the raw volume while the Paperless stack is ever left stopped.
+
 ## One-time installation on the server
 
 Install the required packages:
