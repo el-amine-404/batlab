@@ -210,6 +210,10 @@ setup: check-env
 	@echo "==> Creating data directories..."
 	sudo mkdir -p \
 		$(DATA_ROOT)/immich \
+		$(DATA_ROOT)/photos/library \
+		$(DATA_ROOT)/photos/inbox \
+		$(DATA_ROOT)/photos/private \
+		$(DATA_ROOT)/files \
 		$(DATA_ROOT)/documents/media \
 		$(DATA_ROOT)/documents/export \
 		$(DATA_ROOT)/documents/consume
@@ -245,7 +249,9 @@ setup: check-env
 		$(VOLUMES_ROOT)/paperless/redis \
 		$(DATA_ROOT)/documents/media \
 		$(DATA_ROOT)/documents/export \
-		$(DATA_ROOT)/documents/consume
+		$(DATA_ROOT)/documents/consume \
+		$(DATA_ROOT)/photos \
+		$(DATA_ROOT)/files
 
 	@echo "==> Symlinking .env to all stacks..."
 	@for d in compose/*; do \
