@@ -34,8 +34,10 @@ stop_data_containers() {
   fi
 
   echo "$reason; stopped: ${names:-none}"
-  watchdog_notify "Data disk unavailable" \
-    "$reason."$'\n'"Stopped: ${names:-nothing was running}" "$RED"
+  watchdog_notify "🔴 Data disk unavailable" "$RED" \
+    "Mount" "\`$WATCHDOG_DATA_ROOT\`" \
+    "Reason" "$reason" \
+    "Stopped" "${names// /, }"
 }
 
 start_data_containers() {
@@ -60,7 +62,9 @@ start_data_containers() {
   # shellcheck disable=SC2086
   docker start $names >/dev/null
   echo "started: $names"
-  watchdog_notify "Data disk back" "Started: $names" "$GREEN"
+  watchdog_notify "🟢 Data disk back" "$GREEN" \
+    "Mount" "\`$WATCHDOG_DATA_ROOT\`" \
+    "Started" "${names// /, }"
 }
 
 case "${1:-}" in
@@ -71,11 +75,11 @@ stop)
   # Docker stops everything itself on shutdown; stopping here would mark the
   # containers as manually stopped and page on every reboot.
   [[ "$(systemctl is-system-running 2>/dev/null || true)" == stopping ]] && exit 0
-  stop_data_containers "$WATCHDOG_DATA_ROOT was unmounted or its disk disappeared"
+  stop_data_containers "unmounted, or its disk disappeared"
   ;;
 boot)
   mountpoint -q "$WATCHDOG_DATA_ROOT" ||
-    stop_data_containers "Booted without $WATCHDOG_DATA_ROOT"
+    stop_data_containers "booted without the disk"
   ;;
 *)
   echo "usage: $0 start|stop|boot" >&2
