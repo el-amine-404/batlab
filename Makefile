@@ -7,6 +7,7 @@ NET ?= home_server
 # Pinned so the subnet survives a Docker reinstall: several services declare
 # static addresses in it, and an unpinned network gets whatever pool is free.
 NET_SUBNET ?= 172.19.0.0/16
+NET_GATEWAY ?= 172.19.0.1
 
 DC := docker compose --env-file $(ENV)
 
@@ -111,7 +112,7 @@ check-stack: check-env
 
 network:
 	@docker network inspect $(NET) >/dev/null 2>&1 || \
-		docker network create --subnet $(NET_SUBNET) $(NET)
+		docker network create --subnet $(NET_SUBNET) --gateway $(NET_GATEWAY) $(NET)
 	@actual=$$(docker network inspect $(NET) --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null); \
 	if [ "$$actual" != "$(NET_SUBNET)" ]; then \
 		echo "Error: network '$(NET)' has subnet $$actual, expected $(NET_SUBNET)."; \
@@ -173,6 +174,7 @@ setup: check-env
 		$(VOLUMES_ROOT)/jellyfin/data \
 		$(VOLUMES_ROOT)/jellyfin/cache \
 		$(VOLUMES_ROOT)/jellyfin/log \
+		$(VOLUMES_ROOT)/netdata/conf \
 		$(VOLUMES_ROOT)/netdata/lib \
 		$(VOLUMES_ROOT)/netdata/cache \
 		$(VOLUMES_ROOT)/navidrome/data \

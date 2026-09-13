@@ -32,7 +32,6 @@ local/
 # Service runtime artifacts (generated under compose/ at deploy time) ----------
 logs/
 .cache
-compose/netdata/conf/
 compose/adguardhome/conf/
 compose/jellyfin/conf/
 

@@ -177,6 +177,15 @@
           type: uptimekuma
           url: http://uptime-kuma:3001
           slug: potato-homelab
+    - Netdata:
+        icon: netdata
+        href: http://netdata.homelab.lan
+        description: Host Monitoring & Alerts
+        siteMonitor: http://172.19.0.1:19999/api/v1/info
+        statusStyle: "dot"
+        widget:
+          type: netdata
+          url: http://172.19.0.1:19999
     - Dozzle:
         icon: dozzle
         href: http://dozzle.homelab.lan

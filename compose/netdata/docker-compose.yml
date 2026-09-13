@@ -1,23 +1,25 @@
+name: ${NETDATA_PROJECT_NAME}
 services:
   netdata:
     image: ${IMAGE_NETDATA}:${TAG_NETDATA}
     container_name: netdata
+    restart: unless-stopped
+    # Host PID and network are what let it see every process, cgroup and
+    # interface on the machine. Listening is narrowed to loopback plus the
+    # home_server gateway, which is how Caddy and Homepage reach it.
     pid: host
     network_mode: host
-    restart: unless-stopped
-    cap_add:
-      - SYS_PTRACE
-      - SYS_ADMIN
-    security_opt:
-      - apparmor:unconfined
+    command: ["-W", "set", "web", "bind to", "${HOST_LOOPBACK_IP} ${HOME_SERVER_GATEWAY_IP}"]
     environment:
+      - TZ=${TZ}
+      - NETDATA_LISTENER_PORT=${NETDATA_PORT}
       - DISCORD_WEBHOOK_ALERTS=${DISCORD_WEBHOOK_ALERTS}
     volumes:
-      - ${CONFIGS_ROOT}/netdata/conf:/etc/netdata
-      - ${CONFIGS_ROOT}/netdata/alerts/health_alarm_notify.conf:/etc/netdata/health_alarm_notify.conf:ro
-      - ${CONFIGS_ROOT}/netdata/alerts/batlab.conf:/etc/netdata/health.d/batlab.conf:ro
+      - ${VOLUMES_ROOT}/netdata/conf:/etc/netdata
       - ${VOLUMES_ROOT}/netdata/lib:/var/lib/netdata
       - ${VOLUMES_ROOT}/netdata/cache:/var/cache/netdata
+      - ${CONFIGS_ROOT}/netdata/alerts/health_alarm_notify.conf:/etc/netdata/health_alarm_notify.conf:ro
+      - ${CONFIGS_ROOT}/netdata/alerts/batlab.conf:/etc/netdata/health.d/batlab.conf:ro
       - /:/host/root:ro,rslave
       - /etc/localtime:/etc/localtime:ro
       - /etc/passwd:/host/etc/passwd:ro
@@ -27,3 +29,32 @@ services:
       - /run/dbus:/run/dbus:ro
       - /etc/os-release:/host/etc/os-release:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    # Runs as root to set up, then drops to the netdata user; its collectors are
+    # setuid-root binaries, so no-new-privileges and a fixed user would blind them.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - DAC_READ_SEARCH
+      - FOWNER
+      - SETUID
+      - SETGID
+      - SYS_CHROOT
+      - KILL
+      - NET_RAW
+      - SYS_PTRACE
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    healthcheck:
+      test: ["CMD", "/usr/sbin/health.sh"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    cpus: 1.5
+    mem_limit: 1gb
+    mem_reservation: 512m
+    mem_swappiness: 0
+    memswap_limit: 1gb
