@@ -18,8 +18,13 @@ defaults:
   sortTags: semver
   excludeTags:
     - dev
+  # Release tags only, in the shapes the stacks actually pin: two to four numeric
+  # parts (Jellyfin moved to 12.0), linuxserver builds with -lsNNN, and -alpine or
+  # -full variants. Nightlies, betas, rc and arch-prefixed tags stay out.
   includeTags:
-    - '^v?\d+\.\d+\.\d+$'
+    - '^v?\d{1,4}(\.\d{1,5}){1,3}$'
+    - '^v?\d{1,4}(\.\d{1,5}){1,3}(_v\d+(\.\d+)*)?-ls\d+$'
+    - '^v?\d{1,4}(\.\d{1,5}){0,3}-(alpine|full)$'
 
 metrics:
   enabled: false
