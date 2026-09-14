@@ -35,5 +35,11 @@ through a local folder, copies every byte through the network.
   clash is a duplicate or a different shot from the same second.
 - Move a photo together with its `.xmp` sidecar and, for Live Photos, the
   `.mov` of the same name. Moving whole folders keeps them together.
+- To split a place into one folder per visit, run
+  `photos/scripts/group-by-date.py` on it (see `photos/README.md`). The fastest
+  and safest way from another computer is over SSH, on the server's own disk:
+  `ssh my-homelab 'batlab/photos/scripts/group-by-date.py "/mnt/storage/data/photos/library/<place>"'`.
+  It also runs directly on the share (a mapped drive or mounted folder) with
+  Python 3.7 or later installed.
 - Once Immich indexes `library`, avoid renaming or moving what is already
   filed there: Immich sees a new asset and loses its faces and albums.
