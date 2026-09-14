@@ -24,6 +24,7 @@ other related skills that i keep forgetting:
 - [sudo configuration](./docs/configure_sudo.md)
 - [ports management](./docs/ports_management.md)
 - [static ip address](./docs/static_ip_address.md)
+- [samba shares](./docs/samba.md)
 
 official links and descriptions of each hosted service:
 - [hosted services](./docs/hosted_services.md)
