@@ -45,6 +45,24 @@ together with its `.xmp` sidecar and, for Live Photos, the `.mov` of the same
 name. Whatever `mv -n` leaves behind already has a namesake in the theme: either
 a duplicate, or a different shot from the same second to rename with `_01`.
 
+## Folders by visit
+
+Inside a place or event, keep one subfolder per visit: `YYYY-MM-DD` for one
+day, `YYYY-MM-DD_TO_YYYY-MM-DD` for consecutive days, optionally followed by
+`_DESCRIPTION` (`2022-09-02_ALMINA-BEACH`). A place visited only once can stay
+flat. Once files are named by capture time, `scripts/group-by-date.py` builds
+those folders from the names:
+
+```bash
+photos/scripts/group-by-date.py <folder>            # preview
+photos/scripts/group-by-date.py <folder> --apply    # move, never overwriting
+```
+
+It moves only dated files lying directly in the folder, takes their `.xmp`
+sidecars along, adds days to an existing visit folder that covers them, and
+leaves anything it would have to overwrite where it is. Group a folder before
+Immich indexes it.
+
 ## Naming files by capture time
 
 `scripts/organize-media.py` names every photo and video
