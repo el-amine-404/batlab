@@ -32,11 +32,11 @@ readonly CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/batlab-import"
 readonly COMMON_FILTERS=("--exclude=._*" "--exclude=.DS_Store" "--exclude=Thumbs.db" "--exclude=desktop.ini"
   "--exclude=/.Spotlight-V100" "--exclude=/System Volume Information")
 
-# Content that legitimately exists on the server without a source counterpart in
-# trees organize-media.py works on: folders filed there before the import, its
-# state folder and its sidecars. Every other destination must match exactly.
+# What organize-media.py adds in the trees it works on, which has no source
+# counterpart: its state folder and its sidecars. Every other destination must
+# match exactly.
 readonly ORGANIZED_TREES="^photos/(library|inbox)/"
-readonly ORGANIZED_PROTECT=("--filter=P /_to-merge/" "--filter=P /.organize/" "--filter=P *.xmp")
+readonly ORGANIZED_PROTECT=("--filter=P /.organize/" "--filter=P *.xmp")
 
 # Only regular files and folders are imported. Dry runs list symlinks, devices and
 # special files so they are reported instead of being skipped silently.

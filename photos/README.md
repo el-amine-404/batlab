@@ -8,10 +8,10 @@ not mistake phone clips for fake films.
 ```
 /mnt/storage/data/
 ├── photos/
-│   ├── library/         the archive; Immich's external library, mounted read-only
-│   │   ├── BIRTHDAYS/ FAMILLY/ WEDDINGS/ …   themes carried over from HDD_500_11
-│   │   └── _to-merge/iphone-2025-2026/       iPhone folders waiting to be filed into the themes
-│   ├── inbox/           sorted but not yet filed; also visible in Immich
+│   ├── library/         the archive, filed by theme; Immich's external library, read-only
+│   │   └── BIRTHDAYS/ FAMILLY/ WEDDINGS/ …   themes carried over from HDD_500_11
+│   ├── inbox/           the one place to rename, sort and deduplicate before filing; not in Immich
+│   │   └── iphone-2025-2026/                 iPhone backups waiting to be filed
 │   └── private/         kept, never indexed by Immich
 └── files/               documents and other files to host
     ├── family/
@@ -22,9 +22,12 @@ not mistake phone clips for fake films.
 
 ```
 iPhone ─ Immich app backup ─▶ /mnt/storage/data/immich   (Immich-managed, never edited by hand)
-                                       │  sort
+                                       │  copy out
                                        ▼
-                        photos/inbox/ or photos/library/<theme>/
+                                 photos/inbox/            rename, sort, deduplicate
+                                       │  mv -n into a theme
+                                       ▼
+                             photos/library/<theme>/
                                        │  Immich rescans the external library
                                        ▼
                     the photo shows from the archive; the uploaded copy is removed from Immich
@@ -32,6 +35,15 @@ iPhone ─ Immich app backup ─▶ /mnt/storage/data/immich   (Immich-managed, 
 
 Immich's upload location is not `inbox/`: Immich names, moves and owns its
 upload storage, while `inbox/` and `library/` are edited by hand.
+
+`inbox/` stays out of Immich on purpose. Immich sees a moved file as a deletion
+plus a new asset, so indexing photos that are still going to be filed would lose
+their faces and albums; until they are filed, Immich shows the uploaded copy.
+
+File with `mv -n`, which never replaces an existing file, and move a photo
+together with its `.xmp` sidecar and, for Live Photos, the `.mov` of the same
+name. Whatever `mv -n` leaves behind already has a namesake in the theme: either
+a duplicate, or a different shot from the same second to rename with `_01`.
 
 ## Naming files by capture time
 
@@ -46,7 +58,12 @@ $S plan /mnt/storage/data/photos/library --recursive --sample 400     # look fir
 $S plan /mnt/storage/data/photos/library --recursive --rules photos/conf/folder-rules.conf
 <bundle>/apply.sh --accept-weak     # rename, write sidecars, flag weak dates
 <bundle>/rollback.sh                # undo all of it
+$S plan /mnt/storage/data/photos/inbox --recursive                    # new arrivals, before filing
 ```
+
+Plan `library/` and `inbox/` separately: folder rules are relative to the folder
+being planned. Rename in `inbox/` before filing, so files arrive in a theme
+already named and a namesake there is a real duplicate or same-second shot.
 
 On a host that overheats, add the temperature guard from its `hosts/<profile>/README.md`.
 
@@ -118,8 +135,8 @@ It refuses any disk but the one whose filesystem UUID the drive file names, is
 resumable, checksums every file as it lands, and ends with a full xxh128
 comparison of both sides. Symlinks and special files stop the run instead of
 being skipped. Server-side files organize-media.py adds in `photos/library` and
-`photos/inbox` (`*.xmp`, `.organize/`) and `_to-merge/` folders are not reported
-as extra; anywhere else they are. The end of every copy or verification is posted
+`photos/inbox` (`*.xmp`, `.organize/`) are not reported as extra; anywhere else
+they are. The end of every copy or verification is posted
 to Discord through `DISCORD_WEBHOOK_ALERTS` in `compose/.env`. On a host that
 overheats, add the temperature guard from its `hosts/<profile>/README.md`.
 
