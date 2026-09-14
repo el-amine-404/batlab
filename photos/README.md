@@ -50,6 +50,22 @@ $S plan /mnt/storage/data/photos/library --recursive --rules photos/conf/folder-
 
 On a host that overheats, add the temperature guard from its `hosts/<profile>/README.md`.
 
+Requirements: Python 3.9 or later and `exiftool` (`sudo apt install
+libimage-exiftool-perl`); the plan refuses to start without it. The optional
+`timezonefinder` package gives exact times to photos with GPS but no time zone
+tag, typically from cameras and older phones abroad; without it they get the
+folder rule or `Africa/Casablanca`. Debian has no package for it, so give the tool a
+virtual environment and plan with its Python (apply and rollback do not need it):
+
+```bash
+sudo apt install python3-venv
+python3 -m venv ~/.local/share/organize-media
+~/.local/share/organize-media/bin/pip install timezonefinder
+~/.local/share/organize-media/bin/python photos/scripts/organize-media.py plan …
+```
+
+The plan header shows `GPS zone lookup: available` once it is found.
+
 Each plan bundle holds `plan.tsv` (every file: old and new name, local time,
 UTC offset, confidence, evidence, rejected dates) and `review.tsv` (assumed and
 weak dates grouped by folder, the place to decide on folder rules).

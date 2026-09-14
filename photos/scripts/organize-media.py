@@ -1088,22 +1088,46 @@ def rename_noreplace(source: Path, target: Path) -> None:
     if source == target:
         return
     target.parent.mkdir(parents=True, exist_ok=True)
-    libc = ctypes.CDLL(None, use_errno=True)
-    renameat2 = getattr(libc, "renameat2", None)
-    if renameat2 is not None:
-        result = renameat2(ctypes.c_int(-100), ctypes.c_char_p(os.fsencode(source)),
-                           ctypes.c_int(-100), ctypes.c_char_p(os.fsencode(target)), ctypes.c_uint(1))
-        if result == 0:
-            return
-        error_number = ctypes.get_errno()
-        if error_number not in (errno.ENOSYS, errno.EINVAL, errno.EOPNOTSUPP):
-            raise OSError(error_number, os.strerror(error_number), str(target))
-    os.link(source, target, follow_symlinks=False)
+    if sys.platform.startswith("linux"):
+        libc = ctypes.CDLL(None, use_errno=True)
+        renameat2 = getattr(libc, "renameat2", None)
+        if renameat2 is not None:
+            result = renameat2(ctypes.c_int(-100), ctypes.c_char_p(os.fsencode(source)),
+                               ctypes.c_int(-100), ctypes.c_char_p(os.fsencode(target)), ctypes.c_uint(1))
+            if result == 0:
+                return
+            error_number = ctypes.get_errno()
+            if error_number not in (errno.ENOSYS, errno.EINVAL, errno.EOPNOTSUPP):
+                raise OSError(error_number, os.strerror(error_number), str(target))
+    try:
+        os.link(source, target, follow_symlinks=False)
+    except OSError as error:
+        if error.errno not in (errno.EPERM, errno.EOPNOTSUPP, errno.ENOTSUP):
+            raise
+        rename_if_absent(source, target)
+        return
     try:
         os.unlink(source)
     except Exception:
         os.unlink(target)
         raise
+
+
+_WARNED_CHECKED_RENAME = False
+
+
+# Last resort on file systems with neither RENAME_NOREPLACE nor hard links (some
+# network shares): another process creating the target between the check and the
+# rename would be overwritten, which the other two methods rule out.
+def rename_if_absent(source: Path, target: Path) -> None:
+    global _WARNED_CHECKED_RENAME
+    if not _WARNED_CHECKED_RENAME:
+        print(f"warning: {target.parent} supports neither atomic no-replace renames nor hard links; "
+              "renaming after an existence check, so do not modify this folder while it runs", file=sys.stderr)
+        _WARNED_CHECKED_RENAME = True
+    if os.path.lexists(target):
+        raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), str(target))
+    os.rename(source, target)
 
 
 def append_log(run_dir: Path, action: str, source: Path, target: Path) -> None:

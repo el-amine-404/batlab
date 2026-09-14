@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import datetime as dt
+import errno
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -12,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -285,6 +289,43 @@ class EndToEndTests(unittest.TestCase):
             self.assertEqual(restored, set(names))
             flagged_after = (root / ".organize/unverified.tsv").read_text().strip().splitlines()
             self.assertEqual(len(flagged_after), 1, "only the header remains")
+
+
+class RenameTests(unittest.TestCase):
+    def without_renameat2_or_links(self, errno_value: int):
+        platform = unittest.mock.patch.object(media.sys, "platform", "darwin")
+        link = unittest.mock.patch.object(media.os, "link", side_effect=OSError(errno_value, os.strerror(errno_value)))
+        return platform, link
+
+    def test_falls_back_to_checked_rename_without_hard_links(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            source, target = Path(temp, "a.jpg"), Path(temp, "sub/b.jpg")
+            source.write_text("a")
+            platform, link = self.without_renameat2_or_links(errno.EPERM)
+            with platform, link, contextlib.redirect_stderr(io.StringIO()):
+                media.rename_noreplace(source, target)
+            self.assertFalse(source.exists())
+            self.assertEqual(target.read_text(), "a")
+
+    def test_checked_rename_never_replaces(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            source, target = Path(temp, "a.jpg"), Path(temp, "b.jpg")
+            source.write_text("a")
+            target.write_text("b")
+            platform, link = self.without_renameat2_or_links(errno.EPERM)
+            with platform, link, contextlib.redirect_stderr(io.StringIO()), self.assertRaises(FileExistsError):
+                media.rename_noreplace(source, target)
+            self.assertEqual((source.read_text(), target.read_text()), ("a", "b"))
+
+    def test_other_link_errors_are_raised(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            source, target = Path(temp, "a.jpg"), Path(temp, "b.jpg")
+            source.write_text("a")
+            platform, link = self.without_renameat2_or_links(errno.EACCES)
+            with platform, link, self.assertRaises(PermissionError):
+                media.rename_noreplace(source, target)
+            self.assertTrue(source.exists())
+            self.assertFalse(target.exists())
 
 
 if __name__ == "__main__":
