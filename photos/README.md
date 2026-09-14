@@ -86,18 +86,26 @@ another tool is skipped rather than overwritten.
 
 ## Importing a drive
 
-`scripts/import-hdd-500-11.sh` copied the HDD_500_11 archive from the laptop.
-It refuses any disk but HDD_500_11 (by filesystem UUID), is resumable, pauses
-when lab1's CPU runs hot, checksums every file as it lands, and ends with a full
-xxh128 comparison of both sides. Symlinks and special files stop the run instead
-of being skipped. The end of every copy or verification is posted to Discord
-through `DISCORD_WEBHOOK_ALERTS` in `compose/.env`:
+`scripts/import-drive.sh` copies folders from a drive plugged into a laptop into
+these trees. What goes where is described by a drive file in
+`~/.config/batlab-import/<drive>.conf`, kept out of this repository because it
+describes one person's disk; start from `conf/import-drive.example.conf`.
 
 ```bash
-photos/scripts/import-hdd-500-11.sh --dry-run    # plan only
-photos/scripts/import-hdd-500-11.sh              # copy, then verify
-photos/scripts/import-hdd-500-11.sh --verify-only
+S=photos/scripts/import-drive.sh
+$S <drive> --dry-run      # plan only
+$S <drive>                # copy, then verify
+$S <drive> --verify-only
 ```
+
+It refuses any disk but the one whose filesystem UUID the drive file names, is
+resumable, checksums every file as it lands, and ends with a full xxh128
+comparison of both sides. Symlinks and special files stop the run instead of
+being skipped. Server-side files organize-media.py adds in `photos/library` and
+`photos/inbox` (`*.xmp`, `.organize/`) and `_to-merge/` folders are not reported
+as extra; anywhere else they are. The end of every copy or verification is posted
+to Discord through `DISCORD_WEBHOOK_ALERTS` in `compose/.env`. On a host that
+overheats, add the temperature guard from its `hosts/<profile>/README.md`.
 
 Keep the source drive untouched until the copy is verified and offsite backup of
 `photos/` exists.

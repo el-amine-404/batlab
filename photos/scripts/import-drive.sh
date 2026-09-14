@@ -1,49 +1,42 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2059,SC2016,SC2029  # colour codes live in printf formats; remote snippets are quoted with %q on purpose
-# Copies the HDD_500_11 family archive from this laptop into lab1's photo and
-# file trees. Safe to interrupt and re-run: finished files are skipped, partial
-# ones resume. Nothing is ever deleted on either side.
+# Copies folders from a drive mounted on this machine into the server's photo and
+# file trees, as described by a drive file (see photos/conf/import-drive.example.conf).
+# Safe to interrupt and re-run: finished files are skipped, partial ones resume.
+# Nothing is ever deleted on either side.
 #
-#   photos/scripts/import-hdd-500-11.sh              plan, confirm, copy, verify
-#   photos/scripts/import-hdd-500-11.sh --dry-run    plan only
-#   photos/scripts/import-hdd-500-11.sh --verify-only
-#   photos/scripts/import-hdd-500-11.sh --yes --skip-verify
+#   import-drive.sh <drive> [options]     plan, confirm, copy, verify
 #
-# Verify before organize-media.py renames anything in photos/library: after a
-# rename the two sides are meant to differ. The end of every copy or verification
-# is posted to Discord through DISCORD_WEBHOOK_ALERTS in compose/.env.
+#   <drive>                  a drive file, or a name in ~/.config/batlab-import/<name>.conf
+#   --dry-run                plan only
+#   --verify-only            compare both sides without copying
+#   --skip-verify            copy without the final comparison
+#   -y, --yes                copy without asking
+#   --source PATH            mount point, overriding the drive file
+#   --remote HOST            SSH host alias of the server (default my-homelab)
+#   --data PATH              data root on the server (default /mnt/storage/data)
+#   --max-cpu-temp C         pause while the server CPU is at or above C
+#   --cpu-temp-sensor NAME   hwmon sensor to read, required with --max-cpu-temp
+#
+# Verify before organize-media.py renames anything: after a rename the two sides
+# are meant to differ. The end of every copy or verification is posted to Discord
+# through DISCORD_WEBHOOK_ALERTS in compose/.env.
 
 set -Eeuo pipefail
 
-readonly SOURCE="${SOURCE:-/media/amine/HDD_500_11}"
-# The drive's filesystem UUID, so a different disk or a plain folder at the same
-# path is refused. Empty skips the check.
-readonly SOURCE_UUID="${SOURCE_UUID-76FE-D87B}"
-readonly REMOTE="${REMOTE:-my-homelab}"
-readonly DATA="${DATA:-/mnt/storage/data}"
-readonly STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/batlab-import/hdd-500-11"
-readonly HOT_C="${HOT_C:-88}"
-readonly COOL_C="${COOL_C:-80}"
 REPO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly REPO_DIR
-
-# name | source (relative to SOURCE) | destination (relative to DATA) | extra rsync filters
-readonly JOBS=(
-  "library|MEMORIES/|photos/library/|--exclude=/results.txt --exclude=/old-structure.txt"
-  "private|OTHER6DRIVE/OTHER_DATA/TO_FORGET/|photos/private/to-forget/|"
-  "sisters-docs|OTHER6DRIVE/OTHER_DATA/SISTERS_DOCS/|files/family/sisters-docs/|"
-  "notes|./|files/archives/hdd-500-11/|--include=/OPTIMIZATIONS/*** --include=/USEFUL_TRICKS/*** --include=/UPLOAD/ --include=/results.txt --include=/MEMORIES/ --include=/MEMORIES/results.txt --include=/MEMORIES/old-structure.txt --exclude=*"
-  "recycle-bin|./|files/archives/hdd-500-11/recycle-bin/|--include=/\$RECYCLE.BIN/ --include=/\$RECYCLE.BIN/\$R* --include=/.Trashes/ --include=/.Trashes/501/ --include=/.Trashes/501/[!.]* --exclude=*"
-)
+readonly CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/batlab-import"
 
 # Caches and filesystem metadata that other machines regenerate or ignore.
 readonly COMMON_FILTERS=("--exclude=._*" "--exclude=.DS_Store" "--exclude=Thumbs.db" "--exclude=desktop.ini"
   "--exclude=/.Spotlight-V100" "--exclude=/System Volume Information")
 
-# Library content that legitimately exists without a source counterpart: folders
-# that predate the import and what organize-media.py adds later. Every other
-# step must match its source exactly.
-readonly LIBRARY_PROTECT=("--filter=P /_to-merge/" "--filter=P /.organize/" "--filter=P *.xmp")
+# Content that legitimately exists on the server without a source counterpart in
+# trees organize-media.py works on: folders filed there before the import, its
+# state folder and its sidecars. Every other destination must match exactly.
+readonly ORGANIZED_TREES="^photos/(library|inbox)/"
+readonly ORGANIZED_PROTECT=("--filter=P /_to-merge/" "--filter=P /.organize/" "--filter=P *.xmp")
 
 # Only regular files and folders are imported. Dry runs list symlinks, devices and
 # special files so they are reported instead of being skipped silently.
@@ -65,23 +58,83 @@ note() { printf "  ${D}%s${N}\n" "$*"; }
 title() { printf "\n${B}${C}━━ %s ${N}${D}%s${N}\n" "$1" "${2:-}"; }
 human() { numfmt --to=iec --suffix=B --format="%.1f" "$1"; }
 
+trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  printf '%s' "${value%"${value##*[![:space:]]}"}"
+}
+
 DRY_RUN=0 VERIFY_ONLY=0 SKIP_VERIFY=0 ASSUME_YES=0
-FAILURE="" NOTIFY=0 OUTCOME="" STARTED=$SECONDS
-for argument in "$@"; do
-  case "$argument" in
+FAILURE="" NOTIFY=0 OUTCOME="" STARTED=$SECONDS LOG="-"
+CONF="" SOURCE="" REMOTE="my-homelab" DATA="/mnt/storage/data" MAX_TEMP="" SENSOR=""
+while (($#)); do
+  case "$1" in
     --dry-run) DRY_RUN=1 ;;
     --verify-only) VERIFY_ONLY=1 ;;
     --skip-verify) SKIP_VERIFY=1 ;;
     -y | --yes) ASSUME_YES=1 ;;
-    -h | --help) sed -n '3,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) fail "unknown option: $argument" ;;
+    --source | --remote | --data | --max-cpu-temp | --cpu-temp-sensor)
+      (($# > 1)) || fail "$1 needs a value"
+      case "$1" in
+        --source) SOURCE="$2" ;;
+        --remote) REMOTE="$2" ;;
+        --data) DATA="$2" ;;
+        --max-cpu-temp) MAX_TEMP="$2" ;;
+        --cpu-temp-sensor) SENSOR="$2" ;;
+      esac
+      shift
+      ;;
+    -h | --help) sed -n '3,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) fail "unknown option: $1" ;;
+    *) [[ -z "$CONF" ]] || fail "only one drive at a time: $1"; CONF="$1" ;;
   esac
+  shift
 done
+[[ -n "$CONF" ]] || fail "which drive? usage: import-drive.sh <drive> [options], see --help"
 ((VERIFY_ONLY && SKIP_VERIFY)) && fail "--verify-only and --skip-verify contradict each other"
+[[ "$CONF" == */* || "$CONF" == *.conf ]] || CONF="$CONF_DIR/$CONF.conf"
+[[ -r "$CONF" ]] || fail "cannot read drive file $CONF"
+DRIVE="$(basename -- "$CONF" .conf)"
 
 # Values reach remote shells and rsync arguments, so only plain names and paths are accepted.
-[[ "$REMOTE" =~ ^[A-Za-z0-9._@-]+$ ]] || fail "REMOTE must be a plain SSH host alias: $REMOTE"
-[[ "$DATA" =~ ^/[A-Za-z0-9._/-]+$ ]] || fail "DATA must be an absolute path of letters, digits, . _ - and /: $DATA"
+[[ "$DRIVE" =~ ^[A-Za-z0-9._-]+$ ]] || fail "drive file name must be letters, digits, . _ and -: $DRIVE"
+[[ "$REMOTE" =~ ^[A-Za-z0-9._@-]+$ ]] || fail "--remote must be a plain SSH host alias: $REMOTE"
+[[ "$DATA" =~ ^/[A-Za-z0-9._/-]+$ ]] || fail "--data must be an absolute path of letters, digits, . _ - and /: $DATA"
+if [[ -n "$MAX_TEMP" || -n "$SENSOR" ]]; then
+  [[ "$MAX_TEMP" =~ ^[0-9]{2,3}$ ]] || fail "--max-cpu-temp must be whole degrees Celsius: $MAX_TEMP"
+  [[ "$SENSOR" =~ ^[A-Za-z0-9_-]+$ ]] || fail "--cpu-temp-sensor names the hwmon sensor, such as k10temp or coretemp"
+fi
+
+JOBS=() CONF_SOURCE="" SOURCE_UUID=""
+line_number=0
+while IFS= read -r line || [[ -n "$line" ]]; do
+  line_number=$((line_number + 1))
+  [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
+  read -r key rest <<<"$line"
+  where="$CONF line $line_number"
+  case "$key" in
+    source) CONF_SOURCE="$rest" ;;
+    uuid) SOURCE_UUID="$rest" ;;
+    step)
+      IFS='|' read -r name from to filters <<<"$rest"
+      name="$(trim "$name")" from="$(trim "${from:-}")" to="$(trim "${to:-}")" filters="$(trim "${filters:-}")"
+      [[ "$name" =~ ^[a-z0-9][a-z0-9-]*$ ]] || fail "$where: step name must be lowercase letters, digits and -"
+      [[ "$from" == */ && "$from" != /* && "/$from" != */../* ]] || fail "$where: source folder must be relative to the drive and end in /"
+      [[ "$to" =~ ^[A-Za-z0-9._-][A-Za-z0-9._/-]*/$ && "/$to" != */../* ]] || fail "$where: destination must be relative to the data root, plain characters, ending in /"
+      for job in "${JOBS[@]}"; do
+        [[ "${job%%|*}" != "$name" ]] || fail "$where: step $name is defined twice"
+      done
+      JOBS+=("$name|$from|$to|$filters")
+      ;;
+    *) fail "$where: unknown key '$key'; expected source, uuid or step" ;;
+  esac
+done <"$CONF"
+SOURCE="${SOURCE:-$CONF_SOURCE}"
+[[ -n "$SOURCE" ]] || fail "$CONF has no source line"
+[[ -n "$SOURCE_UUID" ]] || fail "$CONF has no uuid line; findmnt -no UUID --mountpoint $SOURCE prints it"
+((${#JOBS[@]})) || fail "$CONF has no step lines"
+readonly SOURCE SOURCE_UUID REMOTE DATA MAX_TEMP SENSOR DRIVE CONF JOBS
+readonly STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/batlab-import/$DRIVE"
 
 install -d -m 700 "$STATE_DIR"
 exec 8>"$STATE_DIR/.lock"
@@ -89,7 +142,8 @@ flock -n 8 || fail "another import is already running (lock: $STATE_DIR/.lock)"
 
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
 readonly RUN_ID
-readonly LOG="$STATE_DIR/$RUN_ID.log"
+LOG="$STATE_DIR/$RUN_ID.log"
+readonly LOG
 readonly WORK="$STATE_DIR/$RUN_ID"
 install -d -m 700 "$WORK"
 # Unix sockets cap paths at 108 bytes, and each run owns its connection.
@@ -141,10 +195,10 @@ notify_discord() {
   local webhook="${IMPORT_DISCORD_WEBHOOK:-$(sed -n 's/^DISCORD_WEBHOOK_ALERTS=//p' "$REPO_DIR/compose/.env" 2>/dev/null | tail -n 1)}"
   [[ "$webhook" == http* ]] || return 0
   case "$status" in
-    0) title="🟢 HDD_500_11 import finished" color=3066993 result="${OUTCOME:-done}" ;;
-    2) title="🔴 HDD_500_11 import: verification failed" color=15158332 result="$OUTCOME" ;;
-    130) title="🟠 HDD_500_11 import interrupted" color=15105570 result="re-run the same command to resume" ;;
-    *) title="🔴 HDD_500_11 import failed" color=15158332 result="${FAILURE:-exit $status}" ;;
+    0) title="🟢 Import of $DRIVE finished" color=3066993 result="${OUTCOME:-done}" ;;
+    2) title="🔴 Import of $DRIVE: verification failed" color=15158332 result="$OUTCOME" ;;
+    130) title="🟠 Import of $DRIVE interrupted" color=15105570 result="re-run the same command to resume" ;;
+    *) title="🔴 Import of $DRIVE failed" color=15158332 result="${FAILURE:-exit $status}" ;;
   esac
   local elapsed=$((SECONDS - STARTED)) payload
   payload="$(python3 -c '
@@ -177,23 +231,23 @@ trap cleanup EXIT
 trap 'printf "\n${Y}Interrupted.${N} Re-run the same command to resume; finished files are kept.\n"; exit 130' INT TERM HUP
 
 remote_temperature() {
-  remote 'for h in /sys/class/hwmon/hwmon*; do [ "$(cat $h/name 2>/dev/null)" = k10temp ] && { echo $(( $(cat $h/temp1_input) / 1000 )); exit; }; done; echo 0'
+  remote 'for h in /sys/class/hwmon/hwmon*; do [ "$(cat $h/name 2>/dev/null)" = '"$SENSOR"' ] && { echo $(( $(cat $h/temp1_input) / 1000 )); exit; }; done; echo 0'
 }
 
-# Pauses the running rsync with SIGSTOP when the server runs hot and resumes it
-# once it cools. lab1 has powered off from sustained heat before.
+# Pauses the running rsync with SIGSTOP while the server runs hot and resumes it
+# once it is 8 degrees cooler.
 thermal_guard() {
   local target_pid="$1" paused=0 temp
   trap 'kill -CONT "$target_pid" 2>/dev/null; exit 0' TERM
   while kill -0 "$target_pid" 2>/dev/null; do
     temp="$(remote_temperature 2>/dev/null || echo 0)"
     [[ "$temp" =~ ^[0-9]+$ ]] || temp=0
-    if ((paused == 0 && temp >= HOT_C)); then
+    if ((paused == 0 && temp >= MAX_TEMP)); then
       kill -STOP "$target_pid" 2>/dev/null || true
       paused=1
-      printf "\n  ${Y}⏸  server CPU at %s °C, pausing until %s °C${N}\n" "$temp" "$COOL_C"
+      printf "\n  ${Y}⏸  server CPU at %s °C, pausing until %s °C${N}\n" "$temp" "$((MAX_TEMP - 8))"
       echo "$(date -Is) paused at ${temp}C" >>"$LOG"
-    elif ((paused == 1 && temp <= COOL_C)); then
+    elif ((paused == 1 && temp <= MAX_TEMP - 8)); then
       kill -CONT "$target_pid" 2>/dev/null || true
       paused=0
       printf "\n  ${G}▶  server CPU at %s °C, resuming${N}\n" "$temp"
@@ -217,8 +271,10 @@ run_guarded() {
     "$@" &
   fi
   ACTIVE_PID=$!
-  thermal_guard "$ACTIVE_PID" &
-  GUARD_PID=$!
+  if [[ -n "$MAX_TEMP" ]]; then
+    thermal_guard "$ACTIVE_PID" &
+    GUARD_PID=$!
+  fi
   if [[ -n "$spinner_label" ]]; then
     local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0 begun=$SECONDS
     while kill -0 "$ACTIVE_PID" 2>/dev/null; do
@@ -229,9 +285,11 @@ run_guarded() {
   local status=0
   wait "$ACTIVE_PID" || status=$?
   ACTIVE_PID=""
-  kill "$GUARD_PID" 2>/dev/null || true
-  wait "$GUARD_PID" 2>/dev/null || true
-  GUARD_PID=""
+  if [[ -n "$GUARD_PID" ]]; then
+    kill "$GUARD_PID" 2>/dev/null || true
+    wait "$GUARD_PID" 2>/dev/null || true
+    GUARD_PID=""
+  fi
   return "$status"
 }
 
@@ -249,17 +307,21 @@ check_destinations() {
   remote "$script"
 }
 
-printf "${B}Import HDD_500_11 → %s:%s${N}\n" "$REMOTE" "$DATA"
+printf "${B}Import %s → %s:%s${N}\n" "$DRIVE" "$REMOTE" "$DATA"
 note "log: $LOG"
 
 title "1. Preflight"
 mountpoint -q "$SOURCE" || fail "$SOURCE is not a mount point; is the drive plugged in and mounted?"
-if [[ -n "$SOURCE_UUID" ]]; then
+# uuid any is for sources without a filesystem UUID, such as a tmpfs.
+if [[ "$SOURCE_UUID" != any ]]; then
   source_uuid="$(findmnt -no UUID --mountpoint "$SOURCE")"
   [[ "$source_uuid" == "$SOURCE_UUID" ]] ||
-    fail "$SOURCE holds filesystem ${source_uuid:-without a UUID}, not HDD_500_11 ($SOURCE_UUID)"
+    fail "$SOURCE holds filesystem ${source_uuid:-without a UUID}, not $DRIVE ($SOURCE_UUID)"
 fi
-[[ -d "$SOURCE/MEMORIES" ]] || fail "$SOURCE has no MEMORIES folder"
+for job in "${JOBS[@]}"; do
+  IFS='|' read -r name src dest filters <<<"$job"
+  [[ -d "$SOURCE/$src" ]] || fail "step $name: $SOURCE/$src does not exist"
+done
 ok "source mounted: $SOURCE ($(findmnt -no FSTYPE,UUID --mountpoint "$SOURCE" | tr -s ' '))"
 has_xxh128 "$(rsync --version)" || fail "local rsync does not support xxh128 checksums"
 remote true 2>/dev/null || fail "cannot reach $REMOTE over SSH without a password"
@@ -275,7 +337,11 @@ else
   denied="$(check_destinations w)" || fail "destination not writable on $REMOTE: $denied"
   ok "every destination writable (${#JOBS[@]} steps)"
 fi
-ok "server CPU temperature: $(remote_temperature) °C (pause at $HOT_C, resume at $COOL_C)"
+if [[ -n "$MAX_TEMP" ]]; then
+  temp="$(remote_temperature)"
+  ((temp > 0)) || fail "sensor $SENSOR not found on $REMOTE; see /sys/class/hwmon/*/name there"
+  ok "server CPU temperature: $temp °C (pause at $MAX_TEMP, resume at $((MAX_TEMP - 8)))"
+fi
 if [[ -n "${IMPORT_DISCORD_WEBHOOK:-}" ]] || grep -q '^DISCORD_WEBHOOK_ALERTS=https://' "$REPO_DIR/compose/.env" 2>/dev/null; then
   ok "Discord notification when the run ends"
 else
@@ -363,7 +429,7 @@ for job in "${JOBS[@]}"; do
   IFS='|' read -r name src dest filters <<<"$job"
   rsync_base "$filters"
   protect=()
-  [[ "$name" == library ]] && protect=("${LIBRARY_PROTECT[@]}")
+  [[ "$dest" =~ $ORGANIZED_TREES ]] && protect=("${ORGANIZED_PROTECT[@]}")
   itemized="$WORK/verify-$name"
   label="$(printf '[%d/%d] %-13s' "$step" "${#JOBS[@]}" "$name")"
   begun=$SECONDS
@@ -418,4 +484,4 @@ if ((problems)); then
 fi
 rm -f "$report"
 OUTCOME="${OUTCOME:+$OUTCOME; }all files verified"
-printf "\n${G}${B}All files verified.${N} The HDD is still untouched; keep it until offsite backup exists.\n"
+printf "\n${G}${B}All files verified.${N} The source drive is untouched; keep it until offsite backup exists.\n"
