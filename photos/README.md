@@ -54,15 +54,18 @@ looks to Immich like a deletion plus a new asset, losing faces and albums.
 
 ```bash
 S=photos/scripts/organize-media.py
-$S plan /mnt/storage/data/photos/library --recursive --sample 400     # look first
-$S plan /mnt/storage/data/photos/library --recursive --rules photos/conf/folder-rules.conf
-<bundle>/apply.sh --accept-weak     # rename, write sidecars, flag weak dates
+L=/mnt/storage/data/photos/library
+$S plan $L --recursive --sample 400                                   # look first
+$S plan $L --recursive --rules $L/.organize/folder-rules.conf
+<bundle>/apply.sh --accept-weak --allow-skipped   # rename, write sidecars, flag weak dates
 <bundle>/rollback.sh                # undo all of it
 $S plan /mnt/storage/data/photos/inbox --recursive                    # new arrivals, before filing
 ```
 
 Plan `library/` and `inbox/` separately: folder rules are relative to the folder
-being planned. Rename in `inbox/` before filing, so files arrive in a theme
+being planned. They name private folders, so they live with the archive in
+`<root>/.organize/folder-rules.conf`, not in this repository;
+`conf/folder-rules.conf` documents the syntax. Rename in `inbox/` before filing, so files arrive in a theme
 already named and a namesake there is a real duplicate or same-second shot.
 
 On a host that overheats, add the temperature guard from its `hosts/<profile>/README.md`.
@@ -93,7 +96,13 @@ How the time is chosen, most reliable first:
 | --- | --- |
 | exact | local time with its offset (iPhone photos and videos); a local time whose offset the GPS clock in the file proves; a UTC time in the zone at the file's GPS position (needs the optional `timezonefinder` package) |
 | assumed | a zoneless time read in the folder's zone or `Africa/Casablanca`; a UTC video time converted the same way; a full date and time in the file name |
-| weak | a day from the file name (WhatsApp) or a dated folder (`2022-OCT-01`, `2015-09-06_TO_…`); the file's modified time |
+| weak | a day from the file name (WhatsApp) or a dated folder (`2022-OCT-01`, `2015-09-06_TO_…`); with `--use-modified-time`, the file's modified time |
+
+The modified time is not used by default: on files that went through copies and
+old drives it is the day they were copied (57 HDD_500_11 files shared one minute
+of 2008). A file with no other date is skipped and keeps its name; pass
+`--allow-skipped` to apply the rest. Use `--use-modified-time` only for a source
+whose files were never copied, such as a fresh phone export.
 
 Times are never read in the zone of the machine running the tool, which is how
 the iPhone videos from France had been named an hour early. Daylight saving and

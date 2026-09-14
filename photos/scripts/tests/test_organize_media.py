@@ -31,8 +31,8 @@ NOW = dt.datetime(2026, 9, 14, 12, 0, 0)
 CASABLANCA = "Africa/Casablanca"
 
 
-def resolve(relative: str, record: dict, mtime: float = 0.0, rules=(), zone: str = CASABLANCA):
-    return media.resolve_capture_time(relative, record, mtime, rules, zone, 1990, NOW)
+def resolve(relative: str, record: dict, mtime: float = 0.0, rules=(), zone: str = CASABLANCA, use_modified_time=False):
+    return media.resolve_capture_time(relative, record, mtime, rules, zone, 1990, NOW, use_modified_time)
 
 
 def casablanca_offset(local: dt.datetime) -> int:
@@ -106,7 +106,7 @@ class ResolutionTests(unittest.TestCase):
 
     def test_file_already_named_with_a_fake_date_is_renamed(self) -> None:
         result = resolve("x/1903-12-31_23h-29m-40s.mp4", {"QuickTime:CreateDate": "1904:01:01 00:00:00"},
-                         mtime=dt.datetime(2018, 7, 29, 21, 0, tzinfo=dt.timezone.utc).timestamp())
+                         mtime=dt.datetime(2018, 7, 29, 21, 0, tzinfo=dt.timezone.utc).timestamp(), use_modified_time=True)
         self.assertNotEqual(result.local[:4], "1903")
         self.assertEqual(result.confidence, "weak")
         self.assertEqual(len(result.rejected), 2)
@@ -116,9 +116,11 @@ class ResolutionTests(unittest.TestCase):
         day_only = resolve("F/IMG-20170928-WA0021.jpg", {}, mtime=other_day)
         self.assertEqual((day_only.precision, day_only.confidence, day_only.local), ("day", "weak", "2017-09-28T00:00:00"))
         same_day = dt.datetime(2018, 8, 24, 15, 46, tzinfo=dt.timezone.utc).timestamp()
-        with_time = resolve("F/IMG-20180824-WA0011.jpg", {}, mtime=same_day)
+        with_time = resolve("F/IMG-20180824-WA0011.jpg", {}, mtime=same_day, use_modified_time=True)
         self.assertEqual((with_time.precision, with_time.confidence), ("second", "weak"))
         self.assertTrue(with_time.local.startswith("2018-08-24T16:46"))
+        without_modified_time = resolve("F/IMG-20180824-WA0011.jpg", {}, mtime=same_day)
+        self.assertEqual((without_modified_time.precision, without_modified_time.local), ("day", "2018-08-24T00:00:00"))
 
     def test_dated_folder_names_are_used(self) -> None:
         result = resolve("REUNIONS/2022-OCT-01/random.jpg", {}, mtime=0)
@@ -144,8 +146,30 @@ class ResolutionTests(unittest.TestCase):
 
     def test_modified_time_is_the_last_resort(self) -> None:
         stamp = dt.datetime(2008, 7, 11, 10, 33, tzinfo=dt.timezone.utc).timestamp()
-        result = resolve("OLD/Photo_047.jpg", {}, mtime=stamp)
+        result = resolve("OLD/Photo_047.jpg", {}, mtime=stamp, use_modified_time=True)
         self.assertEqual((result.confidence, result.evidence), ("weak", "file modified date"))
+
+    def test_modified_time_is_not_used_by_default(self) -> None:
+        stamp = dt.datetime(2008, 7, 11, 10, 33, tzinfo=dt.timezone.utc).timestamp()
+        result = resolve("OLD/Photo_047.jpg", {}, mtime=stamp)
+        self.assertEqual((result.confidence, result.local), ("none", ""))
+
+    def test_separated_date_and_time_names(self) -> None:
+        for name, expected in (("2015_08_03_23h_28m_08s.mp4", "2015-08-03T23:28:08"),
+                               ("Screenshot_2019-05-12-18-30-45.png", "2019-05-12T18:30:45"),
+                               ("IMG_2019.05.12_18.30.45.jpg", "2019-05-12T18:30:45")):
+            with self.subTest(name):
+                result = resolve(f"x/{name}", {})
+                self.assertEqual((result.local, result.confidence), (expected, "assumed"))
+
+    def test_separated_date_only_names(self) -> None:
+        for name in ("VID_2019-05-12.mp4", "2019_05_12_1.png"):
+            with self.subTest(name):
+                result = resolve(f"x/{name}", {})
+                self.assertEqual((result.local, result.precision), ("2019-05-12T00:00:00", "day"))
+
+    def test_mixed_separators_are_not_a_date(self) -> None:
+        self.assertEqual(resolve("x/2019-05_12.png", {}).confidence, "none")
 
 
 class NamingTests(unittest.TestCase):
@@ -257,7 +281,8 @@ class EndToEndTests(unittest.TestCase):
                 path.write_bytes(b"not really media")
                 os.utime(path, (stamp, stamp))
 
-            self.assertEqual(media.main(["plan", str(root), "--recursive", "--state-base", str(state)]), 0)
+            self.assertEqual(media.main(["plan", str(root), "--recursive", "--use-modified-time",
+                                         "--state-base", str(state)]), 0)
             bundle = next(state.iterdir())
             manifest = json.loads((bundle / "manifest.json").read_text())
             self.assertNotIn("OLD/._Photo_047.jpg", {item["source"] for item in manifest["entries"]})
@@ -289,6 +314,32 @@ class EndToEndTests(unittest.TestCase):
             self.assertEqual(restored, set(names))
             flagged_after = (root / ".organize/unverified.tsv").read_text().strip().splitlines()
             self.assertEqual(len(flagged_after), 1, "only the header remains")
+
+
+class GpsTests(unittest.TestCase):
+    def test_western_longitude_uses_its_reference(self) -> None:
+        record = {"GPS:GPSLatitude": 31.51, "GPS:GPSLatitudeRef": "N",
+                  "GPS:GPSLongitude": 9.77, "GPS:GPSLongitudeRef": "W"}
+        self.assertEqual(media.gps_position(record), (31.51, -9.77))
+
+    def test_southern_latitude_uses_its_reference(self) -> None:
+        record = {"GPS:GPSLatitude": 33.87, "GPS:GPSLatitudeRef": "South",
+                  "GPS:GPSLongitude": 151.21, "GPS:GPSLongitudeRef": "East"}
+        self.assertEqual(media.gps_position(record), (-33.87, 151.21))
+
+    def test_composite_coordinates_are_already_signed(self) -> None:
+        record = {"Composite:GPSLatitude": 31.51, "Composite:GPSLongitude": -9.77, "GPS:GPSLongitude": 9.77}
+        self.assertEqual(media.gps_position(record), (31.51, -9.77))
+
+    def test_quicktime_coordinates_are_signed(self) -> None:
+        record = {"Keys:GPSCoordinates": "31.5100 -9.7700 12.3"}
+        self.assertEqual(media.gps_position(record), (31.51, -9.77))
+
+    @unittest.skipIf(media.TimezoneFinder is None, "timezonefinder is not installed")
+    def test_essaouira_resolves_to_casablanca(self) -> None:
+        record = {"GPS:GPSLatitude": 31.51, "GPS:GPSLatitudeRef": "N",
+                  "GPS:GPSLongitude": 9.77, "GPS:GPSLongitudeRef": "W"}
+        self.assertEqual(media.zone_at(media.gps_position(record)), "Africa/Casablanca")
 
 
 class RenameTests(unittest.TestCase):

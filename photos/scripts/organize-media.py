@@ -89,12 +89,15 @@ FILENAME_DATETIME_PATTERNS = (
         r"(?P<hour>\d{2})(?P<minute>\d{2})(?P<second>\d{2})(?:[^0-9]|\d{1,3}(?:[^0-9]|$)|$)"
     ),
     re.compile(
-        r"(?:^|[^0-9])(?P<year>(?:19|20)\d{2})-(?P<month>\d{2})-(?P<day>\d{2})[ _]"
-        r"(?P<hour>\d{2})[.\-](?P<minute>\d{2})[.\-](?P<second>\d{2})(?:[^0-9]|$)"
+        r"(?:^|[^0-9])(?P<year>(?:19|20)\d{2})(?P<separator>[-_.])(?P<month>\d{2})(?P=separator)(?P<day>\d{2})"
+        r"[ _\-T]{1,2}(?P<hour>\d{2})[h.\-_:]{1,2}(?P<minute>\d{2})[m.\-_:]{1,2}(?P<second>\d{2})s?(?:[^0-9]|$)",
+        re.IGNORECASE,
     ),
 )
+DATETIME_PARTS = ("year", "month", "day", "hour", "minute", "second")
 FILENAME_EPOCH_RE = re.compile(r"^(?P<epoch>1\d{12})(?:[^0-9]|$)")
-FILENAME_DATE_RE = re.compile(r"(?:^|[^0-9])(?P<year>(?:19|20)\d{2})(?P<month>\d{2})(?P<day>\d{2})(?:[^0-9]|$)")
+FILENAME_DATE_RE = re.compile(
+    r"(?:^|[^0-9])(?P<year>(?:19|20)\d{2})(?P<separator>[-_.]?)(?P<month>\d{2})(?P=separator)(?P<day>\d{2})(?:[^0-9]|$)")
 MONTHS = {name: index for index, name in enumerate(
     ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), start=1)}
 FOLDER_DATE_RES = (
@@ -369,7 +372,7 @@ def extract_metadata(
         "-DateTimeOriginal", "-SubSecDateTimeOriginal", "-OffsetTimeOriginal", "-OffsetTimeDigitized",
         "-CreateDate", "-CreationDate", "-DateCreated", "-ContentCreateDate", "-ModifyDate",
         "-MediaCreateDate", "-TrackCreateDate",
-        "-GPSDateStamp", "-GPSTimeStamp", "-GPSLatitude#", "-GPSLongitude#", "-GPSCoordinates#",
+        "-GPSDateStamp", "-GPSTimeStamp", "-GPSLatitude#", "-GPSLongitude#", "-GPSLatitudeRef", "-GPSLongitudeRef", "-GPSCoordinates#",
         "-ContentIdentifier", "-MediaGroupUUID", "-Make", "-Model",
     )
     for batch in chunked(files, batch_size):
@@ -461,8 +464,8 @@ def gps_utc(record: dict[str, Any]) -> dt.datetime | None:
 
 
 def gps_position(record: dict[str, Any]) -> tuple[float, float] | None:
-    latitude = next((value for key, value in record.items() if key.endswith(":GPSLatitude")), None)
-    longitude = next((value for key, value in record.items() if key.endswith(":GPSLongitude")), None)
+    latitude = signed_coordinate(record, "GPSLatitude", "S")
+    longitude = signed_coordinate(record, "GPSLongitude", "W")
     if latitude is None or longitude is None:
         coordinates = next((value for key, value in record.items() if key.endswith(":GPSCoordinates")), None)
         if isinstance(coordinates, str):
@@ -476,6 +479,28 @@ def gps_position(record: dict[str, Any]) -> tuple[float, float] | None:
     if latitude == 0 and longitude == 0:
         return None
     return latitude, longitude
+
+
+# EXIF stores coordinates unsigned with the hemisphere in a separate reference
+# tag; without it every western longitude lands east of Greenwich.
+def signed_coordinate(record: dict[str, Any], name: str, negative_reference: str) -> float | None:
+    composite = record.get(f"Composite:{name}")
+    if composite is not None:
+        try:
+            return float(composite)
+        except (TypeError, ValueError):
+            return None
+    value = next((value for key, value in record.items() if key.endswith(f":{name}")), None)
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    reference = next((str(value) for key, value in record.items() if key.endswith(f":{name}Ref")), "")
+    if reference.strip().upper().startswith(negative_reference):
+        number = -abs(number)
+    return number
 
 
 _ZONE_FINDER: Any = None
@@ -547,6 +572,7 @@ def resolve_capture_time(
     default_zone: str,
     min_year: int,
     now: dt.datetime | None = None,
+    use_modified_time: bool = False,
 ) -> Resolution:
     now = now or dt.datetime.now()
     path = PurePosixPath(relative)
@@ -555,11 +581,16 @@ def resolve_capture_time(
     zone = rule.zone or default_zone
     shift = dt.timedelta(minutes=rule.shift_minutes)
     rejected: list[str] = []
+    # Several name patterns can read the same date; report a rejected one once.
+    rejected_name_days: set[dt.date] = set()
 
-    def accept(local: dt.datetime, label: str) -> bool:
+    def accept(local: dt.datetime, label: str, from_name: bool = False) -> bool:
         reason = implausible(local, min_year, now)
         if reason:
-            rejected.append(f"{label}={local.isoformat(sep=' ')} ({reason})")
+            if not (from_name and local.date() in rejected_name_days):
+                rejected.append(f"{label}={local.isoformat(sep=' ')} ({reason})")
+            if from_name:
+                rejected_name_days.add(local.date())
             return False
         return True
 
@@ -636,10 +667,10 @@ def resolve_capture_time(
         if not match:
             continue
         try:
-            local = dt.datetime(**{key: int(number) for key, number in match.groupdict().items()})
+            local = dt.datetime(**{key: int(match[key]) for key in DATETIME_PARTS})
         except ValueError:
             continue
-        if accept(local, label):
+        if accept(local, label, from_name=True):
             return finish(local, "assumed", f"file name ({label}) read as {zone}", zone_offset(zone, local), zone)
 
     epoch = FILENAME_EPOCH_RE.match(name)
@@ -676,17 +707,17 @@ def resolve_capture_time(
             break
     for day, label in day_candidates:
         noon = dt.datetime.combine(day, dt.time(12))
-        if not accept(noon, label):
+        if not accept(noon, label, from_name=not label.startswith("folder")):
             continue
-        if modified_local.date() == day:
+        if use_modified_time and modified_local.date() == day:
             return Resolution(modified_local.isoformat(timespec="seconds"), "second", "weak",
                               f"{label}, time from modified date", modified_offset, zone, rejected)
         return Resolution(noon.replace(hour=0).isoformat(timespec="seconds"), "day", "weak", label, None, zone, rejected)
 
-    if accept(modified_local, "modified date"):
+    if use_modified_time and accept(modified_local, "modified date"):
         return Resolution(modified_local.isoformat(timespec="seconds"), "second", "weak",
                           "file modified date", modified_offset, zone, rejected)
-    return Resolution("", "none", "none", "no plausible date", None, None, rejected)
+    return Resolution("", "none", "none", "no date in metadata, file name or folder name", None, None, rejected)
 
 
 def embedded_is_authoritative(resolution: Resolution) -> bool:
@@ -805,6 +836,7 @@ def make_plan_entries(
     min_year: int = DEFAULT_MIN_YEAR,
     sidecar_mode: str = "needed",
     now: dt.datetime | None = None,
+    use_modified_time: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     provisional: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []
@@ -813,10 +845,11 @@ def make_plan_entries(
         relative = str(path.relative_to(root))
         record = metadata.get(path, {})
         stat_result = path.stat()
-        resolution = resolve_capture_time(relative, record, stat_result.st_mtime, rules, default_zone, min_year, now)
+        resolution = resolve_capture_time(relative, record, stat_result.st_mtime, rules, default_zone, min_year, now,
+                                          use_modified_time)
         foreign = [candidate for candidate in sidecar_candidates(path) if candidate.exists() and not is_own_sidecar(candidate)]
         if resolution.confidence == "none":
-            skipped.append({"source": relative, "reason": "; ".join(resolution.rejected) or "no plausible date"})
+            skipped.append({"source": relative, "reason": "; ".join([resolution.evidence, *resolution.rejected])})
         elif foreign:
             skipped.append({"source": relative, "reason": f"has a sidecar from another tool: {foreign[0].name}"})
         else:
@@ -985,10 +1018,12 @@ def command_plan(args: argparse.Namespace) -> int:
     print(f"Media files  : {len(discovered_files):,} discovered; {len(files):,} selected")
     print(f"Default zone : {args.default_zone}  (GPS zone lookup: {'available' if TimezoneFinder else 'not installed'})")
     print(f"Folder rules : {len(rules)}")
+    print("Modified time: " + ("used as a last resort" if args.use_modified_time else "not used (files with no other date are skipped)"))
     print(f"State bundle : {run_dir}")
     print("Mode         : " + ("SAMPLE VALIDATION (cannot be applied)" if sample_mode else "PLAN ONLY (nothing is changed)"))
     metadata = extract_metadata(files, exiftool, args.batch_size, args.max_cpu_temp, args.cpu_temp_sensor)
-    entries, skipped = make_plan_entries(root, files, metadata, run_id, rules, args.default_zone, args.min_year, args.sidecars)
+    entries, skipped = make_plan_entries(root, files, metadata, run_id, rules, args.default_zone, args.min_year, args.sidecars,
+                                         use_modified_time=args.use_modified_time)
 
     manifest = {
         "schema_version": SCHEMA_VERSION,
@@ -1004,6 +1039,7 @@ def command_plan(args: argparse.Namespace) -> int:
         "extensions": list(args.extensions),
         "default_zone": args.default_zone,
         "min_year": args.min_year,
+        "use_modified_time": args.use_modified_time,
         "sidecar_mode": args.sidecars,
         "rules": [asdict(rule) | {"date": rule.date.isoformat() if rule.date else None} for rule in rules],
         "filename_format": "YYYY-MM-DD_HHh-MMm-SSs[_NN][_vNN].ext | YYYY-MM-DD_date-only_NN[_vNN].ext",
@@ -1043,7 +1079,8 @@ def command_plan(args: argparse.Namespace) -> int:
     if sample_mode:
         print("Apply      : disabled for sample bundles")
     else:
-        print(f"Apply      : {run_dir / 'apply.sh'}" + ("  (add --accept-weak to include flagged files)" if confidence["weak"] else ""))
+        flags = (["--accept-weak"] if confidence["weak"] else []) + (["--allow-skipped"] if skipped else [])
+        print(f"Apply      : {run_dir / 'apply.sh'}" + (f"  (needs {' '.join(flags)})" if flags else ""))
         print(f"Rollback   : {run_dir / 'rollback.sh'}")
     return 0
 
@@ -1384,6 +1421,9 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--min-year", type=int, default=DEFAULT_MIN_YEAR, help="reject capture dates before this year")
     plan.add_argument("--sidecars", choices=("needed", "all", "none"), default="needed",
                       help="needed: only where the file's own metadata lacks the local time and offset")
+    plan.add_argument("--use-modified-time", action="store_true",
+                      help="date files that have nothing better by their modified time; only where it was never "
+                           "reset by copying, such as a fresh phone export")
     plan.add_argument("--exiftool", default="exiftool", help="ExifTool executable")
     plan.add_argument("--batch-size", type=int, default=100, choices=range(1, 501), metavar="1..500")
     plan.add_argument("--max-cpu-temp", type=float, default=0, help="pause metadata reading above this many C (0 is off)")
