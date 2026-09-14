@@ -171,7 +171,8 @@ class Progress:
                 f"\r{self.label:<20} [{bar}] {percent:6.2f}% "
                 f"{completed:,}/{self.total:,} {rate:7.1f}/s ETA {format_duration(eta)}{suffix}"
             )
-            sys.stderr.write(message[: max(shutil.get_terminal_size((120, 20)).columns - 1, 40)])
+            # Erase to the end of the line so a shorter file name leaves no trace of a longer one.
+            sys.stderr.write(message[: max(shutil.get_terminal_size((120, 20)).columns - 1, 40)] + "\x1b[K")
             sys.stderr.flush()
             if completed >= self.total:
                 sys.stderr.write("\n")
