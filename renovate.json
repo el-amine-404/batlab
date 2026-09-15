@@ -40,6 +40,14 @@
       "commitMessageExtra": "to {{newValue}}"
     },
     {
+      "description": "ghcr.io and lscr.io publish no release timestamps, and minimumReleaseAge otherwise holds their updates back forever; the nightly updater's health check and rollback stay the safety net",
+      "matchPackageNames": [
+        "ghcr.io/**",
+        "lscr.io/**"
+      ],
+      "minimumReleaseAgeBehaviour": "timestamp-optional"
+    },
+    {
       "description": "linuxserver.io tags carry a build suffix (-lsNNN) and, for qBittorrent, the libtorrent version",
       "matchPackageNames": [
         "lscr.io/linuxserver/**"
