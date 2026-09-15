@@ -27,8 +27,8 @@
   "semanticCommits": "disabled",
   "commitMessagePrefix": "chore:",
   "minimumReleaseAge": "3 days",
-  "prConcurrentLimit": 5,
-  "prHourlyLimit": 2,
+  "prConcurrentLimit": 10,
+  "prHourlyLimit": 0,
   "packageRules": [
     {
       "description": "Commit and PR titles: the exact tag written to versions.env, no added v prefix; placed in a rule so it overrides the docker preset",
