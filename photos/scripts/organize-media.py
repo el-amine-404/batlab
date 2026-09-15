@@ -94,6 +94,9 @@ FILENAME_DATETIME_PATTERNS = (
         re.IGNORECASE,
     ),
 )
+FILENAME_COMPACT_DATETIME_RE = re.compile(
+    r"(?:^|[^0-9])(?P<year>20\d{2})(?P<month>\d{2})(?P<day>\d{2})(?P<hour>\d{2})(?P<minute>\d{2})(?P<second>\d{2})"
+    r"(?:\d{3})?(?:[^0-9]|$)")
 DATETIME_PARTS = ("year", "month", "day", "hour", "minute", "second")
 FILENAME_EPOCH_RE = re.compile(r"^(?P<epoch>1\d{12})(?:[^0-9]|$)")
 FILENAME_DATE_RE = re.compile(
@@ -663,7 +666,8 @@ def resolve_capture_time(
 
     name = path.name
     for label, match in (("own name", OWN_NAME_RE.match(name)),
-                         *(("name date-time", pattern.search(name)) for pattern in FILENAME_DATETIME_PATTERNS)):
+                         *(("name date-time", pattern.search(name)) for pattern in FILENAME_DATETIME_PATTERNS),
+                         ("name date-time", FILENAME_COMPACT_DATETIME_RE.search(name))):
         if not match:
             continue
         try:

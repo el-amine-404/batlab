@@ -162,6 +162,14 @@ class ResolutionTests(unittest.TestCase):
                 result = resolve(f"x/{name}", {})
                 self.assertEqual((result.local, result.confidence), (expected, "assumed"))
 
+    def test_compact_date_and_time_names(self) -> None:
+        for name, expected in (("20250814103434247_f2727e3c8e9d4ffa8870c132a4d59e69_G24502653.jpg", "2025-08-14T10:34:34"),
+                               ("brgame_screenshot_1784036045_20260714143404.jpg", "2026-07-14T14:34:04")):
+            with self.subTest(name):
+                result = resolve(f"x/{name}", {})
+                self.assertEqual((result.local, result.confidence), (expected, "assumed"))
+        self.assertEqual(resolve("x/order_20251399887766.jpg", {}).confidence, "none", "month 13 is not a date")
+
     def test_separated_date_only_names(self) -> None:
         for name in ("VID_2019-05-12.mp4", "2019_05_12_1.png"):
             with self.subTest(name):
