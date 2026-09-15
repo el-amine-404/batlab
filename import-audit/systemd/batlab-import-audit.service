@@ -1,0 +1,15 @@
+[Unit]
+Description=Report downloads Sonarr or Radarr imported wrongly or not at all
+Wants=network-online.target
+After=network-online.target docker.service
+RequiresMountsFor=/mnt/storage/data
+
+[Service]
+Type=oneshot
+User=potato
+Group=potato
+WorkingDirectory=/home/potato/batlab
+ExecStart=/usr/bin/python3 /home/potato/batlab/import-audit/scripts/audit.py
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=15m

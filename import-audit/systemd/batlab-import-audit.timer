@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Batlab import audit every hour
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=10m
+Unit=batlab-import-audit.service
+
+[Install]
+WantedBy=timers.target
