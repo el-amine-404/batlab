@@ -14,8 +14,19 @@ answering, and nothing told anyone.
   the root filesystem. DNS, Caddy, gluetun and everything else are unaffected.
   Each stop and start posts to Discord.
 
+- **SMART alerts** — `scripts/smart-notify.sh` turns a smartd warning into the
+  same Discord card. Debian ships smartd writing to root's local mailbox, which
+  nobody reads, so a failing disk was announced to no one. Which disks are
+  watched, and with what temperature limits, is a host file:
+  `hosts/<profile>/smartd.conf`.
+
 Netdata's Discord alerts, including the blocked-process alert that would have
 caught the outage, are configured in `compose/netdata/alerts/`.
+
+A disk that disappears from the bus, the 2026-09 failure, raises no SMART
+warning at all: smartd can only ask disks it can still talk to. The data guard
+and the heartbeat cover that case; SMART covers the disk that is still answering
+while it degrades.
 
 ## One-time installation on the server
 
@@ -81,3 +92,23 @@ the disk busy.
 
 Unmounting the data disk makes the heartbeat fail. Pause the `lab1` check in
 healthchecks.io first, and resume it afterwards.
+
+## SMART alerts
+
+```bash
+sudo cp /etc/smartd.conf /etc/smartd.conf.packaged
+sudo install -m 644 hosts/<profile>/smartd.conf /etc/smartd.conf
+sudo install -m 755 watchdog/scripts/smart-notify.sh /etc/smartmontools/run.d/20discord
+sudo systemctl restart smartmontools.service
+```
+
+`run-parts` requires a name without a dot, hence `20discord`. It runs after the
+packaged `10mail`, which exits at once because the disks are configured with
+`-m <nomailer>`.
+
+Test the path from smartd to Discord without waiting for a disk to fail:
+
+```bash
+sudo env SMARTD_FAILTYPE=EmailTest SMARTD_DEVICESTRING=/dev/sdb \
+  SMARTD_MESSAGE='test message' /etc/smartmontools/run.d/20discord </dev/null
+```
