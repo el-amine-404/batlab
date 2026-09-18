@@ -34,7 +34,7 @@ Measured: `qwen3:4b` at 1.09 tokens/s; a 10 s 1080p x265 sample decode takes
 | Photo organiser and import temperature guard | command-line flags | `organize-media.py plan --max-cpu-temp 85 --cpu-temp-sensor k10temp`; `import-drive.sh <drive> --max-cpu-temp 88 --cpu-temp-sensor k10temp` | metadata reading and transfers run for hours | Drop the flags |
 | Cleanuparr schedules | Cleanuparr database, see `cleanuparr.md` | queue 10 min, malware 5 min, seeker 30 min | CPU and heat | Defaults are fine |
 | Data disk on USB 2.0 port | physical | USB 2.0 port, not the blue ones | the JMS578 bridge resets under sustained writes over USB 3 | Use SATA or a proper enclosure |
-| SMART monitoring | `smartd.conf` | three disks by serial; data disk warns at 50 C, alarms at 55 C | USB bridges rename disks between reboots, and the enclosures refuse offline tests | Copy the file, put your own disks' `/dev/disk/by-id` names in it |
+| SMART monitoring | `smartd.conf` | three disks by serial; data disk warns at 50 C, SSDs at 55 C | USB bridges rename disks between reboots, and the enclosures refuse offline tests | Copy the file, put your own disks' `/dev/disk/by-id` names in it |
 | No battery | physical | healthchecks.io heartbeat catches outages | mains blips power it off | A UPS; keep the heartbeat |
 
 Not listed because they are right on any machine: background jobs at low
