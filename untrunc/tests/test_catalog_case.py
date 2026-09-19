@@ -18,6 +18,17 @@ case = load('case')
 
 
 class CatalogTests(unittest.TestCase):
+    def test_cleanup_finds_latest_summary_with_unique_suffix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            with self.assertRaises(ValueError):
+                case.latest_results(work)
+            for stamp, suffix in [('20000101T120000', 'abcdef12'), ('20000101T130000', '12345678')]:
+                folder = work / f'{stamp}-summary-{suffix}'
+                folder.mkdir()
+                (folder / 'results.json').write_text(json.dumps([{'file': suffix}]))
+            self.assertEqual(case.latest_results(work), [{'file': '12345678'}])
+
     def test_ranking_prefers_codec_over_nearest_date(self):
         target = {'path': 'bad.mp4', 'signature': {'extradata_hash': 'correct'}, 'date': 1000}
         nearest = {'path': 'near.mp4', 'signature': {'extradata_hash': 'wrong'}, 'date': 999, 'status': 'decode-clean'}

@@ -122,6 +122,13 @@ def agent(action, config):
     return subprocess.call(['hermes'], cwd=REPO, env=env)
 
 
+def latest_results(work):
+    summaries = sorted(work.glob('*-summary-*/results.json'))
+    if not summaries:
+        raise ValueError('No recovery summary found in this case; run the standard recovery first')
+    return json.loads(summaries[-1].read_text())
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('action', choices=['prepare', 'scan', 'run', 'clean', 'agent-setup', 'agent-model', 'agent'])
@@ -144,10 +151,7 @@ def main():
     if args.action == 'clean':
         if os.environ.get('ALLOW_TRIM') != '1':
             raise ValueError('Set ALLOW_TRIM=1 to request the optional shortened derivative')
-        summaries = sorted((root / 'work').glob('*summary/results.json'))
-        if not summaries:
-            raise ValueError('Run the standard recovery first')
-        results = json.loads(summaries[-1].read_text())
+        results = latest_results(root / 'work')
         with_audio = [r for r in results if float(r.get('durations', {}).get('audio') or 0) > 0]
         if not with_audio:
             raise ValueError('No candidate with recovered audio found')
