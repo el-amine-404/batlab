@@ -405,7 +405,7 @@ def main():
                                       'agent-setup', 'agent-model', 'agent'])
     p.add_argument('--config', required=True, type=Path)
     p.add_argument('--limit', type=positive_int, help='batch only: process at most this many suspects now')
-    p.add_argument('--fresh', action='store_true', help='scan only: start a new scan instead of resuming an interrupted one')
+    p.add_argument('--fresh', action='store_true', help='scan only: scan every file again instead of skipping unchanged ones (also compares content hashes)')
     args = p.parse_args()
     if args.limit and args.action != 'batch':
         p.error('--limit only applies to batch')

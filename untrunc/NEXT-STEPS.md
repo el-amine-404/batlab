@@ -219,18 +219,33 @@ to overwrite different bytes. Runtime sources are mounted read-only.
 The scan first prints how many video files it found, then counts through them
 (`Scanning 3/37: path/to/clip.mp4`).
 
-**An interrupted scan resumes.** If a scan is stopped (Ctrl-C, `docker stop`, a crash, a
-dropped share or a sleeping laptop), run the same `make untrunc-case-scan` command again. It
-continues the newest unfinished scan and prints `Resuming ...`:
-- Files already scanned are kept if their size and modification time are unchanged. Changed
-  files are scanned again, and so are files whose scan failed (for example a timeout).
-- Only the file that was being decoded when it stopped is redone.
-- Progress is saved at least every 5 seconds and the catalog is replaced atomically, so a hard
-  crash can lose at most a few seconds of results and never corrupts the catalog.
-- It resumes only when the folder, `scan_mode` and scanner version are the same. Otherwise it says
-  why and starts a new scan. A finished scan is never resumed: the next run scans again.
-- To start over instead, use `make untrunc-case-scan CASE_ARGS=--fresh`.
-- Until the scan finishes, `untrunc-case-suspects` warns that the catalog is incomplete and
+### Rescanning: resume, skip unchanged files, and check content
+
+Run the same `make untrunc-case-scan` command every time; it decides what to do:
+
+- **An interrupted scan resumes** (Ctrl-C, `docker stop`, a crash, a dropped share, a sleeping
+  laptop). It continues the newest unfinished scan and prints `Resuming ...`. Only the file being
+  decoded when it stopped is redone. Progress is saved at least every 5 seconds and the catalog is
+  replaced atomically, so a hard crash can lose a few seconds of results but never corrupts it.
+- **After a finished scan, unchanged files are skipped.** Add videos, rerun the command, and only the
+  new and changed files are scanned (`Building on the last complete scan ...`). Each scan is
+  still saved as its own complete catalog. Files that disappeared are dropped, and the rankings are
+  recomputed from everything, so a new healthy clip can become a reference for an old suspect.
+- **Suspects are always checked again.** Only clean results are reused: a file flagged as damaged,
+  or whose scan failed, is re-checked every time. A wrong "unreadable" caused by a share hiccup is
+  never kept for good, and suspects are few. A large damaged file is therefore read again on every rescan.
+- **What "unchanged" means:** the same relative path, size and modification time, under the same
+  folder, `scan_mode` and scanner version. If any of these differ, the scan says why and scans
+  everything. The first scan after a tool upgrade that changes the scanner version rescans everything.
+- **Content hashes.** A full scan records a SHA-256 of each file's audio and video packets
+  (`stream_hash`), computed in the same pass as the decoding, so it costs no extra reading. It covers
+  the media, not the container's metadata. A probe scan never reads whole files and records none.
+- **`--fresh` re-verifies everything.** `make untrunc-case-scan CASE_ARGS=--fresh` scans every file
+  again and compares each hash with the last complete scan. A file whose content changed while its size
+  and date did not is reported (`WARNING: ... possible silent corruption or a read error`) and shown
+  by `untrunc-case-suspects`: check it against a backup. The default incremental scan cannot notice
+  such a change, because it does not read unchanged files, so run `--fresh` now and then for an archive.
+- Until a scan finishes, `untrunc-case-suspects` warns that the catalog is incomplete, and
   `untrunc-case-batch` and `untrunc-case-run` refuse to use it.
 
 Scanning fully decodes supported video formats under source_root, so start with a

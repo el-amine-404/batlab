@@ -109,6 +109,11 @@ def render_suspects(catalog, catalog_file, src, top, warnings=()):
     lines += [f'Warning: {w}' for w in warnings]
     if packet_only_note(items):
         lines.append(f'Note: {packet_only_note(items)}')
+    changed = [i['path'] for i in items if i.get('content_changed')]
+    if changed:
+        shown = ', '.join(changed[:5]) + (f' and {len(changed) - 5} more' if len(changed) > 5 else '')
+        lines.append(f'Warning: {len(changed)} file(s) changed content without changing size or date since the previous '
+                     f'scan (possible silent corruption or a read error): {shown}. Check them against a backup.')
     if catalog.get('mode') == 'probe':
         lines.append('Note: probe scans do not decode-verify healthy files, so no references can be ranked. '
                      'Rescan with scan_mode "full".')

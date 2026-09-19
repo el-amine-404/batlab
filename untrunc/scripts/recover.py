@@ -228,7 +228,7 @@ def finish_scan(report, out):
     catalog = shown(out / 'catalog.json')
     kept = report.get('reused', 0)
     print(f'\nScan finished: {len(report["items"])} video file(s) checked'
-          + (f' ({kept} kept from the interrupted scan)' if kept else '') + '.', flush=True)
+          + (f' ({kept} unchanged and skipped)' if kept else '') + '.', flush=True)
     print(f'Catalog saved to: {catalog}', flush=True)
     if not report['complete']:
         print('WARNING: the catalog is INCOMPLETE because some folders could not be read '
@@ -238,21 +238,29 @@ def finish_scan(report, out):
 
 
 def run_scan():
-    """Continue the newest interrupted scan of this library when there is one, else start a new scan."""
-    from catalog import resumable_scan, scan
+    """Scan the library: resume an interrupted scan, skip what is unchanged since the last one, or scan everything."""
+    from catalog import plan_scan, scan
     mode = os.environ.get('SCAN_MODE') or 'full'
-    resume, reason = (None, '') if os.environ.get('SCAN_FRESH') == '1' else resumable_scan(WORK, LIBRARY, mode)
-    if reason:
-        say(f'Not resuming an earlier scan: {reason}. Starting a new scan.')
-    if resume:
-        say(f'Resuming the interrupted scan saved in {shown(resume)}')
+    fresh = os.environ.get('SCAN_FRESH') == '1'
+    plan = plan_scan(WORK, LIBRARY, mode, fresh)
+    if plan['reason']:
+        say(f'Not reusing an earlier scan: {plan["reason"]}. Scanning everything.')
+    if plan['kind'] == 'resume':
+        say(f'Resuming the interrupted scan saved in {shown(plan["folder"])}')
+    elif plan['kind'] == 'incremental':
+        say(f'Building on the last complete scan ({plan["source"]}): unchanged files are skipped, new, changed and '
+            'previously flagged files are scanned. Use --fresh to scan everything again.')
+    elif fresh:
+        say('Scanning everything again (--fresh)' + (f'; content hashes are compared with the last complete scan '
+                                                    f'({plan["baseline_source"]}).' if plan['baseline'] else '.'))
+    resume = plan['folder']
     out = resume or attempt('scan') / 'catalog'
 
     def stop(signum, frame):
         raise KeyboardInterrupt  # docker stop / kill: save progress like Ctrl-C does
     previous = signal.signal(signal.SIGTERM, stop)
     try:
-        report = scan(LIBRARY, out, mode, TIMEOUT, resume=bool(resume))
+        report = scan(LIBRARY, out, mode, TIMEOUT, resume=bool(resume), reuse=plan['reuse'], baseline=plan['baseline'])
     except KeyboardInterrupt:
         return 130
     finally:

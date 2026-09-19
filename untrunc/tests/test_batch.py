@@ -28,6 +28,7 @@ def load(name):
 case = load('case')
 catalog_tool = load('catalog')
 report = load('report')
+report_module = report  # tests below use `report` for scan results
 
 
 def match(path, score=100.0, reasons=('codec_name: match', 'model: different', 'same directory'),
@@ -516,11 +517,38 @@ class HostPathTests(unittest.TestCase):
 
 
 def junk_library(root, count):
-    """Files that look like videos to the scanner but are not: ffprobe rejects each one in milliseconds."""
+    """Files that look like videos to the scanner but are not: ffprobe rejects each one, so each is a suspect."""
     root.mkdir(parents=True, exist_ok=True)
     for n in range(count):
         (root / f'v{n:03d}.mp4').write_bytes(f'not a video {n}'.encode())
     return root
+
+
+_SEED = []
+
+
+def seed_video():
+    """Bytes of one tiny healthy video, made once."""
+    if not _SEED:
+        with tempfile.TemporaryDirectory() as tmp:
+            file = Path(tmp) / 'seed.mp4'
+            REAL_RUN(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=64x48:rate=15:duration=0.2',
+                      '-f', 'lavfi', '-i', 'sine=frequency=440:duration=0.2', '-c:v', 'libx264', '-bf', '0',
+                      '-pix_fmt', 'yuv420p', '-c:a', 'aac', str(file)], check=True)
+            _SEED.append(file.read_bytes())
+    return _SEED[0]
+
+
+def tiny_library(root, count):
+    """Healthy videos (copies of one tiny clip): clean in probe and in full mode."""
+    root.mkdir(parents=True, exist_ok=True)
+    for n in range(count):
+        (root / f'v{n:03d}.mp4').write_bytes(seed_video())
+    return root
+
+
+def truncated(data):
+    return data[:data.index(b'moov') - 4]  # cut before the index: unreadable, like an interrupted recording
 
 
 class Interrupt:
@@ -536,22 +564,31 @@ class Interrupt:
         return REAL_RUN(*args, **kwargs)
 
 
-@unittest.skipUnless(shutil.which('ffprobe'), 'ffprobe is required')
+def distinct_scan_names():
+    """recover.attempt() names scan folders by the second: give each scan in a test its own increasing stamp."""
+    counter = itertools.count(1)
+    return patch('time.strftime', lambda fmt, *args: f'20260101T{next(counter):06d}')
+
+
+needs_ffmpeg = unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'ffmpeg is required')
+
+
+@needs_ffmpeg
 class ResumableScanTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.base = Path(self.tmp.name)
-        self.library = junk_library(self.base / 'library', 5)
+        self.library = tiny_library(self.base / 'library', 5)
         self.out = self.base / 'scan' / 'catalog'
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def scan(self, runner=None, resume=False, mode='probe'):
+    def scan(self, runner=None, resume=False, mode='probe', **kwargs):
         out = io.StringIO()
         with patch('subprocess.run', runner or Interrupt()), contextlib.redirect_stdout(out):
             try:
-                return catalog_tool.scan(self.library, self.out, mode, resume=resume), out.getvalue()
+                return catalog_tool.scan(self.library, self.out, mode, resume=resume, **kwargs), out.getvalue()
             except KeyboardInterrupt:
                 return None, out.getvalue()
 
@@ -572,14 +609,13 @@ class ResumableScanTests(unittest.TestCase):
         self.assertEqual(runner.calls, 3)  # ffprobe ran only for the three files not yet done
         self.assertEqual((report['complete'], report['reused']), (True, 2))
         self.assertEqual([i['path'] for i in report['items']], [f'v{n:03d}.mp4' for n in range(5)])
-        self.assertIn('Scanning 1/5: v000.mp4 (already scanned)', printed)
+        self.assertIn('Scanning 1/5: v000.mp4 (unchanged, skipped)', printed)
         self.assertIn('Scanning 3/5: v002.mp4\n', printed)
-        self.assertIn('Resuming:', printed)
         self.assertEqual(self.saved()['complete'], True)
 
     def test_files_changed_since_the_interruption_are_scanned_again(self):
         self.scan(Interrupt(at=3))
-        (self.library / 'v000.mp4').write_bytes(b'changed, and longer than before')
+        (self.library / 'v000.mp4').write_bytes(seed_video() + b'appended')
         runner = Interrupt()
         report, _ = self.scan(runner, resume=True)
         self.assertEqual((runner.calls, report['reused']), (4, 1))  # v000 again + the three unfinished files
@@ -623,94 +659,362 @@ class ResumableScanTests(unittest.TestCase):
         self.assertEqual(self.saved()['items'], [])
         self.assertEqual(self.scan(resume=True)[0]['reused'], 0)
 
-    def test_completed_scan_report_records_what_resuming_needs(self):
+    def test_completed_scan_report_records_what_reuse_needs(self):
         report, _ = self.scan()
-        self.assertEqual((report['scan_version'], report['reused'], report['mode']), (catalog_tool.SCAN_VERSION, 0, 'probe'))
+        self.assertEqual((report['scan_version'], report['reused'], report['dropped'], report['content_changed']),
+                         (catalog_tool.SCAN_VERSION, 0, 0, []))
         self.assertEqual(self.saved()['host_source_root'], str(self.library.resolve()))
+
+    def test_flagged_files_are_checked_again_on_resume_because_a_verdict_may_have_been_a_hiccup(self):
+        self.library = junk_library(self.base / 'junk', 5)  # every file is a suspect
+        self.scan(Interrupt(at=4))
+        self.assertEqual(len(self.saved()['items']), 3)
+        runner = Interrupt()
+        report, printed = self.scan(runner, resume=True)
+        self.assertEqual((runner.calls, report['reused']), (5, 0))  # all five, including the three already flagged
+        self.assertNotIn('(unchanged, skipped)', printed)
 
     def test_decode_logs_are_named_by_file_so_they_stay_unique_on_resume(self):
         first = catalog_tool.hashlib.sha1(b'a/x.mp4').hexdigest()[:12]
         second = catalog_tool.hashlib.sha1(b'b/x.mp4').hexdigest()[:12]
         self.assertNotEqual(first, second)  # same basename in different folders
 
-    @unittest.skipUnless(shutil.which('ffmpeg'), 'ffmpeg is required')
-    def test_full_mode_resume_keeps_decode_logs_and_verdicts(self):
-        good = self.base / 'seed.mp4'
-        REAL_RUN(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=64x48:rate=15:duration=0.2',
-                  '-c:v', 'libx264', '-bf', '0', '-pix_fmt', 'yuv420p', str(good)], check=True)
+    def test_full_mode_resume_keeps_decode_logs_hashes_and_verdicts(self):
         library = self.base / 'real'
         for name in ('a/x.mp4', 'b/x.mp4', 'c/x.mp4'):
             (library / name).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy(good, library / name)
+            (library / name).write_bytes(seed_video())
         self.library = library
         report, _ = self.scan(Interrupt(at=4), mode='full')  # ffprobe, ffmpeg, ffprobe, then Ctrl-C in the 2nd decode
         self.assertIsNone(report)
         kept = self.saved()['items']
         self.assertEqual([(i['path'], i['status']) for i in kept], [('a/x.mp4', 'decode-clean')])
-        log_a = kept[0]['log']
+        log_a, hash_a = kept[0]['log'], kept[0]['stream_hash']
         report, _ = self.scan(resume=True, mode='full')
         self.assertEqual(report['reused'], 1)
-        logs = {i['path']: i['log'] for i in report['items']}
-        self.assertEqual(logs['a/x.mp4'], log_a)  # the kept file's log is untouched
-        self.assertEqual(len(set(logs.values())), 3)  # same basename, three different logs
-        for name in logs.values():
-            self.assertTrue((self.out / name).exists())
+        by_path = {i['path']: i for i in report['items']}
+        self.assertEqual((by_path['a/x.mp4']['log'], by_path['a/x.mp4']['stream_hash']), (log_a, hash_a))  # untouched
+        self.assertEqual(len({i['log'] for i in report['items']}), 3)  # same basename, three different logs
+        for item in report['items']:
+            self.assertTrue((self.out / item['log']).exists())
         self.assertEqual({i['status'] for i in report['items']}, {'decode-clean'})
 
 
-class ResumeDecisionTests(unittest.TestCase):
+class ReuseRuleTests(unittest.TestCase):
+    def stat(self, size=10, mtime_ns=5):
+        return type('S', (), {'st_size': size, 'st_mtime_ns': mtime_ns})()
+
+    def item(self, **fields):
+        return dict({'status': 'decode-clean', 'size': 10, 'mtime_ns': 5, 'stream_hash': {'algorithm': 'sha256', 'value': 'ab'}}, **fields)
+
+    def test_only_clean_unchanged_files_are_reused(self):
+        reusable = catalog_tool.reusable
+        self.assertTrue(reusable(self.item(), self.stat(), 'full'))
+        self.assertTrue(reusable(self.item(status='probe-only-unverified', stream_hash=None), self.stat(), 'probe'))
+        for status in ('decode-errors', 'unreadable-or-no-video', 'scan-error', 'something-else'):
+            self.assertFalse(reusable(self.item(status=status), self.stat(), 'full'), status)
+        self.assertFalse(reusable(self.item(), self.stat(size=11), 'full'))
+        self.assertFalse(reusable(self.item(), self.stat(mtime_ns=6), 'full'))
+        self.assertFalse(reusable(self.item(), None, 'full'))  # the file vanished or cannot be read
+        self.assertFalse(reusable(None, self.stat(), 'full'))
+
+    def test_a_full_result_without_its_hash_is_not_reused(self):
+        self.assertFalse(catalog_tool.reusable(self.item(stream_hash=None), self.stat(), 'full'))
+        self.assertFalse(catalog_tool.reusable(self.item(stream_hash=None), self.stat(), 'full'))
+
+
+class PlanScanTests(unittest.TestCase):
+    HASHED = {'stream_hash': {'algorithm': 'sha256', 'value': 'aa'}}
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.work = Path(self.tmp.name) / 'work'
         self.root = Path(self.tmp.name) / 'lib'
         self.root.mkdir()
-        self.version = catalog_tool.SCAN_VERSION
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def write(self, name, **fields):
+    def write(self, name, items=(), **fields):
         folder = self.work / name / 'catalog'
         folder.mkdir(parents=True)
-        data = {'complete': False, 'scan_version': self.version, 'mode': 'full', 'host_source_root': str(self.root), 'items': []}
+        data = {'complete': False, 'scan_version': catalog_tool.SCAN_VERSION, 'mode': 'full',
+                'host_source_root': str(self.root), 'items': [dict(i) for i in items]}
         data.update(fields)
-        (folder / 'catalog.json').write_text(data if isinstance(data, str) else json.dumps(data))
+        (folder / 'catalog.json').write_text(json.dumps(data))
         return folder
 
-    def decide(self, mode='full'):
-        return catalog_tool.resumable_scan(self.work, self.root, mode)
+    def plan(self, mode='full', fresh=False):
+        return catalog_tool.plan_scan(self.work, self.root, mode, fresh)
 
-    def test_no_earlier_scan_and_finished_scans_are_not_resumed(self):
-        self.assertEqual(self.decide(), (None, ''))
-        self.write('20260101-scan-aaaa', complete=True)
-        self.assertEqual(self.decide(), (None, ''))
+    def test_no_earlier_scan_means_a_new_scan(self):
+        plan = self.plan()
+        self.assertEqual((plan['kind'], plan['reuse'], plan['baseline'], plan['reason']), ('new', {}, {}, ''))
 
-    def test_the_newest_interrupted_matching_scan_is_resumed(self):
-        self.write('20260101-scan-aaaa')
-        newest = self.write('20260102-scan-bbbb')
-        self.assertEqual(self.decide(), (newest, ''))
+    def test_a_complete_scan_is_built_on_in_a_new_folder(self):
+        self.write('20260101-scan-aaaa', [dict(self.HASHED, path='a.mp4')], complete=True)
+        plan = self.plan()
+        self.assertEqual((plan['kind'], plan['folder'], plan['source']), ('incremental', None, '20260101-scan-aaaa'))
+        self.assertEqual(list(plan['reuse']), ['a.mp4'])
+        self.assertEqual(list(plan['baseline']), ['a.mp4'])
+        self.assertEqual(plan['baseline_source'], '20260101-scan-aaaa')
 
-    def test_only_the_newest_scan_counts(self):
+    def test_the_newest_interrupted_scan_is_resumed_in_place(self):
+        self.write('20260101-scan-aaaa', [dict(self.HASHED, path='old.mp4')], complete=True)
+        newest = self.write('20260102-scan-bbbb', [{'path': 'new.mp4'}])
+        plan = self.plan()
+        self.assertEqual((plan['kind'], plan['folder']), ('resume', newest))
+        self.assertEqual(list(plan['reuse']), ['new.mp4'])  # what is reused comes from the interrupted scan
+        self.assertEqual(list(plan['baseline']), ['old.mp4'])  # what hashes are compared with is the last complete one
+
+    def test_only_the_newest_scan_decides(self):
         self.write('20260101-scan-aaaa')  # interrupted long ago
-        self.write('20260102-scan-bbbb', complete=True)  # a later scan finished
-        self.assertEqual(self.decide(), (None, ''))
+        self.write('20260102-scan-bbbb', [{'path': 'b.mp4'}], complete=True)  # a later scan finished
+        plan = self.plan()
+        self.assertEqual((plan['kind'], plan['source']), ('incremental', '20260102-scan-bbbb'))
 
-    def test_mismatches_start_a_new_scan_and_say_why(self):
-        self.write('20260101-scan-aaaa', mode='probe')
-        self.assertIn('used mode "probe", not "full"', self.decide('full')[1])
-        self.assertIsNotNone(self.decide('probe')[0])
+    def test_fresh_reuses_nothing_but_still_compares_with_the_last_complete_scan(self):
+        self.write('20260101-scan-aaaa', [dict(self.HASHED, path='a.mp4')], complete=True)
+        plan = self.plan(fresh=True)
+        self.assertEqual((plan['kind'], plan['reuse'], plan['reason']), ('new', {}, ''))
+        self.assertEqual(list(plan['baseline']), ['a.mp4'])
+
+    def test_mismatches_start_a_new_scan_say_why_and_never_reuse(self):
+        self.write('20260101-scan-aaaa', mode='probe', complete=True)
+        plan = self.plan('full')
+        self.assertEqual((plan['kind'], plan['reuse'], plan['baseline']), ('new', {}, {}))
+        self.assertIn('the last scan used mode "probe", not "full"', plan['reason'])
         self.write('20260102-scan-bbbb', host_source_root='/somewhere/else')
-        self.assertIn('different folder (/somewhere/else)', self.decide()[1])
-        self.write('20260103-scan-cccc', scan_version=self.version - 1)
-        self.assertIn('different version of the scanner', self.decide()[1])
-        older = self.write('20260104-scan-dddd')
-        (older / 'catalog.json').write_text('{"half written')
-        self.assertIn('unreadable catalog', self.decide()[1])
-        old_format = self.write('20260105-scan-eeee')
-        (old_format / 'catalog.json').write_text(json.dumps({'complete': False, 'mode': 'full', 'items': []}))  # no version
-        self.assertIn('different version of the scanner', self.decide()[1])
+        self.assertIn('the interrupted scan was of a different folder (/somewhere/else)', self.plan()['reason'])
+        self.write('20260103-scan-cccc', scan_version=catalog_tool.SCAN_VERSION - 1, complete=True)
+        self.assertIn('the last scan was made by a different version of the scanner', self.plan()['reason'])
+        old_format = self.write('20260104-scan-dddd')
+        (old_format / 'catalog.json').write_text(json.dumps({'complete': False, 'mode': 'full', 'items': []}))
+        self.assertIn('different version of the scanner', self.plan()['reason'])
+        broken = self.write('20260105-scan-eeee')
+        (broken / 'catalog.json').write_text('{"half written')
+        plan = self.plan()
+        self.assertIn('unreadable catalog', plan['reason'])
+        self.assertEqual(plan['kind'], 'new')
+
+    def test_the_hash_baseline_is_the_newest_complete_scan_that_recorded_hashes(self):
+        self.write('20260101-scan-aaaa', [dict(self.HASHED, path='a.mp4')], complete=True)
+        # Newer, complete, but made before hashes existed: incompatible for reuse and useless for comparing.
+        self.write('20260102-scan-bbbb', [{'path': 'a.mp4'}], scan_version=catalog_tool.SCAN_VERSION - 1, complete=True)
+        plan = self.plan()
+        self.assertEqual(plan['kind'], 'new')
+        self.assertEqual(plan['baseline_source'], '20260101-scan-aaaa')
+        self.assertEqual(list(plan['baseline']), ['a.mp4'])
+
+    def test_probe_scans_need_no_hashes_to_be_a_baseline(self):
+        self.write('20260101-scan-aaaa', [{'path': 'a.mp4'}], mode='probe', complete=True)
+        self.assertEqual(self.plan('probe')['baseline_source'], '20260101-scan-aaaa')
+        self.assertEqual(self.plan('full')['baseline_source'], '')
 
 
+@needs_ffmpeg
+class IncrementalScanTests(unittest.TestCase):
+    """Rescanning a folder after files were added, changed or deleted, with real tiny videos."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+        self.recover = load('recover')
+        r = self.recover
+        r.WORK, r.LIBRARY = self.base / 'work', self.base / 'library'
+        r.HOST_CASE, r.HOST_LIBRARY = '', ''
+        r.WORK.mkdir()
+        self.library = r.LIBRARY
+        self.library.mkdir()
+        self.env = patch.dict(os.environ, {'SCAN_MODE': 'full'})
+        self.env.start()
+        stamps = distinct_scan_names()
+        stamps.start()
+        self.addCleanup(stamps.stop)
+        os.environ.pop('SCAN_FRESH', None)
+        os.environ.pop('SCAN_HOST_ROOT', None)
+        self.addCleanup(self.env.stop)
+        for name in ('a.mp4', 'b.mp4'):
+            (self.library / name).write_bytes(seed_video())
+        (self.library / 'cut.mp4').write_bytes(truncated(seed_video()))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_scan(self, fresh=False):
+        runner, out = Interrupt(), io.StringIO()
+        with patch.dict(os.environ, {'SCAN_FRESH': '1'} if fresh else {}), patch('subprocess.run', runner), \
+                contextlib.redirect_stdout(out):
+            code = self.recover.run_scan()
+        return code, out.getvalue(), runner.calls
+
+    def newest(self):
+        return json.loads(sorted(self.recover.WORK.glob('*-scan-*/catalog/catalog.json'))[-1].read_text())
+
+    def test_unchanged_clean_files_are_skipped_and_suspects_are_checked_again(self):
+        self.assertEqual(self.run_scan()[0], 0)
+        code, printed, calls = self.run_scan()
+        self.assertEqual(code, 0)
+        self.assertIn('Building on the last complete scan', printed)
+        self.assertIn('Scanning 1/3: a.mp4 (unchanged, skipped)', printed)
+        self.assertIn('Scanning 2/3: b.mp4 (unchanged, skipped)', printed)
+        self.assertIn('Scanning 3/3: cut.mp4\n', printed)  # a suspect is never skipped
+        self.assertIn('Scan finished: 3 video file(s) checked (2 unchanged and skipped).', printed)
+        self.assertEqual(calls, 1)  # only ffprobe of the truncated file: no decoding of the two clean ones
+        self.assertEqual(len(list(self.recover.WORK.glob('*-scan-*'))), 2)  # each complete scan stays as its own record
+
+    def test_new_changed_and_deleted_files_are_handled_and_rankings_use_the_new_files(self):
+        self.run_scan()
+        first = self.newest()
+        self.assertEqual([r['path'] for r in first['rankings']['cut.mp4']], ['a.mp4', 'b.mp4'])
+        (self.library / 'b.mp4').unlink()                                   # deleted
+        (self.library / 'a.mp4').write_bytes(seed_video() + b'more bytes')  # changed
+        (self.library / 'c.mp4').write_bytes(seed_video())                  # new
+        code, printed, calls = self.run_scan()
+        self.assertEqual(code, 0)
+        report = self.newest()
+        self.assertEqual([i['path'] for i in report['items']], ['a.mp4', 'c.mp4', 'cut.mp4'])
+        self.assertEqual((report['reused'], report['dropped']), (0, 1))
+        self.assertIn('1 file(s) from the earlier scan no longer exist and were dropped.', printed)
+        self.assertNotIn('unchanged, skipped', printed)
+        self.assertEqual({r['path'] for r in report['rankings']['cut.mp4']}, {'a.mp4', 'c.mp4'})  # the new clip is a candidate
+
+    def test_fresh_scans_everything_again(self):
+        self.run_scan()
+        code, printed, calls = self.run_scan(fresh=True)
+        self.assertEqual(code, 0)
+        self.assertIn('Scanning everything again (--fresh); content hashes are compared with the last complete scan', printed)
+        self.assertNotIn('skipped', printed)
+        self.assertEqual(calls, 2 * 2 + 1)  # ffprobe + ffmpeg for each healthy file, ffprobe for the truncated one
+
+    def test_a_different_mode_never_reuses_the_last_scan(self):
+        self.run_scan()
+        with patch.dict(os.environ, {'SCAN_MODE': 'probe'}):
+            code, printed, calls = self.run_scan()
+        self.assertIn('Not reusing an earlier scan: the last scan used mode "full", not "probe". Scanning everything.', printed)
+        self.assertEqual(calls, 3)  # ffprobe for every file
+        self.assertNotIn('skipped', printed)
+
+
+@needs_ffmpeg
+class ContentHashTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+        self.library = self.base / 'library'
+        self.library.mkdir()
+        (self.library / 'a.mp4').write_bytes(seed_video())
+        (self.library / 'copy.mp4').write_bytes(seed_video())
+        self.n = 0
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def scan(self, **kwargs):
+        self.n += 1
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            report = catalog_tool.scan(self.library, self.base / f'scan{self.n}', 'full', **kwargs)
+        return report, out.getvalue()
+
+    def flip_middle_byte_keeping_size_and_date(self, name):
+        file = self.library / name
+        stat = file.stat()
+        data = bytearray(file.read_bytes())
+        data[data.index(b'mdat') + 200] ^= 0xFF
+        file.write_bytes(bytes(data))
+        os.utime(file, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+
+    def test_every_full_result_carries_a_hash_computed_in_the_same_pass(self):
+        report, _ = self.scan()
+        hashes = {i['path']: i['stream_hash'] for i in report['items']}
+        for value in hashes.values():
+            self.assertEqual(value['algorithm'], 'sha256')
+            self.assertRegex(value['value'], r'^[0-9a-f]{64}$')
+        self.assertEqual(hashes['a.mp4'], hashes['copy.mp4'])  # same content, same fingerprint
+        probe = catalog_tool.scan(self.library, self.base / 'probe', 'probe')
+        self.assertTrue(all('stream_hash' not in i for i in probe['items']))  # probe mode never reads whole files
+
+    def test_hash_covers_the_media_and_changes_when_it_does(self):
+        before, _ = self.scan()
+        self.flip_middle_byte_keeping_size_and_date('a.mp4')
+        after, _ = self.scan()
+        old = {i['path']: i['stream_hash'] for i in before['items']}
+        new = {i['path']: i['stream_hash'] for i in after['items']}
+        self.assertNotEqual(old['a.mp4'], new['a.mp4'])
+        self.assertEqual(old['copy.mp4'], new['copy.mp4'])
+
+    def test_silent_change_with_same_size_and_date_is_reported_on_a_rescan(self):
+        first, _ = self.scan()
+        baseline = {i['path']: i for i in first['items']}
+        self.flip_middle_byte_keeping_size_and_date('a.mp4')
+        report, printed = self.scan(baseline=baseline)
+        self.assertEqual([c['path'] for c in report['content_changed']], ['a.mp4'])
+        self.assertEqual(report['content_changed'][0]['previous_hash'], baseline['a.mp4']['stream_hash']['value'])
+        changed = next(i for i in report['items'] if i['path'] == 'a.mp4')
+        self.assertEqual(changed['content_changed']['previous_hash'], baseline['a.mp4']['stream_hash']['value'])
+        self.assertIn('WARNING: a.mp4 has different content than in the previous scan although its size and date are unchanged.', printed)
+        self.assertIn('WARNING: 1 file(s) changed content without changing size or date', printed)
+        self.assertNotIn('copy.mp4 has different', printed)  # the untouched copy raises no alarm
+        text = '\n'.join(report_module.render_suspects(report, '/c.json', '/src', 3))
+        self.assertIn('Warning: 1 file(s) changed content without changing size or date since the previous scan', text)
+        self.assertIn('a.mp4', text.split('Warning: 1 file(s) changed content')[1])
+
+    def test_an_ordinary_edit_or_a_different_algorithm_raises_no_alarm(self):
+        first, _ = self.scan()
+        baseline = {i['path']: i for i in first['items']}
+        # A legitimate edit changes the size (or the date): not silent, so not reported.
+        (self.library / 'a.mp4').write_bytes(seed_video() + b'appended')
+        report, printed = self.scan(baseline=baseline)
+        self.assertEqual(report['content_changed'], [])
+        self.assertNotIn('WARNING', printed)
+        # An earlier hash made with another algorithm cannot be compared.
+        odd = {p: dict(i, stream_hash={'algorithm': 'md5', 'value': '00'}) for p, i in baseline.items()}
+        self.flip_middle_byte_keeping_size_and_date('copy.mp4')
+        report, printed = self.scan(baseline=odd)
+        self.assertEqual(report['content_changed'], [])
+
+    def test_the_alarm_persists_while_the_flagged_clean_file_is_reused(self):
+        first, _ = self.scan()
+        baseline = {i['path']: i for i in first['items']}
+        self.flip_middle_byte_keeping_size_and_date('a.mp4')
+        second, _ = self.scan(baseline=baseline)
+        flagged = next(i for i in second['items'] if i['path'] == 'a.mp4')
+        if flagged['status'] in catalog_tool.CLEAN_STATUSES:
+            third, _ = self.scan(reuse={i['path']: i for i in second['items']})
+            self.assertEqual([c['path'] for c in third['content_changed']], ['a.mp4'])  # not silently forgotten
+
+    def test_command_and_parser(self):
+        metadata = {'streams': [{'index': 0, 'codec_type': 'video', 'codec_name': 'h264'},
+                                {'index': 1, 'codec_type': 'audio', 'codec_tag_string': 'apac'}]}
+        plain, _ = catalog_tool.decode_command('a.mp4', metadata)
+        hashed, packet_only = catalog_tool.decode_command('a.mp4', metadata, with_hash=True)
+        self.assertNotIn('hash', plain)
+        self.assertEqual(hashed[:len(plain)], plain)  # the decode output is unchanged
+        self.assertEqual(hashed[len(plain):], ['-map', '0:0', '-map', '0:1', '-c', 'copy', '-f', 'hash', '-hash', 'sha256', '-'])
+        self.assertEqual(packet_only, [{'index': 1, 'codec_tag': 'apac'}])
+        fallback, _ = catalog_tool.decode_command('a.mp4', {}, with_hash=True)  # no stream information
+        self.assertEqual(fallback[8:], ['-map', '0:v?', '-map', '0:a?', '-f', 'null', '-',
+                                        '-map', '0:v?', '-map', '0:a?', '-c', 'copy', '-f', 'hash', '-hash', 'sha256', '-'])
+        parse = catalog_tool.parse_hash
+        self.assertEqual(parse('noise\nSHA256=ABCDEF0123\n'), 'abcdef0123')
+        self.assertEqual(parse('sha256=00ff'), '00ff')
+        self.assertIsNone(parse('MD5=abcd'))
+        self.assertIsNone(parse(''))
+        self.assertIsNone(parse(None))
+
+    def test_a_file_with_undecodable_audio_still_gets_its_hash_and_no_false_alarm(self):
+        good = self.base / 'good.mp4'
+        good.write_bytes(seed_video())
+        undecodable_audio_copy(good, self.library / 'iphone.mp4')
+        report, _ = self.scan()
+        item = next(i for i in report['items'] if i['path'] == 'iphone.mp4')
+        self.assertEqual(item['status'], 'decode-clean')
+        self.assertRegex(item['stream_hash']['value'], r'^[0-9a-f]{64}$')
+        self.assertTrue(item['packet_checked_streams'])
+
+
+@needs_ffmpeg
 class RunScanTests(unittest.TestCase):
     """recover.py's scan entry point, in-process: which folder it uses and what it tells the user."""
 
@@ -719,7 +1023,7 @@ class RunScanTests(unittest.TestCase):
         base = Path(self.tmp.name)
         self.recover = load('recover')
         r = self.recover
-        r.WORK, r.LIBRARY = base / 'work', junk_library(base / 'library', 5)
+        r.WORK, r.LIBRARY = base / 'work', tiny_library(base / 'library', 5)
         r.HOST_CASE, r.HOST_LIBRARY = '', ''
         r.WORK.mkdir()
         patcher = patch.dict(os.environ, {'SCAN_MODE': 'probe'})
@@ -727,6 +1031,9 @@ class RunScanTests(unittest.TestCase):
         os.environ.pop('SCAN_FRESH', None)
         os.environ.pop('SCAN_HOST_ROOT', None)
         self.addCleanup(patcher.stop)
+        stamps = distinct_scan_names()
+        stamps.start()
+        self.addCleanup(stamps.stop)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -747,15 +1054,16 @@ class RunScanTests(unittest.TestCase):
         code, printed = self.run_scan()
         self.assertEqual(code, 0)
         self.assertIn(f'Resuming the interrupted scan saved in {before / "catalog"}', printed)
-        self.assertIn('Scan finished: 5 video file(s) checked (2 kept from the interrupted scan).', printed)
+        self.assertIn('Scan finished: 5 video file(s) checked (2 unchanged and skipped).', printed)
         self.assertEqual(self.scans(), [before])  # no second scan folder
         self.assertTrue(json.loads((before / 'catalog/catalog.json').read_text())['complete'])
 
-    def test_after_a_finished_scan_the_next_run_starts_a_new_one(self):
+    def test_after_a_finished_scan_the_next_run_builds_on_it_in_a_new_folder(self):
         self.assertEqual(self.run_scan()[0], 0)
         code, printed = self.run_scan()
         self.assertEqual(code, 0)
-        self.assertNotIn('Resuming', printed)
+        self.assertIn('Building on the last complete scan', printed)
+        self.assertIn('Scan finished: 5 video file(s) checked (5 unchanged and skipped).', printed)
         self.assertEqual(len(self.scans()), 2)
 
     def test_fresh_flag_ignores_an_interrupted_scan(self):
@@ -764,13 +1072,14 @@ class RunScanTests(unittest.TestCase):
             code, printed = self.run_scan()
         self.assertEqual(code, 0)
         self.assertNotIn('Resuming', printed)
+        self.assertIn('Scanning everything again (--fresh).', printed)  # no complete scan to compare with
         self.assertEqual(len(self.scans()), 2)
 
-    def test_a_different_mode_is_not_resumed_and_the_user_is_told(self):
+    def test_a_different_mode_is_not_reused_and_the_user_is_told(self):
         self.run_scan(Interrupt(at=3))
         with patch.dict(os.environ, {'SCAN_MODE': 'full'}):
             code, printed = self.run_scan()
-        self.assertIn('Not resuming an earlier scan: the interrupted scan used mode "probe", not "full". Starting a new scan.', printed)
+        self.assertIn('Not reusing an earlier scan: the interrupted scan used mode "probe", not "full". Scanning everything.', printed)
         self.assertEqual(len(self.scans()), 2)
 
     def test_sigterm_handler_is_restored_after_the_scan(self):
@@ -778,22 +1087,22 @@ class RunScanTests(unittest.TestCase):
         self.run_scan()
         self.assertIs(signal.getsignal(signal.SIGTERM), before)
 
-    def test_summary_mentions_kept_files_only_when_there_are_some(self):
+    def test_summary_mentions_skipped_files_only_when_there_are_some(self):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             self.recover.finish_scan({'items': [{}], 'complete': True, 'walk_errors': []}, Path('/work/s/catalog'))
         self.assertIn('Scan finished: 1 video file(s) checked.', out.getvalue())
-        self.assertNotIn('kept', out.getvalue())
+        self.assertNotIn('skipped', out.getvalue())
 
 
-@unittest.skipUnless(os.name == 'posix' and shutil.which('ffprobe'), 'needs POSIX signals and ffprobe')
+@unittest.skipUnless(os.name == 'posix' and shutil.which('ffprobe') and shutil.which('ffmpeg'), 'needs POSIX signals and ffmpeg')
 class RealSignalTests(unittest.TestCase):
     """The real recover.py process, interrupted the way Ctrl-C and `docker stop` do it."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.base = Path(self.tmp.name)
-        self.library = junk_library(self.base / 'library', 40)
+        self.library = tiny_library(self.base / 'library', 40)
         (self.base / 'work').mkdir()
         self.env = dict(os.environ, REPAIR_WORK=str(self.base / 'work'), REPAIR_LIBRARY=str(self.library),
                         REPAIR_INPUT=str(self.base / 'input'), REPAIR_REFERENCES=str(self.base / 'refs'),
