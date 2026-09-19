@@ -12,6 +12,10 @@ import time
 import uuid
 from fractions import Fraction
 
+# Also supports loading this script directly for local tests.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from progress import Progress, say
+
 INPUT = Path(os.environ.get('REPAIR_INPUT', '/input')).resolve()
 REFS = Path(os.environ.get('REPAIR_REFERENCES', '/references')).resolve()
 WORK = Path(os.environ.get('REPAIR_WORK', '/work')).resolve()
@@ -33,9 +37,13 @@ def inside(root, name):
 
 def digest(path):
     h = hashlib.sha256()
-    with path.open('rb') as f:
-        for block in iter(lambda: f.read(1024 * 1024), b''):
-            h.update(block)
+    size = path.stat().st_size
+    read = 0
+    with Progress('Checking file fingerprint', lambda: read / size if size else None):
+        with path.open('rb') as f:
+            for block in iter(lambda: f.read(1024 * 1024), b''):
+                h.update(block)
+                read += len(block)
     return h.hexdigest()
 
 
@@ -45,21 +53,43 @@ def attempt(label):
     return p
 
 
-def run(args, log, stdout=None):
+def run(args, log, stdout=None, duration=None):
     args = list(map(str, args))
+    labels = {'decode': 'Checking all video and audio for errors',
+              'retained-decode': 'Checking retained video frames',
+              'untrunc': 'Reconstructing the damaged container',
+              'extract': 'Extracting video for frame reconstruction',
+              'remux': 'Writing reconstructed video',
+              'rotation': 'Restoring video orientation',
+              'audio': 'Saving full recovered audio'}
+    label = labels.get(log.stem, 'Saving review image' if log.stem.startswith('frame-') else log.stem)
+    progress_file = log.with_suffix('.progress')
+    if Path(args[0]).name == 'ffmpeg':
+        args[1:1] = ['-nostats', '-progress', str(progress_file)]
+
+    def fraction():
+        if not duration or not progress_file.exists():
+            return None
+        values = dict(line.split('=', 1) for line in progress_file.read_text().splitlines() if '=' in line)
+        return float(values.get('out_time_us', 0)) / 1000000 / duration
+
     save(log.with_suffix('.command.json'), args)
-    with log.open('w') as err:
+    with Progress(label, fraction) as progress, log.open('w') as err:
         try:
             r = subprocess.run(args, stdout=stdout if stdout is not None else err,
                                stderr=err, timeout=TIMEOUT, check=False)
+            if r.returncode:
+                progress.outcome = f'exit {r.returncode}; see {log}'
             return r.returncode
         except subprocess.TimeoutExpired:
             err.write('\nTIMEOUT: experiment stopped; output is incomplete.\n')
+            progress.outcome = f'timed out after {TIMEOUT}s; output incomplete'
             return 124
 
 
 def probe(path):
-    r = subprocess.run(['ffprobe', '-v', 'error', '-show_format', '-show_streams',
+    with Progress('Reading video metadata'):
+        r = subprocess.run(['ffprobe', '-v', 'error', '-show_format', '-show_streams',
                         '-of', 'json', str(path)], capture_output=True, text=True,
                        timeout=TIMEOUT)
     return {'returncode': r.returncode, 'errors': r.stderr,
@@ -71,10 +101,11 @@ def verify(path, out):
     info = probe(path)
     save(out / 'probe.json', info)
     log = out / 'decode.log'
+    length = float(info['metadata'].get('format', {}).get('duration') or 0)
     # Decode all audio/video. Exit status alone is insufficient: FFmpeg can
     # conceal corruption and still exit zero. Count its error-level messages.
     rc = run(['ffmpeg', '-v', 'error', '-nostdin', '-threads', '2', '-i', path,
-              '-map', '0:v?', '-map', '0:a?', '-f', 'null', '-'], log)
+              '-map', '0:v?', '-map', '0:a?', '-f', 'null', '-'], log, duration=length)
     messages = [s for s in log.read_text().splitlines() if s.strip()]
     # Null muxer rounds timestamps; duplicate DTS here is not a picture
     # decoding error. Preserve it separately instead of rejecting a reference.
@@ -99,6 +130,7 @@ def verify(path, out):
                  '-frames:v', '1', '-vf', 'scale=480:-2', '-n', out / f'frame-{n}.jpg'],
                 out / f'frame-{n}.log')
     save(out / 'report.json', result)
+    say(f'Verification: {result["status"]} · {lines} decoding error messages · {out / "report.json"}')
     return result
 
 
@@ -107,7 +139,8 @@ def repair(broken, reference, skip=False):
     # Never hardlink the original: the tool receives an independent copy.
     staged = out / 'input' / broken.name
     staged.parent.mkdir()
-    shutil.copyfile(broken, staged)
+    with Progress('Copying input for a separate attempt'):
+        shutil.copyfile(broken, staged)
     before = digest(broken)
     save(out / 'inputs.json', {'original': str(broken), 'original_sha256': before,
          'reference': str(reference), 'reference_sha256': digest(reference), 'skip_unknown': skip})
@@ -176,6 +209,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('action', choices=['inventory', 'repair', 'auto', 'verify', 'reframe', 'scan', 'clean-tail'])
     a = p.parse_args()
+    say(f'Starting {a.action}. Long stages report activity every 5 seconds; estimates are per stage.')
     if a.action == 'clean-tail':
         if os.environ.get('ALLOW_TRIM') != '1':
             raise ValueError('Cleanup excludes damaged video and shortens audio: set ALLOW_TRIM=1 explicitly')
@@ -219,12 +253,15 @@ def main():
         if not refs:
             raise ValueError('Add healthy clips to references/ first')
         results = []
-        for reference in refs:
+        say(f'Plan: {len(refs)} references, 2 repair modes each; reconstruction and verification as needed.')
+        for ref_index, reference in enumerate(refs, 1):
+            say(f'\nReference {ref_index}/{len(refs)}: {reference.name}')
             refcheck = verify(reference, attempt('reference') / 'verification')
             if refcheck['status'] != 'decode-clean-needs-review':
                 print(f'Skipping reference with decode errors: {reference}', flush=True)
                 continue
             for skip in (False, True):
+                say(f'Attempt {2 if skip else 1}/2: {"skip unknown data" if skip else "standard repair"}')
                 current = repair(broken, reference, skip)
                 results.extend(current)
                 if os.environ.get('FPS') and not any(r['status'] == 'decode-clean-needs-review' for r in current):

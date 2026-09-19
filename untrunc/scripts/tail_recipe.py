@@ -7,51 +7,57 @@ import subprocess
 
 
 def clean(recovery, broken, candidate, recipe_path):
+    recovery.say('Cleanup: verify original → scan frames → validate → preserve audio → write → verify.')
     r = json.loads(recipe_path.read_text())
     if recovery.digest(broken) != r['original_sha256']:
         raise ValueError('This forensic recipe belongs to a different original; refusing to apply it')
     out = recovery.attempt('clean-tail')
-    data = broken.read_bytes()
+    with recovery.Progress('Reading original video'):
+        data = broken.read_bytes()
     hits = []
-    for match in re.finditer(b'[\x41\x65]', data):
-        i = match.start()
-        if i < 4:
-            continue
-        n = int.from_bytes(data[i-4:i], 'big')
-        if not 100 < n < 1000000 or i+n > len(data):
-            continue
-        bits = ''.join(f'{v:08b}' for v in data[i+1:i+24].replace(b'\x00\x00\x03', b'\x00\x00'))
-        p = 0
-        def ue():
-            nonlocal p
-            q = p
-            while bits[q] == '0':
-                q += 1
-            zeros = q-p
-            value = int(bits[q:q+zeros+1], 2)-1
-            p = q+zeros+1
-            return value
-        try:
-            first, slice_type, pps = ue(), ue(), ue()
-            frame = int(bits[p:p+r['frame_num_bits']], 2)
-        except (IndexError, ValueError):
-            continue
-        typ = data[i] & 31
-        if first == 0 and pps == 0 and ((typ == 5 and slice_type == 7 and frame == 0) or
-                                      (typ == 1 and slice_type == 5 and 0 < frame < r['gop_cycle'])):
-            hits.append((i, n, frame))
+    scanned = 0
+    with recovery.Progress('Scanning original frame boundaries', lambda: scanned / len(data)):
+        for match in re.finditer(b'[\x41\x65]', data):
+            i = match.start()
+            scanned = i
+            if i < 4:
+                continue
+            n = int.from_bytes(data[i-4:i], 'big')
+            if not 100 < n < 1000000 or i+n > len(data):
+                continue
+            bits = ''.join(f'{v:08b}' for v in data[i+1:i+24].replace(b'\x00\x00\x03', b'\x00\x00'))
+            p = 0
+            def ue():
+                nonlocal p
+                q = p
+                while bits[q] == '0':
+                    q += 1
+                zeros = q-p
+                value = int(bits[q:q+zeros+1], 2)-1
+                p = q+zeros+1
+                return value
+            try:
+                first, slice_type, pps = ue(), ue(), ue()
+                frame = int(bits[p:p+r['frame_num_bits']], 2)
+            except (IndexError, ValueError):
+                continue
+            typ = data[i] & 31
+            if first == 0 and pps == 0 and ((typ == 5 and slice_type == 7 and frame == 0) or
+                                          (typ == 1 and slice_type == 5 and 0 < frame < r['gop_cycle'])):
+                hits.append((i, n, frame))
     if len(hits) != r['expected_candidates'] or any(x[2] != n % r['gop_cycle'] for n, x in enumerate(hits)):
         raise ValueError('Candidate count/continuity differs from the documented recipe')
     retained = hits[:-r['exclude_final_candidates']]
     raw = out / 'retained.h264'
-    with raw.open('xb') as f:
+    with recovery.Progress('Writing retained video frames'), raw.open('xb') as f:
         for header in (r['sps_hex'], r['pps_hex']):
             f.write(b'\0\0\0\1'+bytes.fromhex(header))
         for offset, length, _ in retained:
             f.write(b'\0\0\0\1'+data[offset:offset+length])
     del data
+    recovery.say(f'Retaining {len(retained)} frames; full audio will be saved separately.')
     rc = recovery.run(['ffmpeg', '-v', 'error', '-nostdin', '-threads', '2', '-i', raw,
-                       '-f', 'null', '-'], out / 'retained-decode.log')
+                       '-f', 'null', '-'], out / 'retained-decode.log', duration=len(retained) / r['fps'])
     if rc or (out / 'retained-decode.log').read_text().strip():
         raise ValueError(f'Retained sequence failed verification: {out}')
     # Preserve every available audio sample separately before shortening the derivative.

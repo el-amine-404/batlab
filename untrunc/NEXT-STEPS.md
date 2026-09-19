@@ -49,6 +49,16 @@ The scan may run before `broken` names an existing file; inspect the catalog, th
 set `broken` before preparing the case. Empty `references` selects ranked healthy
 clips. Explicit references override ranking. Size/mtime checks reject stale scans.
 
+The terminal shows named stages, reference/attempt counts and elapsed time.
+Long-running stages print activity every five seconds. Full decoding checks show
+approximate percentage and ETA when duration is available; other stages explicitly
+say remaining time is unknown. Estimates cover the current stage, not the entire
+experiment. Detailed tool errors remain in the log files.
+
+After updating scripts in this repository, run `make untrunc-build` again: the
+container contains a copy of the scripts. An already-running container continues
+using its previous version.
+
 Results go under the configured case's `work/` directory. Each attempt records
 commands, hashes, metadata, decode errors and review frames. The latest summary's
 `results.json` lists candidate paths; `/work/` means this case's work directory on

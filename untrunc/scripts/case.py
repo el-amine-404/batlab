@@ -11,6 +11,9 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from progress import Progress
+
 REPO = Path(__file__).resolve().parents[2]
 
 
@@ -34,6 +37,11 @@ def source(root, value):
 
 
 def stage(src, dst):
+    with Progress(f'Preparing {src.name}'):
+        return stage_file(src, dst)
+
+
+def stage_file(src, dst):
     if dst.exists():
         if sha(src) != sha(dst):
             raise ValueError(f'Refusing to overwrite different bytes: {dst}')
@@ -158,6 +166,7 @@ def main():
         best = max(with_audio, key=lambda r: float(r['durations']['audio']))
         env.update(CANDIDATE=best['file'], RECIPE=c['cleanup_recipe'], ALLOW_TRIM='1')
     cmd = ['docker', 'compose', '-f', str(REPO / 'compose/untrunc/docker-compose.yml'), 'run', '--rm', '--no-deps']
+    print(f'Outputs and logs: {root / "work"}', flush=True)
     return subprocess.call(cmd + (['scanner'] if args.action == 'scan' else ['untrunc', 'clean-tail' if args.action == 'clean' else 'auto']), env=env, cwd=REPO)
 
 
