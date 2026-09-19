@@ -105,6 +105,10 @@ def render_suspects(catalog, catalog_file, src, top, warnings=()):
              f'Scanned {len(items)} video(s), mode {catalog.get("mode", "unknown")}: '
              + (' · '.join(f'{counts[s]} {s}' for s in order) or 'nothing found')]
     lines += [f'Warning: {w}' for w in warnings]
+    partial = sum(1 for i in items if i.get('packet_checked_streams'))
+    if partial:
+        lines.append(f'Note: {partial} video(s) have audio ffmpeg cannot decode (for example Apple spatial audio); '
+                     'those tracks were checked at packet level only (truncation, index damage), not decoded.')
     if catalog.get('mode') == 'probe':
         lines.append('Note: probe scans do not decode-verify healthy files, so no references can be ranked. '
                      'Rescan with scan_mode "full".')

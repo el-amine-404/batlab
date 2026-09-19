@@ -307,6 +307,112 @@ class ScanProgressTests(unittest.TestCase):
             self.assertIn('Found 1 video file(s) to scan.', lines)
 
 
+def undecodable_audio_copy(good, target):
+    """Relabel good's AAC track as a codec ffmpeg has no decoder for, like Apple spatial audio (apac)."""
+    data = good.read_bytes()
+    assert data.count(b'mp4a') == 1 and data.count(b'esds') >= 1
+    target.write_bytes(data.replace(b'mp4a', b'apac').replace(b'esds', b'esdz'))  # same lengths
+
+
+@unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'ffmpeg is required')
+class UndecodableAudioTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+        good = self.base / 'good.mp4'
+        subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=160x120:rate=30:duration=2',
+                        '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2', '-c:v', 'libx264', '-bf', '0',
+                        '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-movflags', '+faststart', str(good)], check=True)
+        self.library = self.base / 'library'
+        self.library.mkdir()
+        undecodable_audio_copy(good, self.library / 'iphone.mp4')
+        self.good = good
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def probe(self, file):
+        out = subprocess.run(['ffprobe', '-v', 'error', '-show_streams', '-of', 'json', str(file)],
+                             capture_output=True, text=True, check=True).stdout
+        return json.loads(out)
+
+    def scan(self):
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            result = catalog_tool.scan(self.library, self.base / 'out')
+        return result, out.getvalue()
+
+    def test_fixture_really_has_an_audio_track_ffmpeg_cannot_decode(self):
+        audio = self.probe(self.library / 'iphone.mp4')['streams'][1]
+        self.assertEqual((audio['codec_type'], audio.get('codec_name'), audio['codec_tag_string']), ('audio', None, 'apac'))
+        old = subprocess.run(['ffmpeg', '-v', 'error', '-nostdin', '-i', str(self.library / 'iphone.mp4'),
+                              '-map', '0:v?', '-map', '0:a?', '-f', 'null', '-'], capture_output=True, text=True)
+        self.assertIn('no decoder found', old.stderr)  # what made healthy iPhone files look damaged
+
+    def test_command_decodes_what_it_can_and_packet_checks_the_rest(self):
+        metadata = {'streams': [
+            {'index': 0, 'codec_type': 'video', 'codec_name': 'hevc'},
+            {'index': 1, 'codec_type': 'data'},
+            {'index': 2, 'codec_type': 'audio', 'codec_name': 'aac'},
+            {'index': 3, 'codec_type': 'audio', 'codec_tag_string': 'apac'},
+            {'index': 4, 'codec_type': 'audio', 'codec_name': 'unknown', 'codec_tag_string': 'zzzz'},
+            {'index': 5, 'codec_type': 'audio', 'codec_name': 'none', 'codec_tag_string': 'yyyy'}]}
+        command, packet_only = catalog_tool.decode_command('/x/a.mov', metadata)
+        self.assertEqual(command, ['ffmpeg', '-v', 'error', '-nostdin', '-threads', '2', '-i', '/x/a.mov',
+                                   '-map', '0:0', '-map', '0:2', '-map', '0:3', '-c:2', 'copy',
+                                   '-map', '0:4', '-c:3', 'copy', '-map', '0:5', '-c:4', 'copy',
+                                   '-f', 'null', '-'])  # positions are output streams
+        self.assertEqual([x['index'] for x in packet_only], [3, 4, 5])
+
+    def test_ordinary_files_and_undecodable_video_keep_the_strict_check(self):
+        plain = {'streams': [{'index': 0, 'codec_type': 'video', 'codec_name': 'h264'},
+                             {'index': 1, 'codec_type': 'audio', 'codec_name': 'aac'}]}
+        command, packet_only = catalog_tool.decode_command('a.mp4', plain)
+        self.assertNotIn('copy', command)
+        self.assertEqual(packet_only, [])
+        odd_video = {'streams': [{'index': 0, 'codec_type': 'video', 'codec_tag_string': 'zzzz'}]}
+        command, packet_only = catalog_tool.decode_command('a.mp4', odd_video)
+        self.assertNotIn('copy', command)  # a picture that cannot be decoded is reported, not waved through
+        self.assertEqual(packet_only, [])
+        fallback = catalog_tool.decode_command('a.mp4', {})[0]  # no stream information: the original mapping
+        self.assertEqual(fallback[8:], ['-map', '0:v?', '-map', '0:a?', '-f', 'null', '-'])
+
+    def test_healthy_file_with_undecodable_audio_is_clean_but_labelled(self):
+        result, printed = self.scan()
+        item = result['items'][0]
+        self.assertEqual(item['status'], 'decode-clean')
+        self.assertEqual(item['packet_checked_streams'], [{'index': 1, 'codec_tag': 'apac'}])
+        self.assertEqual(result['rankings'], {})
+        self.assertIn('1 file(s) have audio that ffmpeg cannot decode', printed)
+
+    def test_truncation_is_still_detected_through_the_packet_check(self):
+        data = (self.library / 'iphone.mp4').read_bytes()
+        (self.library / 'iphone.mp4').write_bytes(data[:int(len(data) * 0.6)])  # index at the front, data cut
+        result, _ = self.scan()
+        item = result['items'][0]
+        self.assertEqual(item['status'], 'decode-errors')
+        log = (self.base / 'out' / item['log']).read_text()
+        self.assertIn('stream 1', log)  # the audio track's own packets were reported as partial
+        self.assertIn('partial file', log)
+
+    def test_repair_verification_accepts_it_too(self):
+        recover = load('recover')
+        recover.WORK = self.base / 'work'
+        recover.WORK.mkdir()
+        with contextlib.redirect_stdout(io.StringIO()):
+            report_data = recover.verify(self.library / 'iphone.mp4', self.base / 'check')
+        self.assertEqual(report_data['status'], 'decode-clean-needs-review')
+        self.assertEqual(report_data['packet_checked_streams'], [{'index': 1, 'codec_tag': 'apac'}])
+
+    def test_suspect_listing_mentions_packet_only_checks(self):
+        catalog = {'complete': True, 'mode': 'full', 'rankings': {}, 'items': [
+            {'path': 'a.mov', 'status': 'decode-clean', 'packet_checked_streams': [{'index': 2}]},
+            {'path': 'b.mov', 'status': 'decode-clean'}]}
+        text = '\n'.join(report.render_suspects(catalog, '/c.json', '/src', 3))
+        self.assertIn('Note: 1 video(s) have audio ffmpeg cannot decode', text)
+        plain = '\n'.join(report.render_suspects(dict(catalog, items=[catalog['items'][1]]), '/c.json', '/src', 3))
+        self.assertNotIn('cannot decode', plain)
+
+
 class StagingTests(Fixture):
     def test_interrupted_copy_is_replaced_on_the_next_run_not_refused(self):
         src, dst = self.src / 'trip/bad-a.mp4', self.base / 'input.mp4'

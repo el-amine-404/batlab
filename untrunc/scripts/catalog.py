@@ -37,6 +37,29 @@ def signature(metadata):
             'model': tags.get('model') or tags.get('com.apple.quicktime.model')}
 
 
+def decode_command(path, metadata):
+    """ffmpeg command that decodes every audio/video stream, plus the streams it can only packet-check.
+
+    Audio ffmpeg has no decoder for (for example Apple spatial audio, tag apac) cannot be decoded, but its
+    packets are still read with stream copy in the same pass. That reports truncation and index damage, not
+    bit errors inside that audio. A video stream without a decoder stays in the decode list so it is reported:
+    a picture that cannot be decoded cannot be verified.
+    """
+    args = ['ffmpeg', '-v', 'error', '-nostdin', '-threads', '2', '-i', str(path)]
+    packet_only, position = [], 0
+    for stream in metadata.get('streams', []):
+        if stream.get('codec_type') not in ('video', 'audio'):
+            continue
+        args += ['-map', f'0:{stream["index"]}']
+        if stream['codec_type'] == 'audio' and stream.get('codec_name') in (None, '', 'unknown', 'none'):
+            args += [f'-c:{position}', 'copy']
+            packet_only.append({'index': stream['index'], 'codec_tag': stream.get('codec_tag_string')})
+        position += 1
+    if not position:
+        args += ['-map', '0:v?', '-map', '0:a?']
+    return args + ['-f', 'null', '-'], packet_only
+
+
 def rank(target, items, limit=5):
     ranked = []
     for item in items:
@@ -105,19 +128,24 @@ def scan(root, out, mode='full', timeout=1800):
                 item['status'] = 'probe-only-unverified'
             else:
                 log = out / f'decode-{len(items):05d}.log'
+                command, packet_only = decode_command(path, metadata)
                 with log.open('w') as f:
-                    r = subprocess.run(['ffmpeg', '-v', 'error', '-nostdin', '-threads', '2',
-                                        '-i', str(path), '-map', '0:v?', '-map', '0:a?', '-f', 'null', '-'],
-                                       stdout=subprocess.DEVNULL, stderr=f, timeout=timeout)
+                    r = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=f, timeout=timeout)
                 messages = log.read_text().splitlines()
                 errors_found = [s for s in messages if s.strip() and not ('[null @' in s and 'non monotonically increasing dts' in s)]
                 item.update(decode_returncode=r.returncode, error_log_lines=len(errors_found), log=log.name)
+                if packet_only:
+                    item['packet_checked_streams'] = packet_only
                 item['status'] = 'decode-clean' if r.returncode == 0 and not errors_found else 'decode-errors'
         except (OSError, ValueError, subprocess.TimeoutExpired) as e:
             item.update(status='scan-error', scan_error=str(e))
         items.append(item)
         # A partial scan is useful if interrupted, but must not look complete.
         (out / 'catalog.json').write_text(json.dumps({'complete': False, 'mode': mode, 'items': items}, indent=2))
+    partial = [i for i in items if i.get('packet_checked_streams')]
+    if partial:
+        print(f'Note: {len(partial)} file(s) have audio that ffmpeg cannot decode (for example Apple spatial audio); '
+              'those tracks were checked at packet level only.', flush=True)
     suspects = [i for i in items if i['status'] in ('unreadable-or-no-video', 'decode-errors')]
     report = {'complete': not errors, 'walk_errors': errors, 'mode': mode,
               'root_in_container': str(root), 'host_source_root': (os.environ.get('SCAN_HOST_ROOT') or str(root)), 'items': items,

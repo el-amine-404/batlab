@@ -225,6 +225,14 @@ videos, decode errors, unreadable files and scan failures. Unreadable is not pro
 of corruption: permissions and unsupported formats can also prevent reading.
 `scan_mode: "probe"` is faster but does not certify healthy reference candidates.
 
+Audio that ffmpeg has no decoder for (for example the Apple spatial-audio track on recent
+iPhone recordings, tag `apac`) cannot be decoded. Those tracks are still read packet by
+packet in the same pass, so truncation and index damage are detected, but bit errors
+inside that audio are not. Such files stay `decode-clean` and are marked in the catalog
+(`packet_checked_streams`), in the scan summary and in the suspects listing. A *video*
+track without a decoder is still reported as a decode error, because the picture cannot be
+verified. The same rule applies when repairs are verified.
+
 Rankings compare available codec configuration, dimensions, frame rate, audio,
 device metadata, directory and dates. Missing metadata weakens the ranking, which
 is labelled heuristic-only. Matching dates do not establish a shared camera.

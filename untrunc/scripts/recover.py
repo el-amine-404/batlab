@@ -14,6 +14,7 @@ from fractions import Fraction
 
 # Also supports loading this script directly for local tests.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from catalog import decode_command
 from progress import Progress, say
 
 INPUT = Path(os.environ.get('REPAIR_INPUT', '/input')).resolve()
@@ -104,8 +105,8 @@ def verify(path, out):
     length = float(info['metadata'].get('format', {}).get('duration') or 0)
     # Decode all audio/video. Exit status alone is insufficient: FFmpeg can
     # conceal corruption and still exit zero. Count its error-level messages.
-    rc = run(['ffmpeg', '-v', 'error', '-nostdin', '-threads', '2', '-i', path,
-              '-map', '0:v?', '-map', '0:a?', '-f', 'null', '-'], log, duration=length)
+    command, packet_only = decode_command(path, info['metadata'])
+    rc = run(command, log, duration=length)
     messages = [s for s in log.read_text().splitlines() if s.strip()]
     # Null muxer rounds timestamps; duplicate DTS here is not a picture
     # decoding error. Preserve it separately instead of rejecting a reference.
@@ -119,7 +120,7 @@ def verify(path, out):
     result = {'file': str(path), 'sha256': digest(path), 'decode_returncode': rc,
               'error_log_lines': lines, 'null_muxer_timing_warnings': timing, 'durations': durations,
               'status': 'decode-clean-needs-review' if clean else 'needs-investigation',
-              'complete_recovery': 'unknown', 'visual_review': 'pending',
+              'packet_checked_streams': packet_only, 'complete_recovery': 'unknown', 'visual_review': 'pending',
               'audio_sync_review': 'pending'}
     # Export small review frames including the tail. These are evidence for a
     # reviewer, not automatic proof of correctness or a substitute for listening.
