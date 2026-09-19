@@ -58,6 +58,7 @@ endef
 help:
 	@echo ""
 	@echo "Maa qall wa dall"
+	@echo "  make untrunc-help - Video recovery and verification tools"
 	@echo ""
 	@echo "  make list       - List all discovered stacks"
 	@echo "  make setup      - Create base directories and symlinks"
@@ -428,3 +429,6 @@ new:
 		> compose/$(STACK)/docker-compose.yml
 
 	@echo "Created compose/$(STACK)"
+
+# Offline video recovery tools (see untrunc/README.md).
+include $(REPO_ROOT)/untrunc/Makefile

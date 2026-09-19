@@ -1,0 +1,8 @@
+{
+  "home": "~/.local/share/batlab-hermes",
+  "base_url": "http://localhost:11434/v1",
+  "base_model": "qwen3.5:9b",
+  "model": "batlab-video-recovery",
+  "context_tokens": 65536,
+  "api_timeout_seconds": 1800
+}

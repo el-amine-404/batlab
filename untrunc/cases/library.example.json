@@ -1,0 +1,11 @@
+{
+  "case": "library-test",
+  "repair_root": "~/video-repair/cases",
+  "source_root": "/mnt/photos/library",
+  "broken": "relative/path/to/damaged.mp4",
+  "references": [],
+  "fps": "",
+  "max_references": 3,
+  "timeout_seconds": 1800,
+  "scan_mode": "full"
+}

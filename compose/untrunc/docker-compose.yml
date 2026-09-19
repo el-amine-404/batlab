@@ -1,0 +1,73 @@
+# One-shot tools: ordinary `make up` never launches a repair.
+services:
+  untrunc:
+    profiles: [tools]
+    image: local/batlab-untrunc:9d86ec9
+    build:
+      context: ../..
+      dockerfile: compose/untrunc/Dockerfile
+    user: "${REPAIR_UID:-1000}:${REPAIR_GID:-1000}"
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    cpus: "${REPAIR_CPUS:-4}"
+    mem_limit: "${REPAIR_MEMORY:-4g}"
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=256m
+    environment:
+      BROKEN: "${BROKEN:-}"
+      REFERENCE: "${REFERENCE:-}"
+      CANDIDATE: "${CANDIDATE:-}"
+      FPS: "${FPS:-}"
+      RECIPE: "${RECIPE:-}"
+      ALLOW_TRIM: "${ALLOW_TRIM:-0}"
+      REPAIR_TIMEOUT: "${REPAIR_TIMEOUT:-1800}"
+      MAX_REFERENCES: "${MAX_REFERENCES:-3}"
+    volumes:
+      - type: bind
+        source: ${REPAIR_CASE_DIR:-/tmp/batlab-untrunc-unconfigured}/input
+        target: /input
+        read_only: true
+        bind:
+          create_host_path: false
+          selinux: z
+      - type: bind
+        source: ${REPAIR_CASE_DIR:-/tmp/batlab-untrunc-unconfigured}/references
+        target: /references
+        read_only: true
+        bind:
+          create_host_path: false
+          selinux: z
+      - type: bind
+        source: ${REPAIR_CASE_DIR:-/tmp/batlab-untrunc-unconfigured}/work
+        target: /work
+        bind:
+          create_host_path: false
+          selinux: z
+
+      - type: bind
+        source: ${REPAIR_RECIPES_DIR:-${REPAIR_CASE_DIR:-/tmp/batlab-untrunc-unconfigured}/recipes}
+        target: /recipes
+        read_only: true
+        bind:
+          create_host_path: false
+          selinux: z
+
+  scanner:
+    extends:
+      service: untrunc
+    # The library is read-only and never recursively relabelled for SELinux.
+    security_opt: [no-new-privileges:true, label=disable]
+    environment:
+      SCAN_MODE: "${SCAN_MODE:-full}"
+      SCAN_HOST_ROOT: "${SCAN_HOST_ROOT:-}"
+    volumes:
+      - type: bind
+        source: ${SCAN_ROOT:-/tmp/batlab-untrunc-unconfigured}
+        target: /library
+        read_only: true
+        bind:
+          create_host_path: false
+    command: [scan]

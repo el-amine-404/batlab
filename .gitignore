@@ -48,3 +48,8 @@ __pycache__/
 *.swp
 *.swo
 *~
+
+# Private recovery inputs and recipes must stay outside this public repository.
+untrunc/cases/*.json
+!untrunc/cases/*.example.json
+untrunc/recipes/

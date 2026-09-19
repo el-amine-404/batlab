@@ -26,6 +26,7 @@ other related skills that i keep forgetting:
 - [static ip address](./docs/static_ip_address.md)
 - [samba shares](./docs/samba.md)
 - [import audit](./import-audit/README.md)
+- [video recovery and local AI agent](./untrunc/README.md)
 
 official links and descriptions of each hosted service:
 - [hosted services](./docs/hosted_services.md)

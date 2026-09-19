@@ -1,0 +1,7 @@
+**
+!untrunc/
+!untrunc/scripts/
+!untrunc/scripts/*.py
+!compose/
+!compose/untrunc/
+!compose/untrunc/Dockerfile
