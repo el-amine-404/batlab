@@ -9,7 +9,8 @@ REPAIR_DC = docker compose -f "$(REPO_ROOT)/compose/untrunc/docker-compose.yml"
 
 .PHONY: untrunc-init untrunc-build untrunc-config untrunc-inventory untrunc-repair untrunc-auto untrunc-verify untrunc-reframe untrunc-help
 untrunc-help:
-	@echo 'Saved workflows: untrunc-case-prepare / untrunc-case-scan / untrunc-case-run'
+	@echo 'Saved workflows: untrunc-case-scan / untrunc-case-suspects / untrunc-case-prepare / untrunc-case-run'
+	@echo 'Whole folder:    untrunc-case-scan, then untrunc-case-suspects (preview), then untrunc-case-batch [CASE_ARGS="--limit 5"]'
 	@echo 'REPAIR_CONFIG=$(HOME)/.config/batlab/case.json is the default replay config.'
 	@echo 'Optional recipe-based cleanup: untrunc-case-clean ALLOW_TRIM=1 (requires a private recipe)'
 	@echo 'Local agent: untrunc-agent-install / untrunc-agent-setup / untrunc-agent-model / untrunc-agent'
@@ -38,10 +39,11 @@ untrunc-inventory untrunc-repair untrunc-auto untrunc-verify untrunc-reframe:
 
 REPAIR_CONFIG ?= $(HOME)/.config/batlab/case.json
 AGENT_CONFIG ?= untrunc/agent/local.json
+CASE_ARGS ?=
 export SCAN_ROOT SCAN_MODE SCAN_HOST_ROOT
-.PHONY: untrunc-case-prepare untrunc-case-scan untrunc-case-run untrunc-agent-setup untrunc-agent-model untrunc-agent
-untrunc-case-prepare untrunc-case-scan untrunc-case-run untrunc-case-clean:
-	python3 "$(REPO_ROOT)/untrunc/scripts/case.py" $(patsubst untrunc-case-%,%,$@) --config "$(REPAIR_CONFIG)"
+.PHONY: untrunc-case-prepare untrunc-case-scan untrunc-case-suspects untrunc-case-batch untrunc-case-run untrunc-agent-setup untrunc-agent-model untrunc-agent
+untrunc-case-prepare untrunc-case-scan untrunc-case-suspects untrunc-case-batch untrunc-case-run untrunc-case-clean:
+	python3 "$(REPO_ROOT)/untrunc/scripts/case.py" $(patsubst untrunc-case-%,%,$@) --config "$(REPAIR_CONFIG)" $(CASE_ARGS)
 untrunc-agent-setup untrunc-agent-model untrunc-agent:
 	python3 "$(REPO_ROOT)/untrunc/scripts/case.py" $(patsubst untrunc-%,%,$@) --config "$(AGENT_CONFIG)"
 

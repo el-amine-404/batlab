@@ -1,7 +1,9 @@
 # Video recovery with Untrunc
 
 Start with [the repeatable next steps](NEXT-STEPS.md): private case configuration, library
-scanning/reference selection, optional forensic cleanup, and local agent setup.
+scanning/reference selection, `make untrunc-case-suspects` to list damaged-looking files
+and their healthy matches, `make untrunc-case-batch` to repair them all, optional forensic
+cleanup, and local agent setup.
 
 One-shot CPU tools for repair experiments, with FFmpeg verification and a reusable
 agent skill. Original media is read-only; each attempt gets its own directory.

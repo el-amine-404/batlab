@@ -204,8 +204,10 @@ Run in a terminal with working Docker Compose access:
 ```bash
 make untrunc-build
 make untrunc-case-scan
+make untrunc-case-suspects   # list damaged-looking files and their best healthy matches
 make untrunc-case-prepare
-make untrunc-case-run
+make untrunc-case-run        # repair the single file named by "broken"
+make untrunc-case-batch      # or repair every suspect found by the scan
 ```
 
 The targets default to `~/.config/batlab/case.json`. Use
@@ -243,6 +245,68 @@ commands, hashes, metadata, decode errors and review frames. The latest summary'
 the host. Inspect footage, audio synchronization, duration and orientation.
 Make may report `Error 2` even when candidates exist: check the verification report.
 Decode-clean is not proof of complete original recovery.
+
+## Find suspects and repair a whole folder
+
+After a scan, list what it found without starting Docker or reading the media:
+
+```bash
+make untrunc-case-suspects REPAIR_CONFIG=~/.config/batlab/case.json
+```
+
+It reads the newest scan for the case and prints, for each file that decodes with
+errors or cannot be read as video: its status, size, the first ffprobe or decoder
+message, and the ranked healthy matches. A `*` marks the matches a repair would
+use (`max_references`). It works even if the share is currently unmounted, and it warns
+when the scan is incomplete or belongs to a different `source_root`. The ranking is a
+hypothesis: check that a match really is the same camera and recording mode.
+
+To repair one of them, put its path (relative to `source_root`) in `broken` and run
+`make untrunc-case-run`. To repair **all** of them in turn:
+
+```bash
+make untrunc-case-batch REPAIR_CONFIG=~/.config/batlab/case.json
+make untrunc-case-batch REPAIR_CONFIG=... CASE_ARGS='--limit 1'   # try one first
+```
+
+Requirements and behaviour:
+- The latest scan must be complete, made with `scan_mode: "full"`, and for the same
+  `source_root`. A file changed after the scan is rejected as stale: rescan.
+- `broken` is ignored. `references` must be `[]` and `fps` empty: references come from
+  the scan's ranking for each file, and a frame rate is evidence about one file, so
+  use a single-file run when you have explicit references or a justified rate.
+- Each suspect gets its own case folder, `<repair_root>/<case>/batch/<name>-<id>/`, with
+  its own `input/`, `references/` and `work/`, so files never mix. The folder is
+  named from the file, its references and their size/modification time: a changed source
+  gets a new folder and the earlier one is kept.
+- Per file it does what `untrunc-case-run` does: stage the copies, then up to
+  `max_references` references, each in standard and skip-unknown modes. Suspects
+  without a decode-verified match are reported as `no references` and not attempted.
+- Files run one after another, so a long batch takes hours: expect the scan's decoding
+  time plus up to six repair attempts per file. Each attempt copies the damaged
+  file, so keep free space for several times the size of the damaged files.
+- Progress is saved in `<repair_root>/<case>/batch/batch-report.json` after every
+  file. **Ctrl-C is safe.** Running the same command again skips files that already
+  have a decode-clean candidate and retries the rest; delete a file's entry from the
+  report to force it again.
+- After 3 consecutive errors (for example Docker not reachable) it stops instead of
+  failing every remaining file. Fix the cause and run the command again.
+- `--limit N` processes at most N pending files now; run it again for the next N.
+
+Statuses in the summary:
+
+| Status | Meaning |
+|---|---|
+| `candidate ready` | At least one output decoded without errors. Its path is printed. |
+| `needs investigation` | Untrunc ran but no output was decode-clean. Read that file's `work/` reports. |
+| `no references` | The scan found no decode-verified healthy match for it. |
+| `error` | Staging or the container failed; the message says why. |
+
+Exit status: 0 when every suspect has a candidate, 2 when any file is unfinished or needs
+attention (`make` then prints `Error 2`, which does not mean the tool crashed), 1 when
+the batch stopped on errors or could not start, 130 when interrupted.
+**A decode-clean candidate is not proof of complete recovery:** play each one and check
+the footage, duration and audio sync before keeping it.
 
 ## Optional forensic cleanup
 

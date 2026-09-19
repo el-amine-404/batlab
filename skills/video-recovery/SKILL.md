@@ -31,8 +31,10 @@ outside the repository. This skill is a procedure, not trained model weights.
    and container structure. SMB URLs need a readable filesystem mount or copy.
 2. Choose healthy references by codec configuration, device and recording mode;
    nearest date alone is insufficient. Use inventory and decode verification. `untrunc-case-scan` creates a read-only
-   full-decode catalog with explainable reference rankings; `untrunc-case-prepare`
-   stages selected files from a saved case JSON. Missing codec metadata makes
+   full-decode catalog with explainable reference rankings; `untrunc-case-suspects`
+   lists the suspects and their ranked matches, `untrunc-case-prepare`
+   stages selected files from a saved case JSON and `untrunc-case-batch` repairs every
+   suspect in isolated case folders (references from the scan, no `fps`). Missing codec metadata makes
    rankings heuristic-only, not evidence of the same device.
 3. Run default Untrunc and, if it stops at unknown sequences, the separate `-s`
    attempt. `untrunc-auto` automates bounded trials and writes JSON reports.
