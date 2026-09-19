@@ -376,13 +376,43 @@ class UndecodableAudioTests(unittest.TestCase):
         fallback = catalog_tool.decode_command('a.mp4', {})[0]  # no stream information: the original mapping
         self.assertEqual(fallback[8:], ['-map', '0:v?', '-map', '0:a?', '-f', 'null', '-'])
 
+    def test_a_garbled_tag_may_be_damage_so_it_is_still_reported(self):
+        data = (self.library / 'iphone.mp4').read_bytes()
+        (self.library / 'iphone.mp4').write_bytes(data.replace(b'apac', b'\xc3\x01\x9f\x02'))
+        audio = self.probe(self.library / 'iphone.mp4')['streams'][1]
+        self.assertEqual((audio.get('codec_name'), audio['codec_tag_string']), (None, '[195][1][159][2]'))
+        result, printed = self.scan()
+        item = result['items'][0]
+        self.assertEqual(item['status'], 'decode-errors')  # cannot be told apart from a damaged header
+        self.assertNotIn('packet_checked_streams', item)
+        self.assertNotIn('no decoder for (codec tag', printed)
+
+    def test_odd_but_well_formed_tags_are_named_in_the_note(self):
+        data = (self.library / 'iphone.mp4').read_bytes()
+        (self.library / 'iphone.mp4').write_bytes(data.replace(b'apac', b'Xpac'))
+        result, printed = self.scan()
+        self.assertEqual(result['items'][0]['status'], 'decode-clean')
+        self.assertIn('codec tag: Xpac x1)', printed)  # no explanation invented for an unknown tag
+        self.assertNotIn('Apple', printed)
+        self.assertIn('An unexpected tag name deserves a closer look', printed)
+
+    def test_note_counts_files_and_tags_without_asserting_a_cause(self):
+        note = catalog_tool.packet_only_note([
+            {'packet_checked_streams': [{'index': 2, 'codec_tag': 'apac'}]},
+            {'packet_checked_streams': [{'index': 2, 'codec_tag': 'apac'}, {'index': 3, 'codec_tag': 'zzzz'}]},
+            {}])
+        self.assertTrue(note.startswith('2 file(s) contain audio that ffmpeg has no decoder for (codec tag: '))
+        self.assertIn('apac x2 = Apple spatial audio, zzzz x1)', note)
+        self.assertEqual(catalog_tool.packet_only_note([{}, {'packet_checked_streams': []}]), '')
+
     def test_healthy_file_with_undecodable_audio_is_clean_but_labelled(self):
         result, printed = self.scan()
         item = result['items'][0]
         self.assertEqual(item['status'], 'decode-clean')
         self.assertEqual(item['packet_checked_streams'], [{'index': 1, 'codec_tag': 'apac'}])
         self.assertEqual(result['rankings'], {})
-        self.assertIn('1 file(s) have audio that ffmpeg cannot decode', printed)
+        self.assertIn('Note: 1 file(s) contain audio that ffmpeg has no decoder for (codec tag: apac x1 = Apple spatial audio)', printed)
+        self.assertIn('but not corruption inside that audio', printed)
 
     def test_truncation_is_still_detected_through_the_packet_check(self):
         data = (self.library / 'iphone.mp4').read_bytes()
@@ -405,12 +435,12 @@ class UndecodableAudioTests(unittest.TestCase):
 
     def test_suspect_listing_mentions_packet_only_checks(self):
         catalog = {'complete': True, 'mode': 'full', 'rankings': {}, 'items': [
-            {'path': 'a.mov', 'status': 'decode-clean', 'packet_checked_streams': [{'index': 2}]},
+            {'path': 'a.mov', 'status': 'decode-clean', 'packet_checked_streams': [{'index': 2, 'codec_tag': 'apac'}]},
             {'path': 'b.mov', 'status': 'decode-clean'}]}
         text = '\n'.join(report.render_suspects(catalog, '/c.json', '/src', 3))
-        self.assertIn('Note: 1 video(s) have audio ffmpeg cannot decode', text)
+        self.assertIn('Note: 1 file(s) contain audio that ffmpeg has no decoder for (codec tag: apac x1 = Apple spatial audio)', text)
         plain = '\n'.join(report.render_suspects(dict(catalog, items=[catalog['items'][1]]), '/c.json', '/src', 3))
-        self.assertNotIn('cannot decode', plain)
+        self.assertNotIn('no decoder for', plain)
 
 
 class HostPathTests(unittest.TestCase):

@@ -7,6 +7,36 @@ import re
 import subprocess
 
 EXTENSIONS = {'.mp4', '.mov', '.m4v', '.3gp', '.mkv', '.avi', '.webm'}
+KNOWN_TAGS = {'apac': 'Apple spatial audio'}
+
+
+def undecodable_audio(stream):
+    """An audio track ffmpeg cannot decode although its codec tag is a proper four-character code.
+
+    A missing or garbled tag (for example '[195][1][159][2]') is not accepted here: it cannot be told apart
+    from a damaged header, so such a track stays in the strict decode check and is reported.
+    """
+    if stream.get('codec_type') != 'audio' or stream.get('codec_name') not in (None, '', 'unknown', 'none'):
+        return False
+    return bool(re.fullmatch(r'[ -~]{4}', stream.get('codec_tag_string') or ''))
+
+
+def packet_only_note(items):
+    """A factual sentence about tracks that were only packet-checked; empty when there are none."""
+    tags = {}
+    files = 0
+    for item in items:
+        found = [s['codec_tag'] for s in item.get('packet_checked_streams', [])]
+        files += bool(found)
+        for tag in found:
+            tags[tag] = tags.get(tag, 0) + 1
+    if not files:
+        return ''
+    shown = ', '.join(f'{tag} x{count}' + (f' = {KNOWN_TAGS[tag]}' if tag in KNOWN_TAGS else '')
+                      for tag, count in sorted(tags.items()))
+    return (f'{files} file(s) contain audio that ffmpeg has no decoder for (codec tag: {shown}). Those tracks were not '
+            'decoded: only their packets were read, which detects truncation and index damage but not corruption '
+            'inside that audio. An unexpected tag name deserves a closer look.')
 
 
 def date_of(path, metadata):
@@ -51,7 +81,7 @@ def decode_command(path, metadata):
         if stream.get('codec_type') not in ('video', 'audio'):
             continue
         args += ['-map', f'0:{stream["index"]}']
-        if stream['codec_type'] == 'audio' and stream.get('codec_name') in (None, '', 'unknown', 'none'):
+        if undecodable_audio(stream):
             args += [f'-c:{position}', 'copy']
             packet_only.append({'index': stream['index'], 'codec_tag': stream.get('codec_tag_string')})
         position += 1
@@ -143,10 +173,9 @@ def scan(root, out, mode='full', timeout=1800):
         items.append(item)
         # A partial scan is useful if interrupted, but must not look complete.
         (out / 'catalog.json').write_text(json.dumps({'complete': False, 'mode': mode, 'items': items}, indent=2))
-    partial = [i for i in items if i.get('packet_checked_streams')]
-    if partial:
-        print(f'Note: {len(partial)} file(s) have audio that ffmpeg cannot decode (for example Apple spatial audio); '
-              'those tracks were checked at packet level only.', flush=True)
+    note = packet_only_note(items)
+    if note:
+        print(f'Note: {note}', flush=True)
     suspects = [i for i in items if i['status'] in ('unreadable-or-no-video', 'decode-errors')]
     report = {'complete': not errors, 'walk_errors': errors, 'mode': mode,
               'root_in_container': str(root), 'host_source_root': (os.environ.get('SCAN_HOST_ROOT') or str(root)), 'items': items,
