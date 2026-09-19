@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import Mock
 
 
 def load(name):
@@ -18,6 +19,16 @@ case = load('case')
 
 
 class CatalogTests(unittest.TestCase):
+    def test_source_diagnostics_distinguish_missing_and_denied(self):
+        for error, message in [(PermissionError('denied'), 'Permission denied'),
+                               (FileNotFoundError('missing'), 'path not found'),
+                               (OSError('connection lost'), 'connection lost')]:
+            source = Mock()
+            source.stat.side_effect = error
+            with self.assertRaisesRegex(ValueError, message):
+                case.check_source_directory(source)
+
+
     def test_cleanup_finds_latest_summary_with_unique_suffix(self):
         with tempfile.TemporaryDirectory() as tmp:
             work = Path(tmp)

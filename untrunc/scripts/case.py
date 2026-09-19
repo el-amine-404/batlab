@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -54,6 +55,19 @@ def stage_file(src, dst):
     return {'source': str(src), 'destination': str(dst), 'sha256': sha(dst)}
 
 
+def check_source_directory(src):
+    try:
+        mode = src.stat().st_mode
+    except PermissionError as e:
+        raise ValueError(f'Permission denied accessing source directory: {src}; check mount authentication and access') from e
+    except FileNotFoundError as e:
+        raise ValueError(f'Source path not found: {src}; reconnect the share or update source_root') from e
+    except OSError as e:
+        raise ValueError(f'Source mount/path error for {src}: {e}') from e
+    if not stat.S_ISDIR(mode):
+        raise ValueError(f'Source path exists but is not a directory: {src}')
+
+
 def case_config(config):
     c = json.loads(config.read_text())
     if not re.fullmatch(r'[A-Za-z0-9_-]+', c['case']):
@@ -62,8 +76,7 @@ def case_config(config):
     if root.is_relative_to(REPO):
         raise ValueError('Runtime cases must be outside the repository')
     src = path(c['source_root'])
-    if not src.is_dir():
-        raise ValueError(f'Source directory unavailable: {src}; mount SMB or copy locally first')
+    check_source_directory(src)
     if root.is_relative_to(src) or src.is_relative_to(root):
         raise ValueError('source_root and case directory must be disjoint to avoid scanning outputs')
     for name in ('input', 'references', 'work', 'recipes'):
