@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -20,6 +21,7 @@ from progress import Progress, say
 INPUT = Path(os.environ.get('REPAIR_INPUT', '/input')).resolve()
 REFS = Path(os.environ.get('REPAIR_REFERENCES', '/references')).resolve()
 WORK = Path(os.environ.get('REPAIR_WORK', '/work')).resolve()
+LIBRARY = Path(os.environ.get('REPAIR_LIBRARY', '/library')).resolve()
 TIMEOUT = int(os.environ.get('REPAIR_TIMEOUT') or '1800')
 # Host folder behind /input, /references and /work (the container only sees those short mount names).
 HOST_CASE = os.environ.get('HOST_CASE_DIR', '')
@@ -33,8 +35,8 @@ def shown(path):
         for mount, name in ((WORK, 'work'), (REFS, 'references'), (INPUT, 'input')):
             if path == mount or mount in path.parents:
                 return str(Path(HOST_CASE) / name / path.relative_to(mount))
-    if HOST_LIBRARY and (path == Path('/library') or Path('/library') in path.parents):
-        return str(Path(HOST_LIBRARY) / path.relative_to('/library'))
+    if HOST_LIBRARY and (path == LIBRARY or LIBRARY in path.parents):
+        return str(Path(HOST_LIBRARY) / path.relative_to(LIBRARY))
     return str(path)
 
 
@@ -224,13 +226,38 @@ def reframe(source, fps, reference=None):
 def finish_scan(report, out):
     """Say what the scan did and where its catalog is; exit 0 only for a complete scan."""
     catalog = shown(out / 'catalog.json')
-    print(f'\nScan finished: {len(report["items"])} video file(s) checked.', flush=True)
+    kept = report.get('reused', 0)
+    print(f'\nScan finished: {len(report["items"])} video file(s) checked'
+          + (f' ({kept} kept from the interrupted scan)' if kept else '') + '.', flush=True)
     print(f'Catalog saved to: {catalog}', flush=True)
     if not report['complete']:
         print('WARNING: the catalog is INCOMPLETE because some folders could not be read '
               f'(first problem: {report["walk_errors"][0] if report["walk_errors"] else "unknown"}).', flush=True)
         return 2
     return 0
+
+
+def run_scan():
+    """Continue the newest interrupted scan of this library when there is one, else start a new scan."""
+    from catalog import resumable_scan, scan
+    mode = os.environ.get('SCAN_MODE') or 'full'
+    resume, reason = (None, '') if os.environ.get('SCAN_FRESH') == '1' else resumable_scan(WORK, LIBRARY, mode)
+    if reason:
+        say(f'Not resuming an earlier scan: {reason}. Starting a new scan.')
+    if resume:
+        say(f'Resuming the interrupted scan saved in {shown(resume)}')
+    out = resume or attempt('scan') / 'catalog'
+
+    def stop(signum, frame):
+        raise KeyboardInterrupt  # docker stop / kill: save progress like Ctrl-C does
+    previous = signal.signal(signal.SIGTERM, stop)
+    try:
+        report = scan(LIBRARY, out, mode, TIMEOUT, resume=bool(resume))
+    except KeyboardInterrupt:
+        return 130
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+    return finish_scan(report, out)
 
 
 def main():
@@ -248,10 +275,7 @@ def main():
         print(json.dumps(result, indent=2))
         return 0 if result['status'] == 'decode-clean-needs-review' else 2
     if a.action == 'scan':
-        from catalog import scan
-        out = attempt('scan') / 'catalog'
-        report = scan(Path('/library'), out, os.environ.get('SCAN_MODE') or 'full', TIMEOUT)
-        return finish_scan(report, out)
+        return run_scan()
     if a.action == 'inventory':
         out = attempt('inventory')
         items = {str(f): probe(f) for root in (INPUT, REFS) for f in sorted(root.iterdir())

@@ -64,6 +64,7 @@ services:
     environment:
       SCAN_MODE: "${SCAN_MODE:-full}"
       SCAN_HOST_ROOT: "${SCAN_HOST_ROOT:-}"
+      SCAN_FRESH: "${SCAN_FRESH:-}"
     volumes:
       - type: bind
         source: ${SCAN_ROOT:-/tmp/batlab-untrunc-unconfigured}

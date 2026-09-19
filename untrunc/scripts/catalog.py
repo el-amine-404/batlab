@@ -1,12 +1,17 @@
 """Read-only video inventory and explainable reference ranking."""
 import datetime as dt
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
+import time
 
 EXTENSIONS = {'.mp4', '.mov', '.m4v', '.3gp', '.mkv', '.avi', '.webm'}
+# Bump when scan results change meaning, so a partial scan made by older code is not resumed.
+SCAN_VERSION = 1
+FLUSH_SECONDS = 5
 KNOWN_TAGS = {'apac': 'Apple spatial audio'}
 
 
@@ -119,19 +124,58 @@ def rank(target, items, limit=5):
     return sorted(ranked, key=lambda x: (-x['score'], x['date_distance_seconds'] if x['date_distance_seconds'] is not None else float('inf'), x['path']))[:limit]
 
 
-def scan(root, out, mode='full', timeout=1800):
+def host_root_of(root):
+    """The library folder as its owner knows it (inside Docker it is mounted at /library)."""
+    return os.environ.get('SCAN_HOST_ROOT') or str(root)
+
+
+def write_json(file, data):
+    """Atomic replace, so an interruption never leaves a half-written catalog."""
+    tmp = file.with_name(file.name + '.tmp')
+    tmp.write_text(json.dumps(data, indent=2) + '\n')
+    os.replace(tmp, file)
+
+
+def resumable_scan(work, root, mode):
+    """The interrupted scan a new run should continue, as (catalog folder, ''); else (None, reason or '')."""
+    catalogs = sorted(work.glob('*scan*/catalog/catalog.json'))
+    if not catalogs:
+        return None, ''
+    newest = catalogs[-1]
+    try:
+        data = json.loads(newest.read_text())
+    except (OSError, ValueError):
+        return None, f'the newest scan ({newest.parent.parent.name}) has an unreadable catalog'
+    if data.get('complete'):
+        return None, ''
+    if data.get('scan_version') != SCAN_VERSION:
+        return None, 'the interrupted scan was made by a different version of the scanner'
+    if data.get('mode') != mode:
+        return None, f'the interrupted scan used mode "{data.get("mode")}", not "{mode}"'
+    if data.get('host_source_root') != host_root_of(root):
+        return None, f'the interrupted scan was of a different folder ({data.get("host_source_root")})'
+    return newest.parent, ''
+
+
+def scan(root, out, mode='full', timeout=1800, resume=False):
+    """Catalog every video under root. With resume, out is an interrupted scan whose finished files are kept."""
     if mode not in ('full', 'probe'):
         raise ValueError('SCAN_MODE must be full or probe')
     root = root.resolve()
     if not root.is_dir():
         raise ValueError('Library directory is unavailable')
-    out.mkdir(parents=True, exist_ok=False)
+    previous = {}
+    if resume:
+        previous = {i['path']: i for i in json.loads((out / 'catalog.json').read_text())['items']}
+    else:
+        out.mkdir(parents=True, exist_ok=False)
+    host_root = host_root_of(root)
     items = []
     errors = []
     def walk_error(err):
         errors.append(str(err))
     # Inside Docker the library is mounted at /library: show the folder as it is on the host.
-    print(f'Looking for video files under {os.environ.get("SCAN_HOST_ROOT") or root} ...', flush=True)
+    print(f'Looking for video files under {host_root} ...', flush=True)
     videos = []
     for directory, dirs, names in os.walk(root, followlinks=False, onerror=walk_error):
         dirs[:] = sorted(d for d in dirs if not (Path(directory) / d).is_symlink())
@@ -141,45 +185,84 @@ def scan(root, out, mode='full', timeout=1800):
                 videos.append(path)
     total = len(videos)
     print(f'Found {total} video file(s) to scan.', flush=True)
-    for number, path in enumerate(videos, 1):
-        rel = str(path.relative_to(root))
-        print(f'Scanning {number:>{len(str(total))}}/{total}: {rel}', flush=True)
-        item = {'path': rel, 'status': 'scan-error', 'signature': {}, 'date': date_of(rel, {})}
-        try:
-            r = subprocess.run(['ffprobe', '-v', 'error', '-show_format', '-show_streams',
-                                '-show_data_hash', 'sha256', '-of', 'json', str(path)],
-                               capture_output=True, text=True, timeout=timeout)
-            metadata = json.loads(r.stdout or '{}')
-            item.update(signature=signature(metadata), date=date_of(rel, metadata), metadata=metadata,
-                        size=path.stat().st_size, mtime_ns=path.stat().st_mtime_ns,
-                        probe_errors=r.stderr)
-            if r.returncode or not any(s.get('codec_type') == 'video' for s in metadata.get('streams', [])):
-                item['status'] = 'unreadable-or-no-video'
-            elif mode == 'probe':
-                item['status'] = 'probe-only-unverified'
-            else:
-                log = out / f'decode-{len(items):05d}.log'
-                command, packet_only = decode_command(path, metadata)
-                with log.open('w') as f:
-                    r = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=f, timeout=timeout)
-                messages = log.read_text().splitlines()
-                errors_found = [s for s in messages if s.strip() and not ('[null @' in s and 'non monotonically increasing dts' in s)]
-                item.update(decode_returncode=r.returncode, error_log_lines=len(errors_found), log=log.name)
-                if packet_only:
-                    item['packet_checked_streams'] = packet_only
-                item['status'] = 'decode-clean' if r.returncode == 0 and not errors_found else 'decode-errors'
-        except (OSError, ValueError, subprocess.TimeoutExpired) as e:
-            item.update(status='scan-error', scan_error=str(e))
-        items.append(item)
-        # A partial scan is useful if interrupted, but must not look complete.
-        (out / 'catalog.json').write_text(json.dumps({'complete': False, 'mode': mode, 'items': items}, indent=2))
+    if resume:
+        print(f'Resuming: files already scanned (unchanged size and date) are kept; {len(previous)} are on record.', flush=True)
+    seen = set()
+    reused = 0
+    last_saved = time.monotonic()
+
+    def snapshot():
+        # Finished files first, then earlier results not yet revisited, so a resume never loses progress.
+        return items + [old for rel, old in previous.items() if rel not in seen]
+
+    def save_partial(force=False):
+        nonlocal last_saved
+        if force or time.monotonic() - last_saved >= FLUSH_SECONDS:
+            # A partial scan is useful if interrupted, but must not look complete.
+            write_json(out / 'catalog.json', {'complete': False, 'scan_version': SCAN_VERSION, 'mode': mode,
+                                              'host_source_root': host_root, 'items': snapshot()})
+            last_saved = time.monotonic()
+    save_partial(force=not resume)
+    try:
+        for number, path in enumerate(videos, 1):
+            rel = str(path.relative_to(root))
+            label = f'Scanning {number:>{len(str(total))}}/{total}: {rel}'
+            try:
+                stat = path.stat()
+            except OSError:
+                stat = None
+            old = previous.get(rel)
+            if old and stat and old.get('status') != 'scan-error' and old.get('size') == stat.st_size \
+                    and old.get('mtime_ns') == stat.st_mtime_ns:
+                print(f'{label} (already scanned)', flush=True)
+                items.append(old)
+                seen.add(rel)
+                reused += 1
+                save_partial()
+                continue
+            print(label, flush=True)
+            item = {'path': rel, 'status': 'scan-error', 'signature': {}, 'date': date_of(rel, {})}
+            try:
+                r = subprocess.run(['ffprobe', '-v', 'error', '-show_format', '-show_streams',
+                                    '-show_data_hash', 'sha256', '-of', 'json', str(path)],
+                                   capture_output=True, text=True, timeout=timeout)
+                metadata = json.loads(r.stdout or '{}')
+                item.update(signature=signature(metadata), date=date_of(rel, metadata), metadata=metadata,
+                            size=path.stat().st_size, mtime_ns=path.stat().st_mtime_ns,
+                            probe_errors=r.stderr)
+                if r.returncode or not any(s.get('codec_type') == 'video' for s in metadata.get('streams', [])):
+                    item['status'] = 'unreadable-or-no-video'
+                elif mode == 'probe':
+                    item['status'] = 'probe-only-unverified'
+                else:
+                    # Named after the file, not its position, so it stays unique when a scan is resumed.
+                    log = out / f'decode-{hashlib.sha1(rel.encode()).hexdigest()[:12]}.log'
+                    command, packet_only = decode_command(path, metadata)
+                    with log.open('w') as f:
+                        r = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=f, timeout=timeout)
+                    messages = log.read_text().splitlines()
+                    errors_found = [s for s in messages if s.strip() and not ('[null @' in s and 'non monotonically increasing dts' in s)]
+                    item.update(decode_returncode=r.returncode, error_log_lines=len(errors_found), log=log.name)
+                    if packet_only:
+                        item['packet_checked_streams'] = packet_only
+                    item['status'] = 'decode-clean' if r.returncode == 0 and not errors_found else 'decode-errors'
+            except (OSError, ValueError, subprocess.TimeoutExpired) as e:
+                item.update(status='scan-error', scan_error=str(e))
+            items.append(item)
+            seen.add(rel)
+            save_partial()
+    except KeyboardInterrupt:
+        save_partial(force=True)
+        print(f'\nInterrupted: {min(len(snapshot()), total)} of {total} file(s) are saved. '
+              'Run the same command again to resume.', flush=True)
+        raise
     note = packet_only_note(items)
     if note:
         print(f'Note: {note}', flush=True)
     suspects = [i for i in items if i['status'] in ('unreadable-or-no-video', 'decode-errors')]
-    report = {'complete': not errors, 'walk_errors': errors, 'mode': mode,
-              'root_in_container': str(root), 'host_source_root': (os.environ.get('SCAN_HOST_ROOT') or str(root)), 'items': items,
+    report = {'complete': not errors, 'walk_errors': errors, 'mode': mode, 'scan_version': SCAN_VERSION, 'reused': reused,
+              'root_in_container': str(root), 'host_source_root': host_root, 'items': items,
               'rankings': {i['path']: rank(i, items) for i in suspects},
               'note': 'Unreadable may mean permissions/unsupported format, not proven corruption. Rankings are hypotheses, not device identification.'}
-    (out / 'catalog.json').write_text(json.dumps(report, indent=2) + '\n')
+    write_json(out / 'catalog.json', report)
     return report

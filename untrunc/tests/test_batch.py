@@ -6,13 +6,16 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
 SCRIPTS = Path(__file__).parents[1] / 'scripts'
+REAL_RUN = subprocess.run
 
 
 def load(name):
@@ -202,11 +205,12 @@ class CatalogTests(Fixture):
     def test_problems(self):
         good = self.write_catalog()
         self.assertEqual(case.catalog_problems(good, self.source), [])
-        incomplete = case.catalog_problems({'complete': False, 'walk_errors': ['a', 'b', 'c']}, self.source)
-        self.assertEqual(len(incomplete), 1)
-        self.assertIn('incomplete', incomplete[0])
-        self.assertIn('a; b', incomplete[0])
-        self.assertNotIn('c', incomplete[0].split('folders')[1])  # only the first two are quoted
+        unreadable = case.catalog_problems({'complete': False, 'walk_errors': ['a', 'b', 'c']}, self.source)
+        self.assertEqual(len(unreadable), 1)
+        self.assertIn('some folders could not be read: a; b)', unreadable[0])  # only the first two are quoted
+        interrupted = case.catalog_problems({'complete': False}, self.source)
+        self.assertEqual(len(interrupted), 1)
+        self.assertIn('the scan was interrupted: run make untrunc-case-scan again to resume it', interrupted[0])
         other = case.catalog_problems(dict(good, host_source_root='/elsewhere'), self.source)
         self.assertIn('different source root (/elsewhere)', other[0])
         self.assertIn('does not record', case.catalog_problems({'complete': True}, self.source)[0])
@@ -508,6 +512,339 @@ class HostPathTests(unittest.TestCase):
         compose = (Path(__file__).parents[2] / 'compose/untrunc/docker-compose.yml').read_text()
         self.assertIn('HOST_CASE_DIR: "${REPAIR_CASE_DIR:-}"', compose)  # what shown() relies on
         self.assertIn('SCAN_HOST_ROOT: "${SCAN_HOST_ROOT:-}"', compose)
+        self.assertIn('SCAN_FRESH: "${SCAN_FRESH:-}"', compose)  # --fresh reaches the scanner
+
+
+def junk_library(root, count):
+    """Files that look like videos to the scanner but are not: ffprobe rejects each one in milliseconds."""
+    root.mkdir(parents=True, exist_ok=True)
+    for n in range(count):
+        (root / f'v{n:03d}.mp4').write_bytes(f'not a video {n}'.encode())
+    return root
+
+
+class Interrupt:
+    """Stands in for subprocess.run: Ctrl-C on the Nth call, otherwise the real command; counts calls."""
+
+    def __init__(self, at=None):
+        self.at, self.calls = at, 0
+
+    def __call__(self, *args, **kwargs):
+        self.calls += 1
+        if self.at == self.calls:
+            raise KeyboardInterrupt
+        return REAL_RUN(*args, **kwargs)
+
+
+@unittest.skipUnless(shutil.which('ffprobe'), 'ffprobe is required')
+class ResumableScanTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+        self.library = junk_library(self.base / 'library', 5)
+        self.out = self.base / 'scan' / 'catalog'
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def scan(self, runner=None, resume=False, mode='probe'):
+        out = io.StringIO()
+        with patch('subprocess.run', runner or Interrupt()), contextlib.redirect_stdout(out):
+            try:
+                return catalog_tool.scan(self.library, self.out, mode, resume=resume), out.getvalue()
+            except KeyboardInterrupt:
+                return None, out.getvalue()
+
+    def saved(self):
+        return json.loads((self.out / 'catalog.json').read_text())
+
+    def test_interrupt_saves_progress_and_resume_scans_only_the_rest(self):
+        report, printed = self.scan(Interrupt(at=3))  # Ctrl-C while probing the third file
+        self.assertIsNone(report)
+        self.assertIn('Interrupted: 2 of 5 file(s) are saved. Run the same command again to resume.', printed)
+        partial = self.saved()
+        self.assertEqual([i['path'] for i in partial['items']], ['v000.mp4', 'v001.mp4'])
+        self.assertEqual((partial['complete'], partial['mode'], partial['scan_version'], partial['host_source_root']),
+                         (False, 'probe', catalog_tool.SCAN_VERSION, str(self.library.resolve())))
+        self.assertEqual(list(self.out.glob('*.tmp')), [])  # atomic writes leave no temporary file
+        runner = Interrupt()
+        report, printed = self.scan(runner, resume=True)
+        self.assertEqual(runner.calls, 3)  # ffprobe ran only for the three files not yet done
+        self.assertEqual((report['complete'], report['reused']), (True, 2))
+        self.assertEqual([i['path'] for i in report['items']], [f'v{n:03d}.mp4' for n in range(5)])
+        self.assertIn('Scanning 1/5: v000.mp4 (already scanned)', printed)
+        self.assertIn('Scanning 3/5: v002.mp4\n', printed)
+        self.assertIn('Resuming:', printed)
+        self.assertEqual(self.saved()['complete'], True)
+
+    def test_files_changed_since_the_interruption_are_scanned_again(self):
+        self.scan(Interrupt(at=3))
+        (self.library / 'v000.mp4').write_bytes(b'changed, and longer than before')
+        runner = Interrupt()
+        report, _ = self.scan(runner, resume=True)
+        self.assertEqual((runner.calls, report['reused']), (4, 1))  # v000 again + the three unfinished files
+
+    def test_files_that_failed_to_scan_are_retried_not_kept(self):
+        self.scan(Interrupt(at=3))
+        partial = self.saved()
+        partial['items'][0].update(status='scan-error', scan_error='timed out')
+        partial['items'][0].pop('size')
+        (self.out / 'catalog.json').write_text(json.dumps(partial))
+        runner = Interrupt()
+        report, _ = self.scan(runner, resume=True)
+        self.assertEqual((runner.calls, report['reused']), (4, 1))
+        self.assertNotIn('scan-error', {i['status'] for i in report['items']})
+
+    def test_resuming_never_loses_results_that_have_not_been_revisited_yet(self):
+        self.scan(Interrupt(at=5))  # four files done
+        self.assertEqual(len(self.saved()['items']), 4)
+
+        def stop_on_second_file(*args, **kwargs):
+            if args and str(args[0]).startswith('Scanning 2/5'):
+                raise KeyboardInterrupt
+            print(*args, **kwargs)
+        out = io.StringIO()
+        with patch.object(catalog_tool, 'print', stop_on_second_file, create=True), contextlib.redirect_stdout(out), \
+                self.assertRaises(KeyboardInterrupt):
+            catalog_tool.scan(self.library, self.out, 'probe', resume=True)
+        self.assertEqual([i['path'] for i in self.saved()['items']], [f'v{n:03d}.mp4' for n in range(4)])  # all four kept
+
+    def test_a_stray_temporary_file_from_a_crash_is_harmless(self):
+        self.scan(Interrupt(at=3))
+        (self.out / 'catalog.json.tmp').write_text('{"half written')
+        report, _ = self.scan(resume=True)
+        self.assertTrue(report['complete'])
+        self.assertEqual(list(self.out.glob('*.tmp')), [])
+
+    def test_interrupt_before_any_file_still_leaves_a_resumable_scan(self):
+        report, printed = self.scan(Interrupt(at=1))
+        self.assertIsNone(report)
+        self.assertIn('Interrupted: 0 of 5', printed)
+        self.assertEqual(self.saved()['items'], [])
+        self.assertEqual(self.scan(resume=True)[0]['reused'], 0)
+
+    def test_completed_scan_report_records_what_resuming_needs(self):
+        report, _ = self.scan()
+        self.assertEqual((report['scan_version'], report['reused'], report['mode']), (catalog_tool.SCAN_VERSION, 0, 'probe'))
+        self.assertEqual(self.saved()['host_source_root'], str(self.library.resolve()))
+
+    def test_decode_logs_are_named_by_file_so_they_stay_unique_on_resume(self):
+        first = catalog_tool.hashlib.sha1(b'a/x.mp4').hexdigest()[:12]
+        second = catalog_tool.hashlib.sha1(b'b/x.mp4').hexdigest()[:12]
+        self.assertNotEqual(first, second)  # same basename in different folders
+
+    @unittest.skipUnless(shutil.which('ffmpeg'), 'ffmpeg is required')
+    def test_full_mode_resume_keeps_decode_logs_and_verdicts(self):
+        good = self.base / 'seed.mp4'
+        REAL_RUN(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=64x48:rate=15:duration=0.2',
+                  '-c:v', 'libx264', '-bf', '0', '-pix_fmt', 'yuv420p', str(good)], check=True)
+        library = self.base / 'real'
+        for name in ('a/x.mp4', 'b/x.mp4', 'c/x.mp4'):
+            (library / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(good, library / name)
+        self.library = library
+        report, _ = self.scan(Interrupt(at=4), mode='full')  # ffprobe, ffmpeg, ffprobe, then Ctrl-C in the 2nd decode
+        self.assertIsNone(report)
+        kept = self.saved()['items']
+        self.assertEqual([(i['path'], i['status']) for i in kept], [('a/x.mp4', 'decode-clean')])
+        log_a = kept[0]['log']
+        report, _ = self.scan(resume=True, mode='full')
+        self.assertEqual(report['reused'], 1)
+        logs = {i['path']: i['log'] for i in report['items']}
+        self.assertEqual(logs['a/x.mp4'], log_a)  # the kept file's log is untouched
+        self.assertEqual(len(set(logs.values())), 3)  # same basename, three different logs
+        for name in logs.values():
+            self.assertTrue((self.out / name).exists())
+        self.assertEqual({i['status'] for i in report['items']}, {'decode-clean'})
+
+
+class ResumeDecisionTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.work = Path(self.tmp.name) / 'work'
+        self.root = Path(self.tmp.name) / 'lib'
+        self.root.mkdir()
+        self.version = catalog_tool.SCAN_VERSION
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write(self, name, **fields):
+        folder = self.work / name / 'catalog'
+        folder.mkdir(parents=True)
+        data = {'complete': False, 'scan_version': self.version, 'mode': 'full', 'host_source_root': str(self.root), 'items': []}
+        data.update(fields)
+        (folder / 'catalog.json').write_text(data if isinstance(data, str) else json.dumps(data))
+        return folder
+
+    def decide(self, mode='full'):
+        return catalog_tool.resumable_scan(self.work, self.root, mode)
+
+    def test_no_earlier_scan_and_finished_scans_are_not_resumed(self):
+        self.assertEqual(self.decide(), (None, ''))
+        self.write('20260101-scan-aaaa', complete=True)
+        self.assertEqual(self.decide(), (None, ''))
+
+    def test_the_newest_interrupted_matching_scan_is_resumed(self):
+        self.write('20260101-scan-aaaa')
+        newest = self.write('20260102-scan-bbbb')
+        self.assertEqual(self.decide(), (newest, ''))
+
+    def test_only_the_newest_scan_counts(self):
+        self.write('20260101-scan-aaaa')  # interrupted long ago
+        self.write('20260102-scan-bbbb', complete=True)  # a later scan finished
+        self.assertEqual(self.decide(), (None, ''))
+
+    def test_mismatches_start_a_new_scan_and_say_why(self):
+        self.write('20260101-scan-aaaa', mode='probe')
+        self.assertIn('used mode "probe", not "full"', self.decide('full')[1])
+        self.assertIsNotNone(self.decide('probe')[0])
+        self.write('20260102-scan-bbbb', host_source_root='/somewhere/else')
+        self.assertIn('different folder (/somewhere/else)', self.decide()[1])
+        self.write('20260103-scan-cccc', scan_version=self.version - 1)
+        self.assertIn('different version of the scanner', self.decide()[1])
+        older = self.write('20260104-scan-dddd')
+        (older / 'catalog.json').write_text('{"half written')
+        self.assertIn('unreadable catalog', self.decide()[1])
+        old_format = self.write('20260105-scan-eeee')
+        (old_format / 'catalog.json').write_text(json.dumps({'complete': False, 'mode': 'full', 'items': []}))  # no version
+        self.assertIn('different version of the scanner', self.decide()[1])
+
+
+class RunScanTests(unittest.TestCase):
+    """recover.py's scan entry point, in-process: which folder it uses and what it tells the user."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        base = Path(self.tmp.name)
+        self.recover = load('recover')
+        r = self.recover
+        r.WORK, r.LIBRARY = base / 'work', junk_library(base / 'library', 5)
+        r.HOST_CASE, r.HOST_LIBRARY = '', ''
+        r.WORK.mkdir()
+        patcher = patch.dict(os.environ, {'SCAN_MODE': 'probe'})
+        patcher.start()
+        os.environ.pop('SCAN_FRESH', None)
+        os.environ.pop('SCAN_HOST_ROOT', None)
+        self.addCleanup(patcher.stop)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_scan(self, runner=None):
+        out = io.StringIO()
+        with patch('subprocess.run', runner or Interrupt()), contextlib.redirect_stdout(out):
+            return self.recover.run_scan(), out.getvalue()
+
+    def scans(self):
+        return sorted(self.recover.WORK.glob('*-scan-*'))
+
+    def test_interrupt_returns_130_and_the_next_run_continues_the_same_scan(self):
+        code, printed = self.run_scan(Interrupt(at=3))
+        self.assertEqual(code, 130)
+        self.assertEqual(len(self.scans()), 1)
+        before = self.scans()[0]
+        code, printed = self.run_scan()
+        self.assertEqual(code, 0)
+        self.assertIn(f'Resuming the interrupted scan saved in {before / "catalog"}', printed)
+        self.assertIn('Scan finished: 5 video file(s) checked (2 kept from the interrupted scan).', printed)
+        self.assertEqual(self.scans(), [before])  # no second scan folder
+        self.assertTrue(json.loads((before / 'catalog/catalog.json').read_text())['complete'])
+
+    def test_after_a_finished_scan_the_next_run_starts_a_new_one(self):
+        self.assertEqual(self.run_scan()[0], 0)
+        code, printed = self.run_scan()
+        self.assertEqual(code, 0)
+        self.assertNotIn('Resuming', printed)
+        self.assertEqual(len(self.scans()), 2)
+
+    def test_fresh_flag_ignores_an_interrupted_scan(self):
+        self.run_scan(Interrupt(at=3))
+        with patch.dict(os.environ, {'SCAN_FRESH': '1'}):
+            code, printed = self.run_scan()
+        self.assertEqual(code, 0)
+        self.assertNotIn('Resuming', printed)
+        self.assertEqual(len(self.scans()), 2)
+
+    def test_a_different_mode_is_not_resumed_and_the_user_is_told(self):
+        self.run_scan(Interrupt(at=3))
+        with patch.dict(os.environ, {'SCAN_MODE': 'full'}):
+            code, printed = self.run_scan()
+        self.assertIn('Not resuming an earlier scan: the interrupted scan used mode "probe", not "full". Starting a new scan.', printed)
+        self.assertEqual(len(self.scans()), 2)
+
+    def test_sigterm_handler_is_restored_after_the_scan(self):
+        before = signal.getsignal(signal.SIGTERM)
+        self.run_scan()
+        self.assertIs(signal.getsignal(signal.SIGTERM), before)
+
+    def test_summary_mentions_kept_files_only_when_there_are_some(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.recover.finish_scan({'items': [{}], 'complete': True, 'walk_errors': []}, Path('/work/s/catalog'))
+        self.assertIn('Scan finished: 1 video file(s) checked.', out.getvalue())
+        self.assertNotIn('kept', out.getvalue())
+
+
+@unittest.skipUnless(os.name == 'posix' and shutil.which('ffprobe'), 'needs POSIX signals and ffprobe')
+class RealSignalTests(unittest.TestCase):
+    """The real recover.py process, interrupted the way Ctrl-C and `docker stop` do it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+        self.library = junk_library(self.base / 'library', 40)
+        (self.base / 'work').mkdir()
+        self.env = dict(os.environ, REPAIR_WORK=str(self.base / 'work'), REPAIR_LIBRARY=str(self.library),
+                        REPAIR_INPUT=str(self.base / 'input'), REPAIR_REFERENCES=str(self.base / 'refs'),
+                        SCAN_MODE='probe', HOST_CASE_DIR='', SCAN_HOST_ROOT='', PYTHONUNBUFFERED='1')
+        self.env.pop('SCAN_FRESH', None)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def start(self):
+        return subprocess.Popen([sys.executable, str(SCRIPTS / 'recover.py'), 'scan'], env=self.env,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+    def interrupt_after(self, process, marker, sig):
+        lines = []
+        for line in process.stdout:
+            lines.append(line)
+            if marker in line:
+                process.send_signal(sig)
+                break
+        rest, _ = process.communicate(timeout=30)
+        return ''.join(lines) + rest
+
+    def catalogs(self):
+        return sorted((self.base / 'work').glob('*-scan-*/catalog/catalog.json'))
+
+    def test_sigterm_saves_progress_and_a_second_run_finishes_the_same_scan(self):
+        process = self.start()
+        printed = self.interrupt_after(process, 'Scanning  8/40', signal.SIGTERM)
+        self.assertEqual(process.returncode, 130, printed)
+        self.assertIn('Interrupted:', printed)
+        (catalog_file,) = self.catalogs()
+        partial = json.loads(catalog_file.read_text())
+        self.assertFalse(partial['complete'])
+        self.assertGreaterEqual(len(partial['items']), 7)  # the 8th was announced, not finished
+        second = subprocess.run([sys.executable, str(SCRIPTS / 'recover.py'), 'scan'], env=self.env,
+                                capture_output=True, text=True, timeout=120)
+        self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+        self.assertIn('Resuming the interrupted scan', second.stdout)
+        self.assertEqual(self.catalogs(), [catalog_file])
+        final = json.loads(catalog_file.read_text())
+        self.assertEqual((final['complete'], len(final['items'])), (True, 40))
+        self.assertGreaterEqual(final['reused'], 7)
+
+    def test_sigint_behaves_like_ctrl_c(self):
+        process = self.start()
+        printed = self.interrupt_after(process, 'Scanning  8/40', signal.SIGINT)
+        self.assertEqual(process.returncode, 130, printed)
+        self.assertNotIn('Traceback', printed)
+        self.assertIn('Run the same command again to resume.', printed)
+        self.assertFalse(json.loads(self.catalogs()[0].read_text())['complete'])
 
 
 class StagingTests(Fixture):
@@ -901,6 +1238,40 @@ class CommandLineTests(Fixture):
         self.assertEqual(result.returncode, 1)
         self.assertNotIn('untrunc-case-suspects', result.stdout)
         self.assertIn('permission denied', result.stderr)
+
+    def env_recording_docker(self, exit_code=0):
+        bin_dir = self.base / f'envbin{exit_code}'
+        bin_dir.mkdir()
+        fake = bin_dir / 'docker'
+        fake.write_text('#!/bin/sh\necho "SCAN_FRESH=[$SCAN_FRESH]" >> "$FAKE_LOG"\n' f'exit {exit_code}\n')
+        fake.chmod(0o755)
+        return bin_dir
+
+    def test_fresh_flag_reaches_the_container_only_when_asked(self):
+        log = self.base / 'fresh.log'
+        bin_dir = self.env_recording_docker()
+        self.assertEqual(self.cli('scan', '--config', str(self.config), path_prefix=str(bin_dir), FAKE_LOG=str(log)).returncode, 0)
+        self.assertEqual(self.cli('scan', '--fresh', '--config', str(self.config), path_prefix=str(bin_dir), FAKE_LOG=str(log)).returncode, 0)
+        self.assertEqual(log.read_text().splitlines(), ['SCAN_FRESH=[]', 'SCAN_FRESH=[1]'])
+        stray = self.cli('scan', '--config', str(self.config), path_prefix=str(bin_dir), FAKE_LOG=str(log), SCAN_FRESH='1')
+        self.assertEqual(log.read_text().splitlines()[-1], 'SCAN_FRESH=[]')  # a stray variable in your shell is ignored
+
+    def test_fresh_flag_is_only_for_scan(self):
+        result = self.cli('batch', '--config', str(self.config), '--fresh')
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('--fresh only applies to scan', result.stderr)
+
+    def test_interrupted_scan_explains_how_to_resume_and_is_not_blamed_on_docker(self):
+        result = self.cli('scan', '--config', str(self.config), path_prefix=str(self.fake_docker(130)))
+        self.assertEqual(result.returncode, 130)
+        self.assertIn('Run the same command again to resume it (add --fresh to start over)', result.stderr)
+        self.assertNotIn('If Docker reported', result.stderr)
+        self.assertNotIn('untrunc-case-suspects', result.stdout)
+
+    def test_incomplete_scan_exit_status_is_not_blamed_on_docker_either(self):
+        result = self.cli('scan', '--config', str(self.config), path_prefix=str(self.fake_docker(2)))
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn('If Docker reported', result.stderr)
 
     def test_batch_command_reports_a_missing_docker_clearly(self):
         empty = self.base / 'empty-bin'

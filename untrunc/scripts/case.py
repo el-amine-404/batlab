@@ -146,8 +146,11 @@ def catalog_problems(catalog, src):
     problems = []
     if not catalog.get('complete'):
         detail = '; '.join(str(e) for e in catalog.get('walk_errors', [])[:2])
-        problems.append('catalog is incomplete (the scan was interrupted or could not read some folders'
-                        + (f': {detail}' if detail else '') + ')')
+        if catalog.get('walk_errors'):
+            problems.append(f'catalog is incomplete (some folders could not be read: {detail})')
+        else:
+            problems.append('catalog is incomplete (the scan was interrupted: run make untrunc-case-scan again '
+                            'to resume it)')
     host = catalog.get('host_source_root')
     if host is None:
         if catalog.get('complete'):
@@ -161,7 +164,8 @@ def usable_catalog(work, src, missing):
     file, catalog = load_catalog(work, missing)
     problems = catalog_problems(catalog, src)
     if problems:
-        raise ValueError('Cannot use the latest scan: ' + '; '.join(problems) + '. Rescan with make untrunc-case-scan.')
+        raise ValueError('Cannot use the latest scan: ' + '; '.join(problems) + '. Run make untrunc-case-scan again (an interrupted scan resumes; '
+                         'CASE_ARGS=--fresh starts over).')
     return file, catalog
 
 
@@ -401,9 +405,12 @@ def main():
                                       'agent-setup', 'agent-model', 'agent'])
     p.add_argument('--config', required=True, type=Path)
     p.add_argument('--limit', type=positive_int, help='batch only: process at most this many suspects now')
+    p.add_argument('--fresh', action='store_true', help='scan only: start a new scan instead of resuming an interrupted one')
     args = p.parse_args()
     if args.limit and args.action != 'batch':
         p.error('--limit only applies to batch')
+    if args.fresh and args.action != 'scan':
+        p.error('--fresh only applies to scan')
     if args.action.startswith('agent'):
         return agent(args.action, args.config)
     c, root, src = case_config(args.config, check_source=args.action != 'suspects')
@@ -428,12 +435,15 @@ def main():
         env.update(CANDIDATE=best['file'], RECIPE=c['cleanup_recipe'], ALLOW_TRIM='1')
     if args.action == 'scan':
         warn_if_userspace_mount(src)
+        env['SCAN_FRESH'] = '1' if args.fresh else ''
     print(f'Outputs and logs: {root / "work"}', flush=True)
     status = compose(env, *(['scanner'] if args.action == 'scan' else ['untrunc', 'clean-tail' if args.action == 'clean' else 'auto']))
     if status == 0 and args.action == 'scan':
         print(f'Next: list the damaged-looking files and their healthy matches with\n'
               f'  make untrunc-case-suspects REPAIR_CONFIG={shlex.quote(str(args.config.resolve()))}', flush=True)
-    if status and args.action == 'scan':
+    if status == 130 and args.action == 'scan':
+        print('Scan interrupted. Run the same command again to resume it (add --fresh to start over).', file=sys.stderr)
+    if status not in (0, 2, 130) and args.action == 'scan':
         print('If Docker reported a socket or bind-mount "permission denied" error, '
               f'see untrunc/NEXT-STEPS.md, "Troubleshooting source access".', file=sys.stderr)
     return status

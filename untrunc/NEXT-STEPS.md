@@ -219,6 +219,20 @@ to overwrite different bytes. Runtime sources are mounted read-only.
 The scan first prints how many video files it found, then counts through them
 (`Scanning 3/37: path/to/clip.mp4`).
 
+**An interrupted scan resumes.** If a scan is stopped (Ctrl-C, `docker stop`, a crash, a
+dropped share or a sleeping laptop), run the same `make untrunc-case-scan` command again. It
+continues the newest unfinished scan and prints `Resuming ...`:
+- Files already scanned are kept if their size and modification time are unchanged. Changed
+  files are scanned again, and so are files whose scan failed (for example a timeout).
+- Only the file that was being decoded when it stopped is redone.
+- Progress is saved at least every 5 seconds and the catalog is replaced atomically, so a hard
+  crash can lose at most a few seconds of results and never corrupts the catalog.
+- It resumes only when the folder, `scan_mode` and scanner version are the same. Otherwise it says
+  why and starts a new scan. A finished scan is never resumed: the next run scans again.
+- To start over instead, use `make untrunc-case-scan CASE_ARGS=--fresh`.
+- Until the scan finishes, `untrunc-case-suspects` warns that the catalog is incomplete and
+  `untrunc-case-batch` and `untrunc-case-run` refuse to use it.
+
 Scanning fully decodes supported video formats under source_root, so start with a
 small folder. The resulting `work/*scan*/catalog/catalog.json` separates clean
 videos, decode errors, unreadable files and scan failures. Unreadable is not proof

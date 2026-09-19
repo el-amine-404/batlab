@@ -11,6 +11,7 @@ REPAIR_DC = docker compose -f "$(REPO_ROOT)/compose/untrunc/docker-compose.yml"
 untrunc-help:
 	@echo 'Saved workflows: untrunc-case-scan / untrunc-case-suspects / untrunc-case-prepare / untrunc-case-run'
 	@echo 'Whole folder:    untrunc-case-scan, then untrunc-case-suspects (preview), then untrunc-case-batch [CASE_ARGS="--limit 5"]'
+	@echo 'Interrupted scan: run untrunc-case-scan again to resume it; CASE_ARGS=--fresh starts a new scan'
 	@echo 'REPAIR_CONFIG=$(HOME)/.config/batlab/case.json is the default replay config.'
 	@echo 'Optional recipe-based cleanup: untrunc-case-clean ALLOW_TRIM=1 (requires a private recipe)'
 	@echo 'Local agent: untrunc-agent-install / untrunc-agent-setup / untrunc-agent-model / untrunc-agent'
