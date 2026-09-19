@@ -33,6 +33,10 @@ an entire photo library. SELinux labels are shared container labels on these cas
 folders; originals elsewhere are never mounted. Runtime data stays outside git.
 Do not run a repair while another program changes the input files.
 
+If the media is on a network share, see [NEXT-STEPS.md](NEXT-STEPS.md) (Samba source and
+"Troubleshooting source access"): a desktop-mounted share often needs a regular mount or
+a local copy before Docker can scan it.
+
 ```bash
 make untrunc-inventory CASE=example-video
 make untrunc-repair CASE=example-video BROKEN=damaged.mp4 REFERENCE=healthy.mp4

@@ -1,10 +1,12 @@
+import contextlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 
 def load(name):
@@ -28,6 +30,36 @@ class CatalogTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, message):
                 case.check_source_directory(source)
 
+
+    def test_source_diagnostics_point_to_troubleshooting_guide(self):
+        for error in [PermissionError('denied'), FileNotFoundError('missing'), OSError('lost')]:
+            source = Mock()
+            source.stat.side_effect = error
+            with self.assertRaisesRegex(ValueError, 'Troubleshooting source access'):
+                case.check_source_directory(source)
+
+    def test_filesystem_type_uses_innermost_mount_and_decodes_spaces(self):
+        rows = [
+            '20 1 8:1 / / rw - ext4 /dev/sda1 rw',
+            '30 20 0:40 / /run/user/1000/kio-fuse-ABC rw - fuse.kio-fuse kio-fuse rw',
+            '31 20 0:41 / /mnt/my\\040share rw - cifs //nas/photos rw',
+            '32 20 0:42 / /mnt/disk rw - fuseblk /dev/sdb1 rw',
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            info = Path(tmp) / 'mountinfo'
+            info.write_text('\n'.join(rows) + '\n')
+            find = lambda p: case.filesystem_type(Path(p), str(info))
+            self.assertEqual(find('/run/user/1000/kio-fuse-ABC/smb/x'), 'fuse.kio-fuse')
+            self.assertEqual(find('/mnt/my share/library'), 'cifs')
+            self.assertEqual(find('/home/user/videos'), 'ext4')
+            self.assertIsNone(case.filesystem_type(Path('/x'), str(Path(tmp) / 'missing')))
+
+    def test_userspace_mount_warning_is_limited_to_fuse(self):
+        for kind, warned in [('fuse.kio-fuse', True), ('fuse', True), ('fuseblk', False), ('cifs', False), (None, False)]:
+            out = io.StringIO()
+            with patch.object(case, 'filesystem_type', return_value=kind), contextlib.redirect_stderr(out):
+                case.warn_if_userspace_mount(Path('/mnt/x'))
+            self.assertEqual('Warning' in out.getvalue(), warned, kind)
 
     def test_cleanup_finds_latest_summary_with_unique_suffix(self):
         with tempfile.TemporaryDirectory() as tmp:

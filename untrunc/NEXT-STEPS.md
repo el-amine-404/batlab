@@ -12,7 +12,9 @@ cp -n untrunc/cases/library.example.json ~/.config/batlab/case.json
 ```
 
 Edit the private JSON:
-- `source_root`: local folder or readable CIFS mount, not an SMB URL.
+- `source_root`: local folder or regular (kernel) CIFS/NFS mount, not an SMB URL. A desktop
+  FUSE path can be read by Python but not by Docker; see
+  [Desktop mount versus Docker access](#desktop-mount-versus-docker-access).
 - `repair_root`: external directory for copied inputs and recovery attempts.
 - `case`: a short case identifier.
 - `broken`: damaged file's path relative to source_root.
@@ -32,9 +34,20 @@ URL. The server name identifies the computer, `photos` is the share, and
 `library/example-event/` is the folder inside the share. Do not put a password in
 the URL or commit your real server, account or archive paths to this repository.
 
-### Find a KDE / Dolphin mount
+### Find a desktop file-manager mount
 
-Open the share in Dolphin and authenticate there. Then list the desktop mounts:
+Many desktops expose an authenticated share as a local FUSE path, for example
+KIO-Fuse on KDE (`/run/user/<uid>/kio-fuse-*`) or GVFS on GNOME
+(`/run/user/<uid>/gvfs/`). Open the share in your file manager and authenticate
+there. Then list the mounts visible to your terminal:
+
+```bash
+findmnt -o TARGET,FSTYPE,SOURCE | grep -E 'fuse|cifs|nfs'
+```
+
+The remaining steps use a KDE KIO-Fuse layout as the worked example; other desktops
+name their directories differently, so always inspect with `ls`. On KDE the KIO-Fuse
+mount can be listed directly:
 
 ```bash
 findmnt -t fuse.kio-fuse -o TARGET
@@ -65,9 +78,10 @@ share + folder inside the share**. The UID may differ from 1000; `id -u` shows
 yours. The `ABC123` suffix is an example, not a fixed value. If the actual entry
 uses different spelling or encoding, use the names returned by `ls`.
 
-If `findmnt` returns nothing, no KIO-Fuse mount is visible to that terminal.
-Being able to browse a URL in Dolphin does not by itself establish a usable local
-mount. Copy the required folder locally with Dolphin, or use a regular CIFS mount.
+If `findmnt` returns nothing, no such mount is visible to that terminal.
+Being able to browse a URL in a file manager does not by itself establish a usable
+local mount. Copy the required folder locally with the file manager, or use a
+regular CIFS mount.
 
 Check the path and read access before configuring a scan:
 
@@ -85,31 +99,103 @@ inspection convenience. No shell export is needed for later Make commands.
 
 ### Desktop mount versus Docker access
 
-A desktop FUSE mount can work in Dolphin and your terminal while remaining
-inaccessible to the Docker daemon or container. A permission error in that case
-is an access problem, not evidence of damaged video. Do not change archive
-permissions broadly or relabel the entire library to work around it.
+A desktop FUSE mount is private to the user session that created it. It works in
+your file manager and terminal, but the Docker daemon (which runs as root) is refused.
+`make untrunc-case-scan` bind-mounts `source_root` into the scanner container, so it
+fails with an error such as:
 
-For a repeatable homelab job, prefer either:
+```text
+invalid mount config for type "bind": stat /run/user/1000/<desktop-mount>/...: permission denied
+```
 
-- A local copy in a dedicated source folder, with the recovery case stored elsewhere.
-- A regular, preferably read-only CIFS mount at a stable location such as
-  `/mnt/archive`, managed by the host administrator. Keep credentials outside git.
+This is an access problem, not evidence of damaged video. Do not change archive
+permissions broadly or relabel the entire library to work around it. Before starting
+Docker, the scan also prints a warning when `source_root` is on a user-space (FUSE)
+mount.
 
-Find existing regular Samba mounts with:
+Only the **scan** needs Docker to reach the source. `prepare` and `run` copy the
+chosen files with your own account, so a desktop path can still work for them when
+`references` lists explicit files and you skip the scan.
+
+For a scan, use one of these instead:
+
+**1. A regular CIFS mount** (read-only, at a stable location):
+
+```bash
+sudo mkdir -p /mnt/archive
+sudo mount -t cifs //nas.example/photos /mnt/archive \
+  -o ro,username=archive-user,uid="$(id -u)",gid="$(id -g)",file_mode=0444,dir_mode=0555
+```
+
+- This needs the CIFS mount helper (usually the `cifs-utils` package).
+- It prompts for the password. For repeated use, pass `credentials=/path/to/file`
+  instead: a root-owned file with mode `600` holding `username=` and `password=`
+  lines. Keep it outside git.
+- Do not add `vers=` unless the server requires it. Forcing a version the server does
+  not support fails with `mount error(95): Operation not supported`; see
+  [Troubleshooting source access](#troubleshooting-source-access).
+- The mount does not survive a reboot. Remove it with `sudo umount /mnt/archive`.
+- If `//nas.example/photos` is mounted at `/mnt/archive`, the example folder is
+  `/mnt/archive/library/example-event`. Do **not** add `photos` again: the mount
+  already represents that share.
+
+Existing regular Samba mounts are listed with:
 
 ```bash
 findmnt -t cifs -o TARGET,SOURCE
 ```
 
-If `//nas.example/photos` is mounted at `/mnt/archive`, the same example folder is
-`/mnt/archive/library/example-event`. Do **not** add `photos` again: the mount
-already represents that share.
+**2. A local copy** in a dedicated source folder, kept apart from the recovery case:
 
-Store that stable path as `source_root`, then follow the build/scan commands below.
+```bash
+rsync -a --info=progress2 "/path/to/desktop-mount/example-event/" ~/video-repair/source/example-event/
+```
+
+`cp -a` also works. Keep modification times (`-a` does): `prepare` compares size and
+modification time with the scan. Point `source_root` at the copy.
+
+**3. Explicit references**, skipping the scan (see below).
+
+Store the stable path as `source_root`, then follow the build/scan commands below.
 The scanner mounts the library read-only and does not recursively relabel it.
-A KIO-Fuse path may change after logout or remounting; rediscover it and update the
-private JSON if you keep using a desktop mount.
+A desktop-mount path (such as KIO-Fuse's random suffix) may change after logout or
+remounting; rediscover it and update the private JSON if you keep using one.
+
+## Troubleshooting source access
+
+**`Permission denied accessing source directory` from the Python script**
+- The share is not authenticated for this user, or the session expired. Open the
+  share again in your file manager (or remount it) and repeat the `ls` check.
+- Your shell's primary group differs from the one that owns the mount. Desktop FUSE
+  mounts accept only your own user *and* group, so a shell started with `newgrp` or
+  `sg` is refused. Compare `id -gn` with a normal login shell, and `exit` the
+  `newgrp`/`sg` shell.
+
+**`permission denied while trying to connect to the docker API at unix:///var/run/docker.sock`**
+- This session may not be allowed to use Docker. Adding yourself to the `docker` group
+  (for example `sudo usermod -aG docker "$USER"`) applies only to **new** login
+  sessions. Log out and back in, or run `su - "$USER"` for a fresh login shell, then
+  confirm with `id` that `docker` appears in the group list.
+- Avoid `newgrp docker` for this workflow: it changes your primary group, which then
+  breaks access to desktop FUSE mounts (previous item).
+- Membership in `docker` is effectively root access on the host; follow your own
+  policy. Rootless Docker does not need this group.
+
+**`invalid mount config for type "bind": stat ...: permission denied`**
+- Docker could not read `source_root`, usually because it is a desktop FUSE mount.
+  See [Desktop mount versus Docker access](#desktop-mount-versus-docker-access).
+
+**`mount error(95): Operation not supported` (or `mount error(13)`) from `mount -t cifs`**
+- Read the kernel log for the exact reason: `sudo dmesg | grep -i cifs | tail`.
+- `Dialect not supported by server` means the forced `vers=` is not offered by the
+  server. Remove `vers=` to let the kernel negotiate, or try `vers=2.1`. SMB 1.0 is
+  disabled in many kernels and is not recommended; use a local copy instead.
+- `mount error(13)` normally means a wrong username, password or domain.
+
+**`Source path not found`**
+- The mount is absent or its path changed. Manual mounts vanish after a reboot;
+  desktop mounts can change their directory name after logout. List current mounts with
+  `findmnt -o TARGET,FSTYPE,SOURCE`, then update `source_root`.
 
 ## Build, scan and repair
 

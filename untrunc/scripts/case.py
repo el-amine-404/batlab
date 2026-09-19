@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from progress import Progress
 
 REPO = Path(__file__).resolve().parents[2]
+SOURCE_HELP = 'See untrunc/NEXT-STEPS.md, "Troubleshooting source access".'
 
 
 def path(value):
@@ -59,13 +60,50 @@ def check_source_directory(src):
     try:
         mode = src.stat().st_mode
     except PermissionError as e:
-        raise ValueError(f'Permission denied accessing source directory: {src}; check mount authentication and access') from e
+        raise ValueError(
+            f'Permission denied accessing source directory: {src}; check mount authentication and access.\n'
+            'Common causes: a network share that is not authenticated or has expired for this user, or a shell '
+            'whose primary group differs from the one that owns the mount (for example after newgrp or sg). '
+            f'Compare `id` with a fresh login shell. {SOURCE_HELP}') from e
     except FileNotFoundError as e:
-        raise ValueError(f'Source path not found: {src}; reconnect the share or update source_root') from e
+        raise ValueError(
+            f'Source path not found: {src}; reconnect the share or update source_root.\n'
+            'Desktop mount directories can change after logout or remount; `findmnt` lists the current mounts. '
+            f'{SOURCE_HELP}') from e
     except OSError as e:
-        raise ValueError(f'Source mount/path error for {src}: {e}') from e
+        raise ValueError(
+            f'Source mount/path error for {src}: {e}\n'
+            f'The share may be disconnected or stale; remount it and retry. {SOURCE_HELP}') from e
     if not stat.S_ISDIR(mode):
         raise ValueError(f'Source path exists but is not a directory: {src}')
+
+
+def filesystem_type(target, mountinfo='/proc/self/mountinfo'):
+    """Filesystem type of the innermost mount containing target, or None if unknown."""
+    try:
+        lines = Path(mountinfo).read_text(errors='replace').splitlines()
+    except OSError:
+        return None
+    best = None
+    for line in lines:
+        left, separator, right = line.partition(' - ')
+        fields, tail = left.split(), right.split()
+        if not separator or len(fields) < 5 or not tail:
+            continue
+        # mountinfo escapes spaces and other characters as \040-style octal.
+        mount = Path(re.sub(r'\\([0-7]{3})', lambda m: chr(int(m.group(1), 8)), fields[4]))
+        if (target == mount or target.is_relative_to(mount)) and (best is None or len(mount.parts) >= len(best[0].parts)):
+            best = (mount, tail[0])
+    return best[1] if best else None
+
+
+def warn_if_userspace_mount(src):
+    kind = filesystem_type(src)
+    # fuseblk is excluded: it is normally a host-managed disk that Docker can read.
+    if kind and (kind == 'fuse' or kind.startswith('fuse.')):
+        print(f'Warning: {src} is on a user-space ({kind}) mount. The scanner reads it through the Docker daemon, '
+              'which usually cannot access such mounts and reports a bind-mount "permission denied". '
+              f'Use a regular CIFS/NFS mount or a local copy if that happens. {SOURCE_HELP}', file=sys.stderr)
 
 
 def case_config(config):
@@ -178,9 +216,15 @@ def main():
             raise ValueError('No candidate with recovered audio found')
         best = max(with_audio, key=lambda r: float(r['durations']['audio']))
         env.update(CANDIDATE=best['file'], RECIPE=c['cleanup_recipe'], ALLOW_TRIM='1')
+    if args.action == 'scan':
+        warn_if_userspace_mount(src)
     cmd = ['docker', 'compose', '-f', str(REPO / 'compose/untrunc/docker-compose.yml'), 'run', '--rm', '--no-deps']
     print(f'Outputs and logs: {root / "work"}', flush=True)
-    return subprocess.call(cmd + (['scanner'] if args.action == 'scan' else ['untrunc', 'clean-tail' if args.action == 'clean' else 'auto']), env=env, cwd=REPO)
+    status = subprocess.call(cmd + (['scanner'] if args.action == 'scan' else ['untrunc', 'clean-tail' if args.action == 'clean' else 'auto']), env=env, cwd=REPO)
+    if status and args.action == 'scan':
+        print('If Docker reported a socket or bind-mount "permission denied" error, '
+              f'see untrunc/NEXT-STEPS.md, "Troubleshooting source access".', file=sys.stderr)
+    return status
 
 
 if __name__ == '__main__':
