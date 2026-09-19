@@ -246,6 +246,67 @@ class CatalogTests(Fixture):
         self.assertEqual(case.case_config(self.config, check_source=False)[2], self.base / 'unmounted')
 
 
+class ScanProgressTests(unittest.TestCase):
+    """The scan announces how many videos it found, then counts through them."""
+
+    def scan(self, root, mode='probe'):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            result = catalog_tool.scan(root, root.parent / 'catalog-out', mode)
+        return result, out.getvalue().splitlines()
+
+    def test_announces_the_total_then_counts_each_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'library'
+            (root / 'sub').mkdir(parents=True)
+            for name in ('a.mp4', 'z.mp4', 'sub/c.MOV'):
+                (root / name).write_bytes(b'not a video')
+            (root / 'notes.txt').write_text('ignored')
+            (root / 'link.mp4').symlink_to(root / 'a.mp4')  # symlinks are skipped, as before
+            result, lines = self.scan(root)
+            self.assertEqual(lines[0], f'Looking for video files under {root.resolve()} ...')
+            self.assertEqual(lines[1], 'Found 3 video file(s) to scan.')
+            self.assertEqual(lines[2:], ['Scanning 1/3: a.mp4', 'Scanning 2/3: z.mp4', 'Scanning 3/3: sub/c.MOV'])
+            # Same order as before: a folder's files come before its sub-folders.
+            self.assertEqual([i['path'] for i in result['items']], ['a.mp4', 'z.mp4', 'sub/c.MOV'])
+            self.assertTrue(result['complete'])
+
+    def test_counter_is_aligned_for_larger_totals(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'library'
+            root.mkdir()
+            for n in range(10):
+                (root / f'v{n}.mp4').write_bytes(b'x')
+            _, lines = self.scan(root)
+            self.assertEqual(lines[1], 'Found 10 video file(s) to scan.')
+            self.assertEqual(lines[2], 'Scanning  1/10: v0.mp4')
+            self.assertEqual(lines[-1], 'Scanning 10/10: v9.mp4')
+
+    def test_no_videos_is_reported_and_still_a_complete_scan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'library'
+            root.mkdir()
+            (root / 'photo.jpg').write_bytes(b'x')
+            result, lines = self.scan(root)
+            self.assertEqual(lines[1:], ['Found 0 video file(s) to scan.'])
+            self.assertEqual((result['complete'], result['items']), (True, []))
+
+    @unittest.skipIf(os.name != 'posix' or os.geteuid() == 0, 'needs a non-root POSIX user to make a folder unreadable')
+    def test_unreadable_folder_still_marks_the_scan_incomplete(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'library'
+            (root / 'locked').mkdir(parents=True)
+            (root / 'ok.mp4').write_bytes(b'x')
+            (root / 'locked').chmod(0)
+            try:
+                result, lines = self.scan(root)
+            finally:
+                (root / 'locked').chmod(0o755)
+            self.assertFalse(result['complete'])
+            self.assertEqual(len(result['walk_errors']), 1)
+            self.assertIn('Found 1 video file(s) to scan.', lines)
+
+
 class StagingTests(Fixture):
     def test_interrupted_copy_is_replaced_on_the_next_run_not_refused(self):
         src, dst = self.src / 'trip/bad-a.mp4', self.base / 'input.mp4'

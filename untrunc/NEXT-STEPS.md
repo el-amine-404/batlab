@@ -216,6 +216,9 @@ Explicit references allow skipping the scan. Preparation is rerunnable, copies
 rather than links source files, preserves basenames and verifies hashes. It refuses
 to overwrite different bytes. Runtime sources are mounted read-only.
 
+The scan first prints how many video files it found, then counts through them
+(`Scanning 3/37: path/to/clip.mp4`).
+
 Scanning fully decodes supported video formats under source_root, so start with a
 small folder. The resulting `work/*scan*/catalog/catalog.json` separates clean
 videos, decode errors, unreadable files and scan failures. Unreadable is not proof

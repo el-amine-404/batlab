@@ -77,42 +77,47 @@ def scan(root, out, mode='full', timeout=1800):
     errors = []
     def walk_error(err):
         errors.append(str(err))
+    print(f'Looking for video files under {root} ...', flush=True)
+    videos = []
     for directory, dirs, names in os.walk(root, followlinks=False, onerror=walk_error):
         dirs[:] = sorted(d for d in dirs if not (Path(directory) / d).is_symlink())
         for name in sorted(names):
             path = Path(directory) / name
-            if path.is_symlink() or path.suffix.lower() not in EXTENSIONS:
-                continue
-            rel = str(path.relative_to(root))
-            print(f'Scan: {rel}', flush=True)
-            item = {'path': rel, 'status': 'scan-error', 'signature': {}, 'date': date_of(rel, {})}
-            try:
-                r = subprocess.run(['ffprobe', '-v', 'error', '-show_format', '-show_streams',
-                                    '-show_data_hash', 'sha256', '-of', 'json', str(path)],
-                                   capture_output=True, text=True, timeout=timeout)
-                metadata = json.loads(r.stdout or '{}')
-                item.update(signature=signature(metadata), date=date_of(rel, metadata), metadata=metadata,
-                            size=path.stat().st_size, mtime_ns=path.stat().st_mtime_ns,
-                            probe_errors=r.stderr)
-                if r.returncode or not any(s.get('codec_type') == 'video' for s in metadata.get('streams', [])):
-                    item['status'] = 'unreadable-or-no-video'
-                elif mode == 'probe':
-                    item['status'] = 'probe-only-unverified'
-                else:
-                    log = out / f'decode-{len(items):05d}.log'
-                    with log.open('w') as f:
-                        r = subprocess.run(['ffmpeg', '-v', 'error', '-nostdin', '-threads', '2',
-                                            '-i', str(path), '-map', '0:v?', '-map', '0:a?', '-f', 'null', '-'],
-                                           stdout=subprocess.DEVNULL, stderr=f, timeout=timeout)
-                    messages = log.read_text().splitlines()
-                    errors_found = [s for s in messages if s.strip() and not ('[null @' in s and 'non monotonically increasing dts' in s)]
-                    item.update(decode_returncode=r.returncode, error_log_lines=len(errors_found), log=log.name)
-                    item['status'] = 'decode-clean' if r.returncode == 0 and not errors_found else 'decode-errors'
-            except (OSError, ValueError, subprocess.TimeoutExpired) as e:
-                item.update(status='scan-error', scan_error=str(e))
-            items.append(item)
-            # A partial scan is useful if interrupted, but must not look complete.
-            (out / 'catalog.json').write_text(json.dumps({'complete': False, 'mode': mode, 'items': items}, indent=2))
+            if not path.is_symlink() and path.suffix.lower() in EXTENSIONS:
+                videos.append(path)
+    total = len(videos)
+    print(f'Found {total} video file(s) to scan.', flush=True)
+    for number, path in enumerate(videos, 1):
+        rel = str(path.relative_to(root))
+        print(f'Scanning {number:>{len(str(total))}}/{total}: {rel}', flush=True)
+        item = {'path': rel, 'status': 'scan-error', 'signature': {}, 'date': date_of(rel, {})}
+        try:
+            r = subprocess.run(['ffprobe', '-v', 'error', '-show_format', '-show_streams',
+                                '-show_data_hash', 'sha256', '-of', 'json', str(path)],
+                               capture_output=True, text=True, timeout=timeout)
+            metadata = json.loads(r.stdout or '{}')
+            item.update(signature=signature(metadata), date=date_of(rel, metadata), metadata=metadata,
+                        size=path.stat().st_size, mtime_ns=path.stat().st_mtime_ns,
+                        probe_errors=r.stderr)
+            if r.returncode or not any(s.get('codec_type') == 'video' for s in metadata.get('streams', [])):
+                item['status'] = 'unreadable-or-no-video'
+            elif mode == 'probe':
+                item['status'] = 'probe-only-unverified'
+            else:
+                log = out / f'decode-{len(items):05d}.log'
+                with log.open('w') as f:
+                    r = subprocess.run(['ffmpeg', '-v', 'error', '-nostdin', '-threads', '2',
+                                        '-i', str(path), '-map', '0:v?', '-map', '0:a?', '-f', 'null', '-'],
+                                       stdout=subprocess.DEVNULL, stderr=f, timeout=timeout)
+                messages = log.read_text().splitlines()
+                errors_found = [s for s in messages if s.strip() and not ('[null @' in s and 'non monotonically increasing dts' in s)]
+                item.update(decode_returncode=r.returncode, error_log_lines=len(errors_found), log=log.name)
+                item['status'] = 'decode-clean' if r.returncode == 0 and not errors_found else 'decode-errors'
+        except (OSError, ValueError, subprocess.TimeoutExpired) as e:
+            item.update(status='scan-error', scan_error=str(e))
+        items.append(item)
+        # A partial scan is useful if interrupted, but must not look complete.
+        (out / 'catalog.json').write_text(json.dumps({'complete': False, 'mode': mode, 'items': items}, indent=2))
     suspects = [i for i in items if i['status'] in ('unreadable-or-no-video', 'decode-errors')]
     report = {'complete': not errors, 'walk_errors': errors, 'mode': mode,
               'root_in_container': str(root), 'host_source_root': (os.environ.get('SCAN_HOST_ROOT') or str(root)), 'items': items,
