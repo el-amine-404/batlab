@@ -19,6 +19,98 @@ Edit the private JSON:
 - `references`: relative paths of healthy references, or `[]` for ranked selection.
 - `fps`: empty unless evidence supports a reconstruction frame rate.
 
+## Use a Samba share as the source
+
+A file manager understands an address such as:
+
+```text
+smb://archive-user@nas.example/photos/library/example-event/
+```
+
+Python, FFmpeg and Docker bind mounts need a **local filesystem path**, not that
+URL. The server name identifies the computer, `photos` is the share, and
+`library/example-event/` is the folder inside the share. Do not put a password in
+the URL or commit your real server, account or archive paths to this repository.
+
+### Find a KDE / Dolphin mount
+
+Open the share in Dolphin and authenticate there. Then list the desktop mounts:
+
+```bash
+findmnt -t fuse.kio-fuse -o TARGET
+```
+
+For example, it may show:
+
+```text
+/run/user/1000/kio-fuse-ABC123
+```
+
+Inspect the mount rather than guessing its internal directory names:
+
+```bash
+ls '/run/user/1000/kio-fuse-ABC123/'
+ls '/run/user/1000/kio-fuse-ABC123/smb/'
+ls '/run/user/1000/kio-fuse-ABC123/smb/archive-user@nas.example/'
+```
+
+If those entries exist, the example URL maps to:
+
+```text
+/run/user/1000/kio-fuse-ABC123/smb/archive-user@nas.example/photos/library/example-event
+```
+
+The pieces are: **actual mount target + smb + actual server/account directory +
+share + folder inside the share**. The UID may differ from 1000; `id -u` shows
+yours. The `ABC123` suffix is an example, not a fixed value. If the actual entry
+uses different spelling or encoding, use the names returned by `ls`.
+
+If `findmnt` returns nothing, no KIO-Fuse mount is visible to that terminal.
+Being able to browse a URL in Dolphin does not by itself establish a usable local
+mount. Copy the required folder locally with Dolphin, or use a regular CIFS mount.
+
+Check the path and read access before configuring a scan:
+
+```bash
+media_path='/run/user/1000/kio-fuse-ABC123/smb/archive-user@nas.example/photos/library/example-event'
+ls -ld "$media_path"
+ls "$media_path"
+# Substitute an actual file shown by ls; reads one byte without changing it.
+head -c 1 "$media_path/example.mp4" >/dev/null
+```
+
+Paste the verified path into `source_root` in your **private** case JSON. JSON
+requires the actual path: the shell variable `$media_path` above is only a temporary
+inspection convenience. No shell export is needed for later Make commands.
+
+### Desktop mount versus Docker access
+
+A desktop FUSE mount can work in Dolphin and your terminal while remaining
+inaccessible to the Docker daemon or container. A permission error in that case
+is an access problem, not evidence of damaged video. Do not change archive
+permissions broadly or relabel the entire library to work around it.
+
+For a repeatable homelab job, prefer either:
+
+- A local copy in a dedicated source folder, with the recovery case stored elsewhere.
+- A regular, preferably read-only CIFS mount at a stable location such as
+  `/mnt/archive`, managed by the host administrator. Keep credentials outside git.
+
+Find existing regular Samba mounts with:
+
+```bash
+findmnt -t cifs -o TARGET,SOURCE
+```
+
+If `//nas.example/photos` is mounted at `/mnt/archive`, the same example folder is
+`/mnt/archive/library/example-event`. Do **not** add `photos` again: the mount
+already represents that share.
+
+Store that stable path as `source_root`, then follow the build/scan commands below.
+The scanner mounts the library read-only and does not recursively relabel it.
+A KIO-Fuse path may change after logout or remounting; rediscover it and update the
+private JSON if you keep using a desktop mount.
+
 ## Build, scan and repair
 
 Run in a terminal with working Docker Compose access:
