@@ -21,6 +21,21 @@ INPUT = Path(os.environ.get('REPAIR_INPUT', '/input')).resolve()
 REFS = Path(os.environ.get('REPAIR_REFERENCES', '/references')).resolve()
 WORK = Path(os.environ.get('REPAIR_WORK', '/work')).resolve()
 TIMEOUT = int(os.environ.get('REPAIR_TIMEOUT') or '1800')
+# Host folder behind /input, /references and /work (the container only sees those short mount names).
+HOST_CASE = os.environ.get('HOST_CASE_DIR', '')
+HOST_LIBRARY = os.environ.get('SCAN_HOST_ROOT', '')
+
+
+def shown(path):
+    """A container path as it appears on the host, so messages point to real folders."""
+    path = Path(path)
+    if HOST_CASE:
+        for mount, name in ((WORK, 'work'), (REFS, 'references'), (INPUT, 'input')):
+            if path == mount or mount in path.parents:
+                return str(Path(HOST_CASE) / name / path.relative_to(mount))
+    if HOST_LIBRARY and (path == Path('/library') or Path('/library') in path.parents):
+        return str(Path(HOST_LIBRARY) / path.relative_to('/library'))
+    return str(path)
 
 
 def save(path, data):
@@ -32,7 +47,7 @@ def inside(root, name):
         raise ValueError('Missing filename; see make untrunc-help')
     p = (root / name).resolve()
     if not p.is_relative_to(root) or not p.is_file():
-        raise ValueError(f'Expected an existing file inside {root}: {name}')
+        raise ValueError(f'Expected an existing file inside {shown(root)}: {name}')
     return p
 
 
@@ -80,7 +95,7 @@ def run(args, log, stdout=None, duration=None):
             r = subprocess.run(args, stdout=stdout if stdout is not None else err,
                                stderr=err, timeout=TIMEOUT, check=False)
             if r.returncode:
-                progress.outcome = f'exit {r.returncode}; see {log}'
+                progress.outcome = f'exit {r.returncode}; see {shown(log)}'
             return r.returncode
         except subprocess.TimeoutExpired:
             err.write('\nTIMEOUT: experiment stopped; output is incomplete.\n')
@@ -131,7 +146,7 @@ def verify(path, out):
                  '-frames:v', '1', '-vf', 'scale=480:-2', '-n', out / f'frame-{n}.jpg'],
                 out / f'frame-{n}.log')
     save(out / 'report.json', result)
-    say(f'Verification: {result["status"]} · {lines} decoding error messages · {out / "report.json"}')
+    say(f'Verification: {result["status"]} · {lines} decoding error messages · {shown(out / "report.json")}')
     return result
 
 
@@ -177,12 +192,12 @@ def reframe(source, fps, reference=None):
     rc = run(['ffmpeg', '-v', 'error', '-nostdin', '-i', source, '-map', '0:v:0',
               '-c', 'copy', '-bsf:v', 'h264_mp4toannexb', '-f', 'h264', '-n', raw], out / 'extract.log')
     if rc:
-        raise RuntimeError(f'Extraction failed; see {out}')
+        raise RuntimeError(f'Extraction failed; see {shown(out)}')
     rc = run(['ffmpeg', '-v', 'warning', '-nostdin', '-r', str(rate), '-i', raw,
               '-i', source, '-map', '0:v:0', '-map', '1:a?', '-c', 'copy',
               '-movflags', '+faststart', '-n', intermediate], out / 'remux.log')
     if rc:
-        raise RuntimeError(f'Remux failed; see {out}')
+        raise RuntimeError(f'Remux failed; see {shown(out)}')
     rotation_data = video.get('side_data_list', [])
     if not any('rotation' in item for item in rotation_data) and reference is not None:
         ref_video = next((s for s in probe(reference)['metadata'].get('streams', [])
@@ -197,13 +212,25 @@ def reframe(source, fps, reference=None):
               '-i', intermediate, '-map', '0', '-c', 'copy', *rotation_output,
               '-movflags', '+faststart', '-n', final], out / 'rotation.log')
     if rc:
-        raise RuntimeError(f'Rotation remux failed; see {out}')
+        raise RuntimeError(f'Rotation remux failed; see {shown(out)}')
     result = verify(final, out / 'verification')
     result['expected_rotation'] = rotation
     result['actual_rotation'] = [s.get('side_data_list', []) for s in probe(final)['metadata'].get('streams', [])
                                  if s.get('codec_type') == 'video']
     save(out / 'result.json', result)
     return result
+
+
+def finish_scan(report, out):
+    """Say what the scan did and where its catalog is; exit 0 only for a complete scan."""
+    catalog = shown(out / 'catalog.json')
+    print(f'\nScan finished: {len(report["items"])} video file(s) checked.', flush=True)
+    print(f'Catalog saved to: {catalog}', flush=True)
+    if not report['complete']:
+        print('WARNING: the catalog is INCOMPLETE because some folders could not be read '
+              f'(first problem: {report["walk_errors"][0] if report["walk_errors"] else "unknown"}).', flush=True)
+        return 2
+    return 0
 
 
 def main():
@@ -224,14 +251,13 @@ def main():
         from catalog import scan
         out = attempt('scan') / 'catalog'
         report = scan(Path('/library'), out, os.environ.get('SCAN_MODE') or 'full', TIMEOUT)
-        print(f'Catalog: {out}/catalog.json')
-        return 0 if report['complete'] else 2
+        return finish_scan(report, out)
     if a.action == 'inventory':
         out = attempt('inventory')
         items = {str(f): probe(f) for root in (INPUT, REFS) for f in sorted(root.iterdir())
                  if f.is_file() and f.suffix.lower() in ('.mp4', '.mov', '.m4v', '.3gp')}
         save(out / 'inventory.json', items)
-        print(out)
+        print(shown(out))
         return 0
     if a.action in ('verify', 'reframe'):
         source = inside(WORK, os.environ.get('CANDIDATE', ''))
@@ -259,7 +285,7 @@ def main():
             say(f'\nReference {ref_index}/{len(refs)}: {reference.name}')
             refcheck = verify(reference, attempt('reference') / 'verification')
             if refcheck['status'] != 'decode-clean-needs-review':
-                print(f'Skipping reference with decode errors: {reference}', flush=True)
+                print(f'Skipping reference with decode errors: {shown(reference)}', flush=True)
                 continue
             for skip in (False, True):
                 say(f'Attempt {2 if skip else 1}/2: {"skip unknown data" if skip else "standard repair"}')
@@ -273,7 +299,7 @@ def main():
                             print(str(e), file=sys.stderr)
     summary = attempt('summary')
     save(summary / 'results.json', results)
-    print(f'Results: {summary}/results.json', flush=True)
+    print(f'Results: {shown(summary / "results.json")}', flush=True)
     print('Human review of footage, duration and audio sync is still required.')
     return 0 if any(r['status'] == 'decode-clean-needs-review' for r in results) else 2
 

@@ -413,6 +413,73 @@ class UndecodableAudioTests(unittest.TestCase):
         self.assertNotIn('cannot decode', plain)
 
 
+class HostPathTests(unittest.TestCase):
+    """Messages produced inside the container must point at real folders on the host."""
+
+    def setUp(self):
+        self.recover = load('recover')
+        r = self.recover
+        r.INPUT, r.REFS, r.WORK = Path('/input'), Path('/references'), Path('/work')
+        r.HOST_CASE, r.HOST_LIBRARY = '/home/u/cases/trip', '/mnt/share/photos/trip'
+
+    def test_container_paths_become_host_paths(self):
+        shown = self.recover.shown
+        self.assertEqual(shown('/work/20260101-scan-ab/catalog/catalog.json'),
+                         '/home/u/cases/trip/work/20260101-scan-ab/catalog/catalog.json')
+        self.assertEqual(shown(Path('/work')), '/home/u/cases/trip/work')
+        self.assertEqual(shown('/references/a.mp4'), '/home/u/cases/trip/references/a.mp4')
+        self.assertEqual(shown('/input/b.mp4'), '/home/u/cases/trip/input/b.mp4')
+        self.assertEqual(shown('/library'), '/mnt/share/photos/trip')
+        self.assertEqual(shown('/library/day 1/c.mp4'), '/mnt/share/photos/trip/day 1/c.mp4')
+
+    def test_other_paths_and_missing_host_information_are_left_alone(self):
+        shown = self.recover.shown
+        self.assertEqual(shown('/workshop/x'), '/workshop/x')  # only a real mount, not a shared name prefix
+        self.assertEqual(shown('/tmp/x'), '/tmp/x')
+        self.recover.HOST_CASE = self.recover.HOST_LIBRARY = ''
+        self.assertEqual((shown('/work/a'), shown('/library/b')), ('/work/a', '/library/b'))
+
+    def test_scan_summary_names_the_host_catalog_and_flags_incomplete_scans(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = self.recover.finish_scan({'items': [{}, {}, {}], 'complete': True, 'walk_errors': []},
+                                            Path('/work/20260101-scan-ab/catalog'))
+        text = out.getvalue()
+        self.assertEqual(code, 0)
+        self.assertIn('Scan finished: 3 video file(s) checked.', text)
+        self.assertIn('Catalog saved to: /home/u/cases/trip/work/20260101-scan-ab/catalog/catalog.json', text)
+        self.assertNotIn('/work/2026', text.replace('/home/u/cases/trip/work/2026', ''))  # no bare container path
+        self.assertNotIn('INCOMPLETE', text)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = self.recover.finish_scan({'items': [], 'complete': False, 'walk_errors': ['[Errno 13] Permission denied: x']},
+                                            Path('/work/s/catalog'))
+        self.assertEqual(code, 2)
+        self.assertIn('INCOMPLETE', out.getvalue())
+        self.assertIn('Permission denied: x', out.getvalue())
+
+    def test_scanner_announces_the_host_folder_not_the_mount_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'library'
+            root.mkdir()
+
+            def first_line(outdir):
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    catalog_tool.scan(root, Path(tmp) / outdir, 'probe')
+                return out.getvalue().splitlines()[0]
+            with patch.dict(os.environ, {'SCAN_HOST_ROOT': '/mnt/share/photos/trip'}):
+                self.assertEqual(first_line('a'), 'Looking for video files under /mnt/share/photos/trip ...')
+            with patch.dict(os.environ):
+                os.environ.pop('SCAN_HOST_ROOT', None)
+                self.assertEqual(first_line('b'), f'Looking for video files under {root.resolve()} ...')
+
+    def test_compose_passes_the_host_case_folder_into_the_container(self):
+        compose = (Path(__file__).parents[2] / 'compose/untrunc/docker-compose.yml').read_text()
+        self.assertIn('HOST_CASE_DIR: "${REPAIR_CASE_DIR:-}"', compose)  # what shown() relies on
+        self.assertIn('SCAN_HOST_ROOT: "${SCAN_HOST_ROOT:-}"', compose)
+
+
 class StagingTests(Fixture):
     def test_interrupted_copy_is_replaced_on_the_next_run_not_refused(self):
         src, dst = self.src / 'trip/bad-a.mp4', self.base / 'input.mp4'
@@ -777,6 +844,33 @@ class CommandLineTests(Fixture):
         self.assertEqual(lines[3], f'UID:{os.getuid()}')
         self.assertIn('1 suspect(s) not processed yet', result.stdout)
         self.assertIn('candidate ready', result.stdout)
+
+    def fake_docker(self, exit_code):
+        bin_dir = self.base / f'bin{exit_code}'
+        bin_dir.mkdir()
+        fake = bin_dir / 'docker'
+        fake.write_text(f'#!/bin/sh\nexit {exit_code}\n')
+        fake.chmod(0o755)
+        return bin_dir
+
+    def test_successful_scan_says_what_to_run_next_with_the_full_config_path(self):
+        result = self.cli('scan', '--config', str(self.config), path_prefix=str(self.fake_docker(0)))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f'make untrunc-case-suspects REPAIR_CONFIG={self.config.resolve()}', result.stdout)
+
+    def test_config_path_with_spaces_is_quoted_in_the_hint(self):
+        spaced = self.base / 'my configs'
+        spaced.mkdir()
+        target = spaced / 'case file.json'
+        target.write_text(self.config.read_text())
+        result = self.cli('scan', '--config', str(target), path_prefix=str(self.fake_docker(0)))
+        self.assertIn(f"REPAIR_CONFIG='{target}'", result.stdout)
+
+    def test_failed_scan_does_not_suggest_the_next_step(self):
+        result = self.cli('scan', '--config', str(self.config), path_prefix=str(self.fake_docker(1)))
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn('untrunc-case-suspects', result.stdout)
+        self.assertIn('permission denied', result.stderr)
 
     def test_batch_command_reports_a_missing_docker_clearly(self):
         empty = self.base / 'empty-bin'

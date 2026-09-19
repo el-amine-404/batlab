@@ -100,7 +100,8 @@ def scan(root, out, mode='full', timeout=1800):
     errors = []
     def walk_error(err):
         errors.append(str(err))
-    print(f'Looking for video files under {root} ...', flush=True)
+    # Inside Docker the library is mounted at /library: show the folder as it is on the host.
+    print(f'Looking for video files under {os.environ.get("SCAN_HOST_ROOT") or root} ...', flush=True)
     videos = []
     for directory, dirs, names in os.walk(root, followlinks=False, onerror=walk_error):
         dirs[:] = sorted(d for d in dirs if not (Path(directory) / d).is_symlink())

@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -429,6 +430,9 @@ def main():
         warn_if_userspace_mount(src)
     print(f'Outputs and logs: {root / "work"}', flush=True)
     status = compose(env, *(['scanner'] if args.action == 'scan' else ['untrunc', 'clean-tail' if args.action == 'clean' else 'auto']))
+    if status == 0 and args.action == 'scan':
+        print(f'Next: list the damaged-looking files and their healthy matches with\n'
+              f'  make untrunc-case-suspects REPAIR_CONFIG={shlex.quote(str(args.config.resolve()))}', flush=True)
     if status and args.action == 'scan':
         print('If Docker reported a socket or bind-mount "permission denied" error, '
               f'see untrunc/NEXT-STEPS.md, "Troubleshooting source access".', file=sys.stderr)

@@ -59,7 +59,7 @@ def clean(recovery, broken, candidate, recipe_path):
     rc = recovery.run(['ffmpeg', '-v', 'error', '-nostdin', '-threads', '2', '-i', raw,
                        '-f', 'null', '-'], out / 'retained-decode.log', duration=len(retained) / r['fps'])
     if rc or (out / 'retained-decode.log').read_text().strip():
-        raise ValueError(f'Retained sequence failed verification: {out}')
+        raise ValueError(f'Retained sequence failed verification: {recovery.shown(out)}')
     # Preserve every available audio sample separately before shortening the derivative.
     audio = out / 'full-recovered-audio.m4a'
     rc = recovery.run(['ffmpeg', '-v', 'error', '-nostdin', '-i', candidate, '-map', '0:a:0',

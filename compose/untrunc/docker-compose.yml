@@ -17,6 +17,7 @@ services:
     tmpfs:
       - /tmp:rw,nosuid,nodev,size=256m
     environment:
+      HOST_CASE_DIR: "${REPAIR_CASE_DIR:-}"
       BROKEN: "${BROKEN:-}"
       REFERENCE: "${REFERENCE:-}"
       CANDIDATE: "${CANDIDATE:-}"
