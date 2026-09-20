@@ -51,7 +51,22 @@ nothing in the library points at it any more.
 | Seeding rule | categories `movies` and `tv`, tags (any) `unlinked`, max seed time 1 h, max inactive days 7, action Delete with source files |
 
 Tagging rather than moving the category leaves Radarr's and Sonarr's own
-category mapping alone.
+category mapping alone. qBittorrent runs with automatic torrent management and
+relocates on a category change, so moving the category would move the files.
+
+**Tags (Any) must contain `unlinked`.** It is the only thing scoping the rule:
+the categories field covers every download in `movies` and `tv`, and `Max Ratio
+0` is satisfied by any ratio at all, so with the tag field empty the rule matches
+the entire library and the idle guard is all that stands between it and
+deletion. That happened on 2026-09-20: seven torrents were removed from the
+client with reason `MaxRatioReached` at ratio 0. Nothing was lost, because each
+was still hardlinked into the library and only the torrent copy went, but the
+seeding did.
+
+Verified on 2026-09-20 with the guard live rather than assumed: seven untagged
+torrents past the seven-day mark, eligible on every other criterion, were left
+untouched by a real pass, while the one tagged `unlinked` download stayed queued
+for removal at its seventh idle day.
 
 A download that never imported has no hardlinks either, and is indistinguishable
 from one an upgrade replaced. The seven idle days are the grace period:
