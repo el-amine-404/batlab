@@ -146,11 +146,17 @@ def check_left_behind(sonarr: Arr, radarr: Arr, torrents: Path, min_age: int, no
     for path, status in finished_videos(movie_root, min_age, now):
         top = movie_root / path.relative_to(movie_root).parts[0]
         movie_folders.setdefault(top, []).append(status)
+    movie_has_file: dict[int, bool] | None = None
     for folder, statuses in movie_folders.items():
         if any(status.st_nlink > 1 for status in statuses):
             continue
         movie = (radarr.get("parse", title=folder.name) or {}).get("movie") or {}
-        if not movie.get("hasFile"):
+        # Radarr's parse endpoint returns hasFile as null however full the
+        # library is, so a release an upgrade replaced would be reported for as
+        # long as it seeds. The movie list is where the answer is real.
+        if movie_has_file is None:
+            movie_has_file = {item["id"]: bool(item.get("hasFile")) for item in radarr.get("movie")}
+        if not movie_has_file.get(movie.get("id"), False):
             problems.append(Problem("left behind", f"left:{folder}",
                                     f"{movie.get('title', 'unknown movie')}: `{folder.name}` was downloaded but is not in the library"))
     return problems

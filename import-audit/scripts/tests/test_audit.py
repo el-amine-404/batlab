@@ -124,10 +124,36 @@ class CheckTests(unittest.TestCase):
         self.file("torrents/movies/Shutter.Island.2010/Into.the.Lighthouse.mkv")
         self.link(movie, "media/movies/Shutter Island (2010)/Shutter Island (2010).mkv")
         self.file("torrents/movies/Lost.Movie.2024/Lost.Movie.2024.mkv")
-        radarr = FakeArr("Radarr", {"parse": lambda **query: {"movie": {"title": query["title"], "hasFile": False}}})
+        radarr = FakeArr("Radarr", {
+            "parse": lambda **query: {"movie": {"id": 1 if "Shutter" in query["title"] else 2, "title": query["title"]}},
+            "movie": [{"id": 1, "hasFile": True}, {"id": 2, "hasFile": False}],
+        })
         sonarr = FakeArr("Sonarr", {"parse": {}})
         problems = audit.check_left_behind(sonarr, radarr, self.data / "torrents", 3600, time.time())
         self.assertEqual([problem.key for problem in problems], [f"left:{self.data / 'torrents/movies/Lost.Movie.2024'}"])
+
+    def test_a_release_replaced_by_an_upgrade_is_not_reported(self) -> None:
+        """Radarr's parse endpoint answers hasFile with null whatever the library holds."""
+        self.file("torrents/movies/Robin.Hood.2026.WEB-DL.DD5.1-FIRST/Robin.Hood.2026.WEB-DL.DD5.1-FIRST.mkv")
+        upgrade = self.file("torrents/movies/Robin.Hood.2026.AMZN.WEB-DL.DDP5.1-SECOND/Robin.Hood.2026.AMZN.WEB-DL.DDP5.1-SECOND.mkv")
+        self.link(upgrade, "media/movies/Robin Hood (2026)/Robin Hood (2026) - SECOND.mkv")
+        radarr = FakeArr("Radarr", {
+            "parse": lambda **_: {"movie": {"id": 26, "title": "Robin Hood", "hasFile": None}},
+            "movie": [{"id": 26, "hasFile": True}],
+        })
+        sonarr = FakeArr("Sonarr", {"parse": {}})
+        self.assertEqual(audit.check_left_behind(sonarr, radarr, self.data / "torrents", 3600, time.time()), [])
+
+    def test_a_movie_with_no_file_at_all_is_still_reported(self) -> None:
+        self.file("torrents/movies/Lost.Movie.2024/Lost.Movie.2024.mkv")
+        radarr = FakeArr("Radarr", {
+            "parse": lambda **_: {"movie": {"id": 7, "title": "Lost Movie", "hasFile": None}},
+            "movie": [{"id": 7, "hasFile": False}],
+        })
+        sonarr = FakeArr("Sonarr", {"parse": {}})
+        problems = audit.check_left_behind(sonarr, radarr, self.data / "torrents", 3600, time.time())
+        self.assertEqual(len(problems), 1)
+        self.assertIn("Lost Movie", problems[0].text)
 
     def test_young_downloads_are_ignored(self) -> None:
         path = self.file("torrents/tv/pack/Courage.S01E09E10.Weremole.mp4")
