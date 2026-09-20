@@ -38,8 +38,9 @@ Measured: `qwen3:4b` at 1.09 tokens/s; a 10 s 1080p x265 sample decode takes
 | No battery | physical | healthchecks.io heartbeat catches outages | mains blips power it off | A UPS; keep the heartbeat |
 
 Not listed because they are right on any machine: background jobs at low
-priority, the data disk guard, the heartbeat, backup pings, Blocklist Sync, and
-the quiet boot CPU alert in `compose/netdata/alerts/cpu.conf`.
+priority, the data disk guard, the heartbeat, backup pings, Blocklist Sync, the
+Download Cleaner rules in `cleanuparr.md`, and the quiet boot CPU alert in
+`compose/netdata/alerts/cpu.conf`.
 
 ## Installing on lab1
 

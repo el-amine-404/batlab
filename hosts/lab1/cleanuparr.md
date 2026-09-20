@@ -29,3 +29,36 @@ chosen because of this machine.
   7-day minimum cycle.
 - Notifications: Discord `#downloads` for removals, replacement grabs and
   cleaned downloads, webhook in `DISCORD_WEBHOOK_DOWNLOADS`.
+
+## Download Cleaner
+
+qBittorrent already enforces the seeding policy — ratio 1, 60 minutes, or 10
+minutes idle — but its action is *Stop torrent*, so a finished download stays on
+disk forever. Deleting it is Cleanuparr's job, because it is the only part of
+the stack that can tell a download the library still uses from one it does not.
+
+Radarr and Sonarr hardlink out of `torrents/` into `media/`, so a live download
+has two links to one inode. When an upgrade replaces the library file, the
+torrent copy drops back to one link. Zero remaining hardlinks is the signal that
+nothing in the library points at it any more.
+
+| Setting | Value |
+| --- | --- |
+| Download Cleaner | enabled, hourly, `0 0 * * * ?` |
+| Unlinked handling | enabled, categories `movies` and `tv` |
+| Unlinked marking | tag, not category |
+| Tag | `unlinked` |
+| Seeding rule | categories `movies` and `tv`, tags (any) `unlinked`, max seed time 1 h, max inactive days 7, action Delete with source files |
+
+Tagging rather than moving the category leaves Radarr's and Sonarr's own
+category mapping alone.
+
+A download that never imported has no hardlinks either, and is indistinguishable
+from one an upgrade replaced. The seven idle days are the grace period:
+`import-audit` reports it as left behind within three hours, which leaves a week
+to import it by hand before Cleanuparr removes it.
+
+Cleanuparr mounts `torrents/` read-only and at the same path qBittorrent uses.
+Both matter: the hardlink count is read from the file, and the delete is done by
+qBittorrent over its API. A different mount path makes every download look
+unlinked.
