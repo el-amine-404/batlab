@@ -18,8 +18,17 @@ KNOWN_TAGS = {'apac': 'Apple spatial audio'}
 SUSPECT_STATUSES = ('decode-errors', 'unreadable-or-no-video')
 # What is wrong with a suspect, most Untrunc-relevant first. Untrunc rebuilds a missing or damaged index from a
 # healthy reference; it cannot repair picture or audio data, and it only reads these container formats.
-KINDS = ('truncated', 'container', 'unreadable', 'video-errors', 'audio-errors', 'not-video', 'no-real-errors', 'other')
-NOT_UNTRUNC_KINDS = ('video-errors', 'audio-errors', 'not-video', 'no-real-errors')
+KINDS = ('truncated', 'container', 'unreadable', 'video-errors', 'audio-errors', 'decoder-warning', 'not-video',
+         'no-real-errors', 'other')
+NOT_UNTRUNC_KINDS = ('video-errors', 'audio-errors', 'decoder-warning', 'not-video', 'no-real-errors')
+# Non-fatal ffmpeg warnings that describe how a stream was encoded, not damage to it. A file is labelled
+# decoder-warning only when ALL its counted messages are these, there are few of them and ffmpeg exited with 0.
+# It stays a suspect and stays listed; it is just not called picture damage. Add a warning here only after checking
+# that files carrying it decode every frame and look clean.
+BENIGN_WARNINGS = (
+    re.compile(r'number of reference frames \(\d+\+\d+\) exceeds max \(\d+; probably corrupt input\), discarding one'),
+)
+MAX_BENIGN_WARNINGS = 3
 UNTRUNC_EXTENSIONS = ('.mp4', '.mov', '.m4v', '.3gp')
 DEMUXER_TAGS = ('avi', 'matroska,webm', 'mpegts', 'mpeg', 'flv', 'asf')
 
@@ -67,22 +76,29 @@ def message_source(line):
 
 
 def classify_suspect(item, log_dir):
-    """What kind of problem a suspect has; see KINDS. Uses the stored kind, else works it out from the item and log."""
-    if item.get('kind') in KINDS:
-        return item['kind']
+    """What kind of problem a suspect has; see KINDS.
+
+    The kind is worked out from the evidence (ffprobe output, decode log), so improved rules apply to old
+    catalogs too. A kind stored by the scan is only a fallback for when that evidence is missing.
+    """
+    stored = item.get('kind') if item.get('kind') in KINDS else None
     streams = (item.get('metadata') or {}).get('streams', [])
     if item.get('status') == 'unreadable-or-no-video':
-        if 'moov atom not found' in (item.get('probe_errors') or ''):
+        probe_errors = item.get('probe_errors') or ''
+        if 'moov atom not found' in probe_errors:
             return 'truncated'
         if streams and not any(s.get('codec_type') == 'video' for s in streams):
             return 'not-video'
-        return 'unreadable'
+        return stored if stored and not probe_errors and not streams else 'unreadable'
     lines = read_log(Path(log_dir) / Path(item['log']).name) if log_dir and item.get('log') else None
     if lines is None:
-        return 'other'  # cannot tell, so it is not set aside as harmless
+        return stored or 'other'  # cannot tell, so it is not set aside as harmless
     errors, _ = split_log(lines)
     if not errors:
         return 'no-real-errors'
+    if (item.get('decode_returncode') == 0 and len(errors) <= MAX_BENIGN_WARNINGS
+            and all(any(w.search(line) for w in BENIGN_WARNINGS) for line in errors)):
+        return 'decoder-warning'
 
     def codecs(kind):
         return {s.get('codec_name') for s in streams if s.get('codec_type') == kind and s.get('codec_name')}

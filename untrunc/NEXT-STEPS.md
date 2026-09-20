@@ -307,14 +307,17 @@ decoder message. A `*` marks the healthy matches a repair would use (`max_refere
 | `unreadable` | could not be opened for another reason | may help |
 | `video-errors` | errors in the picture data, index fine (damage or a device quirk) | cannot repair picture data |
 | `audio-errors` | only the audio decoder complained, video decoded cleanly | cannot repair audio data |
+| `decoder-warning` | only one known non-fatal ffmpeg warning (reference-frame count above the declared maximum); every frame decodes | probably fine: play it |
 | `not-video` | no video stream (for example an audio file named `.mp4`) | nothing to repair |
 | `no-real-errors` | flagged only for ffmpeg's harmless timestamp warning by an older scanner | rescan to clear |
 | `other` | could not be classified | look at it |
 
 Every suspect is always listed and none is hidden: kinds Untrunc cannot help with appear in a
 short form (no matches). `CASE_ARGS='--kinds truncated,container'` filters the listing (and
-`--kinds all` shows every kind in full). Kinds come from the decode logs, so a file with several
-kinds of message gets the most serious one; when a log is missing or a message cannot be
+`--kinds all` shows every kind in full). Kinds are worked out from the decode logs each time, so an improved rule applies to an old catalog
+without a rescan. A file is `decoder-warning` only when **all** its messages are that one known warning,
+there are at most three of them and ffmpeg exited with status 0; anything else keeps it in a real error kind, and
+the file stays a suspect either way. A file with several kinds of message gets the most serious one; when a log is missing or a message cannot be
 matched, the file is `other`, never set aside as harmless. A missing index is decided by
 ffprobe, not guessed. It works even if the share is currently unmounted, and it warns
 when the scan is incomplete or belongs to a different `source_root`. The ranking is a

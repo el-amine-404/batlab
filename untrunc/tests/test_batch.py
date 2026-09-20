@@ -1338,9 +1338,106 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(self.kind(log=['[aist#0:1/none @ 0x1] Decoding requested, but no decoder found for: none'], streams=[self.V, self.A]), 'other')
         self.assertEqual(self.kind(log=[REAL], streams=[]), 'other')  # no stream information to match against
 
-    def test_a_stored_kind_is_used_and_an_invalid_one_ignored(self):
-        self.assertEqual(self.kind(log=[REAL], streams=[self.V], kind='audio-errors'), 'audio-errors')
+    def test_evidence_wins_and_a_stored_kind_is_only_a_fallback(self):
+        # Rules improve, so a kind stored by an older scan never overrides what the logs show now.
+        self.assertEqual(self.kind(log=[REAL], streams=[self.V], kind='audio-errors'), 'video-errors')
         self.assertEqual(self.kind(log=[REAL], streams=[self.V], kind='bogus'), 'video-errors')
+        # With nothing to derive from (no log, no ffprobe output) the stored kind is used, if it is valid.
+        self.assertEqual(self.kind(streams=[self.V], kind='audio-errors'), 'audio-errors')
+        self.assertEqual(self.kind(streams=[self.V], kind='bogus'), 'other')
+        self.assertEqual(self.kind('unreadable-or-no-video', kind='truncated'), 'truncated')
+        self.assertEqual(self.kind('unreadable-or-no-video', probe_errors='Invalid data found', kind='truncated'), 'unreadable')
+
+
+WARN = '[h264 @ 0x5555] number of reference frames (2+3) exceeds max (4; probably corrupt input), discarding one'
+
+
+class DecoderWarningTests(unittest.TestCase):
+    """One known non-fatal warning is labelled decoder-warning: strictly, and never by loosening the scan itself."""
+
+    V = {'codec_type': 'video', 'codec_name': 'h264'}
+    A = {'codec_type': 'audio', 'codec_name': 'aac'}
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def kind(self, lines, returncode=0, streams=None, **fields):
+        (self.dir / 'w.log').write_text('\n'.join(lines) + '\n')
+        item = dict({'path': 'a.mp4', 'status': 'decode-errors', 'log': 'w.log',
+                     'metadata': {'streams': streams or [self.V, self.A]}}, **fields)
+        if returncode is not None:
+            item['decode_returncode'] = returncode
+        return catalog_tool.classify_suspect(item, self.dir)
+
+    def test_the_known_warning_alone_with_a_clean_exit_is_a_decoder_warning(self):
+        self.assertEqual(self.kind([WARN]), 'decoder-warning')
+        self.assertEqual(self.kind([DTS, REPEAT, WARN]), 'decoder-warning')  # the ignored timestamp lines do not matter
+        self.assertEqual(self.kind([WARN.replace('2+3', '5+1').replace('max (4', 'max (3')]), 'decoder-warning')
+
+    def test_a_few_repetitions_are_tolerated_but_not_many(self):
+        self.assertEqual(self.kind([WARN] * catalog_tool.MAX_BENIGN_WARNINGS), 'decoder-warning')
+        self.assertEqual(self.kind([WARN] * (catalog_tool.MAX_BENIGN_WARNINGS + 1)), 'video-errors')
+
+    def test_any_other_message_keeps_the_file_in_a_real_error_kind(self):
+        self.assertEqual(self.kind([WARN, REAL]), 'video-errors')
+        self.assertEqual(self.kind([WARN, '[aac @ 0x1] Input buffer exhausted before END element found']), 'video-errors')
+        self.assertEqual(self.kind([WARN, '[mov,mp4 @ 0x2] stream 0, offset 0x81cf: partial file']), 'container')
+        self.assertEqual(self.kind([WARN, '[somethingelse @ 0x1] odd']), 'video-errors')
+        self.assertEqual(self.kind([WARN, REPEAT]), 'video-errors')  # a repeat means the warning recurred: not benign
+
+    def test_a_failed_or_unknown_exit_status_is_never_benign(self):
+        self.assertEqual(self.kind([WARN], returncode=1), 'video-errors')
+        self.assertEqual(self.kind([WARN], returncode=None), 'video-errors')  # not recorded: cannot vouch for it
+
+    def test_other_wordings_are_not_treated_as_the_known_warning(self):
+        self.assertEqual(self.kind(['[h264 @ 0x1] number of reference frames exceeds max']), 'video-errors')
+        self.assertEqual(self.kind(['[h264 @ 0x1] number of reference frames (2+3) exceeds max (4), discarding one']), 'video-errors')
+
+    def test_only_kind_changes_the_file_is_still_a_suspect_with_its_status(self):
+        item = {'path': 'a.mp4', 'status': 'decode-errors', 'log': 'w.log', 'decode_returncode': 0,
+                'metadata': {'streams': [self.V]}}
+        (self.dir / 'w.log').write_text(WARN + '\n')
+        catalog = {'items': [item, {'path': 'ok.mp4', 'status': 'decode-clean'}]}
+        self.assertEqual([i['path'] for i in report_module.suspects(catalog)], ['a.mp4'])  # still listed
+        self.assertEqual(item['status'], 'decode-errors')
+
+    def test_the_scan_keeps_the_status_and_stores_the_kind(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            library = tiny_library(Path(tmp) / 'library', 1)
+
+            def fake(args, **kwargs):
+                if args[0] == 'ffmpeg':
+                    kwargs['stderr'].write(WARN + '\n')
+                    return subprocess.CompletedProcess(args, 0, stdout='SHA256=' + 'ab' * 32 + '\n', stderr='')
+                return REAL_RUN(args, **kwargs)
+            with patch('subprocess.run', fake), contextlib.redirect_stdout(io.StringIO()):
+                item = catalog_tool.scan(library, Path(tmp) / 'out', 'full')['items'][0]
+        self.assertEqual((item['status'], item['decode_returncode'], item['error_log_lines']), ('decode-errors', 0, 1))
+        self.assertEqual(item['kind'], 'decoder-warning')  # the scan is exactly as strict as before
+
+    def test_selection_listing_and_batch_treat_it_as_not_for_untrunc_but_never_hide_it(self):
+        catalog = {'complete': True, 'mode': 'full', 'rankings': {'w.mp4': [match('ok.mp4', 80.0)]}, 'items': [
+            {'path': 'ok.mp4', 'status': 'decode-clean', 'size': 1},
+            {'path': 'w.mp4', 'status': 'decode-errors', 'size': 2048, 'log': 'w.log', 'decode_returncode': 0,
+             'metadata': {'streams': [self.V]}}]}
+        (self.dir / 'w.log').write_text(WARN + '\n')
+        selected, left = report_module.select_suspects(catalog, self.dir)
+        self.assertEqual(([i['path'] for i in selected], list(left)), ([], ['decoder-warning']))
+        selected, _ = report_module.select_suspects(catalog, self.dir, ('decoder-warning',))
+        self.assertEqual([i['path'] for i in selected], ['w.mp4'])  # can still be chosen on purpose
+        text = '\n'.join(report_module.render_suspects(catalog, self.dir / 'catalog.json', '/src', 3))
+        self.assertIn('Suspects (1): 1 decoder-warning', text)
+        self.assertIn('== decoder-warning (1): flagged for one non-fatal ffmpeg warning', text)
+        self.assertIn('1 decoder message(s); first: [h264 @ 0x5555] number of reference frames', text)  # listed, with its message
+        self.assertIn('w.mp4  (2.0 KB)', text)
+        self.assertNotIn('80.0', text)  # short form: nothing to repair, so no matches
+        self.assertIn('decoder-warning', catalog_tool.KINDS)
+        self.assertIn('decoder-warning', catalog_tool.NOT_UNTRUNC_KINDS)
+        self.assertEqual(case.parse_kinds('decoder-warning,truncated'), ('decoder-warning', 'truncated'))
 
 
 class SelectionTests(unittest.TestCase):

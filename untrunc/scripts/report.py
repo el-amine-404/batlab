@@ -13,6 +13,8 @@ KIND_TEXT = {
     'video-errors': 'errors in the picture data although the index is fine (real damage or a device quirk): '
                     'Untrunc cannot repair picture data',
     'audio-errors': 'only the audio decoder complained and the video decoded cleanly: Untrunc cannot repair audio data',
+    'decoder-warning': "flagged for one non-fatal ffmpeg warning (reference-frame count above the declared maximum); "
+                       'the decoder continues and exits normally. Probably fine: play it. Nothing to repair',
     'not-video': 'has no video stream, for example an audio file named .mp4: nothing to repair',
     'no-real-errors': "flagged only for ffmpeg's harmless timestamp warning by an older scanner: rescan to clear",
     'other': 'could not be classified: take a look at it',
