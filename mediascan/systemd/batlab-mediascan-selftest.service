@@ -1,0 +1,21 @@
+[Unit]
+Description=Run the Batlab mediascan selftest under the same sandbox as the scans
+RequiresMountsFor=/mnt/storage/data
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/home/potato/batlab/mediascan/scripts/selftest.py
+Nice=19
+IOSchedulingClass=idle
+
+# This unit exists to answer one question before the sandbox is applied to the
+# real scans: does everything they do still work inside it? The selftest builds
+# containers with ffmpeg, reads them with ffprobe, types files with file(1),
+# scans with clamd, makes hardlinks and moves them. If it passes here it passes
+# there, and the same hardening.conf drop-in is installed against this unit so
+# the two cannot drift apart.
+
+[Install]
+WantedBy=multi-user.target

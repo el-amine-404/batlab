@@ -226,6 +226,71 @@ python3 mediascan/scripts/verify-media.py /mnt/storage/data/media \
   --remediate-dry-run --arr-path-map /mnt/storage/data=/data
 ```
 
+## The scans run unprivileged
+
+They parse files chosen by whoever made the torrent. Doing that as root on the
+host means one parser bug in ffmpeg or `file` is root on the host, outside any
+container. Nothing here needs root: the library is `potato:potato` and clamd is
+reached through a world-writable socket.
+
+`systemd/hardening.conf` is a drop-in, not an edit to the units, so it can be
+removed without touching them. It drops the scans to `potato`, clears every
+capability, makes the filesystem read-only apart from the state directory and
+the library, and restricts syscalls and address families.
+
+Two things must be handed over first, or every run exits on the first line:
+
+```bash
+sudo chown -R potato:potato /var/lib/batlab-mediascan
+sudo chgrp potato /etc/batlab-mediascan /etc/batlab-mediascan/mediascan.env
+sudo chmod 750 /etc/batlab-mediascan
+sudo chmod 640 /etc/batlab-mediascan/mediascan.env
+```
+
+Prove the sandbox on the selftest unit before any real scan runs inside it:
+
+```bash
+sudo install -m 644 mediascan/systemd/batlab-mediascan-selftest.service /etc/systemd/system/
+sudo install -d -m 755 /etc/systemd/system/batlab-mediascan-selftest.service.d
+sudo install -m 644 mediascan/systemd/hardening.conf \
+  /etc/systemd/system/batlab-mediascan-selftest.service.d/
+sudo systemctl daemon-reload
+sudo systemctl start batlab-mediascan-selftest.service
+journalctl -u batlab-mediascan-selftest.service -n 60 --no-pager
+```
+
+`selftest.py` builds containers with ffmpeg, reads them with ffprobe, types
+files with `file`, scans with clamd, and moves hardlinked files — inside the
+same sandbox the scans will run in. It must end `0 failed`. The same drop-in is
+installed against the selftest unit so the two cannot drift apart.
+
+Only once it passes, apply it to the scans themselves:
+
+```bash
+for unit in sweep deep watch; do
+  sudo install -d -m 755 /etc/systemd/system/batlab-mediascan-$unit.service.d
+  sudo install -m 644 mediascan/systemd/hardening.conf \
+    /etc/systemd/system/batlab-mediascan-$unit.service.d/
+done
+sudo systemctl daemon-reload
+sudo systemctl restart batlab-mediascan-watch.service
+sudo systemctl start batlab-mediascan-sweep.service   # a real run, on the real library
+```
+
+A running watcher keeps its old privileges until it is restarted, so that
+restart is what actually moves it into the sandbox.
+
+Undo all of it with:
+
+```bash
+sudo rm /etc/systemd/system/batlab-mediascan-*.service.d/hardening.conf
+sudo systemctl daemon-reload
+```
+
+`systemd-analyze security batlab-mediascan-sweep.service` scores it before and
+after. `MemoryDenyWriteExecute` is deliberately absent: some codecs allocate
+executable pages, so it would break the decode rather than the attack.
+
 ## Host limits
 
 The units run at `Nice=19` with idle I/O on every machine. Anything sized for a
