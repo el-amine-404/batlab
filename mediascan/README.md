@@ -16,6 +16,7 @@ as JSON reports and, optionally, moved into quarantine. Nothing is ever deleted.
 | `scan-yara.sh` | optional, off unless rules are set | matches against your own YARA rules |
 | `deep-verify.py` | hours, rate limited | corruption that only appears when the file is read through |
 | `watch.sh` | instant, per file | everything above, the moment a file lands |
+| `selftest.py` | 2 min | nothing in the library: it proves the checks above still catch what they should |
 
 `verify-media.py` reads container headers, so a 1 GB file and an 80 GB file both
 cost about a second. `deep-verify.py` is the only script that reads whole files
@@ -65,6 +66,43 @@ while actually inspecting 26 GB. `scan-clamav.sh` therefore scans only files
 below that limit, which is where scripts, subtitles, images, and stray
 executables live anyway. Raising the limit does not make clamd inspect a film;
 it only makes the skipping less visible.
+
+## Proving the checks still work
+
+The EICAR precondition in `scan-clamav.sh` is there because an engine that
+cannot read its input reports a clean library, which looks exactly like a clean
+library. Every other check has the same failure mode, and a `file` database or
+an ffmpeg version can change what they see without anything here changing.
+
+`selftest.py` builds, for each check, a file that must be flagged and a file
+that must not, and compares the verdicts against the quarantine list in
+`sweep.sh`:
+
+```bash
+mediascan/scripts/selftest.py          # needs ffmpeg and file; no root, no config
+mediascan/scripts/selftest.py --keep   # leave the fixtures behind to look at
+```
+
+Fixtures are built in a temporary directory outside the library, so the watcher
+never sees them and nothing in `roots.txt` is touched. Run it after changing a
+verifier, and on the server after a distribution upgrade, since that is where
+the engines that decide the verdicts actually live. `clamd` is not reachable
+from a laptop, so a run there skips it and says so; a skipped check proves
+nothing.
+
+A detection nothing acts on is a failure too. If a fixture is flagged with a
+verdict missing from `sweep.sh`'s `--problem` list, the file would be reported
+every night and left exactly where it is.
+
+## Cover art is a video stream
+
+Matroska carries a poster as an attachment named `cover.jpg`, and ffmpeg hands
+it back as a second video stream with `attached_pic` set. A poster is usually
+taller than the film is wide, so choosing the largest video stream chooses the
+poster: a correct 1080p h264 remux reported itself as `mjpeg`, and every remux
+with cover art would have. `verify-media.py` selects on the disposition instead,
+and `deep-verify.py` decodes `0:V:0` rather than `0:v:0` so the sample decode
+reads the feature and not a single JPEG.
 
 ## Quarantine and hardlinks
 
