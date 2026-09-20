@@ -143,8 +143,15 @@ def verify(path, timeout):
         finding.problems.append("NOT_VIDEO: container holds no video stream")
         return finding
 
-    # Cover art is a video stream too; prefer one that actually has duration.
-    primary = max(video_streams, key=lambda s: int(s.get("width") or 0) * int(s.get("height") or 0))
+    # Cover art is a video stream too, and a poster is often taller than the
+    # film is wide, so the largest stream is not the feature. Only the
+    # disposition separates them.
+    feature_streams = [s for s in video_streams if not (s.get("disposition") or {}).get("attached_pic")]
+    if not feature_streams:
+        finding.problems.append("NOT_VIDEO: container holds only attached cover art")
+        return finding
+
+    primary = max(feature_streams, key=lambda s: int(s.get("width") or 0) * int(s.get("height") or 0))
     finding.width = int(primary.get("width") or 0)
     finding.height = int(primary.get("height") or 0)
     finding.video_codec = primary.get("codec_name", "")
