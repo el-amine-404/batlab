@@ -60,8 +60,11 @@ def sample_decode(path, sample_seconds, timeout):
 
     for point in SAMPLE_POINTS:
         offset = max(0.0, min(duration - sample_seconds, duration * point))
+        # 0:V:0 is the first video stream that is not an attached picture.
+        # Decoding cover art instead of the feature passes in a fraction of a
+        # second and proves nothing about the film.
         error = run_ffmpeg(
-            ("-ss", f"{offset:.2f}", "-i", path, "-t", str(sample_seconds), "-map", "0:v:0"),
+            ("-ss", f"{offset:.2f}", "-i", path, "-t", str(sample_seconds), "-map", "0:V:0"),
             timeout,
         )
         if error:
