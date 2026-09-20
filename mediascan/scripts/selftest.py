@@ -402,12 +402,12 @@ def check_clamav(root, result):
 
     eicar = os.path.join(root, "types", "eicar.com")
     completed = run(("clamdscan", "--fdpass", "--no-summary", "--infected", eicar))
-    if completed.returncode > 1 or "Can't access file" in completed.stdout + completed.stderr:
-        result.skipped.append(f"clamav: clamd unreachable or cannot read the fixture ({completed.stdout.strip()[:120]})")
-        return
-
+    # An installed engine that cannot read what it is handed is a failure, not a
+    # skip. scan-clamav.sh refuses to report a clean sweep without this probe, so
+    # anything that breaks it here breaks the nightly scan too — which is exactly
+    # how PrivateTmp in the sandbox was caught.
     result.record("FOUND" in completed.stdout, "clamav detects the EICAR test file",
-                  completed.stdout.strip()[:200])
+                  f"exit {completed.returncode}: {(completed.stdout + completed.stderr).strip()[:160]}")
 
 
 def main():
