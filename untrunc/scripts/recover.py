@@ -15,7 +15,7 @@ from fractions import Fraction
 
 # Also supports loading this script directly for local tests.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from catalog import decode_command
+from catalog import decode_command, split_log
 from progress import Progress, say
 
 INPUT = Path(os.environ.get('REPAIR_INPUT', '/input')).resolve()
@@ -127,8 +127,8 @@ def verify(path, out):
     messages = [s for s in log.read_text().splitlines() if s.strip()]
     # Null muxer rounds timestamps; duplicate DTS here is not a picture
     # decoding error. Preserve it separately instead of rejecting a reference.
-    timing = [s for s in messages if '[null @' in s and 'non monotonically increasing dts' in s]
-    lines = len(messages) - len(timing)
+    counted, timing = split_log(messages)
+    lines = len(counted)
     streams = info['metadata'].get('streams', [])
     video = next((s for s in streams if s.get('codec_type') == 'video'), {})
     durations = {s['codec_type']: s.get('duration') for s in streams

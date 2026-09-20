@@ -296,10 +296,27 @@ After a scan, list what it found without starting Docker or reading the media:
 make untrunc-case-suspects REPAIR_CONFIG=~/.config/batlab/case.json
 ```
 
-It reads the newest scan for the case and prints, for each file that decodes with
-errors or cannot be read as video: its status, size, the first ffprobe or decoder
-message, and the ranked healthy matches. A `*` marks the matches a repair would
-use (`max_references`). It works even if the share is currently unmounted, and it warns
+It reads the newest scan for the case and lists every file that decodes with errors or
+cannot be read as video, **grouped by what is wrong** and with the first real ffprobe or
+decoder message. A `*` marks the healthy matches a repair would use (`max_references`).
+
+| Kind | Meaning | Untrunc |
+|---|---|---|
+| `truncated` | recording cut off, index (`moov` atom) missing | what it repairs |
+| `container` | header or index problems | may help |
+| `unreadable` | could not be opened for another reason | may help |
+| `video-errors` | errors in the picture data, index fine (damage or a device quirk) | cannot repair picture data |
+| `audio-errors` | only the audio decoder complained, video decoded cleanly | cannot repair audio data |
+| `not-video` | no video stream (for example an audio file named `.mp4`) | nothing to repair |
+| `no-real-errors` | flagged only for ffmpeg's harmless timestamp warning by an older scanner | rescan to clear |
+| `other` | could not be classified | look at it |
+
+Every suspect is always listed and none is hidden: kinds Untrunc cannot help with appear in a
+short form (no matches). `CASE_ARGS='--kinds truncated,container'` filters the listing (and
+`--kinds all` shows every kind in full). Kinds come from the decode logs, so a file with several
+kinds of message gets the most serious one; when a log is missing or a message cannot be
+matched, the file is `other`, never set aside as harmless. A missing index is decided by
+ffprobe, not guessed. It works even if the share is currently unmounted, and it warns
 when the scan is incomplete or belongs to a different `source_root`. The ranking is a
 hypothesis: check that a match really is the same camera and recording mode.
 
@@ -312,6 +329,11 @@ make untrunc-case-batch REPAIR_CONFIG=... CASE_ARGS='--limit 1'   # try one firs
 ```
 
 Requirements and behaviour:
+- **Only the kinds Untrunc can help with are repaired by default** (`truncated`, `container`,
+  `unreadable`, `other`). The rest are reported as `Not attempted` in the summary and never touched.
+  `CASE_ARGS='--kinds video-errors'` selects a kind explicitly (`all` selects every kind). Untrunc reads
+  only `.mp4 .mov .m4v .3gp`: a suspect in another format (`.avi`, `.mkv`, ...) is reported, never attempted.
+  The exit status refers to the files that were selected.
 - The latest scan must be complete, made with `scan_mode: "full"`, and for the same
   `source_root`. A file changed after the scan is rejected as stale: rescan.
 - `broken` is ignored. `references` must be `[]` and `fps` empty: references come from

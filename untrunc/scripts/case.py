@@ -15,7 +15,9 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from progress import Progress
-from report import ranked_references, render_batch, render_suspects, suspects
+from catalog import KINDS
+from report import (left_out_text, ranked_references, render_batch, render_suspects, select_suspects,
+                    suspects)
 
 REPO = Path(__file__).resolve().parents[2]
 SOURCE_HELP = 'See untrunc/NEXT-STEPS.md, "Troubleshooting source access".'
@@ -250,9 +252,9 @@ def compose(env, *service_args):
     return subprocess.call(cmd + list(service_args), env=env, cwd=REPO)
 
 
-def show_suspects(c, root, src):
+def show_suspects(c, root, src, kinds=None):
     file, catalog = load_catalog(root / 'work', f'No scan found in {root / "work"}: run make untrunc-case-scan first')
-    print('\n'.join(render_suspects(catalog, file, src, c.get('max_references', 3), catalog_problems(catalog, src))))
+    print('\n'.join(render_suspects(catalog, file, src, c.get('max_references', 3), catalog_problems(catalog, src), kinds)))
     return 0
 
 
@@ -325,7 +327,7 @@ def repair_suspect(c, catalog, item, src, batch_root):
     return entry
 
 
-def run_batch(c, root, src, limit=None):
+def run_batch(c, root, src, limit=None, kinds=None):
     """Repair every suspect in the latest scan, one isolated case folder each; resumable."""
     if c.get('references'):
         raise ValueError('Batch chooses references per file from the scan: set "references" to [] '
@@ -339,9 +341,14 @@ def run_batch(c, root, src, limit=None):
                                            'run make untrunc-case-scan first')
     if catalog.get('mode') != 'full':
         raise ValueError('Batch needs a scan made with scan_mode "full": probe scans cannot verify healthy references')
-    found = suspects(catalog)
-    if not found:
+    everything = suspects(catalog)
+    if not everything:
         print('No suspect files in the latest scan: nothing to repair.')
+        return 0
+    found, left_out = select_suspects(catalog, catalog_file.parent, kinds)
+    if not found:
+        print(f'Nothing to repair: none of the {len(everything)} suspect(s) is of a kind Untrunc can help with '
+              f'({left_out_text(left_out)}).\nRun make untrunc-case-suspects to review them.')
         return 0
     batch_root = root / 'batch'
     batch_root.mkdir(exist_ok=True)
@@ -358,7 +365,9 @@ def run_batch(c, root, src, limit=None):
     pending = [i for i in found if i['path'] not in done]
     todo = pending[:limit] if limit else pending
     print(f'Batch repair using scan {catalog_file}\n'
-          f'Suspects: {len(found)} · already have a candidate: {len(done)} · to process now: {len(todo)}\n'
+          f'Suspects to repair: {len(found)} of {len(everything)}'
+          + (f' (left out: {left_out_text(left_out)})' if left_out else '') + '\n'
+          f'Already have a candidate: {len(done)} · to process now: {len(todo)}\n'
           f'Each suspect gets its own case folder under {batch_root}\n'
           'Ctrl-C is safe: finished files are remembered, so run the same command again to resume.', flush=True)
     consecutive, processed, stopped, interrupted = 0, 0, False, False
@@ -384,12 +393,24 @@ def run_batch(c, root, src, limit=None):
         interrupted = True
         print('\nInterrupted. Finished files are saved; run the same command again to resume.', file=sys.stderr)
     entries = {i['path']: saved[i['path']] for i in found if i['path'] in saved}
-    print('\n'.join(render_batch(entries, report_file, len(pending) - processed)))
+    print('\n'.join(render_batch(entries, report_file, len(pending) - processed, left_out)))
     if interrupted:
         return 130
     if stopped:
         return 1
     return 0 if all(entries.get(i['path'], {}).get('status') == 'candidate-ready' for i in found) else 2
+
+
+def parse_kinds(value):
+    """--kinds: comma-separated kinds, or 'all'."""
+    names = tuple(v.strip() for v in value.split(',') if v.strip())
+    if names == ('all',):
+        return KINDS
+    unknown = [n for n in names if n not in KINDS]
+    if unknown or not names:
+        what = ', '.join(unknown) if unknown else repr(value)
+        raise argparse.ArgumentTypeError(f'unknown kind(s) {what}; choose from {", ".join(KINDS)} or all')
+    return names
 
 
 def positive_int(value):
@@ -405,12 +426,16 @@ def main():
                                       'agent-setup', 'agent-model', 'agent'])
     p.add_argument('--config', required=True, type=Path)
     p.add_argument('--limit', type=positive_int, help='batch only: process at most this many suspects now')
+    p.add_argument('--kinds', type=parse_kinds, help='suspects and batch: only these kinds of suspect (comma-separated '
+                   'or all); the batch default is every kind Untrunc can help with')
     p.add_argument('--fresh', action='store_true', help='scan only: scan every file again instead of skipping unchanged ones (also compares content hashes)')
     args = p.parse_args()
     if args.limit and args.action != 'batch':
         p.error('--limit only applies to batch')
     if args.fresh and args.action != 'scan':
         p.error('--fresh only applies to scan')
+    if args.kinds and args.action not in ('suspects', 'batch'):
+        p.error('--kinds only applies to suspects and batch')
     if args.action.startswith('agent'):
         return agent(args.action, args.config)
     c, root, src = case_config(args.config, check_source=args.action != 'suspects')
@@ -418,9 +443,9 @@ def main():
         prepare(c, root, src)
         return 0
     if args.action == 'suspects':
-        return show_suspects(c, root, src)
+        return show_suspects(c, root, src, args.kinds)
     if args.action == 'batch':
-        return run_batch(c, root, src, args.limit)
+        return run_batch(c, root, src, args.limit, args.kinds)
     env = repair_env(c, root, src)
     if args.action == 'run':
         prepare(c, root, src)

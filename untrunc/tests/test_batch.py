@@ -68,26 +68,26 @@ class ReportTests(unittest.TestCase):
         self.assertNotIn('Invalid data found', text)
         self.assertIn('5.0 MB', text)
         self.assertIn('1.5 KB', text)
-        self.assertIn('7 decoder message(s); first: [h264 @ 0x2] error while decoding MB 3 4', text)
+        self.assertIn('2 decoder message(s); first: [h264 @ 0x2] error while decoding MB 3 4', text)  # counted from the log
         self.assertIn('match: codec_name | differ: model | same directory', text)
         self.assertIn('[heuristic-only]', text)
         self.assertIn('no decode-verified match found', text)
         self.assertIn('make untrunc-case-batch', text)
-        self.assertIn('What the statuses mean:', text)
-        self.assertIn('unreadable-or-no-video: cannot be opened as video', text)
-        self.assertIn('permissions or an unsupported format', text)
-        self.assertEqual(text.count('cannot be opened as video'), 1)  # explained once, not per file
+        self.assertIn('Suspects (3): 1 truncated · 1 unreadable · 1 other', text)
+        self.assertIn('== truncated (1): the recording was cut off and its index (moov atom) is missing', text)
+        self.assertIn('== unreadable (1): could not be opened, for a reason other than a missing index', text)
+        self.assertEqual(text.count('== truncated'), 1)  # each kind is explained once, not per file
 
     def test_only_the_top_matches_are_marked_as_used(self):
         lines = self.render(top=1).splitlines()
-        marked = [l for l in lines if l.lstrip().startswith('*')]
+        marked = [l for l in lines if l.lstrip().startswith('*') and not l.startswith('* marks')]
         self.assertEqual(len(marked), 2)  # first match of cut.mp4 and of glitch.mp4
         self.assertTrue(any('b.mp4' in l and not l.lstrip().startswith('*') for l in lines))
         self.assertIn('max_references = 1', self.render(top=1))
 
     def test_missing_log_and_probe_text_degrade_gracefully(self):
         text = self.render()  # decode log file absent
-        self.assertIn('7 decoder message(s)', text)
+        self.assertIn('7 decoder message(s); the log could not be read', text)
         self.assertNotIn('first:', text)
         self.assertIn('ffprobe found no video stream', text)  # lonely.mp4 has no probe text
         self.assertEqual(report.first_line_of_file('/nonexistent/file'), '')
@@ -148,7 +148,7 @@ class Fixture(unittest.TestCase):
         self.tmp.cleanup()
 
     def write_catalog(self, good=('trip/good-a.mp4', 'trip/good-b.mp4'), bad=('trip/bad-a.mp4', 'trip/bad-b.mp4'),
-                      orphan=('lonely.mp4',), **overrides):
+                      orphan=('lonely.mp4',), kinds=None, **overrides):
         items, rankings = [], {}
         ranked = [match(g, 200 - n) for n, g in enumerate(good)]
         for names, status in ((good, 'decode-clean'), (bad, 'decode-errors'), (orphan, 'unreadable-or-no-video')):
@@ -158,6 +158,8 @@ class Fixture(unittest.TestCase):
                 file.write_bytes(name.encode() * 20)
                 st = file.stat()
                 items.append({'path': name, 'status': status, 'size': st.st_size, 'mtime_ns': st.st_mtime_ns})
+                if kinds and name in kinds:
+                    items[-1]['kind'] = kinds[name]
         for name in bad:
             rankings[name] = ranked
         for name in orphan:
@@ -1156,6 +1158,383 @@ class RealSignalTests(unittest.TestCase):
         self.assertFalse(json.loads(self.catalogs()[0].read_text())['complete'])
 
 
+DTS = '[null @ 0x5555] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 41 >= 41'
+REPEAT = '    Last message repeated 6 times'
+REAL = '[h264 @ 0x5555] error while decoding MB 3 4, bytestream 45'
+
+
+class LogCountingTests(unittest.TestCase):
+    """Which decoder messages count. The rule may drop false alarms but must never hide a real message."""
+
+    split = staticmethod(catalog_tool.split_log)
+
+    def test_the_timestamp_warning_and_its_repeat_lines_are_ignored(self):
+        self.assertEqual(self.split([DTS, REPEAT]), ([], [DTS, REPEAT]))
+        self.assertEqual(self.split([DTS, REPEAT, REPEAT]), ([], [DTS, REPEAT, REPEAT]))
+        self.assertEqual(self.split([DTS, '', REPEAT]), ([], [DTS, REPEAT]))  # blank lines do not matter
+
+    def test_a_repeat_of_a_real_message_still_counts(self):
+        self.assertEqual(self.split([REAL, REPEAT]), ([REAL, REPEAT], []))
+        self.assertEqual(self.split([DTS, REAL, REPEAT]), ([REAL, REPEAT], [DTS]))  # the repeat follows the real one
+        self.assertEqual(self.split([DTS, REPEAT, REAL, REPEAT]), ([REAL, REPEAT], [DTS, REPEAT]))
+
+    def test_a_repeat_with_nothing_before_it_cannot_be_attributed_so_it_counts(self):
+        self.assertEqual(self.split([REPEAT]), ([REPEAT], []))
+        self.assertEqual(self.split([REPEAT, DTS, REPEAT]), ([REPEAT], [DTS, REPEAT]))
+
+    def test_other_messages_from_the_null_muxer_still_count(self):
+        other = '[null @ 0x5555] Application provided invalid timestamp'
+        self.assertEqual(self.split([other]), ([other], []))
+
+    def test_randomised_sequences_never_hide_a_real_message(self):
+        import random
+        rng = random.Random(7)
+        pool = [DTS, REPEAT, REAL, '[aac @ 0x1] Input buffer exhausted before END element found', '',
+                '[mov,mp4 @ 0x2] stream 1, offset 0x81cf: partial file']
+        for _ in range(2000):
+            lines = [rng.choice(pool) for _ in range(rng.randint(0, 12))]
+            errors, ignored = self.split(lines)
+            nonblank = [l for l in lines if l.strip()]
+            self.assertEqual(len(errors) + len(ignored), len(nonblank))
+            self.assertEqual([l for l in nonblank if l in errors or l in ignored], nonblank)
+            previous_ignored = False
+            expected_errors = []
+            for line in nonblank:
+                if line == DTS or (line == REPEAT and previous_ignored):
+                    previous_ignored = True
+                else:
+                    expected_errors.append(line)
+                    previous_ignored = False
+            self.assertEqual(errors, expected_errors, lines)
+            for line in nonblank:  # every real message survives
+                if line not in (DTS, REPEAT):
+                    self.assertIn(line, errors)
+            self.assertGreaterEqual(len(errors), len([l for l in nonblank if l not in (DTS, REPEAT)]))
+
+    def test_the_new_rule_never_counts_more_than_the_old_one(self):
+        import random
+        rng = random.Random(11)
+        pool = [DTS, REPEAT, REAL, '[aac @ 0x1] problem']
+        for _ in range(500):
+            lines = [rng.choice(pool) for _ in range(rng.randint(0, 10))]
+            old = [l for l in lines if l.strip() and not catalog_tool.is_timing_warning(l)]
+            self.assertLessEqual(len(self.split(lines)[0]), len(old))
+
+
+@needs_ffmpeg
+class ScanCountingTests(unittest.TestCase):
+    """The scan and the repair verification apply the rule, and the scan stores each suspect's kind."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+        self.library = tiny_library(self.base / 'library', 1)
+        self.n = 0
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def scan_with_log(self, lines, mode='full'):
+        self.n += 1
+
+        def fake(args, **kwargs):
+            if args[0] == 'ffmpeg':
+                kwargs['stderr'].write('\n'.join(lines) + '\n')
+                return subprocess.CompletedProcess(args, 0, stdout='SHA256=' + 'ab' * 32 + '\n', stderr='')
+            return REAL_RUN(args, **kwargs)
+        with patch('subprocess.run', fake), contextlib.redirect_stdout(io.StringIO()):
+            return catalog_tool.scan(self.library, self.base / f'out{self.n}', mode)['items'][0]
+
+    def test_a_file_with_only_the_ignored_warning_is_clean(self):
+        item = self.scan_with_log([DTS, REPEAT, DTS, REPEAT])
+        self.assertEqual((item['status'], item['error_log_lines']), ('decode-clean', 0))
+        self.assertNotIn('kind', item)  # only suspects get a kind
+
+    def test_a_real_error_and_its_repeat_still_flag_the_file_with_a_kind(self):
+        item = self.scan_with_log([DTS, REAL, REPEAT])
+        self.assertEqual((item['status'], item['error_log_lines']), ('decode-errors', 2))
+        self.assertEqual(item['kind'], 'video-errors')  # [h264 @ ...] against the file's h264 video stream
+
+    def test_a_single_real_error_is_never_hidden_among_many_ignored_lines(self):
+        item = self.scan_with_log([DTS, REPEAT] * 50 + [REAL] + [DTS, REPEAT] * 50)
+        self.assertEqual((item['status'], item['error_log_lines']), ('decode-errors', 1))
+
+    def test_truncated_files_get_their_kind_and_healthy_files_none(self):
+        (self.library / 'cut.mp4').write_bytes(truncated(seed_video()))
+        self.n += 1
+        with contextlib.redirect_stdout(io.StringIO()):
+            items = {i['path']: i for i in catalog_tool.scan(self.library, self.base / 'kinds', 'full')['items']}
+        self.assertEqual(items['cut.mp4']['kind'], 'truncated')
+        self.assertNotIn('kind', items['v000.mp4'])
+
+    def test_repair_verification_applies_the_same_rule(self):
+        recover = load('recover')
+        recover.WORK = self.base / 'work'
+        recover.WORK.mkdir()
+
+        def verify(lines):
+            def fake_run(args, log, stdout=None, duration=None):
+                if log.stem == 'decode':
+                    log.write_text('\n'.join(lines) + '\n')
+                return 0
+            with patch.object(recover, 'run', fake_run), contextlib.redirect_stdout(io.StringIO()):
+                return recover.verify(self.library / 'v000.mp4', self.base / f'check{self.n}')
+        self.n += 1
+        clean = verify([DTS, REPEAT])
+        self.assertEqual((clean['status'], clean['error_log_lines']), ('decode-clean-needs-review', 0))
+        self.assertEqual(clean['null_muxer_timing_warnings'], [DTS, REPEAT])  # still recorded for the reviewer
+        self.n += 1
+        bad = verify([DTS, REAL, REPEAT])
+        self.assertEqual((bad['status'], bad['error_log_lines']), ('needs-investigation', 2))
+
+
+class ClassifyTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def kind(self, status='decode-errors', log=None, streams=(), **fields):
+        item = dict({'path': 'a.mp4', 'status': status, 'metadata': {'streams': list(streams)}}, **fields)
+        if log is not None:
+            (self.dir / 'x.log').write_text('\n'.join(log) + '\n')
+            item['log'] = 'x.log'
+        return catalog_tool.classify_suspect(item, self.dir)
+
+    V = {'codec_type': 'video', 'codec_name': 'h264'}
+    A = {'codec_type': 'audio', 'codec_name': 'aac'}
+
+    def test_files_that_cannot_be_opened(self):
+        self.assertEqual(self.kind('unreadable-or-no-video', probe_errors='[mov,mp4 @ 0x1] moov atom not found'), 'truncated')
+        self.assertEqual(self.kind('unreadable-or-no-video', streams=[{'codec_type': 'audio', 'codec_name': 'mp3'}]), 'not-video')
+        self.assertEqual(self.kind('unreadable-or-no-video', probe_errors='Invalid data found when processing input'), 'unreadable')
+        self.assertEqual(self.kind('unreadable-or-no-video'), 'unreadable')
+
+    def test_decode_errors_are_sorted_by_where_the_complaint_comes_from(self):
+        s = [self.V, self.A]
+        self.assertEqual(self.kind(log=[REAL], streams=s), 'video-errors')
+        self.assertEqual(self.kind(log=[DTS, REPEAT, '[aac @ 0x1] Input buffer exhausted before END element found'], streams=s), 'audio-errors')
+        self.assertEqual(self.kind(log=['[mp3float @ 0x1] bad frame'], streams=[{'codec_type': 'audio', 'codec_name': 'mp3'}, self.V]), 'audio-errors')
+        self.assertEqual(self.kind(log=['[mov,mp4,m4a,3gp,3g2,mj2 @ 0x1] stream 1, offset 0x81cf: partial file'], streams=s), 'container')
+        self.assertEqual(self.kind(log=['[mov,mp4,m4a,3gp,3g2,mj2 @ 0x1] stream 1, missing mandatory atoms, broken header'], streams=s), 'container')
+        self.assertEqual(self.kind(log=['Cannot determine format of input stream 0:0 after EOF'], streams=s), 'container')
+        self.assertEqual(self.kind(log=['[avi @ 0x1] Invalid chunk'], streams=s), 'container')
+
+    def test_when_several_kinds_of_complaint_appear_the_most_serious_wins(self):
+        s = [self.V, self.A]
+        audio = '[aac @ 0x1] Input buffer exhausted before END element found'
+        self.assertEqual(self.kind(log=[audio, REAL], streams=s), 'video-errors')
+        self.assertEqual(self.kind(log=[audio, REAL, '[mov,mp4 @ 0x2] partial file'], streams=s), 'container')
+
+    def test_only_the_ignored_warning_means_no_real_errors_but_uncertainty_stays_visible(self):
+        self.assertEqual(self.kind(log=[DTS, REPEAT], streams=[self.V]), 'no-real-errors')
+        self.assertEqual(self.kind(log=[DTS, REAL, REPEAT], streams=[self.V]), 'video-errors')  # the repeat is not ignored
+        self.assertEqual(self.kind(streams=[self.V]), 'other')  # no log recorded
+        self.assertEqual(catalog_tool.classify_suspect({'status': 'decode-errors', 'log': 'gone.log'}, self.dir), 'other')
+        self.assertEqual(catalog_tool.classify_suspect({'status': 'decode-errors', 'log': 'x.log'}, None), 'other')
+        self.assertEqual(self.kind(log=['[somethingelse @ 0x1] odd'], streams=[self.V, self.A]), 'other')
+        self.assertEqual(self.kind(log=['[aist#0:1/none @ 0x1] Decoding requested, but no decoder found for: none'], streams=[self.V, self.A]), 'other')
+        self.assertEqual(self.kind(log=[REAL], streams=[]), 'other')  # no stream information to match against
+
+    def test_a_stored_kind_is_used_and_an_invalid_one_ignored(self):
+        self.assertEqual(self.kind(log=[REAL], streams=[self.V], kind='audio-errors'), 'audio-errors')
+        self.assertEqual(self.kind(log=[REAL], streams=[self.V], kind='bogus'), 'video-errors')
+
+
+class SelectionTests(unittest.TestCase):
+    def setUp(self):
+        def item(path, kind, status='decode-errors'):
+            return {'path': path, 'status': status, 'kind': kind}
+        self.catalog = {'items': [
+            {'path': 'clean.mp4', 'status': 'decode-clean'},
+            item('cut.mp4', 'truncated', 'unreadable-or-no-video'), item('head.mov', 'container'),
+            item('odd.mp4', 'other'), item('pic.mp4', 'video-errors'), item('snd.mp4', 'audio-errors'),
+            item('song.mp4', 'not-video', 'unreadable-or-no-video'), item('noise.mp4', 'no-real-errors'),
+            item('old.avi', 'truncated', 'unreadable-or-no-video'), item('mix.mkv', 'video-errors')]}
+
+    def names(self, items):
+        return [i['path'] for i in items]
+
+    def test_default_takes_everything_untrunc_can_help_with_and_anything_unclassified(self):
+        selected, left = report_module.select_suspects(self.catalog, None)
+        self.assertEqual(self.names(selected), ['cut.mp4', 'head.mov', 'odd.mp4'])  # 'other' is attempted, not dismissed
+        self.assertEqual({k: self.names(v) for k, v in left.items()},
+                         {'video-errors': ['mix.mkv', 'pic.mp4'], 'audio-errors': ['snd.mp4'], 'not-video': ['song.mp4'],
+                          'no-real-errors': ['noise.mp4'], 'unsupported-format': ['old.avi']})
+
+    def test_named_kinds_select_exactly_those(self):
+        selected, left = report_module.select_suspects(self.catalog, None, ('audio-errors',))
+        self.assertEqual(self.names(selected), ['snd.mp4'])
+        self.assertEqual(self.names(left['truncated']), ['cut.mp4', 'old.avi'])  # reported under its kind
+        self.assertNotIn('unsupported-format', left)  # that label is only for kinds that were asked for
+
+    def test_all_kinds_still_never_selects_a_format_untrunc_cannot_read(self):
+        selected, left = report_module.select_suspects(self.catalog, None, catalog_tool.KINDS)
+        self.assertNotIn('old.avi', self.names(selected))
+        self.assertNotIn('mix.mkv', self.names(selected))
+        self.assertEqual(set(left), {'unsupported-format'})
+        self.assertEqual(self.names(left['unsupported-format']), ['mix.mkv', 'old.avi'])
+
+    def test_clean_files_are_never_suspects(self):
+        selected, left = report_module.select_suspects(self.catalog, None, catalog_tool.KINDS)
+        self.assertNotIn('clean.mp4', self.names(selected) + [n for v in left.values() for n in self.names(v)])
+
+    def test_text_for_the_left_out_kinds(self):
+        text = report_module.left_out_text({'audio-errors': [1, 2], 'unsupported-format': [3]})
+        self.assertEqual(text, '2 audio-errors, 1 in a format Untrunc cannot read')
+
+
+class KindListingTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        (self.dir / 'first.log').write_text(DTS + '\n' + REPEAT + '\n[aac @ 0x1] Input buffer exhausted before END element found\n')
+        (self.dir / 'noise.log').write_text(DTS + '\n' + REPEAT + '\n')
+        streams = [{'codec_type': 'video', 'codec_name': 'h264'}, {'codec_type': 'audio', 'codec_name': 'aac'}]
+        item = lambda path, status, **f: dict({'path': path, 'status': status, 'size': 2048, 'metadata': {'streams': streams}}, **f)
+        self.catalog = {'complete': True, 'mode': 'full', 'rankings': {
+            'a-cut.mp4': [match('ok.mp4', 90.0)], 'b-audio.mp4': [match('ok.mp4', 80.0)], 'c-noise.mp4': [match('ok.mp4', 70.0)],
+            'd-old.avi': [match('ok.mp4', 60.0)]}, 'items': [
+            {'path': 'ok.mp4', 'status': 'decode-clean', 'size': 1},
+            item('d-old.avi', 'unreadable-or-no-video', probe_errors='moov atom not found'),
+            item('c-noise.mp4', 'decode-errors', log='noise.log'),
+            item('b-audio.mp4', 'decode-errors', log='first.log'),
+            item('a-cut.mp4', 'unreadable-or-no-video', probe_errors='[mov,mp4 @ 0x1] moov atom not found')]}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def render(self, kinds=None):
+        return '\n'.join(report_module.render_suspects(self.catalog, self.dir / 'catalog.json', '/src', 3, kinds=kinds))
+
+    def test_suspects_are_grouped_by_kind_most_useful_first_with_continuous_numbers(self):
+        text = self.render()
+        self.assertIn('Suspects (4): 2 truncated · 1 audio-errors · 1 no-real-errors', text)
+        order = [text.index(h) for h in ('== truncated (2)', '== audio-errors (1)', '== no-real-errors (1)')]
+        self.assertEqual(order, sorted(order))
+        for number, name in enumerate(['a-cut.mp4', 'd-old.avi', 'b-audio.mp4', 'c-noise.mp4'], 1):
+            self.assertRegex(text, rf'\s{number}\. {name}')
+
+    def test_kinds_untrunc_cannot_help_are_listed_in_short_form_without_matches(self):
+        text = self.render()
+        self.assertIn('  3. b-audio.mp4  (2.0 KB)', text)
+        self.assertNotIn('80.0', text)  # the audio-errors file's match is not worth reading
+        self.assertNotIn('70.0', text)
+        self.assertIn('90.0  ok.mp4', text)  # the truncated file's match is shown
+
+    def test_the_first_message_shown_is_the_first_real_one_not_the_ignored_warning(self):
+        text = self.render()
+        self.assertIn('1 decoder message(s); first: [aac @ 0x1] Input buffer exhausted before END element found', text)
+        self.assertNotIn('non monotonically', text)
+        self.assertIn('no real decoder messages, only the ignored timestamp warning', text)
+        self.assertIn('flagged only for ffmpeg\'s harmless timestamp warning by an older scanner: rescan to clear', text)
+        self.assertIn('1 file(s) were flagged only for a harmless timestamp warning by an older scanner', text)
+
+    def test_unsupported_formats_are_marked_in_the_listing(self):
+        text = self.render()
+        self.assertIn('format not supported by Untrunc (it reads .mp4, .mov, .m4v, .3gp): a repair is not attempted', text)
+        self.assertEqual(text.count('format not supported by Untrunc'), 1)  # only d-old.avi
+
+    def test_kinds_filter_the_listing_and_show_full_detail(self):
+        text = self.render(('audio-errors',))
+        self.assertIn('b-audio.mp4', text)
+        self.assertNotIn('a-cut.mp4', text)
+        self.assertIn('80.0  ok.mp4', text)  # asked for explicitly, so matches are shown
+        self.assertIn('3 suspect(s) of other kinds are not shown.', text)
+        self.assertIn('Suspects (4):', text)  # the counts always cover everything
+
+    def test_the_footer_says_what_the_batch_will_and_will_not_do(self):
+        text = self.render()
+        self.assertIn('repairs only the kinds Untrunc can help with (truncated, container, unreadable, other)', text)
+        self.assertIn("CASE_ARGS='--kinds video-errors' (or 'all')", text)
+
+
+class BatchKindTests(Fixture):
+    def run_batch(self, fake, **kwargs):
+        out = io.StringIO()
+        with patch.object(case, 'compose', fake), patch.object(case.shutil, 'which', return_value='/usr/bin/docker'), \
+                contextlib.redirect_stdout(out):
+            code = case.run_batch(self.c, self.root, self.source, **kwargs)
+        return code, out.getvalue()
+
+    def entries(self):
+        return json.loads((self.root / 'batch' / 'batch-report.json').read_text())['entries']
+
+    def setUp(self):
+        super().setUp()
+        self.write_catalog(orphan=(), kinds={'trip/bad-a.mp4': 'audio-errors', 'trip/bad-b.mp4': 'truncated'})
+
+    def test_by_default_only_kinds_untrunc_can_help_with_are_repaired_and_the_rest_reported(self):
+        fake = FakeCompose()
+        code, out = self.run_batch(fake)
+        self.assertEqual(fake.brokens, ['bad-b.mp4'])
+        self.assertEqual(list(self.entries()), ['trip/bad-b.mp4'])  # nothing is recorded for what was left out
+        self.assertIn('Suspects to repair: 1 of 2 (left out: 1 audio-errors)', out)
+        self.assertIn('Not attempted: 1 audio-errors. Untrunc cannot repair these', out)
+        self.assertEqual(code, 0)  # every selected suspect has a candidate; the report says what was left out
+
+    def test_named_kinds_include_exactly_those(self):
+        fake = FakeCompose()
+        code, out = self.run_batch(fake, kinds=('audio-errors',))
+        self.assertEqual(fake.brokens, ['bad-a.mp4'])
+        self.assertIn('left out: 1 truncated', out)
+
+    def test_all_kinds_repairs_everything_untrunc_can_read(self):
+        fake = FakeCompose()
+        self.run_batch(fake, kinds=catalog_tool.KINDS)
+        self.assertEqual(sorted(fake.brokens), ['bad-a.mp4', 'bad-b.mp4'])
+
+    def test_nothing_selected_runs_no_container_and_says_why(self):
+        self.write_catalog(orphan=(), kinds={'trip/bad-a.mp4': 'audio-errors', 'trip/bad-b.mp4': 'video-errors'})
+        fake = FakeCompose()
+        code, out = self.run_batch(fake)
+        self.assertEqual((code, fake.calls), (0, []))
+        self.assertIn('Nothing to repair: none of the 2 suspect(s) is of a kind Untrunc can help with (1 audio-errors, 1 video-errors).', out)
+        self.assertFalse((self.root / 'batch' / 'batch-report.json').exists())
+
+    def test_a_format_untrunc_cannot_read_is_reported_not_attempted(self):
+        self.write_catalog(bad=('trip/bad-a.mp4', 'trip/clip.avi'), orphan=(), kinds={'trip/clip.avi': 'truncated'})
+        fake = FakeCompose()
+        code, out = self.run_batch(fake)
+        self.assertEqual(fake.brokens, ['bad-a.mp4'])
+        self.assertIn('1 in a format Untrunc cannot read', out)
+
+    def test_unclassified_suspects_are_still_attempted(self):
+        self.write_catalog(orphan=(), kinds=None)  # no kinds stored and no logs: cannot be classified
+        fake = FakeCompose()
+        self.run_batch(fake)
+        self.assertEqual(sorted(fake.brokens), ['bad-a.mp4', 'bad-b.mp4'])
+
+
+class KindsCommandLineTests(Fixture):
+    def cli(self, *args):
+        return subprocess.run([sys.executable, str(SCRIPTS / 'case.py'), *args], capture_output=True, text=True, cwd=self.base)
+
+    def test_the_listing_can_be_filtered_by_kind(self):
+        self.write_catalog(orphan=(), kinds={'trip/bad-a.mp4': 'audio-errors', 'trip/bad-b.mp4': 'truncated'})
+        result = self.cli('suspects', '--config', str(self.config), '--kinds', 'truncated')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('== truncated (1)', result.stdout)
+        self.assertNotIn('== audio-errors', result.stdout)
+        self.assertIn('1 suspect(s) of other kinds are not shown.', result.stdout)
+        everything = self.cli('suspects', '--config', str(self.config), '--kinds', 'all')
+        self.assertIn('== audio-errors (1)', everything.stdout)
+
+    def test_bad_kinds_are_refused_with_the_valid_choices(self):
+        result = self.cli('suspects', '--config', str(self.config), '--kinds', 'truncated,bogus')
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('unknown kind(s) bogus', result.stderr)
+        self.assertIn('video-errors', result.stderr)
+        self.assertEqual(self.cli('suspects', '--config', str(self.config), '--kinds', '').returncode, 2)
+
+    def test_kinds_only_apply_to_suspects_and_batch(self):
+        result = self.cli('scan', '--config', str(self.config), '--kinds', 'truncated')
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('--kinds only applies to suspects and batch', result.stderr)
+
+
 class StagingTests(Fixture):
     def test_interrupted_copy_is_replaced_on_the_next_run_not_refused(self):
         src, dst = self.src / 'trip/bad-a.mp4', self.base / 'input.mp4'
@@ -1213,7 +1592,7 @@ class BatchTests(Fixture):
             self.assertEqual(sorted(p.name for p in (folder / 'references').glob('*.mp4')), ['good-a.mp4', 'good-b.mp4'])
             self.assertEqual(entries[rel]['candidates'], [str(folder / 'work' / f'attempt-{Path(rel).name}' / 'out.mp4')])
             self.assertEqual(entries[rel]['references'], ['trip/good-a.mp4', 'trip/good-b.mp4'])
-        self.assertIn('Suspects: 3 · already have a candidate: 0 · to process now: 3', out)
+        self.assertIn('Suspects to repair: 3 of 3\nAlready have a candidate: 0 · to process now: 3', out)
         self.assertIn('no references', out)
         # Originals untouched.
         self.assertEqual((self.src / 'trip/bad-a.mp4').read_bytes(), b'trip/bad-a.mp4' * 20)
@@ -1268,7 +1647,7 @@ class BatchTests(Fixture):
         self.assertEqual(second.brokens, ['bad-b.mp4'])
         self.assertEqual(self.entries()['trip/bad-b.mp4']['case_dir'], retried_folder)  # same folder on a retry
         self.assertEqual(code, 0)
-        self.assertIn('already have a candidate: 1 · to process now: 1', out)
+        self.assertIn('Already have a candidate: 1 · to process now: 1', out)
         third = FakeCompose()
         code, out, _ = self.run_batch(third)
         self.assertEqual((code, third.calls), (0, []))

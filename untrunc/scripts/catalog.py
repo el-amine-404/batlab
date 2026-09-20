@@ -15,6 +15,93 @@ FLUSH_SECONDS = 5
 CLEAN_STATUSES = ('decode-clean', 'probe-only-unverified')
 HASH_ALGORITHM = 'sha256'
 KNOWN_TAGS = {'apac': 'Apple spatial audio'}
+SUSPECT_STATUSES = ('decode-errors', 'unreadable-or-no-video')
+# What is wrong with a suspect, most Untrunc-relevant first. Untrunc rebuilds a missing or damaged index from a
+# healthy reference; it cannot repair picture or audio data, and it only reads these container formats.
+KINDS = ('truncated', 'container', 'unreadable', 'video-errors', 'audio-errors', 'not-video', 'no-real-errors', 'other')
+NOT_UNTRUNC_KINDS = ('video-errors', 'audio-errors', 'not-video', 'no-real-errors')
+UNTRUNC_EXTENSIONS = ('.mp4', '.mov', '.m4v', '.3gp')
+DEMUXER_TAGS = ('avi', 'matroska,webm', 'mpegts', 'mpeg', 'flv', 'asf')
+
+
+def is_timing_warning(line):
+    """ffmpeg's null muxer complains about repeated timestamps when it discards decoded frames: harmless."""
+    return '[null @' in line and 'non monotonically increasing dts' in line
+
+
+def is_repeat(line):
+    return line.strip().startswith('Last message repeated')
+
+
+def split_log(lines):
+    """(errors, ignored): the decoder messages that count, and the harmless timestamp warnings.
+
+    A 'Last message repeated N times' line belongs to whatever message came just before it, so it is ignored only
+    when that message was an ignored timestamp warning. After a real message it counts, so nothing real is hidden.
+    """
+    errors, ignored, after_ignored = [], [], False
+    for line in lines:
+        if not line.strip():
+            continue
+        if is_timing_warning(line) or (is_repeat(line) and after_ignored):
+            ignored.append(line)
+            after_ignored = True
+        else:
+            errors.append(line)
+            after_ignored = False
+    return errors, ignored
+
+
+def read_log(file):
+    """Lines of a decode log, or None when it cannot be read."""
+    try:
+        return Path(file).read_text(errors='replace').splitlines()
+    except OSError:
+        return None
+
+
+def message_source(line):
+    """The bracketed source of an ffmpeg message, for example 'h264' in '[h264 @ 0x55...] ...'."""
+    found = re.match(r'\[([^\]@]+?) @', line.strip())
+    return found[1] if found else None
+
+
+def classify_suspect(item, log_dir):
+    """What kind of problem a suspect has; see KINDS. Uses the stored kind, else works it out from the item and log."""
+    if item.get('kind') in KINDS:
+        return item['kind']
+    streams = (item.get('metadata') or {}).get('streams', [])
+    if item.get('status') == 'unreadable-or-no-video':
+        if 'moov atom not found' in (item.get('probe_errors') or ''):
+            return 'truncated'
+        if streams and not any(s.get('codec_type') == 'video' for s in streams):
+            return 'not-video'
+        return 'unreadable'
+    lines = read_log(Path(log_dir) / Path(item['log']).name) if log_dir and item.get('log') else None
+    if lines is None:
+        return 'other'  # cannot tell, so it is not set aside as harmless
+    errors, _ = split_log(lines)
+    if not errors:
+        return 'no-real-errors'
+
+    def codecs(kind):
+        return {s.get('codec_name') for s in streams if s.get('codec_type') == kind and s.get('codec_name')}
+
+    def from_codec(source, names):
+        return bool(source) and any(source == n or source.startswith(n) or n.startswith(source) for n in names)
+    found = set()
+    for line in errors:
+        source = message_source(line)
+        if 'Cannot determine format' in line or 'moov atom' in line or (source or '').startswith('mov,mp4') \
+                or source in DEMUXER_TAGS:
+            found.add('container')
+        elif from_codec(source, codecs('video')):
+            found.add('video-errors')
+        elif from_codec(source, codecs('audio')):
+            found.add('audio-errors')
+        else:
+            found.add('other')
+    return next(kind for kind in ('container', 'video-errors', 'audio-errors', 'other') if kind in found)
 
 
 def undecodable_audio(stream):
@@ -310,8 +397,7 @@ def scan(root, out, mode='full', timeout=1800, resume=False, reuse=None, baselin
                     with log.open('w') as f:
                         r = subprocess.run(command, stdout=subprocess.PIPE, stderr=f, text=True, timeout=timeout)
                     digest = parse_hash(r.stdout)
-                    messages = log.read_text().splitlines()
-                    errors_found = [s for s in messages if s.strip() and not ('[null @' in s and 'non monotonically increasing dts' in s)]
+                    errors_found, _ = split_log(log.read_text().splitlines())
                     item.update(decode_returncode=r.returncode, error_log_lines=len(errors_found), log=log.name)
                     if packet_only:
                         item['packet_checked_streams'] = packet_only
@@ -320,6 +406,8 @@ def scan(root, out, mode='full', timeout=1800, resume=False, reuse=None, baselin
                     item['status'] = 'decode-clean' if r.returncode == 0 and not errors_found else 'decode-errors'
             except (OSError, ValueError, subprocess.TimeoutExpired) as e:
                 item.update(status='scan-error', scan_error=str(e))
+            if item['status'] in SUSPECT_STATUSES:
+                item['kind'] = classify_suspect(item, out)
             before = baseline.get(rel) or {}
             was, now = before.get('stream_hash') or {}, item.get('stream_hash') or {}
             if was.get('algorithm') == now.get('algorithm') and was.get('value') and now.get('value') \
@@ -346,7 +434,7 @@ def scan(root, out, mode='full', timeout=1800, resume=False, reuse=None, baselin
     if changed:
         print(f'WARNING: {len(changed)} file(s) changed content without changing size or date since the previous scan: '
               'possible silent corruption or a read error. Check those files against a backup.', flush=True)
-    suspects = [i for i in items if i['status'] in ('unreadable-or-no-video', 'decode-errors')]
+    suspects = [i for i in items if i['status'] in SUSPECT_STATUSES]
     report = {'complete': not errors, 'walk_errors': errors, 'mode': mode, 'scan_version': SCAN_VERSION, 'reused': reused,
               'dropped': dropped, 'content_changed': changed,
               'root_in_container': str(root), 'host_source_root': host_root, 'items': items,
