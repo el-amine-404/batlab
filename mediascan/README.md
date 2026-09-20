@@ -15,6 +15,7 @@ as JSON reports and, optionally, moved into quarantine. Nothing is ever deleted.
 | `scan-virustotal.py` | one lookup per new carrier | files other people have already reported as malicious |
 | `scan-yara.sh` | optional, off unless rules are set | matches against your own YARA rules |
 | `deep-verify.py` | hours, rate limited | corruption that only appears when the file is read through |
+| `verify-embedded.py` | one ffprobe per container, minutes for the ones that carry something | fonts, cover art and subtitle tracks that are not what the container says they are, or that carry known malware |
 | `watch.sh` | instant, per file | everything above, the moment a file lands |
 | `selftest.py` | 2 min | nothing in the library: it proves the checks above still catch what they should |
 
@@ -108,6 +109,45 @@ A container holding nothing but a poster is `COVER_ART_ONLY`, which is reported
 and not quarantined. `NOT_VIDEO` stays what it was, a container with no video
 stream at all. The difference matters because quarantine moves every hardlink of
 what it acts on, and an audiobook in a `.mkv` is misfiled rather than dangerous.
+
+## What a container carries is not what it claims
+
+The checks above answer whether a file is the kind of file its name claims. They
+say nothing about what is inside it. A Matroska container holds fonts, cover art
+and subtitle tracks, and each is later handed to something that parses it —
+freetype, an image decoder, libass — with nothing having read the bytes first.
+
+`verify-media.py` does look at attachments, but it reads the `mimetype` tag,
+which is a string the file supplies about itself: declaring `font/ttf` over an
+ELF binary passes it. Cover art is not reachable from that check at all, because
+Matroska carries it as an attachment that ffmpeg re-presents as a video stream.
+
+`verify-embedded.py` extracts the parts and judges them on their bytes:
+
+| Verdict | Means |
+| --- | --- |
+| `MIME_LIE` | the declared mimetype and the actual content disagree |
+| `NOT_A_FONT` | declared a font, but carries no font header |
+| `NOT_AN_IMAGE` | cover art that is not an image |
+| `APPENDED_DATA` | bytes after the image's end marker, where a second payload hides |
+| `DANGEROUS_ATTACHMENT` | an attachment with an extension nothing should carry |
+| `MALWARE` | clamd matched the extracted part |
+
+Text subtitle tracks are run through `verify-subtitles.py` itself, so an `.ass`
+track inside a container is judged exactly like one beside it. Image subtitles
+are bitmaps and are skipped.
+
+Like `scan-clamav.sh`, it refuses to report clean if clamd cannot detect the
+EICAR probe. Pass `--no-clamav` to run the structural checks alone.
+
+**These verdicts are reported, not quarantined.** Nothing merges
+`embedded.jsonl` into the quarantine pass. A detection does not get to move
+files on the strength of its first week in service.
+
+It runs from `deep.sh`, because extraction means reading the container and the
+deep pass is already doing that. A container carrying nothing costs one
+`ffprobe`, so it walks the whole library rather than the weekly slice, bounded by
+`MEDIASCAN_EMBEDDED_TIME_BUDGET` (one hour by default).
 
 ## Quarantine and hardlinks
 

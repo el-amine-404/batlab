@@ -81,6 +81,14 @@ CASES = (
     Case("subtitles/provider-error-page.srt", "subtitles", ("NOT_SUBTITLE",)),
     Case("subtitles/binary.srt", "subtitles", ("BINARY",)),
     Case("subtitles/no-cues.srt", "subtitles", ("NO_CUES",), quarantined=False),
+
+    # What a container carries inside it. These verdicts are reported, not
+    # quarantined: a new detection does not get to move files on the strength
+    # of its first day in service.
+    Case("clean/Fixture Clean - [Bluray-360p][AVC].mkv", "embedded"),
+    Case("embedded/mime-lie.mkv", "embedded", ("MIME_LIE", "NOT_A_FONT"), quarantined=False),
+    Case("embedded/appended-cover.mkv", "embedded", ("APPENDED_DATA",), quarantined=False),
+    Case("embedded/active-subtitle.mkv", "embedded", ("ACTIVE_CONTENT",), quarantined=False),
 )
 
 
@@ -117,7 +125,7 @@ def encode(target, duration=DURATION, size=VIDEO_SIZE, codec="libx264", audio=Tr
 
 
 def build_fixtures(root):
-    for name in ("clean", "types", "media", "subtitles", "deep", "work"):
+    for name in ("clean", "types", "media", "subtitles", "deep", "embedded", "work"):
         os.makedirs(os.path.join(root, name), exist_ok=True)
 
     work = os.path.join(root, "work")
@@ -182,6 +190,38 @@ def build_fixtures(root):
           "1\n00:00:01,000 --> 00:00:04,000\nA line\0with a NUL\n")
     write(os.path.join(root, "subtitles", "no-cues.srt"), "just some prose, no timings at all\n")
 
+    # An attachment declaring itself a font over an ELF binary: the shape the
+    # mimetype tag cannot be trusted about.
+    liar = os.path.join(work, "payload.ttf")
+    shutil.copy("/bin/true", liar)
+    ffmpeg("-i", base, "-attach", liar,
+           "-metadata:s:t", "mimetype=font/ttf", "-metadata:s:t", "filename=payload.ttf",
+           "-c", "copy", os.path.join(root, "embedded", "mime-lie.mkv"))
+
+    # A valid JPEG with a second payload bolted on after its end marker.
+    appended = os.path.join(work, "appended.jpg")
+    with open(cover, "rb") as source, open(appended, "wb") as target:
+        target.write(source.read())
+        target.write(b"MZ" + b"\x90" * 512)
+    attach_cover(base, appended, os.path.join(root, "embedded", "appended-cover.mkv"))
+
+    # Markup that can fetch or execute, inside the container rather than beside it.
+    active = os.path.join(work, "active.ass")
+    write(active,
+          "[Script Info]\nScriptType: v4.00+\n\n"
+          "[V4+ Styles]\n"
+          "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, "
+          "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
+          "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+          "Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"
+          "0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1\n\n"
+          "[Events]\n"
+          "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+          "Dialogue: 0,0:00:01.00,0:00:04.00,Default,,0,0,0,,"
+          "<script src=\"http://example.invalid/x.js\"></script>\n")
+    ffmpeg("-i", base, "-i", active, "-map", "0", "-map", "1", "-c", "copy",
+           os.path.join(root, "embedded", "active-subtitle.mkv"))
+
     shutil.rmtree(work)
 
 
@@ -203,9 +243,12 @@ def write(path, text):
 
 def run_check(name, root, report_dir):
     """Run one verifier over the whole fixture tree, return path -> problems."""
-    script = {"types": "verify-types.py", "media": "verify-media.py", "subtitles": "verify-subtitles.py"}[name]
+    script = {"types": "verify-types.py", "media": "verify-media.py",
+              "subtitles": "verify-subtitles.py", "embedded": "verify-embedded.py"}[name]
     report = os.path.join(report_dir, f"{name}.jsonl")
-    completed = run(("python3", os.path.join(SCRIPT_DIR, script), root, "--report", report, "--quiet"))
+    extra = ("--no-clamav",) if name == "embedded" and not clamav_usable() else ()
+    completed = run(("python3", os.path.join(SCRIPT_DIR, script), root, "--report", report,
+                     "--quiet", *extra))
     if not os.path.exists(report):
         raise RuntimeError(f"{script} wrote no report: {completed.stderr.strip()[:400]}")
 
@@ -217,6 +260,17 @@ def run_check(name, root, report_dir):
     return findings
 
 
+def clamav_usable():
+    """clamd is only reachable where it runs, and a scan it cannot do proves nothing."""
+    if not shutil.which("clamdscan"):
+        return False
+    with tempfile.TemporaryDirectory() as directory:
+        probe = os.path.join(directory, "eicar.com")
+        write(probe, EICAR)
+        os.chmod(probe, 0o644)
+        return "FOUND" in run(("clamdscan", "--fdpass", "--no-summary", "--infected", probe)).stdout
+
+
 def quarantine_verdicts():
     """The verdicts sweep.sh actually acts on."""
     with open(SWEEP, encoding="utf-8") as handle:
@@ -224,7 +278,8 @@ def quarantine_verdicts():
 
 
 def check_detections(root, report_dir, result):
-    findings = {name: run_check(name, root, report_dir) for name in ("types", "media", "subtitles")}
+    findings = {name: run_check(name, root, report_dir)
+                for name in ("types", "media", "subtitles", "embedded")}
     acted_on = quarantine_verdicts()
 
     for case in CASES:
