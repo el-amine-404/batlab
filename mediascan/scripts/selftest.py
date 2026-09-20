@@ -268,7 +268,7 @@ def clamav_usable():
         probe = os.path.join(directory, "eicar.com")
         write(probe, EICAR)
         os.chmod(probe, 0o644)
-        return "FOUND" in run(("clamdscan", "--fdpass", "--no-summary", "--infected", probe)).stdout
+        return "FOUND" in run(("clamdscan", "--stream", "--no-summary", "--infected", probe)).stdout
 
 
 def quarantine_verdicts():
@@ -401,7 +401,7 @@ def check_clamav(root, result):
         return
 
     eicar = os.path.join(root, "types", "eicar.com")
-    completed = run(("clamdscan", "--fdpass", "--no-summary", "--infected", eicar))
+    completed = run(("clamdscan", "--stream", "--no-summary", "--infected", eicar))
     # An installed engine that cannot read what it is handed is a failure, not a
     # skip. scan-clamav.sh refuses to report a clean sweep without this probe, so
     # anything that breaks it here breaks the nightly scan too — which is exactly

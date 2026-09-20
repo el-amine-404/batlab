@@ -49,7 +49,9 @@ DENIED_SUFFIXES = frozenset(
      ".jar", ".lnk", ".sh", ".dll", ".sys", ".reg", ".hta", ".apk", ".elf", ".so")
 )
 
-MAX_EXTRACT_BYTES = 33_554_432
+# clamd's StreamMaxLength, which on this host equals its MaxFileSize. A part
+# above it cannot be scanned, so it is reported rather than quietly skipped.
+MAX_EXTRACT_BYTES = 26_214_400
 
 EICAR = r"X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
 
@@ -115,7 +117,9 @@ class Clamav:
     """clamd, with the same precondition scan-clamav.sh uses.
 
     An engine that cannot read what it is handed calls everything clean, which
-    is indistinguishable from a container with nothing in it.
+    is indistinguishable from a container with nothing in it. Scans are streamed
+    rather than passed by descriptor, which is what survives a systemd mount
+    namespace.
     """
 
     def __init__(self, enabled):
@@ -139,7 +143,7 @@ class Clamav:
 
     @staticmethod
     def scan_raw(path):
-        completed = subprocess.run(("clamdscan", "--fdpass", "--no-summary", "--infected", path),
+        completed = subprocess.run(("clamdscan", "--stream", "--no-summary", "--infected", path),
                                    capture_output=True, check=False)
         return completed.stdout.decode("utf-8", "replace")
 

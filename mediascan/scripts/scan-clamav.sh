@@ -15,6 +15,12 @@ require_command find
 
 # clamd refuses anything above MaxFileSize (25M by default on this host) and
 # says nothing when it skips, so feeding it whole films only hides that fact.
+#
+# Scans are streamed rather than passed by descriptor. Passing a descriptor
+# fails from inside a systemd mount namespace: clamd answers "Not a regular
+# file" for a file it can otherwise read perfectly, which would kill the EICAR
+# precondition below and with it every scan. Streaming works regardless of
+# namespace or permissions, and nothing sent is above MaxFileSize anyway.
 readonly MAX_SIZE="${MEDIASCAN_CLAMAV_MAX_SIZE:-25M}"
 readonly MARKER="$MEDIASCAN_STATE_DIR/.clamav-marker"
 readonly REPORT="$MEDIASCAN_REPORT_DIR/clamav.jsonl"
@@ -34,10 +40,10 @@ printf '%s' 'X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H
 chmod 0644 "$selftest/eicar.com"
 # clamdscan reports a detection with exit status 1, which pipefail would turn
 # into a pipeline failure, so the result is captured before it is examined.
-selftest_output="$(clamdscan --fdpass --no-summary --infected "$selftest/eicar.com" 2>/dev/null || true)"
+selftest_output="$(clamdscan --stream --no-summary --infected "$selftest/eicar.com" 2>/dev/null || true)"
 if ! grep -q "FOUND" <<<"$selftest_output"; then
   echo "clamd did not detect the EICAR test file; refusing to report a clean scan." >&2
-  echo "  Check that clamav-daemon is running and can read through --fdpass." >&2
+  echo "  Check that clamav-daemon is running and accepts a streamed scan." >&2
   exit 2
 fi
 
@@ -59,7 +65,7 @@ fi
 echo "Scanning $count file(s) under $MAX_SIZE with clamd."
 
 status=0
-clamdscan --fdpass --multiscan --infected --no-summary --file-list="$candidates" >"$infected" || status=$?
+clamdscan --stream --multiscan --infected --no-summary --file-list="$candidates" >"$infected" || status=$?
 
 if ((status > 1)); then
   echo "clamdscan failed with status $status" >&2

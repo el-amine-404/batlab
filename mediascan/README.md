@@ -307,6 +307,26 @@ sudo systemctl daemon-reload
 after. `MemoryDenyWriteExecute` is deliberately absent: some codecs allocate
 executable pages, so it would break the decode rather than the attack.
 
+### clamd is reached by streaming, not by descriptor
+
+Sandboxing puts the service in its own mount namespace, and `clamdscan
+--fdpass` does not survive one. clamd answers `Not a regular file` for a file it
+can otherwise read perfectly — same inode, readable, permissions irrelevant.
+Left alone it would have taken the EICAR precondition down with it, so
+`scan-clamav.sh` would have refused to report a clean sweep and exited 2 every
+night, with the malware scan dead behind a sandbox that looked like a success.
+
+Measured inside the sandbox, on a 0600 probe in a private `/tmp`:
+
+```
+--stream   rc=1   Eicar-Test-Signature FOUND
+--fdpass   rc=2   Not a regular file ERROR
+```
+
+So every clamd call streams. Nothing scanned is above clamd's `StreamMaxLength`,
+which on this host equals its `MaxFileSize` of 25M, and both `scan-clamav.sh`
+and `verify-embedded.py` cap what they send at that.
+
 ## Host limits
 
 The units run at `Nice=19` with idle I/O on every machine. Anything sized for a
