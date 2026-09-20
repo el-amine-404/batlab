@@ -286,6 +286,7 @@ services:
     user: ${PUID}:${PGID}
     networks:
       - home_server
+    restart: unless-stopped
     volumes:
       - ${VOLUMES_ROOT}/recyclarr:/config
       - ${CONFIGS_ROOT}/arr/conf/recyclarr:/config/configs:ro
