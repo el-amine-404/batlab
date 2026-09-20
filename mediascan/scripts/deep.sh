@@ -37,6 +37,7 @@ echo "== Embedded content"
 python3 "$SCRIPT_DIR/verify-embedded.py" "${roots[@]}" \
   "${excludes[@]}" --exclude "$MEDIASCAN_QUARANTINE" \
   --report "$MEDIASCAN_REPORT_DIR/embedded.jsonl" \
+  --state "$MEDIASCAN_STATE_DIR/embedded-state.json" \
   --time-budget "${MEDIASCAN_EMBEDDED_TIME_BUDGET:-3600}" \
   --quiet || status=1
 

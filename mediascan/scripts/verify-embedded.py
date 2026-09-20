@@ -266,6 +266,37 @@ def verify(path, clamav, subtitle_checks, timeout):
     return finding
 
 
+def load_state(path):
+    """What was inspected and found clean, so a budgeted run makes progress.
+
+    Without this the sorted path list plus a time budget means every run
+    re-reads the same alphabetical prefix and never reaches the rest.
+    """
+    if not path or not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_state(path, state, known):
+    if not path:
+        return
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump({k: v for k, v in state.items() if k in known}, handle)
+
+
+def signature_of(path):
+    try:
+        info = os.stat(path)
+    except OSError:
+        return None
+    return [info.st_size, int(info.st_mtime)]
+
+
 def walk(roots, excludes):
     for root in roots:
         if os.path.isfile(root):
@@ -289,6 +320,8 @@ def main():
     parser.add_argument("--timeout", type=int, default=900)
     parser.add_argument("--time-budget", type=int, default=0,
                         help="stop starting new containers after this many seconds (0 means no limit)")
+    parser.add_argument("--state", metavar="FILE",
+                        help="remember which containers came back clean, and skip them while unchanged")
     parser.add_argument("--no-clamav", action="store_true",
                         help="skip the malware scan of extracted parts")
     parser.add_argument("--quiet", action="store_true")
@@ -311,17 +344,32 @@ def main():
         print("No containers to inspect.")
         return 0
 
+    state = load_state(arguments.state)
     findings = []
     started = time.monotonic()
     budget_hit = False
+    skipped = 0
     for path in paths:
+        signature = signature_of(path)
+        # Checked before the budget, so skipping costs nothing and every run
+        # spends its time on containers it has not read yet.
+        if arguments.state and signature and state.get(path) == signature:
+            skipped += 1
+            continue
         if arguments.time_budget and time.monotonic() - started > arguments.time_budget:
             budget_hit = True
             break
         try:
-            findings.append(verify(path, clamav, subtitle_checks, arguments.timeout))
+            finding = verify(path, clamav, subtitle_checks, arguments.timeout)
         except (OSError, subprocess.TimeoutExpired) as error:
-            findings.append(Finding(path=path, problems=[f"UNREADABLE: {error}"]))
+            finding = Finding(path=path, problems=[f"UNREADABLE: {error}"])
+        findings.append(finding)
+        if signature and not finding.problems:
+            state[path] = signature
+        else:
+            state.pop(path, None)
+
+    save_state(arguments.state, state, set(paths))
 
     flagged = [f for f in findings if f.problems]
 
@@ -342,9 +390,12 @@ def main():
 
     print(f"\nInspected {len(findings)} container(s) carrying {carried} embedded part(s); "
           f"{len(flagged)} flagged.")
+    if skipped:
+        print(f"Skipped {skipped} container(s) unchanged since the last run.")
     if budget_hit:
+        remaining = len(paths) - skipped - len(findings)
         print(f"Stopped early: time budget of {arguments.time_budget}s reached "
-              f"with {len(paths) - len(findings)} container(s) unread.")
+              f"with {remaining} container(s) still unread; the next run resumes there.")
     return 1 if flagged else 0
 
 

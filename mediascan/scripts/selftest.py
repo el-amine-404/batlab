@@ -367,6 +367,34 @@ def check_deep(root, report_dir, result):
                   "; ".join(findings.get("intact.mkv") or ["never inspected"]))
 
 
+def check_embedded_state(root, report_dir, result):
+    """A budgeted run must resume, not restart.
+
+    Sorted paths plus a time budget means that without remembered state every
+    run re-reads the same alphabetical prefix and never reaches the rest.
+    """
+    def twice(directory, state_name):
+        state = os.path.join(report_dir, state_name)
+        command = ("python3", os.path.join(SCRIPT_DIR, "verify-embedded.py"),
+                   os.path.join(root, directory), "--state", state, "--quiet")
+        if not clamav_usable():
+            command += ("--no-clamav",)
+        return run(command), run(command)
+
+    first, second = twice("clean", "embedded-state-clean.json")
+    result.record("Inspected 1 container" in first.stdout,
+                  "embedded  a clean container is inspected once", first.stdout.strip()[-200:])
+    result.record("Skipped 1 container" in second.stdout and "Inspected 0 container" in second.stdout,
+                  "embedded  and skipped while it has not changed", second.stdout.strip()[-200:])
+
+    # A flagged container is deliberately not remembered: the report is rebuilt
+    # from what each run inspected, so forgetting it would make the problem
+    # disappear from the report after one pass.
+    _, again = twice("embedded", "embedded-state-flagged.json")
+    result.record("Inspected 3 container" in again.stdout and "Skipped" not in again.stdout,
+                  "embedded  a flagged container is re-read every run", again.stdout.strip()[-200:])
+
+
 def check_clamav(root, result):
     if not shutil.which("clamdscan"):
         result.skipped.append("clamav: clamdscan is not installed here")
@@ -404,6 +432,7 @@ def main():
         build_fixtures(root)
         check_detections(root, reports, result)
         check_deep(root, reports, result)
+        check_embedded_state(root, reports, result)
         check_clamav(root, result)
         check_quarantine(root, result)
     finally:

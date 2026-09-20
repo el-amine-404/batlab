@@ -145,9 +145,25 @@ EICAR probe. Pass `--no-clamav` to run the structural checks alone.
 files on the strength of its first week in service.
 
 It runs from `deep.sh`, because extraction means reading the container and the
-deep pass is already doing that. A container carrying nothing costs one
-`ffprobe`, so it walks the whole library rather than the weekly slice, bounded by
-`MEDIASCAN_EMBEDDED_TIME_BUDGET` (one hour by default).
+deep pass is already doing that.
+
+Measured on lab1: a container carrying nothing costs one `ffprobe` and is done
+in about a second, but one that carries something costs **roughly 12 minutes**,
+because ffmpeg has to read to wherever the attachment sits. Eight containers
+took fifty minutes. The whole library in one pass is not on the table.
+
+So it is incremental. `--state` records the size and mtime of every container
+that came back clean, and those are skipped while they stay unchanged; the check
+happens before the time budget, so each run spends its time on containers it has
+not read yet and the next run resumes where the last one stopped. A container
+that was *flagged* is deliberately not remembered — the report is rebuilt from
+what each run inspected, so forgetting it would make the problem vanish from the
+report after one pass.
+
+`MEDIASCAN_EMBEDDED_TIME_BUDGET` bounds each run at one hour by default.
+
+Installing `mkvtoolnix-cli` would make this far cheaper — `mkvextract` seeks to
+the attachment instead of reading up to it — but it is not currently used.
 
 ## Quarantine and hardlinks
 
