@@ -145,10 +145,12 @@ def verify(path, timeout):
 
     # Cover art is a video stream too, and a poster is often taller than the
     # film is wide, so the largest stream is not the feature. Only the
-    # disposition separates them.
+    # disposition separates them. A container left with nothing but a poster is
+    # reported rather than quarantined: it is a misfiled file, not a dangerous
+    # one, and NOT_VIDEO moves every hardlink of whatever it lands on.
     feature_streams = [s for s in video_streams if not (s.get("disposition") or {}).get("attached_pic")]
     if not feature_streams:
-        finding.problems.append("NOT_VIDEO: container holds only attached cover art")
+        finding.problems.append("COVER_ART_ONLY: the only video stream is attached cover art")
         return finding
 
     primary = max(feature_streams, key=lambda s: int(s.get("width") or 0) * int(s.get("height") or 0))

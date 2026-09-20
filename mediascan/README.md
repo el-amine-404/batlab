@@ -104,6 +104,11 @@ with cover art would have. `verify-media.py` selects on the disposition instead,
 and `deep-verify.py` decodes `0:V:0` rather than `0:v:0` so the sample decode
 reads the feature and not a single JPEG.
 
+A container holding nothing but a poster is `COVER_ART_ONLY`, which is reported
+and not quarantined. `NOT_VIDEO` stays what it was, a container with no video
+stream at all. The difference matters because quarantine moves every hardlink of
+what it acts on, and an audiobook in a `.mkv` is misfiled rather than dangerous.
+
 ## Quarantine and hardlinks
 
 Radarr and Sonarr hardlink from `torrents/` into `media/`, so one file has two

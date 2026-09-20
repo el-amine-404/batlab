@@ -67,7 +67,8 @@ CASES = (
     Case("types/payload.exe", "types", ("DANGEROUS_NAME",)),
     Case("types/eicar.com", "types", ("DANGEROUS_NAME",)),
 
-    Case("media/cover-art-only.mkv", "media", ("NOT_VIDEO",)),
+    Case("media/cover-art-only.mkv", "media", ("COVER_ART_ONLY",), quarantined=False),
+    Case("media/audio-only.mkv", "media", ("NOT_VIDEO",)),
     Case("media/attachment-carrier.mkv", "media", ("ATTACHMENT",)),
     Case("media/unreadable.mkv", "media", ("UNREADABLE",), quarantined=False),
     Case("media/codec-lie x265.mkv", "media", ("CODEC",), quarantined=False),
@@ -145,7 +146,7 @@ def build_fixtures(root):
 
     # Only stream is the poster, which is the shape a still image wearing a
     # .mkv name takes.
-    audio_only = os.path.join(work, "audio-only.mkv")
+    audio_only = os.path.join(root, "media", "audio-only.mkv")
     ffmpeg("-f", "lavfi", "-i", f"sine=frequency=440:duration={DURATION}", "-c:a", "aac", audio_only)
     attach_cover(audio_only, cover, os.path.join(root, "media", "cover-art-only.mkv"))
 
