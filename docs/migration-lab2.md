@@ -67,6 +67,7 @@ Each is a normal commit, validated with `make config` for both profiles.
    start a second DHCP server. Verify the image tag and the variable names
    against the image's README when adding it.
 5. **`hosts/lab2/`**: `compose.env`, `README.md` registry, `smartd.conf`,
+   `modprobe.d/usb-quirks.conf` (the JMS578 enclosure moves with the disk),
    `netdata/cpu-temperature.conf` (sensor `coretemp`, Tjmax 100 C: warn 90,
    critical 95), `netdata/go.d-docker.conf` (try enabled, watch dockerd CPU),
    `stacks.txt`. Starting capacity values, adjusted after a week of Netdata:
@@ -92,9 +93,11 @@ Each is a normal commit, validated with `make config` for both profiles.
 3. BIOS: battery charge limit around 80% if offered; power on after AC loss
    if offered. Check the battery is not swollen.
 4. `docs/install/`: sudo, SSH, Docker, git, make.
-5. Firewall: on lab1 run `sudo ufw status numbered` first and mirror it,
-   dropping 67/udp (DHCP stays on lab1). Keep `DEFAULT_FORWARD_POLICY=ACCEPT`
-   and restart Docker after enabling (see Traps in `CLAUDE.md`).
+5. Security layer: run batdots' `homelab` profile, which sets the ufw rules,
+   SSH hardening, fail2ban, ClamAV, unattended upgrades and the audit tools
+   (lynis, rkhunter, chkrootkit, auditd). Check afterwards that ufw keeps
+   `DEFAULT_FORWARD_POLICY=ACCEPT` and restart Docker (see Traps in
+   `CLAUDE.md`).
 6. Clone the repo to `/home/potato/batlab`. Copy lab1's `compose/.env` and set
    `HOST_PROFILE=lab2`, `HOST_IP=192.168.1.201`.
 7. Record the GPU facts, then fill `RENDER_GID` in `hosts/lab2/compose.env`:
@@ -129,8 +132,9 @@ DNS and DHCP are untouched in this phase, so the house keeps its internet.
    lab1's copy stays in place: it is the rollback.
 4. Unmount the data disk on lab1, move it to lab2, add the same fstab line (by
    UUID) and seal the mountpoint as in `watchdog/README.md`.
-5. **USB 3 test, before anything writes to the disk for real.** Plug into a
-   blue USB 3 port, confirm `lsusb -t` shows it at 5000M, then in one
+5. **USB 3 test, before anything writes to the disk for real.** First give
+   lab2 the UAS quirk lab1 runs with (`hosts/lab2/modprobe.d/usb-quirks.conf`,
+   copied from lab1's) and reboot. Plug into a blue USB 3 port, confirm `lsusb -t` shows it at 5000M, then in one
    terminal watch the kernel and in another write past the SMR cache:
 
    ```bash
@@ -140,10 +144,8 @@ DNS and DHCP are untouched in this phase, so the house keeps its internet.
    rm /mnt/storage/data/usb3-test
    ```
 
-   Pass: no resets or I/O errors across 100 GB each way. If it resets, retry
-   with UAS disabled (kernel parameter `usb-storage.quirks=152d:0578:u`), then
-   fall back to a USB 2 port, and record the outcome in lab2's README either
-   way. If USB 3 passes, the qBittorrent completion recheck costs minutes, not
+   Pass: no resets or I/O errors across 100 GB each way. If it resets, fall
+   back to a USB 2 port, and record the outcome in lab2's README either way. If USB 3 passes, the qBittorrent completion recheck costs minutes, not
    hours; keep it on.
 6. On lab2, restore the state and remove the transfer copy, then `make
    setup`, `make up` and `make status`. Check each new container's logs
@@ -156,8 +158,11 @@ DNS and DHCP are untouched in this phase, so the house keeps its internet.
    ```
 7. Install the host units from each README: watchdog (new healthchecks.io
    check `lab2`), restic (same repository, root rclone config copied from
-   lab1), mediascan, import-audit, updater, smartd with `hosts/lab2/
-   smartd.conf`, samba.
+   lab1), mediascan, import-audit, updater, samba, and SMART alerts:
+   `hosts/lab2/smartd.conf` plus the `20discord` hook, exactly as in
+   `watchdog/README.md`. lab1 never got that last step: its smartd still runs
+   Debian's stock config and mails root, so no disk warning ever reached
+   Discord.
 8. Jellyfin: Dashboard > Playback > Transcoding, Intel QuickSync, enable
    HEVC and HEVC 10-bit decoding and VPP tone mapping, low-power encoding off.
    Force a transcode of an HEVC 10-bit episode and confirm in Netdata that the
@@ -204,6 +209,13 @@ Everything below must pass before the old state on lab1 is deleted.
 - Immich, Paperless (open a document), Navidrome, Seerr, Homepage tiles.
 - Restic: a manual backup from lab2 succeeds, and `restic check` passes.
 - Healthchecks.io: both `lab1` and `lab2` green.
+- Scheduled jobs on lab2, `systemctl list-timers`: `batlab-restic-backup`,
+  `batlab-restic-check`, `batlab-updater`, `batlab-import-audit`,
+  `batlab-mediascan-sweep`, `batlab-mediascan-deep`, `batlab-watchdog-
+  heartbeat`, plus `lynis` and `chkrootkit` from the batdots profile. Services:
+  `batlab-mediascan-watch`, `batlab-data-guard`, `smartd`, `fail2ban`,
+  `clamav-daemon`, `clamav-freshclam`, `unattended-upgrades`. On lab1 only
+  `batlab-watchdog-heartbeat` and `batlab-updater` remain.
 - **Failover drill**: power lab1 off; a phone still browses and
   `*.homelab.lan` still resolves. Power it back on. Then stop lab2's
   AdGuard; the same holds.
