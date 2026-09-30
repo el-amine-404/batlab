@@ -375,6 +375,12 @@ the batch stopped on errors or could not start, 130 when interrupted.
 **A decode-clean candidate is not proof of complete recovery:** play each one and check
 the footage, duration and audio sync before keeping it.
 
+## Replacing damaged files in an Immich library
+
+Once repaired copies exist, `photos/scripts/swap-damaged.py` puts them in the library under the same
+name and moves the damaged originals (and unrecoverable files) to a `damaged/` folder outside the
+library, with a manifest. See [Damaged files](../photos/README.md#damaged-files).
+
 ## Optional forensic cleanup
 
 Normal repair never trims footage or audio. A separately authorized cleanup can

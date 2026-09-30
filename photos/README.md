@@ -63,6 +63,67 @@ sidecars along, adds days to an existing visit folder that covers them, and
 leaves anything it would have to overwrite where it is. Group a folder before
 Immich indexes it.
 
+## Damaged files
+
+A video that is damaged should not stay in `library/`, and it should not be renamed beside its
+repair either: Immich would index both as assets and the duplicate tools would flag the pair.
+`scripts/swap-damaged.py` keeps the damaged original outside the library, in a sibling folder that
+nothing indexes, and puts the repaired file in its place under the same path and name, so Immich keeps
+the asset with its albums and faces.
+
+```
+/mnt/storage/data/photos/
+├── library/                        Immich's external library
+└── damaged/                        never indexed, never scanned by the duplicate tools
+    ├── manifest.json               every damaged file: reason, size, date, SHA-256, sidecar, replacement
+    └── 2026-09-20_bad-copy-sessions/THEME/…/clip.mp4     the damaged original, same relative path
+```
+
+A plan names the files, so it lives outside the repository (`library_root`, `damaged_root`, `batch`,
+and per file `path`, `action` `replace` or `quarantine`, `replacement`, `reason`, optional `expect` and
+`details`; the top of the script shows an example).
+
+```bash
+S=photos/scripts/swap-damaged.py
+$S plan.json                     # preview: nothing changes
+$S plan.json --apply --limit 1   # try one file first (the share must be mounted read-write)
+$S plan.json --apply             # the rest
+$S plan.json --verify            # re-read everything and compare with the manifest
+$S plan.json --rollback --apply  # put the batch back as it was (drop --apply to preview)
+```
+
+For a replacement the damaged original is copied out first and the copy is read back and compared by
+SHA-256; only then is the repair written beside it as `NAME.part` (an extension nothing indexes) and
+moved into place in one step. A file with no replacement is moved out together with its `.xmp` sidecar.
+A file whose size or date no longer matches `expect` was changed since it was examined and is left
+alone. The tool never overwrites, never deletes anything it has not verified, and can be interrupted and
+run again.
+
+A replaced file gets a new modification date (`"mtime": "now"`, the default), which is how Immich
+notices that an external file changed. With `"mtime": "keep"` run Scan All Library Files in Immich
+afterwards. Rescan the library in either case, then open one repaired asset to check its duration.
+
+### Checking a repair against the original
+
+`scripts/compare-media.py` says what a repair changed, so nothing is swapped in on trust. It only
+reads; it needs `ffmpeg` and `ffprobe`.
+
+```bash
+C=photos/scripts/compare-media.py
+$C original.mp4 repaired.mp4 --detail                  # one pair, full report
+$C --old-root /mnt/storage/data/photos/library --new-root ~/repaired --json result.json   # a folder of repairs
+```
+
+Every file in the new folder is compared with the file at the same relative path in the old one, and
+gets a verdict: `IDENTICAL`, `CHANGED` (the differences listed are all there is and every check passed)
+or `CHECK` (read the `FAILED` lines; the exit status is 2). It reports the duration before and after,
+video removed and where (video is compared packet by packet, so a cut in the middle is found), audio
+that was re-encoded and how close it is (loudness of each second), stretches of the original's audio
+that never decoded, decoder messages before and after, and whether the creation date, rotation and
+other tags survived. A `CHECK` is raised when a tag is lost or altered, the rotation or the streams
+change, the new file still has decoder errors, a video packet was altered, or the repair lost audio the
+original still had.
+
 ## Naming files by capture time
 
 `scripts/organize-media.py` names every photo and video
