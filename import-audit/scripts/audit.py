@@ -74,17 +74,23 @@ class Arr:
 
 
 def finished_videos(root: Path, min_age_seconds: int, now: float) -> list[tuple[Path, os.stat_result]]:
-    found = []
+    found, downloading = [], set()
     for directory, subdirectories, files in os.walk(root):
         subdirectories[:] = [name for name in subdirectories if not name.startswith(".")]
         for name in files:
             path = Path(directory, name)
+            if name.endswith(".!qB"):
+                downloading.add(path.relative_to(root).parts[0])
+                continue
             if path.suffix.lower() not in VIDEO_EXTENSIONS or "sample" in name.lower():
                 continue
             status = path.stat()
             if now - status.st_mtime >= min_age_seconds:
                 found.append((path, status))
-    return found
+    # A pack's files finish one by one but are imported only when the whole
+    # torrent completes, so nothing in a folder still holding a partial file
+    # (qBittorrent's .!qB suffix) has been left behind yet.
+    return [(path, status) for path, status in found if path.relative_to(root).parts[0] not in downloading]
 
 
 def container_path(path: str, data_root: Path) -> Path:

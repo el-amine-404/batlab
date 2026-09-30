@@ -155,6 +155,15 @@ class CheckTests(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn("Lost Movie", problems[0].text)
 
+    def test_a_pack_still_downloading_is_not_left_behind(self) -> None:
+        self.file("torrents/tv/Show.S01.1080p-Group/Show.S01E10.1080p-Group.mkv")
+        partial = self.file("torrents/tv/Show.S01.1080p-Group/Show.S01E11.1080p-Group.mkv.!qB")
+        sonarr = FakeArr("Sonarr", {"parse": {"episodes": [{"hasFile": False}]}})
+        radarr = FakeArr("Radarr", {"parse": {}})
+        self.assertEqual(audit.check_left_behind(sonarr, radarr, self.data / "torrents", 3600, time.time()), [])
+        partial.rename(partial.with_suffix(""))
+        self.assertEqual(len(audit.check_left_behind(sonarr, radarr, self.data / "torrents", 3600, time.time())), 2)
+
     def test_young_downloads_are_ignored(self) -> None:
         path = self.file("torrents/tv/pack/Courage.S01E09E10.Weremole.mp4")
         os.utime(path, None)
