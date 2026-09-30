@@ -27,7 +27,7 @@
   "semanticCommits": "disabled",
   "commitMessagePrefix": "chore:",
   "minimumReleaseAge": "3 days",
-  "prConcurrentLimit": 10,
+  "prConcurrentLimit": 0,
   "prHourlyLimit": 0,
   "packageRules": [
     {
@@ -69,7 +69,36 @@
       "enabled": false
     },
     {
-      "description": "Low-risk, security-relevant apps: minor and patch updates merge on their own; lab1's updater deploys them",
+      "description": "Every other minor and patch update arrives as one weekly PR instead of one per image",
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "matchPackageNames": [
+        "!ghcr.io/gethomepage/homepage",
+        "!jellyfin/jellyfin",
+        "!ghcr.io/seerr-team/seerr",
+        "!lscr.io/linuxserver/sonarr",
+        "!lscr.io/linuxserver/radarr",
+        "!lscr.io/linuxserver/prowlarr",
+        "!lscr.io/linuxserver/lidarr",
+        "!lscr.io/linuxserver/bazarr",
+        "!lscr.io/linuxserver/qbittorrent",
+        "!ghcr.io/cleanuparr/cleanuparr",
+        "!ghcr.io/recyclarr/recyclarr",
+        "!ghcr.io/flaresolverr/flaresolverr",
+        "!deluan/navidrome",
+        "!filebrowser/filebrowser",
+        "!louislam/uptime-kuma",
+        "!amir20/dozzle"
+      ],
+      "groupName": "weekly minor and patch updates",
+      "schedule": [
+        "before 6am on monday"
+      ]
+    },
+    {
+      "description": "Low-risk, security-relevant apps: minor and patch updates merge straight into main without a PR; lab1's updater deploys them, and its health check and rollback are the test, since the repository has no CI",
       "matchPackageNames": [
         "ghcr.io/gethomepage/homepage",
         "jellyfin/jellyfin",
@@ -77,6 +106,7 @@
         "lscr.io/linuxserver/sonarr",
         "lscr.io/linuxserver/radarr",
         "lscr.io/linuxserver/prowlarr",
+        "lscr.io/linuxserver/lidarr",
         "lscr.io/linuxserver/bazarr",
         "lscr.io/linuxserver/qbittorrent",
         "ghcr.io/cleanuparr/cleanuparr",
@@ -92,7 +122,8 @@
         "patch"
       ],
       "automerge": true,
-      "automergeType": "pr"
+      "automergeType": "branch",
+      "ignoreTests": true
     },
     {
       "description": "Major updates always need a human, whatever the image",

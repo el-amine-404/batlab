@@ -4,9 +4,10 @@ Image versions are pinned in `compose/versions.env`, which is tracked in Git.
 Two pieces keep those pins current without hand-editing:
 
 - **Renovate** (GitHub app, `renovate.json`) watches every `IMAGE_`/`TAG_` pair
-  and opens a pull request when a newer tag exists and has been public for three
-  days. For the low-risk, security-relevant apps in its automerge rule it merges
-  minor and patch bumps on its own; majors and every other image wait for review.
+  for tags public for three days. For the low-risk, security-relevant apps in
+  its automerge rule it commits minor and patch bumps straight to `main`, with
+  no pull request. Every other image's minor and patch bumps arrive as one
+  grouped pull request on Mondays, and each major as its own.
 - **The updater** (`scripts/update.sh`, nightly on the server) fast-forwards the
   checkout, compares each running container's image with what the checkout now
   says, and recreates the services listed in `conf/auto-services.txt`. It waits
@@ -14,12 +15,16 @@ Two pieces keep those pins current without hand-editing:
   come up, and removes the old image once the new one is healthy.
 
 ```
-Renovate PR ── automerge? ──▶ main ── nightly git pull ──▶ running image differs?
+Renovate ─── automerge? ──▶ main ── nightly git pull ──▶ running image differs?
                   │                                        │
-                  └─ no: you review and merge               ├─ listed: pull, recreate, wait healthy
+                  └─ no: a PR you review and merge          ├─ listed: pull, recreate, wait healthy
                                                             │          ok: #updates, else roll back + #alerts
                                                             └─ not listed: one #updates note, you run make up
 ```
+
+Automerge commits to `main` without waiting for CI, which this repository does
+not have (`ignoreTests`); the updater's health check and rollback are the test.
+Pull-request automerge left eligible PRs open for two weeks here (2026-09).
 
 Stopped containers are never started, so services the data disk guard or you
 stopped stay stopped. A tag that failed once is not retried until a newer one

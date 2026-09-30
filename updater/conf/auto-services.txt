@@ -9,6 +9,7 @@ seerr
 sonarr
 radarr
 prowlarr
+lidarr
 bazarr
 qbittorrent
 cleanuparr
