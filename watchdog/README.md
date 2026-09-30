@@ -88,6 +88,25 @@ messages from `watchdog on lab1`. Use the unit rather than a bare `umount`:
 systemd stops the containers before unmounting, while `umount` just fails with
 the disk busy.
 
+## After the disk drops off
+
+When the disk returns to the bus it gets a new device name (`sdb1` becomes
+`sdd1`), but the dead mount stays at `/mnt/storage/data` and reading it gives
+`Input/output error`. systemd still sees the mount as active under the old name,
+so `systemctl start mnt-storage-data.mount` waits for the old device and fails
+with "A dependency job … failed". Clear the dead mount first; Samba holds it open:
+
+```bash
+sudo systemctl stop smbd nmbd
+sudo umount /mnt/storage/data || sudo umount -l /mnt/storage/data
+sudo systemctl daemon-reload
+sudo systemctl start mnt-storage-data.mount
+sudo systemctl start smbd nmbd batlab-mediascan-watch.service batlab-watchdog-heartbeat.service
+```
+
+`umount -l` is safe here: nothing can write through a device that is gone. The
+mount runs fsck first, then the data guard starts the containers it stopped.
+
 ## Planned maintenance
 
 Unmounting the data disk makes the heartbeat fail. Pause the `lab1` check in
