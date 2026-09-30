@@ -4,3 +4,7 @@ resource_providers:
     type: custom-formats
     service: radarr
     path: /config/local/custom-formats/radarr
+  - name: batlab-sonarr
+    type: custom-formats
+    service: sonarr
+    path: /config/local/custom-formats/sonarr

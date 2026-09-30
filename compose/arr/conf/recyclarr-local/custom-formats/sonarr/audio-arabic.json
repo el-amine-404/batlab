@@ -1,0 +1,16 @@
+{
+  "trash_id": "bb158cc88eff25debcbfd864bda44d23",
+  "name": "Audio: Arabic",
+  "includeCustomFormatWhenRenaming": false,
+  "specifications": [
+    {
+      "name": "Arabic",
+      "implementation": "LanguageSpecification",
+      "negate": false,
+      "required": true,
+      "fields": {
+        "value": 26
+      }
+    }
+  ]
+}

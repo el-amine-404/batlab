@@ -10,6 +10,11 @@ sonarr:
     quality_definition:
       type: anime
 
+    # Anime keeps the guide's strict minimum of 100: only ranked release groups
+    # qualify, since unranked anime uploads are mostly poor re-encodes. Series
+    # are grabbed in whatever genuine form exists, then upgraded: lower
+    # qualities stay allowed as fallbacks, and a release missing the original
+    # audio is accepted down to min_format_score (see custom_formats).
     quality_profiles:
       - trash_id: 20e0fc959f1f1704bed501f23bdae76f  # [Anime] Remux-1080p
         name: Anime
@@ -17,22 +22,135 @@ sonarr:
           enabled: true
       - trash_id: 76a5053bdb2d1e4a8f16a69a37d46c12  # Remux + WEB 2160p
         name: TV
+        min_format_score: -18000
         reset_unmatched_scores:
           enabled: true
+        qualities:
+          - name: Bluray-2160p Remux
+          - name: WEB 2160p
+            qualities:
+              - WEBDL-2160p
+              - WEBRip-2160p
+          - name: Bluray-1080p Remux
+          - name: Bluray-1080p
+          - name: WEB 1080p
+            qualities:
+              - WEBDL-1080p
+              - WEBRip-1080p
+          - name: Bluray-720p
+          - name: WEB 720p
+            qualities:
+              - WEBDL-720p
+              - WEBRip-720p
+          - name: DVD
+          - name: SDTV
+      - trash_id: fe9470e577c300a5ad9a3274f6d1cdf2  # Remux + WEB 1080p
+        name: TV 1080p
+        min_format_score: -18000
+        reset_unmatched_scores:
+          enabled: true
+        qualities:
+          - name: Bluray-1080p Remux
+          - name: Bluray-1080p
+          - name: WEB 1080p
+            qualities:
+              - WEBDL-1080p
+              - WEBRip-1080p
+          - name: HDTV-1080p
+          - name: Bluray-720p
+          - name: WEB 720p
+            qualities:
+              - WEBDL-720p
+              - WEBRip-720p
+          - name: HDTV-720p
+          - name: DVD
+          - name: SDTV
 
     custom_format_groups:
       add:
         - trash_id: e9a1944a254e6f8a9da63083f7ae15cb  # [Audio] Audio Formats
 
     custom_formats:
-      # Anime tiers are 100 apart. A dub only breaks a tie inside one tier, and
-      # both together stay below 100 so a dub never outranks a better release.
+      # Three bands, since no release stacks more than ~7100 positive points
+      # (best audio 5000, best tier ~1900, extras). Each missing-original
+      # format costs 9000, so any original release outranks any fallback, and
+      # the minimum admits two hits (a dub tagged both by title and by
+      # language). Unwanted formats move to
+      # -30000 so the lowered minimum can never admit them; one the guide
+      # adds later arrives at -10000 and must be listed here too, which the
+      # sync's "conflicting scores" lines make easy to spot by their absence.
+      # An untagged title is taken as the series' original language.
+      - trash_ids:
+          - ae575f95ab639ba5d15f663bf019e3e8  # Language: Not Original
+        assign_scores_to:
+          - name: TV
+            score: -9000
+          - name: TV 1080p
+            score: -9000
+      - trash_ids:
+          - 15a05bc7c1a36e2b57fd628f8977e2fc  # AV1
+          - 32b367365729d530ca1c124a0b180c64  # Bad Dual Groups
+          - 85c61753df5da1fb2aab6f2a47426b09  # BR-DISK
+          - fbcb31d8dabd2a319072b84fc0b7249c  # Extras
+          - 9c11cd3f07101cdba90a2d81cf0e56b4  # LQ
+          - e2315f990da2e2cbfc9fa5b7a6fcfe48  # LQ (Release Title)
+          - 23297a736ca77c0fc8e70f8edd7ee56c  # Upscaled
+        assign_scores_to:
+          - name: TV
+            score: -30000
+          - name: TV 1080p
+            score: -30000
+      - trash_ids:
+          - 9b64dff695c2115facf1b6ea59c9bd07  # x265 (no HDR/DV)
+        assign_scores_to:
+          - name: TV
+            score: -30000
+      - trash_ids:
+          - 47435ece6b99a0b477caf360e79ba0bb  # x265 (HD)
+        assign_scores_to:
+          - name: TV 1080p
+            score: -30000
+
+      # Extra dubs rank English, then French, then Arabic. Anime tiers are 100
+      # apart and these sum below that, so a dub only breaks a tie inside one
+      # tier; for series they stay below one audio format step.
       - trash_ids:
           - 418f50b10f1907201b6cfdf881f467b7  # Anime Dual Audio
+        assign_scores_to:
+          - name: Anime
+            score: 50
+      - trash_ids:
           - 7ba05c6e0e14e793538174c679126996  # MULTi
         assign_scores_to:
           - name: Anime
-            score: 40
+            score: 30
+          - name: TV
+            score: 30
+          - name: TV 1080p
+            score: 30
+      - trash_ids:
+          - bb158cc88eff25debcbfd864bda44d23  # Audio: Arabic
+        assign_scores_to:
+          - name: Anime
+            score: 15
+          - name: TV
+            score: 15
+          - name: TV 1080p
+            score: 15
+      - trash_ids:
+          - f8f292544f62296205fc06dff9bb5e94  # Audio: English
+        assign_scores_to:
+          - name: TV
+            score: 60
+          - name: TV 1080p
+            score: 60
+      - trash_ids:
+          - 84957d1c3927a9af2ee23e511f694bd8  # Audio: French
+        assign_scores_to:
+          - name: TV
+            score: 30
+          - name: TV 1080p
+            score: 30
 
     media_naming:
       series: jellyfin-tvdb
