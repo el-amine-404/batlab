@@ -25,11 +25,14 @@ sonarr:
         - trash_id: e9a1944a254e6f8a9da63083f7ae15cb  # [Audio] Audio Formats
 
     custom_formats:
+      # Anime tiers are 100 apart. A dub only breaks a tie inside one tier, and
+      # both together stay below 100 so a dub never outranks a better release.
       - trash_ids:
           - 418f50b10f1907201b6cfdf881f467b7  # Anime Dual Audio
+          - 7ba05c6e0e14e793538174c679126996  # MULTi
         assign_scores_to:
           - name: Anime
-            score: 2000
+            score: 40
 
     media_naming:
       series: jellyfin-tvdb
