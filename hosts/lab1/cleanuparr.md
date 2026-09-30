@@ -20,7 +20,12 @@ chosen because of this machine.
   `Found executable file`, `Invalid season or episode`, `Unable to parse file`,
   `sample`, `Not an upgrade`); downloading metadata 3 strikes; stall rule
   `stalled` 0-100%, 3 strikes, reset on progress; slow rule `crawling` below
-  100KB for 48 h, 0-90%, 3 strikes.
+  100KB for 48 h, 0-90%, 3 strikes, ignoring downloads above 50GB.
+- The 50GB exemption exists because `crawling` also strikes on an estimated
+  time over 48 h, which any 100 GB season pack on public trackers has while
+  downloading normally. On 2026-09-30 it removed a healthy 107 GB pack at 27%
+  and deleted the data. Big packs stay covered by `stalled`, which only strikes
+  a download that makes no progress.
 - Malware Blocker: remove the whole download if any file matches; Sonarr and
   Radarr use the official blacklist.
 - Blacklist Sync writes the same list into qBittorrent's excluded file names,
