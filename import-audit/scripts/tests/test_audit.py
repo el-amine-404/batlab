@@ -182,6 +182,24 @@ class CheckTests(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn("No files found are eligible", problems[0].text)
 
+    def test_a_pack_and_its_episodes_downloading_twice(self) -> None:
+        def record(download: str, title: str, episode: int, score: int, size: float, left: float) -> dict:
+            return {"downloadId": download, "title": title, "episodeId": 100 + episode, "customFormatScore": score,
+                    "size": size, "sizeleft": left, "series": {"title": "Attack on Titan"},
+                    "episode": {"seasonNumber": 4, "episodeNumber": episode}}
+        queue = [record("PACK", "Kira S04", n, 800, 127e9, 110e9) for n in range(1, 31)]
+        queue += [record(f"EP{n}", f"Baws S04E{n}", n, 600, 1e9, 0.5e9) for n in (24, 25)]
+        queue += [record("OTHER", "Other S01E01", 999, 100, 1e9, 1e9)]
+        problems = audit.check_duplicates([FakeArr("Sonarr", {"queue": {"records": queue}})])
+        self.assertEqual(len(problems), 1)
+        self.assertTrue(problems[0].text.startswith("Attack on Titan S04E24, S04E25: keep `Kira S04`"))
+        self.assertIn("remove `Baws S04E24`", problems[0].text)
+        self.assertIn("`Baws S04E25`", problems[0].text)
+
+    def test_downloads_for_different_episodes_are_not_duplicates(self) -> None:
+        queue = [{"downloadId": "A", "episodeId": 1}, {"downloadId": "B", "episodeId": 2}, {"downloadId": "A", "episodeId": 3}]
+        self.assertEqual(audit.check_duplicates([FakeArr("Radarr", {"queue": {"records": queue}})]), [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,6 +14,7 @@ fifth of the show was missing and a third of the titles were wrong.
 | wrong episodes | a library file's torrent source is named for other episodes than Sonarr assigned |
 | left behind | a finished video in `torrents/` is in no library folder, and its episode or movie still has no file |
 | stuck in queue | Sonarr or Radarr flags a download as blocked or failing |
+| duplicate downloads | two queued downloads cover the same episode or movie; the message names the one to keep (higher score, then further along) |
 
 Every check reads the current state, so a fixed problem stops being reported.
 Downloads younger than three hours are skipped while they may still be
@@ -37,6 +38,13 @@ python3 -m unittest discover -s import-audit/scripts/tests
 Sonarr or Radarr → Wanted → Manual Import, pick the torrent folder, set each
 file's episodes from its name, import. For a wrong episode, delete the series'
 affected episode files first (they are hardlinks; the torrent copy stays).
+
+For a duplicate, Activity → Queue → ✕ on the download it says to remove:
+remove from download client, do not blocklist (the release is fine), skip the
+redownload. Keeping both is also fine when the smaller one finishes days
+sooner: it can be watched now and the other replaces it on import. Sonarr
+grabbed a season pack's episodes a second time on 2026-09-30, most likely
+before it had matched the queued pack to its episodes.
 
 ## One-time installation on the server
 

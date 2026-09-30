@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Report downloads that Sonarr or Radarr imported wrongly or not at all.
 
-Three checks, each against the current state rather than history:
+Four checks, each against the current state rather than history:
 
   wrong episodes   a library episode file whose torrent source is named for
                    different episodes than Sonarr assigned to it
   left behind      a finished video in torrents/ that nothing in the library
                    links to, for an episode or movie that still has no file
   stuck in queue   a queue item Sonarr or Radarr flags as blocked or failing
+  duplicate downloads  two queued downloads for the same episode or movie,
+                   naming the one worth keeping
 
 Each problem is posted to Discord once, and again only after it went away and
 came back. Run with --dry-run to print the findings without notifying.
@@ -184,9 +186,61 @@ def check_queues(apps: list[Arr], min_age: int, now: float) -> list[Problem]:
     return problems
 
 
+def describe(item: dict) -> str:
+    size, left = item.get("size") or 0, item.get("sizeleft") or 0
+    done = int(100 * (1 - left / size)) if size else 0
+    return f"`{item.get('title', '?')}` · score {item.get('customFormatScore', 0)} · {size / 1e9:.1f} GB · {done}%"
+
+
+def check_duplicates(apps: list[Arr]) -> list[Problem]:
+    """Downloads covering the same episode or movie; Sonarr grabbed a queued
+    pack's episodes again on 2026-09-30."""
+    problems = []
+    for app in apps:
+        records = app.get("queue", pageSize=1000, includeEpisode="true", includeSeries="true",
+                          includeMovie="true").get("records", [])
+        downloads: dict[str, dict] = {}
+        holders: dict[int, set[str]] = {}
+        labels: dict[int, str] = {}
+        for item in records:
+            target, download = item.get("episodeId") or item.get("movieId"), item.get("downloadId")
+            if not target or not download:
+                continue
+            downloads.setdefault(download, item)
+            holders.setdefault(target, set()).add(download)
+            episode = item.get("episode") or {}
+            labels[target] = (f"S{episode['seasonNumber']:02d}E{episode['episodeNumber']:02d}" if "seasonNumber" in episode
+                              else (item.get("movie") or {}).get("title", str(target)))
+        overlaps: dict[frozenset[str], list[int]] = {}
+        for target, ids in holders.items():
+            if len(ids) > 1:
+                overlaps.setdefault(frozenset(ids), []).append(target)
+        # Grouped by the download worth keeping, so a pack against 27 single
+        # episodes is one line, not 27.
+        by_keeper: dict[str, tuple[set[str], list[int]]] = {}
+        for ids, targets in overlaps.items():
+            ranked = sorted(ids, reverse=True, key=lambda i: (
+                downloads[i].get("customFormatScore", 0),
+                1 - (downloads[i].get("sizeleft") or 0) / (downloads[i].get("size") or 1)))
+            losers, covered = by_keeper.setdefault(ranked[0], (set(), []))
+            losers.update(ranked[1:])
+            covered.extend(targets)
+        for keeper, (losers, covered) in by_keeper.items():
+            names = sorted(labels[target] for target in covered)
+            shown = ", ".join(names[:6]) + (f" +{len(names) - 6} more" if len(names) > 6 else "")
+            removed = sorted(losers, key=lambda i: downloads[i].get("title", ""))
+            listed = ", ".join(describe(downloads[i]) for i in removed[:5])
+            listed += f" +{len(removed) - 5} more" if len(removed) > 5 else ""
+            owner = (downloads[keeper].get("series") or {}).get("title") or app.name
+            problems.append(Problem(
+                "duplicate downloads", f"dup:{app.name}:{keeper}:{','.join(removed)}",
+                f"{owner} {shown}: keep {describe(downloads[keeper])}; remove {listed}"))
+    return problems
+
+
 def notify(webhook: str, problems: list[Problem]) -> None:
     fields = []
-    for kind in ("wrong episodes", "left behind", "stuck in queue"):
+    for kind in ("wrong episodes", "left behind", "stuck in queue", "duplicate downloads"):
         lines = [problem.text for problem in problems if problem.kind == kind]
         if not lines:
             continue
@@ -203,7 +257,9 @@ def notify(webhook: str, problems: list[Problem]) -> None:
         "avatar_url": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/sonarr.png",
         "embeds": [{
             "title": "🟠 Imports need a look",
-            "description": "Fix them in Sonarr/Radarr → Wanted → Manual Import, mapping each file by its name.",
+            "description": "Wrong or left behind: Sonarr/Radarr → Wanted → Manual Import, mapping each file by its "
+                           "name. Duplicate: Activity → Queue → ✕ on the one to remove, remove from client, "
+                           "no blocklist.",
             "color": 15105570, "fields": fields,
             "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
         }],
@@ -239,7 +295,8 @@ def main(argv: list[str] | None = None) -> int:
         torrent_videos = finished_videos(data_root / "torrents/tv", 0, now)
         problems = (check_wrong_episodes(sonarr, data_root, torrent_videos)
                     + check_left_behind(sonarr, radarr, data_root / "torrents", min_age, now)
-                    + check_queues([sonarr, radarr], min_age, now))
+                    + check_queues([sonarr, radarr], min_age, now)
+                    + check_duplicates([sonarr, radarr]))
     except (urllib.error.URLError, OSError, ValueError) as error:
         print(f"audit could not run: {error}", file=sys.stderr)
         return 1
