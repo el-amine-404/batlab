@@ -18,12 +18,11 @@ i will add one once i feel like to. for know just imagine it in your head
 ## Wiki
 
 the docs for this repo are inside [docs](./docs/) folder:
-- [installation](./docs/installation.md)
+- [installing a server](./docs/install/README.md)
+- [migration to lab2](./docs/migration-lab2.md)
 
 other related skills that i keep forgetting:
-- [sudo configuration](./docs/configure_sudo.md)
 - [ports management](./docs/ports_management.md)
-- [static ip address](./docs/static_ip_address.md)
 - [samba shares](./docs/samba.md)
 - [import audit](./import-audit/README.md)
 - [video recovery and local AI agent](./untrunc/README.md)

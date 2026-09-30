@@ -78,7 +78,7 @@ Each is a normal commit, validated with `make config` for both profiles.
    ```
 
    Every other limit starts from lab1's value.
-6. **Docs**: `docs/samba.md` and `docs/static_ip_address.md` to `.201`,
+6. **Docs**: `docs/samba.md` to `.201`,
    `CLAUDE.md` server section to two hosts, `hosts/lab1/README.md` machine
    block to its DNS role.
 
@@ -87,11 +87,11 @@ Each is a normal commit, validated with `make config` for both profiles.
 1. Debian 13 on the internal SSD. First user **`potato`, uid and gid 1000**:
    the data disk's files are owned by 1000, and every unit runs as `potato`.
 2. Static address `192.168.1.201/24`, gateway `192.168.1.1`, nameservers
-   `127.0.0.1 192.168.1.3` (`docs/static_ip_address.md`). Use the onboard
+   `127.0.0.1 192.168.1.3` (`docs/install/04-static-ip.md`). Use the onboard
    I219-LM gigabit port, not the USB adapter.
 3. BIOS: battery charge limit around 80% if offered; power on after AC loss
    if offered. Check the battery is not swollen.
-4. `docs/installation.md` and `docs/configure_sudo.md`: Docker, make, sudo.
+4. `docs/install/`: sudo, SSH, Docker, git, make.
 5. Firewall: on lab1 run `sudo ufw status numbered` first and mirror it,
    dropping 67/udp (DHCP stays on lab1). Keep `DEFAULT_FORWARD_POLICY=ACCEPT`
    and restart Docker after enabling (see Traps in `CLAUDE.md`).
