@@ -25,8 +25,11 @@ chosen because of this machine.
   Radarr use the official blacklist.
 - Blacklist Sync writes the same list into qBittorrent's excluded file names,
   replacing a hand-made list whose `*.ha*`-style patterns skipped real films.
-- Seeker instances: monitored only, below cutoff included, 3 active downloads,
-  7-day minimum cycle.
+- Seeker instances: monitored only, below cutoff included, custom format score
+  included, 3 active downloads, 7-day minimum cycle. The score is what keeps a
+  fallback copy (a dub, an unranked release) searched once its quality already
+  meets the cutoff; with a 10000 score cutoff it puts nearly the whole library
+  in each weekly cycle.
 - Notifications: Discord `#downloads` for removals, replacement grabs and
   cleaned downloads, webhook in `DISCORD_WEBHOOK_DOWNLOADS`.
 
