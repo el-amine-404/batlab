@@ -21,7 +21,7 @@ env_value() {
 }
 
 HOST_PROFILE_NAME="$(env_value HOST_PROFILE)"
-WEBHOOK_OK="$(env_value DISCORD_WEBHOOK_DOWNLOADS)"
+WEBHOOK_OK="$(env_value DISCORD_WEBHOOK_UPDATES)"
 WEBHOOK_FAIL="$(env_value DISCORD_WEBHOOK_ALERTS)"
 readonly HOST_PROFILE_NAME WEBHOOK_OK WEBHOOK_FAIL
 readonly ENV_ARGS=(--env-file compose/versions.env --env-file compose/.env --env-file "hosts/$HOST_PROFILE_NAME/compose.env")

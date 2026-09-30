@@ -30,8 +30,8 @@ chosen because of this machine.
   fallback copy (a dub, an unranked release) searched once its quality already
   meets the cutoff; with a 10000 score cutoff it puts nearly the whole library
   in each weekly cycle.
-- Notifications: Discord `#downloads` for removals, replacement grabs and
-  cleaned downloads, webhook in `DISCORD_WEBHOOK_DOWNLOADS`.
+- Notifications: Discord `#download-issues` for removals, replacement grabs and
+  cleaned downloads, webhook in `DISCORD_WEBHOOK_DOWNLOAD_ISSUES`.
 
 ## Download Cleaner
 

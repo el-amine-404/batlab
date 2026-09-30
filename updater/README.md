@@ -17,8 +17,8 @@ Two pieces keep those pins current without hand-editing:
 Renovate PR ── automerge? ──▶ main ── nightly git pull ──▶ running image differs?
                   │                                        │
                   └─ no: you review and merge               ├─ listed: pull, recreate, wait healthy
-                                                            │          ok: #downloads, else roll back + #alerts
-                                                            └─ not listed: one #downloads note, you run make up
+                                                            │          ok: #updates, else roll back + #alerts
+                                                            └─ not listed: one #updates note, you run make up
 ```
 
 Stopped containers are never started, so services the data disk guard or you

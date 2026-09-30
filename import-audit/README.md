@@ -7,7 +7,7 @@ fit it, filed each two-segment file as four episodes, rejected the real files
 for the episodes it believed were taken, and reported the season complete. A
 fifth of the show was missing and a third of the titles were wrong.
 
-`scripts/audit.py` runs hourly and posts to `#downloads` when:
+`scripts/audit.py` runs hourly and posts to `#download-issues` when:
 
 | Check | Means |
 | --- | --- |
@@ -25,7 +25,7 @@ it disappears and comes back; the list lives in
 `~/.local/state/batlab-import-audit/reported.json`.
 
 The API keys and the webhook come from `compose/.env` (`SONARR_API_KEY`,
-`RADARR_API_KEY`, `DISCORD_WEBHOOK_DOWNLOADS`).
+`RADARR_API_KEY`, `DISCORD_WEBHOOK_DOWNLOAD_ISSUES`).
 
 ```bash
 import-audit/scripts/audit.py --dry-run     # print what it would report

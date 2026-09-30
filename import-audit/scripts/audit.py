@@ -253,8 +253,11 @@ def main(argv: list[str] | None = None) -> int:
     state_path = Path(args.state_dir) / "reported.json"
     reported = set(json.loads(state_path.read_text())) if state_path.exists() else set()
     new = [problem for problem in problems if problem.key not in reported]
-    webhook = env_value(env_file, "DISCORD_WEBHOOK_DOWNLOADS")
-    if new and webhook.startswith("http"):
+    webhook = env_value(env_file, "DISCORD_WEBHOOK_DOWNLOAD_ISSUES")
+    if new:
+        if not webhook.startswith("http"):
+            print("DISCORD_WEBHOOK_DOWNLOAD_ISSUES is not set; nothing is marked as reported", file=sys.stderr)
+            return 1
         notify(webhook, new)
         print(f"posted {len(new)} new problem(s) to Discord")
     state_path.parent.mkdir(parents=True, exist_ok=True)

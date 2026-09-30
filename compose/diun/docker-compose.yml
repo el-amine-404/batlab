@@ -17,7 +17,7 @@ services:
       - TZ=${TZ}
       - LOG_LEVEL=info
       - LOG_JSON=false
-      - DIUN_NOTIF_DISCORD_WEBHOOKURL=${DISCORD_WEBHOOK_DIUN}
+      - DIUN_NOTIF_DISCORD_WEBHOOKURL=${DISCORD_WEBHOOK_UPDATES}
     healthcheck:
       test: ["CMD", "diun", "healthcheck"]
       interval: 30s
