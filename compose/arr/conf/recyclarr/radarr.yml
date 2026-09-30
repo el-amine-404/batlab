@@ -4,6 +4,8 @@ radarr:
     base_url: http://radarr:7878
     api_key: !env_var RADARR_API_KEY
 
+    # The guide's size table has no DVD row, so recyclarr cannot manage it; its
+    # 5 MB/min floor is set in Radarr itself (Settings > Quality).
     quality_definition:
       type: movie
 
@@ -12,7 +14,7 @@ radarr:
     # original audio is accepted down to min_format_score (see custom_formats).
     quality_profiles:
       - trash_id: d1d310673359205736b4b84acd5ea8c8  # Remux 2160p (Combined)
-        name: Movies
+        name: Movies 4K
         min_format_score: -9000
         reset_unmatched_scores:
           enabled: true
@@ -84,7 +86,7 @@ radarr:
       - trash_ids:
           - d6e9318c875905d6cfb5bee961afcea9  # Language: Not Original
         assign_scores_to:
-          - name: Movies
+          - name: Movies 4K
             score: -9000
           - name: Movies 1080p
             score: -9000
@@ -106,14 +108,14 @@ radarr:
           - 712d74cd88bceb883ee32f773656b1f5  # Sing-Along Versions
           - bfd8eb01832d646a0a89c4deb46f8564  # Upscaled
         assign_scores_to:
-          - name: Movies
+          - name: Movies 4K
             score: -20000
           - name: Movies 1080p
             score: -20000
       - trash_ids:
           - 839bea857ed2c0a8e084f3cbdbd65ecb  # x265 (no HDR/DV)
         assign_scores_to:
-          - name: Movies
+          - name: Movies 4K
             score: -20000
       - trash_ids:
           - dc98083864ea246d05a42df0d05f81cc  # x265 (HD)
@@ -126,21 +128,21 @@ radarr:
       - trash_ids:
           - c11d21efd423ff6a0f9daaf35688f9cb  # Audio: English
         assign_scores_to:
-          - name: Movies
+          - name: Movies 4K
             score: 60
           - name: Movies 1080p
             score: 60
       - trash_ids:
           - a44ba0ad6885efc42f49413988de9870  # Audio: French
         assign_scores_to:
-          - name: Movies
+          - name: Movies 4K
             score: 30
           - name: Movies 1080p
             score: 30
       - trash_ids:
           - 351897c0630b18cf8df0195c9cbf471e  # Audio: Arabic
         assign_scores_to:
-          - name: Movies
+          - name: Movies 4K
             score: 15
           - name: Movies 1080p
             score: 15
