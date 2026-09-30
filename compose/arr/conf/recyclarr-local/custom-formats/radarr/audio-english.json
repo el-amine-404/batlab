@@ -1,0 +1,16 @@
+{
+  "trash_id": "c11d21efd423ff6a0f9daaf35688f9cb",
+  "name": "Audio: English",
+  "includeCustomFormatWhenRenaming": false,
+  "specifications": [
+    {
+      "name": "English",
+      "implementation": "LanguageSpecification",
+      "negate": false,
+      "required": true,
+      "fields": {
+        "value": 1
+      }
+    }
+  ]
+}

@@ -290,6 +290,8 @@ services:
     volumes:
       - ${VOLUMES_ROOT}/recyclarr:/config
       - ${CONFIGS_ROOT}/arr/conf/recyclarr:/config/configs:ro
+      - ${CONFIGS_ROOT}/arr/conf/recyclarr-local:/config/local:ro
+      - ${CONFIGS_ROOT}/arr/conf/recyclarr-local/settings.yml:/config/settings.yml:ro
     environment:
       - TZ=${TZ}
       - CRON_SCHEDULE=@daily

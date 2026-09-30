@@ -1,0 +1,16 @@
+{
+  "trash_id": "a44ba0ad6885efc42f49413988de9870",
+  "name": "Audio: French",
+  "includeCustomFormatWhenRenaming": false,
+  "specifications": [
+    {
+      "name": "French",
+      "implementation": "LanguageSpecification",
+      "negate": false,
+      "required": true,
+      "fields": {
+        "value": 2
+      }
+    }
+  ]
+}

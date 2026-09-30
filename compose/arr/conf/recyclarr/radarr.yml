@@ -41,6 +41,38 @@ radarr:
             - name: Movies 1080p
 
     custom_formats:
+      # An untagged release title parses as the original language, so a dub
+      # without it is only caught after import, from the file's own tracks.
+      # The negative score then makes Radarr replace it.
+      - trash_ids:
+          - d6e9318c875905d6cfb5bee961afcea9  # Language: Not Original
+        assign_scores_to:
+          - name: Movies
+          - name: Movies 1080p
+      # Extra dubs rank English, then French, then Arabic. English alone
+      # outscores French and Arabic together; all three stay below one audio
+      # format step, so a dub never outranks a better release.
+      - trash_ids:
+          - c11d21efd423ff6a0f9daaf35688f9cb  # Audio: English
+        assign_scores_to:
+          - name: Movies
+            score: 60
+          - name: Movies 1080p
+            score: 60
+      - trash_ids:
+          - a44ba0ad6885efc42f49413988de9870  # Audio: French
+        assign_scores_to:
+          - name: Movies
+            score: 30
+          - name: Movies 1080p
+            score: 30
+      - trash_ids:
+          - 351897c0630b18cf8df0195c9cbf471e  # Audio: Arabic
+        assign_scores_to:
+          - name: Movies
+            score: 15
+          - name: Movies 1080p
+            score: 15
       # The guide ships channel counts unscored. Small values break ties between
       # two lossless releases without outranking the audio format itself.
       - trash_ids:
