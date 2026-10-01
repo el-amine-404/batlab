@@ -98,11 +98,10 @@ wait for the cutover too, and there is no `CLAUDE.md` to follow or update.
 3. BIOS: battery charge limit around 80% if offered; power on after AC loss
    if offered. Check the battery is not swollen.
 4. `docs/install/`: sudo, SSH, Docker, git, make.
-5. Security layer: run batdots' `homelab` profile, which sets the ufw rules,
-   SSH hardening, fail2ban, ClamAV, unattended upgrades and the audit tools
-   (lynis, rkhunter, chkrootkit, auditd). Check afterwards that ufw keeps
-   `DEFAULT_FORWARD_POLICY=ACCEPT` and restart Docker (see Traps in
-   `CLAUDE.md`).
+5. Security layer: `docs/install/07-security.md` (SSH hardening, ufw,
+   fail2ban, unattended upgrades, ClamAV), with lab2's DNS-replica firewall
+   rule. Done 2026-10-01; lab1's firewall was found off and turned on the same
+   day with the DHCP-host rules.
 6. Clone the repo to `/home/potato/batlab`. Copy lab1's `compose/.env` and set
    `HOST_PROFILE=lab2`, `HOST_IP=192.168.1.201`.
 7. Record the GPU facts, then fill `RENDER_GID` in `hosts/lab2/compose.env`:
