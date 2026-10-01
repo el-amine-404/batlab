@@ -9,6 +9,10 @@ answering, and nothing told anyone.
   pings healthchecks.io. A failed or hung check sends `/fail` and alerts at once;
   a frozen or offline server stops pinging and alerts after the grace time. The
   watcher runs off-site, so it still works when this host cannot.
+  On a host serving the network's DNS, set `WATCHDOG_DNS_SERVER` and the
+  heartbeat also asks it for a name and fails without an address back. On a
+  host without the data disk, leave `WATCHDOG_DATA_ROOT` empty: the disk check is
+  skipped, and the data guard is not installed there.
 - **Data guard** — containers that bind-mount `/mnt/storage/data` run only while
   it is mounted. Without the disk they would write into the empty mountpoint on
   the root filesystem. DNS, Caddy, gluetun and everything else are unaffected.

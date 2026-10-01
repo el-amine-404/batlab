@@ -1,6 +1,7 @@
 # Migration to two hosts: lab2 serves, lab1 keeps DNS
 
-Status: **planned**. Written 2026-09-30 from the live state of lab1.
+Status: **phase 1 in progress**. Written 2026-09-30 from the live state of lab1;
+phase 0 done 2026-10-01.
 
 ## Target
 
@@ -48,7 +49,9 @@ DRM card name, and whether Quick Sync works inside the Jellyfin container.
 
 ## Phase 0: repository changes, before touching hardware
 
-Each is a normal commit, validated with `make config` for both profiles.
+Done 2026-10-01. What differs from the list below: lab1's `stacks.txt` waits for
+phase 3 (until the cutover lab1 still runs every stack), the doc moves in item 6
+wait for the cutover too, and there is no `CLAUDE.md` to follow or update.
 
 1. **Per-host stack list.** `hosts/<profile>/stacks.txt`, one stack per line.
    The Makefile uses it for `STACKS` when present, otherwise every stack, so
@@ -59,13 +62,15 @@ Each is a normal commit, validated with `make config` for both profiles.
    hosts/<profile>/compose.env}`; add `RENDER_GID=992` to lab1's
    `compose.env` and a row to its README.
 3. **Heartbeat without a data disk.** An empty `WATCHDOG_DATA_ROOT` skips the
-   disk check; lab1 adds a check that AdGuard answers on `127.0.0.1:53`.
+   disk check; lab1 sets `WATCHDOG_DNS_SERVER=127.0.0.1` in phase 3, and the
+   heartbeat then fails unless AdGuard returns an address.
 4. **`adguardhome-sync` stack**, following every step of "Adding a stack" in
    `CLAUDE.md`. Origin `http://192.168.1.3:3000`, replica
    `http://192.168.1.201:3000`, credentials from `.env`. DHCP must not sync:
    the server config and static leases features are off, or the replica would
-   start a second DHCP server. Verify the image tag and the variable names
-   against the image's README when adding it.
+   start a second DHCP server. Both instances share the `ADGUARD_USER` /
+   `ADGUARD_PASS` login from `.env`, plus `ADGUARD_ORIGIN_IP` and
+   `ADGUARD_REPLICA_IP`. Image and variables checked against v0.9.3's README.
 5. **`hosts/lab2/`**: `compose.env`, `README.md` registry, `smartd.conf`,
    `modprobe.d/usb-quirks.conf` (the JMS578 enclosure moves with the disk),
    `netdata/cpu-temperature.conf` (sensor `coretemp`, Tjmax 100 C: warn 90,
@@ -172,8 +177,12 @@ DNS and DHCP are untouched in this phase, so the house keeps its internet.
 
 1. On lab2: `make up STACK=adguardhome` and `STACK=unbound`. In the first-run
    wizard set the **web UI to port 3000**: the default 80 collides with Caddy.
+   Use the same login as lab1's AdGuard (`ADGUARD_USER` / `ADGUARD_PASS`).
    Leave DHCP off.
-2. On lab1: `make up STACK=adguardhome-sync`; confirm the replica received
+2. On lab1: add `ADGUARD_ORIGIN_IP=192.168.1.3` and
+   `ADGUARD_REPLICA_IP=192.168.1.201` to `compose/.env`, run `make setup` (it
+   links `.env` into the new stack), then `make up STACK=adguardhome-sync`;
+   confirm the replica received
    the filter lists, user rules and the rewrite.
 3. On lab1's AdGuard: change the rewrite to `*.homelab.lan -> 192.168.1.201`.
    Every `*.homelab.lan` site now reaches lab2's Caddy; `adh.homelab.lan`
@@ -193,8 +202,11 @@ DNS and DHCP are untouched in this phase, so the house keeps its internet.
    Verify on a client after it renews (`nmcli dev show`, `ipconfig /all`):
    both addresses listed. The router's own DHCP stays off.
 5. On lab1: disable samba and the data guard, keep the heartbeat with an
-   empty `WATCHDOG_DATA_ROOT`. Its healthchecks.io check (`lab1`) now watches
-   DNS.
+   empty `WATCHDOG_DATA_ROOT` and `WATCHDOG_DNS_SERVER=127.0.0.1`. Its
+   healthchecks.io check (`lab1`) now watches DNS. Add `hosts/lab1/stacks.txt`
+   (`adguardhome`, `unbound`, `adguardhome-sync`), point `docs/samba.md` at
+   `.201`, and rewrite the machine block of `hosts/lab1/README.md` for its DNS
+   role.
 6. Uptime Kuma (on lab2): add DNS monitors against `192.168.1.3` and
    `192.168.1.201`.
 

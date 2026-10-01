@@ -51,7 +51,31 @@ journald_answers() {
   journalctl --sync
 }
 
-run_check "data disk" data_disk_readable
+# A full answer, not just a reply: AdGuard alone replies SERVFAIL when Unbound
+# behind it is down, and the house has no working DNS either way.
+dns_answers() {
+  python3 - "$WATCHDOG_DNS_SERVER" "${WATCHDOG_DNS_NAME:-debian.org}" <<'PY'
+import random, socket, struct, sys
+server, name = sys.argv[1], sys.argv[2]
+qid = random.randrange(65536)
+query = struct.pack(">HHHHHH", qid, 0x0100, 1, 0, 0, 0)
+query += b"".join(bytes([len(label)]) + label.encode() for label in name.rstrip(".").split("."))
+query += b"\0" + struct.pack(">HH", 1, 1)
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.settimeout(5)
+sock.sendto(query, (server, 53))
+reply = sock.recv(4096)
+rid, flags, _, answers = struct.unpack(">HHHH", reply[:8])
+sys.exit(0 if rid == qid and flags & 0x8000 and flags & 0xF == 0 and answers > 0 else 1)
+PY
+}
+
+if [[ -n "$WATCHDOG_DATA_ROOT" ]]; then
+  run_check "data disk" data_disk_readable
+fi
+if [[ -n "${WATCHDOG_DNS_SERVER:-}" ]]; then
+  run_check "dns" dns_answers
+fi
 run_check "sshd" sshd_answers
 run_check "journald" journald_answers
 

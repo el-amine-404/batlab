@@ -1,0 +1,23 @@
+# Stacks lab2 runs; `make up` without STACK starts exactly these.
+# adguardhome-sync runs on lab1, which holds the AdGuard settings.
+adguardhome
+ai
+arr
+caddy
+diun
+dozzle
+filebrowser
+gotenberg
+homepage
+immich
+jellyfin
+navidrome
+netdata
+open-webui
+paperless
+portainer
+seerr
+speed_test
+unbound
+untrunc
+uptime_kuma

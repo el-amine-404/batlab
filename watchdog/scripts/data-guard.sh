@@ -8,6 +8,7 @@ readonly SCRIPT_DIR
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/common.sh"
 load_watchdog_config
+: "${WATCHDOG_DATA_ROOT:?the data guard needs WATCHDOG_DATA_ROOT}"
 
 readonly STATE_DIR="/var/lib/batlab-watchdog"
 readonly STOPPED_FILE="$STATE_DIR/stopped-containers"

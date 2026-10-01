@@ -25,6 +25,7 @@ Measured: `qwen3:4b` at 1.09 tokens/s; a 10 s 1080p x265 sample decode takes
 | Setting | Where | lab1 value | Why | On stronger hardware |
 | --- | --- | --- | --- | --- |
 | Container CPU and memory limits | `compose.env`, read by 7 stacks | see file | 4 cores, 15 GB shared by ~20 containers | Raise or remove; values are required, so pick per host |
+| Render group for Jellyfin | `compose.env`, `RENDER_GID` | `992` | Debian assigns the gid at install; Jellyfin needs it to open `/dev/dri` | `getent group render \| cut -d: -f3` on the new host |
 | Ollama resident models and parallel requests | `compose.env` | `1` and `1` | vision model alone is ~6 GB | Raise with RAM |
 | Ollama and Paperless AI models, request timeout | `compose/.env` | `qwen3:4b`, 600 s | 1.09 tokens/s | Larger models, shorter timeout |
 | Paperless LLM OCR | `compose/.env` | off | 10-25 min per page | Turn on, see `.env.example` |

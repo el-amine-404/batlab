@@ -1,0 +1,42 @@
+name: adguardhome-sync
+# Runs on lab1 only (hosts/lab2/stacks.txt leaves it out): it copies lab1's
+# AdGuard settings to lab2's every 10 minutes. lab1 is the one to edit; changes
+# made on lab2 are overwritten. DHCP is never copied: the replica would start a
+# second DHCP server on the same network.
+services:
+  adguardhome-sync:
+    image: ${IMAGE_ADGUARDHOME_SYNC}:${TAG_ADGUARDHOME_SYNC}
+    container_name: adguardhome-sync
+    restart: unless-stopped
+    command: run
+    environment:
+      - TZ=${TZ}
+      - CRON=*/10 * * * *
+      - RUN_ON_START=true
+      - ORIGIN_URL=http://${ADGUARD_ORIGIN_IP:?set in compose/.env}:3000
+      - ORIGIN_USERNAME=${ADGUARD_USER:?set in compose/.env}
+      - ORIGIN_PASSWORD=${ADGUARD_PASS:?set in compose/.env}
+      - REPLICA1_URL=http://${ADGUARD_REPLICA_IP:?set in compose/.env}:3000
+      - REPLICA1_USERNAME=${ADGUARD_USER}
+      - REPLICA1_PASSWORD=${ADGUARD_PASS}
+      - FEATURES_DHCP_SERVER_CONFIG=false
+      - FEATURES_DHCP_STATIC_LEASES=false
+    healthcheck:
+      test: ["CMD", "/opt/go/adguardhome-sync", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - home_server
+networks:
+  home_server:
+    external: true
+    name: home_server

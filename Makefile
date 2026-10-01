@@ -19,8 +19,11 @@ VERSIONS_ENV := compose/versions.env
 
 DC := docker compose --env-file $(VERSIONS_ENV) --env-file $(ENV) --env-file $(HOST_ENV)
 
-# Auto-discover stacks
-STACKS := $(sort $(patsubst compose/%/docker-compose.yml,%,$(wildcard compose/*/docker-compose.yml)))
+# Auto-discover stacks. A host that runs only some of them lists those in
+# hosts/<profile>/stacks.txt, one per line; without that file it runs them all.
+ALL_STACKS := $(sort $(patsubst compose/%/docker-compose.yml,%,$(wildcard compose/*/docker-compose.yml)))
+HOST_STACKS := hosts/$(HOST_PROFILE)/stacks.txt
+STACKS := $(if $(wildcard $(HOST_STACKS)),$(sort $(shell sed -e 's/\#.*//' $(HOST_STACKS))),$(ALL_STACKS))
 TARGETS := $(if $(STACK),$(STACK),$(STACKS))
 
 # Storage
@@ -92,6 +95,9 @@ check-env:
 	@test -n "$(HOST_PROFILE)" || (echo "HOST_PROFILE is not set in $(ENV)" && exit 1)
 	@test -f $(HOST_ENV) || (echo "Missing $(HOST_ENV)" && exit 1)
 	@test -f $(VERSIONS_ENV) || (echo "Missing $(VERSIONS_ENV)" && exit 1)
+	@for s in $(STACKS); do \
+		test -f compose/$$s/docker-compose.yml || { echo "$(HOST_STACKS) lists '$$s', which is not in compose/"; exit 1; }; \
+	done
 
 check-all-confirm:
 	@if [ -z "$(STACK)" ]; then \

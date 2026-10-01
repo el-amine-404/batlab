@@ -32,11 +32,11 @@ services:
       start_period: 60s
     networks:
       - home_server
+    # The whole /dev/dri: the card and render node names differ between hosts.
     devices:
-      - /dev/dri/renderD128:/dev/dri/renderD128
-      - /dev/dri/card0:/dev/dri/card0
+      - /dev/dri:/dev/dri
     group_add:
-      - "992"
+      - "${RENDER_GID:?set in hosts/<profile>/compose.env}"
       - "44"
 networks:
   home_server:

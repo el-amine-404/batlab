@@ -15,7 +15,8 @@ load_watchdog_config() {
   source "$WATCHDOG_CONFIG_FILE"
   set +a
 
-  : "${WATCHDOG_DATA_ROOT:?WATCHDOG_DATA_ROOT is not configured}"
+  # Empty on a host without a data disk: the heartbeat then skips the disk check.
+  : "${WATCHDOG_DATA_ROOT?WATCHDOG_DATA_ROOT is not configured}"
 }
 
 # Notifications are best-effort: a guard that stopped containers must not fail
