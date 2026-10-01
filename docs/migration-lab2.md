@@ -1,6 +1,6 @@
 # Migration to two hosts: lab2 serves, lab1 keeps DNS
 
-Status: **phase 1 in progress**. Written 2026-09-30 from the live state of lab1;
+Status: **phase 3 in progress** (phases 1 and 2 done 2026-10-01). Written 2026-09-30 from the live state of lab1;
 phase 0 done 2026-10-01.
 
 ## Target
@@ -133,7 +133,10 @@ DNS and DHCP are untouched in this phase, so the house keeps its internet.
      /mnt/docker-volumes/ /mnt/storage/data/.migration/docker-volumes/
    ```
 
-   lab1's copy stays in place: it is the rollback.
+   lab1's copy stays in place: it is the rollback. On 2026-10-01 the state
+   came from restic instead: a snapshot taken after the stacks were stopped,
+   restored on lab2 with `--include /mnt/docker-volumes`, then
+   `/mnt/docker-volumes/adguardhome` deleted (it carries lab1's DHCP server).
 4. Unmount the data disk on lab1, move it to lab2, add the same fstab line (by
    UUID) and seal the mountpoint as in `watchdog/README.md`.
 5. **USB 3 test, before anything writes to the disk for real.** First give
@@ -179,8 +182,9 @@ DNS and DHCP are untouched in this phase, so the house keeps its internet.
    Use the same login as lab1's AdGuard (`ADGUARD_USER` / `ADGUARD_PASS`).
    Leave DHCP off.
 2. On lab1: add `ADGUARD_ORIGIN_IP=192.168.1.3` and
-   `ADGUARD_REPLICA_IP=192.168.1.201` to `compose/.env`, run `make setup` (it
-   links `.env` into the new stack), then `make up STACK=adguardhome-sync`;
+   `ADGUARD_REPLICA_IP=192.168.1.201` to `compose/.env`, link it with
+   `ln -sf ../.env compose/adguardhome-sync/.env` (`make setup` fails on lab1's
+   sealed, empty data mountpoint), then `make up STACK=adguardhome-sync`;
    confirm the replica received
    the filter lists, user rules and the rewrite.
 3. On lab1's AdGuard: change the rewrite to `*.homelab.lan -> 192.168.1.201`.

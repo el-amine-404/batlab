@@ -21,8 +21,8 @@ A user needs a Samba password once: `sudo smbpasswd -a potato`. To give
 someone read access to `media` only, create a system user without a login shell,
 add it to `media-readers`, and set its Samba password the same way.
 
-Connect from Windows with `\\192.168.1.3\photos` (or `media`, `files`) in
-Explorer, and from Linux with `smb://192.168.1.3/photos` in the file manager.
+Connect from Windows with `\\192.168.1.201\photos` (or `media`, `files`) in
+Explorer, and from Linux with `smb://192.168.1.201/photos` in the file manager.
 
 ## Filing photos from another computer
 

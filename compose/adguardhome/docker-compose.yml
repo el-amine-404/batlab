@@ -13,7 +13,9 @@ services:
     environment:
       - TZ=${TZ}
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/control/status"]
+      # The UI is on 3000; port 80 is Caddy when it runs on the same host, and
+      # nothing at all when it does not.
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/login.html"]
       interval: 30s
       timeout: 10s
       retries: 3

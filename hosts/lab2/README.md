@@ -27,7 +27,7 @@ NIC    Intel I219-LM, 1 Gbit, enp0s31f6, static 192.168.1.201
 | Netdata docker collector | `netdata/go.d-docker.conf` | on, every 10 s | trial: on lab1 it cost most of two cores | watch `app.dockerd` CPU; turn off with `jobs: []` |
 | Deep media pass limits | `systemd/batlab-mediascan-deep.service.d/limits.conf` | 2 threads, stop above 90 C | decode heats a thin chassis | loosen after a week |
 | Data disk without UAS | `modprobe.d/usb-quirks.conf` | `usb-storage quirks=152d:0578:u` | the JMS578 enclosure moves with the disk; known to reset under UAS | after the USB 3 test in `docs/migration-lab2.md` |
-| Data disk port | physical | USB 3 if the write test passes, otherwise USB 2 | lab1's USB 3 reset the bridge; lab2's Intel controller is untested | record the test result here |
+| Data disk port | physical | blue USB 3 port, `usb-storage` at 5000M | 2026-10-01: 100 GB written at 172 MB/s, falling to ~36 MB/s once the SMR cache fills; under UAS the same test wrote at 147 MB/s and read at ~200 MB/s | move to USB 2 if the kernel log ever shows a reset |
 | SMART monitoring | `smartd.conf` | root SSD and data disk by serial | USB names move between reboots | check both with `smartctl -a` once |
 | Battery | BIOS | charge limit ~80% if offered, power on after AC loss | a worn battery kept at 100% swells | check for swelling now and then |
 
@@ -42,6 +42,7 @@ sudo install -m 644 hosts/lab2/systemd/batlab-mediascan-deep.service.d/limits.co
   /etc/systemd/system/batlab-mediascan-deep.service.d/
 sudo systemctl daemon-reload
 sudo install -m 644 hosts/lab2/modprobe.d/usb-quirks.conf /etc/modprobe.d/
+sudo update-initramfs -u   # the USB drivers load from the initramfs; without this the quirk is ignored
 sudo apt install smartmontools
 sudo cp /etc/smartd.conf /etc/smartd.conf.packaged
 sudo install -m 644 hosts/lab2/smartd.conf /etc/smartd.conf
