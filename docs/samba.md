@@ -8,6 +8,7 @@ configuration: LAN only, SMB3 with encryption, no guests.
 | `media` | `/mnt/storage/data/media` | read: `potato` and `@media-readers`; write: `potato` |
 | `photos` | `/mnt/storage/data/photos` (`library`, `inbox`, `private`) | `potato` only |
 | `files` | `/mnt/storage/data/files` | `potato` only |
+| `data` | `/mnt/storage/data` (everything, including `torrents` and `immich`) | `potato` only, read-only |
 
 Install or update it:
 
