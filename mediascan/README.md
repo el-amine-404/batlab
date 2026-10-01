@@ -184,7 +184,7 @@ each other and consume no extra space.
 
 ```bash
 sudo apt update
-sudo apt install clamav-daemon clamav-freshclam ffmpeg file
+sudo apt install clamav-daemon clamav-freshclam ffmpeg file inotify-tools
 ```
 
 Install the configuration and fill in the arr API keys:
