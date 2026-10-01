@@ -10,3 +10,10 @@ exit
 ```
 
 Log out and back in for the group to apply.
+
+Add `potato` to `adm` as well, so `journalctl` shows the system's logs without
+`sudo`:
+
+```bash
+sudo usermod -aG adm potato
+```
