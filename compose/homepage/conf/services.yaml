@@ -139,12 +139,23 @@
     - AdGuard Home:
         icon: adguard-home
         href: http://adh.homelab.lan
-        description: Network-wide Ad Blocking
+        description: Ad Blocking, DNS and DHCP (lab1, edit here)
         siteMonitor: http://192.168.1.3:3000
         statusStyle: "dot"
         widget:
           type: adguard
           url: http://192.168.1.3:3000
+          username: "{{HOMEPAGE_VAR_ADGUARD_USER}}"
+          password: "{{HOMEPAGE_VAR_ADGUARD_PASS}}"
+    - AdGuard Home 2:
+        icon: adguard-home
+        href: http://adh2.homelab.lan
+        description: Backup DNS (lab2, synced copy)
+        siteMonitor: http://192.168.1.201:3000
+        statusStyle: "dot"
+        widget:
+          type: adguard
+          url: http://192.168.1.201:3000
           username: "{{HOMEPAGE_VAR_ADGUARD_USER}}"
           password: "{{HOMEPAGE_VAR_ADGUARD_PASS}}"
     - Gluetun:
