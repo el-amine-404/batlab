@@ -1,0 +1,2 @@
+# Mount point for ${VOLUMES_ROOT}/homepage/logs: the config directory is mounted
+# read-only, so Docker cannot create this folder itself.
