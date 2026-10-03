@@ -164,15 +164,14 @@ class Verdict:
     notes: list[str] = field(default_factory=list)
 
 
-def judge(old_path: Path, new_path: Path, old: dict, new: dict, subtitles: bool = False) -> Verdict:
-    """Whether the old file's audio or sidecar subtitles fit the new file.
-    Subtitles are timed to the release they came with, so they need the same
-    check as audio: on 2026-10-03 a first version restored a WEB release's
-    subtitles onto Blu-ray files without it."""
+def judge(old_path: Path, new_path: Path, old: dict, new: dict) -> Verdict:
+    """Whether the old file's audio fits the new file: the same video, with the
+    offset to apply. Subtitles are checked on their own, against the new
+    file's audio (subtitle_offset)."""
     verdict = Verdict(carry=missing_audio(old, new))
-    if not verdict.carry and not subtitles:
+    if not verdict.carry:
         return verdict
-    lost = "+".join(language(s) or "?" for s in verdict.carry) + " audio" if verdict.carry else "subtitles"
+    lost = "+".join(language(s) or "?" for s in verdict.carry) + " audio"
     old_length, new_length = video_length(old), video_length(new)
     if not old_length or not new_length or abs(old_length - new_length) > MAX_LENGTH_DIFFERENCE:
         verdict.problem = f"{lost} lost; videos differ in length ({old_length:.1f}s vs {new_length:.1f}s)"
@@ -261,24 +260,100 @@ def shift_srt(text: str, offset_ms: int) -> str:
     return SRT_TIME.sub(shifted, text)
 
 
-def restore_sidecars(pairs: list[tuple[Path, Path, str]], offset_ms: int, apply: bool) -> tuple[list[str], list[str]]:
-    """Copies each sidecar to its new name, shifting SRT timings by the offset
-    between the releases. Returns (restored, skipped): formats other than SRT
-    cannot be shifted here, so they are restored only when no shift is needed."""
-    restored, skipped = [], []
+HALVES_AGREE_MS = 300      # both halves of a subtitle must want the same shift
+MIN_CUES_PER_HALF = 15
+FFSUBSYNC_OFFSET = re.compile(r"offset seconds:\s*(-?[0-9.]+)")
+
+
+def srt_halves(text: str, middle_ms: float) -> tuple[str, str, int, int]:
+    """The cues starting before and after the middle, as two SRT texts."""
+    blocks = [block for block in re.split(r"\n\s*\n", text.replace("\r", "").strip()) if "-->" in block]
+    first, second = [], []
+    for block in blocks:
+        h, m, sec, ms = (int(group) for group in SRT_TIME.search(block).groups())
+        (first if ((h * 60 + m) * 60 + sec) * 1000 + ms < middle_ms else second).append(block)
+    return "\n\n".join(first) + "\n", "\n\n".join(second) + "\n", len(first), len(second)
+
+
+def halves_verdict(first_s: float, second_s: float) -> tuple[int | None, str]:
+    """One shift for the whole file if both halves want it, else why not."""
+    if abs(first_s - second_s) * 1000 > HALVES_AGREE_MS:
+        return None, f"its halves need different shifts ({first_s:+.2f} s, {second_s:+.2f} s): the releases are cut differently"
+    shift = round((first_s + second_s) / 2 * 1000)
+    return (shift if abs(shift) >= IGNORED_OFFSET_MS else 0), ""
+
+
+class SubtitleChecker:
+    """Measures with ffsubsync, the tool Bazarr syncs with, how far a subtitle
+    is from the new file's speech: once per half, so a cut that one shift
+    cannot fix shows as two different answers. ffsubsync runs inside the
+    Bazarr container, which has it; the reference audio is extracted once."""
+
+    def __init__(self, new_path: Path, new: dict, data_root: Path, workdir: Path, container: str) -> None:
+        self.new_path, self.new, self.data_root, self.container = new_path, new, data_root, container
+        self.workdir, self.reference = workdir, None
+
+    def in_container(self, path: Path) -> str:
+        return "/data/" + str(path.relative_to(self.data_root))
+
+    def reference_audio(self) -> Path:
+        if self.reference is None:
+            streams = audio_streams(self.new)
+            main = next((s for s in streams if (s.get("disposition") or {}).get("default")), streams[0])
+            self.reference = self.workdir / "reference.wav"
+            subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(self.new_path), "-map", f"0:{main['index']}",
+                            "-ac", "1", "-ar", "16000", str(self.reference)], check=True, capture_output=True)
+        return self.reference
+
+    def ffsubsync(self, subtitle: Path) -> float:
+        output = self.workdir / "synced.srt"
+        result = subprocess.run(["docker", "exec", "-e", "PYTHONPATH=/app/bazarr/bin/libs", self.container,
+                                 "python3", "-m", "ffsubsync.ffsubsync", self.in_container(self.reference_audio()),
+                                 "-i", self.in_container(subtitle), "-o", self.in_container(output), "--no-fix-framerate"],
+                                capture_output=True, text=True, timeout=1800)
+        match = FFSUBSYNC_OFFSET.search(result.stdout + result.stderr)
+        if result.returncode or not match:
+            raise RuntimeError(f"ffsubsync failed on {subtitle.name}: {(result.stderr or result.stdout)[-200:]}")
+        return float(match.group(1))
+
+    def offset(self, sidecar: Path) -> tuple[int | None, str]:
+        """(shift in ms, "") to apply, or (None, reason) to leave it out."""
+        if sidecar.suffix.lower() != ".srt":
+            return None, "not SRT, so it cannot be checked here"
+        text = sidecar.read_text(encoding="utf-8-sig", errors="replace")
+        first, second, n_first, n_second = srt_halves(text, video_length(self.new) * 500)
+        if min(n_first, n_second) < MIN_CUES_PER_HALF:
+            return None, "too few lines to check its timing"
+        measured = []
+        for name, half in (("first.srt", first), ("second.srt", second)):
+            path = self.workdir / name
+            path.write_text(half, encoding="utf-8")
+            measured.append(self.ffsubsync(path))
+        return halves_verdict(*measured)
+
+
+def restore_sidecars(pairs: list[tuple[Path, Path, str]], checker: SubtitleChecker | None,
+                     apply: bool) -> tuple[list[str], list[str]]:
+    """Restores each sidecar ffsubsync finds fits the new file, shifted when
+    needed. Returns (restored, refused) descriptions."""
+    restored, refused = [], []
     for sidecar, target, label in pairs:
-        if offset_ms and sidecar.suffix.lower() != ".srt":
-            skipped.append(label)
+        if checker is None:
+            refused.append(f"{label} (Bazarr's ffsubsync is not reachable)")
+            continue
+        shift, reason = checker.offset(sidecar)
+        if shift is None:
+            refused.append(f"{label}: {reason}")
             continue
         if apply:
-            if offset_ms:
+            if shift:
                 text = sidecar.read_text(encoding="utf-8-sig", errors="replace")
-                target.write_text(shift_srt(text, offset_ms), encoding="utf-8")
+                target.write_text(shift_srt(text, shift), encoding="utf-8")
                 shutil.copystat(sidecar, target)
             else:
                 shutil.copy2(sidecar, target)
-        restored.append(label)
-    return restored, skipped
+        restored.append(label + (f" shifted {shift / 1000:+.2f} s" if shift else ""))
+    return restored, refused
 
 
 # --- Sonarr history -----------------------------------------------------------
@@ -364,7 +439,8 @@ def describe(verdict: Verdict) -> str:
 
 # --- main ---------------------------------------------------------------------
 
-def process(upgrade: Upgrade, sonarr: Arr, data_root: Path, apply: bool) -> tuple[str, str]:
+def process(upgrade: Upgrade, sonarr: Arr, data_root: Path, apply: bool,
+            ffsubsync_container: str = "bazarr") -> tuple[str, str]:
     """Returns (status, message); status is done, kept, manual, or gone."""
     recycle = data_root / "recycle"
     old_path = find_recycled(recycle, upgrade.old)
@@ -380,14 +456,14 @@ def process(upgrade: Upgrade, sonarr: Arr, data_root: Path, apply: bool) -> tupl
 
     old, new = probe(old_path), probe(new_path)
     pairs = missing_sidecars(old_path, new_path)
-    verdict = judge(old_path, new_path, old, new, subtitles=bool(pairs))
-    changes = []
+    verdict = judge(old_path, new_path, old, new)
+    changes, refused = [], []
+    until = (dt.datetime.fromisoformat(upgrade.date.replace("Z", "+00:00")) + dt.timedelta(days=14)).date()
     if verdict.problem:
-        until = (dt.datetime.fromisoformat(upgrade.date.replace("Z", "+00:00")) + dt.timedelta(days=14)).date()
-        return "manual", f"{label}: {verdict.problem}. Old file kept in the recycle bin until {until}"
-    if verdict.carry:
-        if new_path.suffix.lower() != ".mkv":
-            return "manual", f"{label}: {describe(verdict).replace('carried over', 'lost')}; the new file is not MKV"
+        refused.append(verdict.problem)
+    elif verdict.carry and new_path.suffix.lower() != ".mkv":
+        refused.append(f"{describe(verdict).replace('carried over', 'lost')}; the new file is not MKV")
+    elif verdict.carry:
         if apply:
             temporary = recycle / ".dubkeeper" / new_path.name
             temporary.parent.mkdir(parents=True, exist_ok=True)
@@ -398,12 +474,21 @@ def process(upgrade: Upgrade, sonarr: Arr, data_root: Path, apply: bool) -> tupl
             finally:
                 temporary.unlink(missing_ok=True)
         changes.append(describe(verdict))
-    restored, skipped = restore_sidecars(pairs, verdict.offset_ms, apply)
-    if restored:
-        shift = f" (shifted {verdict.offset_ms:+d} ms)" if verdict.offset_ms else ""
-        changes.append("subtitles restored: " + ", ".join(restored) + shift)
-    if skipped:
-        changes.append("not restored, would need a shift: " + ", ".join(skipped))
+    if pairs:
+        workdir = recycle / ".dubkeeper" / "subtitles"
+        workdir.mkdir(parents=True, exist_ok=True)
+        try:
+            checker = SubtitleChecker(new_path, new, data_root, workdir, ffsubsync_container)
+            restored, refused_subtitles = restore_sidecars(pairs, checker, apply)
+            refused += [f"subtitles {reason}" for reason in refused_subtitles]
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+        if restored:
+            changes.append("subtitles restored: " + ", ".join(restored))
+    if refused and not changes:
+        return "manual", f"{label}: {'; '.join(refused)}. The old file stays in the recycle bin until {until}"
+    if refused:
+        changes.append("not kept: " + "; ".join(refused))
     if not changes:
         return "done", f"{label}: nothing lost"
     if apply:
@@ -412,23 +497,27 @@ def process(upgrade: Upgrade, sonarr: Arr, data_root: Path, apply: bool) -> tupl
     return "kept", f"{upgrade.series_title}: `{new_path.name}`: {'; '.join(changes)}{detail}"
 
 
-def check_pair(old_path: Path, new_path: Path) -> int:
+def check_pair(old_path: Path, new_path: Path, data_root: Path, container: str) -> int:
     old, new = probe(old_path), probe(new_path)
     print("old audio:", [language(s) for s in audio_streams(old)], f"video {video_length(old):.3f}s")
     print("new audio:", [language(s) for s in audio_streams(new)], f"video {video_length(new):.3f}s")
-    pairs = missing_sidecars(old_path, new_path)
-    verdict = judge(old_path, new_path, old, new, subtitles=bool(pairs))
+    verdict = judge(old_path, new_path, old, new)
     for note in verdict.notes:
         print("  " + note)
-    if verdict.problem:
-        print("manual:", verdict.problem)
-        return 0
-    print("would merge:", describe(verdict) if verdict.carry else "nothing, no audio lost")
-    restored, skipped = restore_sidecars(pairs, verdict.offset_ms, apply=False)
-    for suffix in restored:
-        print("would restore subtitles:", suffix, f"shifted {verdict.offset_ms:+d} ms" if verdict.offset_ms else "")
-    for suffix in skipped:
-        print("would not restore (needs a shift):", suffix)
+    print("audio:", verdict.problem or (describe(verdict) if verdict.carry else "nothing lost"))
+    pairs = missing_sidecars(old_path, new_path)
+    if pairs:
+        workdir = data_root / "recycle" / ".dubkeeper" / "check"
+        workdir.mkdir(parents=True, exist_ok=True)
+        try:
+            restored, refused = restore_sidecars(
+                pairs, SubtitleChecker(new_path, new, data_root, workdir, container), apply=False)
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+        for item in restored:
+            print("would restore subtitles:", item)
+        for item in refused:
+            print("would not restore:", item)
     return 0
 
 
@@ -440,12 +529,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--env-file", default=str(repo / "compose/.env"))
     parser.add_argument("--data-root", default="/mnt/storage/data")
     parser.add_argument("--sonarr-url", default="http://172.19.10.11:8989")
+    parser.add_argument("--ffsubsync-container", default="bazarr",
+                        help="container whose ffsubsync checks subtitle timing (Bazarr ships it)")
     parser.add_argument("--days", type=float, default=14, help="how far back to look; match the recycle bin's cleanup")
     parser.add_argument("--state-dir", default=os.path.join(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"),
                                                             "batlab-dubkeeper"))
     args = parser.parse_args(argv)
     if args.check:
-        return check_pair(Path(args.check[0]), Path(args.check[1]))
+        return check_pair(Path(args.check[0]), Path(args.check[1]), Path(args.data_root), args.ffsubsync_container)
 
     env_file, data_root = Path(args.env_file), Path(args.data_root)
     if not (data_root / "recycle").is_dir():
@@ -466,7 +557,8 @@ def main(argv: list[str] | None = None) -> int:
         if upgrade.old in handled:
             continue
         try:
-            status, message = process(upgrade, sonarr, data_root, apply=not args.dry_run)
+            status, message = process(upgrade, sonarr, data_root, apply=not args.dry_run,
+                                      ffsubsync_container=args.ffsubsync_container)
         except (subprocess.CalledProcessError, RuntimeError, OSError, urllib.error.URLError, ValueError) as error:
             detail = error.stderr.decode(errors="replace")[-300:] if isinstance(error, subprocess.CalledProcessError) and error.stderr else error
             print(f"{upgrade.old}: {detail}", file=sys.stderr)

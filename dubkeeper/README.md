@@ -19,11 +19,29 @@ last 14 days:
    re-encode, about 40 s of disk time and 12 s of CPU for an episode), shifted
    by the measured offset when it is 40 ms or more, and not marked default;
 5. copies back sidecar subtitles (`.en.srt` and the like) the new file lacks,
-   renamed to match it;
+   renamed to match it, once ffsubsync (the tool Bazarr syncs with, run in the
+   Bazarr container) has checked each against the new file's audio: it measures
+   each half of the subtitle separately, and a subtitle is restored only when
+   both halves want the same shift (within 0.3 s), shifted by it;
 6. asks Sonarr to rescan the series and posts to `#download-issues`.
 
 A pair that fails step 3, or a new file that is not MKV, is reported and left
 alone; the old file stays in the recycle bin until Sonarr's cleanup removes it.
+
+Subtitles are checked on their own because comparing the two videos is the
+wrong question for them. On 2026-10-03 *Attack on Titan* S04's Blu-ray replaced
+TV and WEB releases, and a first version copied their subtitles over unchecked.
+Measured afterwards, per subtitle and per half:
+
+| Subtitle | First half | Second half | Outcome now |
+| --- | --- | --- | --- |
+| S04E10 `.en.hi` (TV, 6 s longer) | −0.08 s | +0.07 s | restored as is |
+| S04E15 `.en.hi` (TV) | +21.77 s | +21.95 s | restored, shifted +21.84 s |
+| S04E24 `.en` (WEB) | −0.62 s | +0.47 s | refused: cut differently |
+| S04E24 `.ar.hi` (WEB) | −0.11 s | +0.06 s | restored as is |
+
+A video check alone refused E10 and E15, which fit or needed only a shift.
+Only SRT is checked; other formats are left in the recycle bin.
 
 ```bash
 dubkeeper/scripts/dubkeeper.py --dry-run          # print decisions, change nothing

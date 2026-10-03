@@ -90,6 +90,26 @@ class JudgeTests(unittest.TestCase):
                 self.assertIn(problem, verdict.problem)
 
 
+class SubtitleTimingTests(unittest.TestCase):
+    def test_halves_that_agree_give_one_shift(self) -> None:
+        # Attack on Titan S04E15's TV subtitles against the Blu-ray, 2026-10-03.
+        self.assertEqual(keeper.halves_verdict(21.77, 21.95), (21860, ""))
+        self.assertEqual(keeper.halves_verdict(-0.08, 0.07), (0, ""))
+
+    def test_halves_that_disagree_mean_a_different_cut(self) -> None:
+        shift, reason = keeper.halves_verdict(-0.62, 0.47)   # S04E24's WEB subtitles
+        self.assertIsNone(shift)
+        self.assertIn("cut differently", reason)
+
+    def test_srt_halves_split_on_start_time(self) -> None:
+        text = "".join(f"{n}\n00:{n:02d}:00,000 --> 00:{n:02d}:02,000\nline {n}\n\n" for n in range(1, 21))
+        first, second, n_first, n_second = keeper.srt_halves(text, 10.5 * 60_000)
+        self.assertEqual((n_first, n_second), (10, 10))
+        self.assertIn("line 10", first)
+        self.assertNotIn("line 11", first)
+        self.assertTrue(second.startswith("11\n"))
+
+
 class LagTests(unittest.TestCase):
     def test_best_lag_finds_a_shift(self) -> None:
         signal = [math.sin(i / 7) + math.sin(i / 3.1) * 0.5 for i in range(600)]
@@ -113,38 +133,36 @@ class FileTests(unittest.TestCase):
         path.write_text(relative)
         return path
 
-    def test_restore_sidecars_renames_and_keeps_existing(self) -> None:
+    def test_restore_sidecars_renames_shifts_and_refuses(self) -> None:
         old = self.touch("recycle/Show/Season 01/Show - S01E01 - old.mkv")
-        self.touch("recycle/Show/Season 01/Show - S01E01 - old.en.srt")
+        (self.root / "recycle/Show/Season 01/Show - S01E01 - old.en.srt").write_text(
+            "1\n00:00:01,000 --> 00:00:02,500\nHi\n")
         self.touch("recycle/Show/Season 01/Show - S01E01 - old.ar.srt")
+        self.touch("recycle/Show/Season 01/Show - S01E01 - old.fr.srt")
         self.touch("recycle/Show/Season 01/Show - S01E01 - old.nfo")
-        self.touch("recycle/Show/Season 01/Show - S01E01 - older.en.srt")
+        self.touch("recycle/Show/Season 01/Show - S01E01 - older.de.srt")
         new = self.touch("media/Show/Season 01/Show - S01E01 - new.mkv")
-        self.touch("media/Show/Season 01/Show - S01E01 - new.en.srt")
+        self.touch("media/Show/Season 01/Show - S01E01 - new.fr.srt")
+
+        class Checker:
+            def offset(self, sidecar: Path) -> tuple[int | None, str]:
+                return {".en.srt": (21850, ""), ".ar.srt": (None, "cut differently")}[sidecar.name[-7:]]
+
         pairs = keeper.missing_sidecars(old, new)
-        self.assertEqual(keeper.restore_sidecars(pairs, 0, apply=True), ([".ar.srt"], []))
-        self.assertEqual((new.parent / "Show - S01E01 - new.ar.srt").read_text(),
-                         "recycle/Show/Season 01/Show - S01E01 - old.ar.srt")
-        self.assertEqual((new.parent / "Show - S01E01 - new.en.srt").read_text(),
-                         "media/Show/Season 01/Show - S01E01 - new.en.srt")
+        self.assertEqual([label for _, _, label in pairs], [".ar.srt", ".en.srt"])
+        restored, refused = keeper.restore_sidecars(pairs, Checker(), apply=True)
+        self.assertEqual((restored, refused), ([".en.srt shifted +21.85 s"], [".ar.srt: cut differently"]))
+        self.assertIn("00:00:22,850 --> 00:00:24,350", (new.parent / "Show - S01E01 - new.en.srt").read_text())
+        self.assertFalse((new.parent / "Show - S01E01 - new.ar.srt").exists())
+        self.assertEqual((new.parent / "Show - S01E01 - new.fr.srt").read_text(), "media/Show/Season 01/Show - S01E01 - new.fr.srt")
 
-    def test_an_offset_shifts_srt_and_skips_other_formats(self) -> None:
+    def test_without_ffsubsync_nothing_is_restored(self) -> None:
         old = self.touch("recycle/S/Ep - old.mkv")
-        (self.root / "recycle/S/Ep - old.en.srt").write_text("1\n00:00:01,000 --> 00:00:02,500\nHi\n")
-        self.touch("recycle/S/Ep - old.fr.ass")
+        self.touch("recycle/S/Ep - old.en.srt")
         new = self.touch("media/S/Ep - new.mkv")
-        restored, skipped = keeper.restore_sidecars(keeper.missing_sidecars(old, new), 1250, apply=True)
-        self.assertEqual((restored, skipped), ([".en.srt"], [".fr.ass"]))
-        self.assertIn("00:00:02,250 --> 00:00:03,750", (self.root / "media/S/Ep - new.en.srt").read_text())
-        self.assertFalse((self.root / "media/S/Ep - new.fr.ass").exists())
-
-    def test_subtitles_alone_still_need_the_same_video(self) -> None:
-        both = media(stream(1, "audio", "jpn"))
-        with mock.patch.object(keeper, "loudness", return_value=[]), \
-                mock.patch.object(keeper, "best_lag", return_value=(0, 0.3)):
-            verdict = keeper.judge(Path("old"), Path("new"), both, both, subtitles=True)
-        self.assertIn("subtitles lost", verdict.problem)
-        self.assertEqual(keeper.judge(Path("old"), Path("new"), both, both).problem, "")
+        restored, refused = keeper.restore_sidecars(keeper.missing_sidecars(old, new), None, apply=True)
+        self.assertEqual(restored, [])
+        self.assertFalse((self.root / "media/S/Ep - new.en.srt").exists())
 
     def test_find_recycled_prefers_same_series(self) -> None:
         self.touch("recycle/Other/Season 01/Ep.mkv")
