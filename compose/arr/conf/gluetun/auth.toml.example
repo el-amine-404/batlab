@@ -1,0 +1,27 @@
+# gluetun control server roles. Copy to ${VOLUMES_ROOT}/gluetun/auth/config.toml
+# (gluetun reads /gluetun/auth/config.toml) and replace the key with
+# GLUETUN_CONTROL_API_KEY from compose/.env; recreate gluetun to apply.
+#
+# Routes listed in no role are refused, so every caller is named here; a newer
+# gluetun changing its default then cannot silently break any of them.
+#
+# The control server is reachable only on the home_server network (port 8000
+# is not published). Reading status stays open there: Uptime Kuma's three VPN
+# monitors and Homepage's Gluetun widget read it without credentials. Changing
+# the tunnel's state needs the key: only vpnguard reconnects it.
+
+[[roles]]
+name = "status readers: uptime kuma, homepage, vpnguard"
+routes = [
+  "GET /v1/publicip/ip",
+  "GET /v1/vpn/status",
+  "GET /v1/portforward",
+  "GET /v1/openvpn/portforwarded",
+]
+auth = "none"
+
+[[roles]]
+name = "vpnguard"
+routes = ["PUT /v1/vpn/status"]
+auth = "apikey"
+apikey = "REPLACE_WITH_GLUETUN_CONTROL_API_KEY"

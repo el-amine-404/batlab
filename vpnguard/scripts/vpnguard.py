@@ -45,10 +45,15 @@ def env_value(env_file: Path, name: str) -> str:
     return ""
 
 
-def container_http(container: str, url: str, method: str = "GET", body: str | None = None) -> str:
+CONTROL_KEY = ""   # GLUETUN_CONTROL_API_KEY, read in main()
+
+
+def container_http(container: str, url: str, method: str = "GET", body: str | None = None, key: str = "") -> str:
     """An HTTP call made inside a container, whose localhost is gluetun's
     network namespace: the control server and qBittorrent listen only there."""
     command = ["docker", "exec", container, "wget", "-qO-", "-T", "15"]
+    if key:
+        command += [f"--header=X-API-Key: {key}"]
     if method == "POST":
         # A form post, which is what qBittorrent's API takes.
         command += [f"--post-data={body or ''}"]
@@ -71,7 +76,8 @@ def forwarded_port() -> int:
 def reconnect() -> int:
     """Stops and starts the tunnel, then waits for a forwarded port (0 if none)."""
     for status in ("stopped", "running"):
-        container_http("gluetun", f"{CONTROL}/v1/vpn/status", "PUT", json.dumps({"status": status}))
+        # The one route gluetun's auth config (compose/arr/conf/gluetun/auth.toml.example) keeps behind a key.
+        container_http("gluetun", f"{CONTROL}/v1/vpn/status", "PUT", json.dumps({"status": status}), key=CONTROL_KEY)
         time.sleep(3)
     deadline = time.monotonic() + PORT_WAIT_SECONDS
     while time.monotonic() < deadline:
@@ -154,6 +160,8 @@ def main(argv: list[str] | None = None) -> int:
     state_path = Path(args.state_dir) / "state.json"
     state = State(**json.loads(state_path.read_text())) if state_path.exists() else State()
     webhook = env_value(Path(args.env_file), args.webhook_var)
+    global CONTROL_KEY
+    CONTROL_KEY = env_value(Path(args.env_file), "GLUETUN_CONTROL_API_KEY")
     now = time.time()
     try:
         running = tunnel_running()
