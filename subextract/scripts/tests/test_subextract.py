@@ -70,6 +70,36 @@ class TrackTests(unittest.TestCase):
         self.assertEqual((t.lines, t.covered, round(t.overlap, 2)), (3, 4.0, 0.67))
 
 
+class OcrTests(unittest.TestCase):
+    def test_quality_gate(self) -> None:
+        # The English and Italian Blu-ray tracks of Attack on Titan S04E24, 2026-10-03.
+        self.assertEqual(sx.ocr_verdict({"cues": 220, "mean_confidence": 95.7, "low_confidence_share": 0.001}), "")
+        self.assertEqual(sx.ocr_verdict({"cues": 344, "mean_confidence": 95.2, "low_confidence_share": 0.005}), "")
+        self.assertIn("mean confidence", sx.ocr_verdict({"cues": 300, "mean_confidence": 71, "low_confidence_share": 0.02}))
+        self.assertIn("under 60%", sx.ocr_verdict({"cues": 300, "mean_confidence": 90, "low_confidence_share": 0.12}))
+        self.assertIn("only 4 lines", sx.ocr_verdict({"cues": 4, "mean_confidence": 99, "low_confidence_share": 0}))
+
+    def test_image_tracks_and_choice(self) -> None:
+        def pgs(index: int, lang: str, title: str = "", default: bool = False, forced: bool = False, frames: int = 0) -> dict:
+            stream = subtitle(index, "hdmv_pgs_subtitle", lang, title, default, forced)
+            stream["tags"]["NUMBER_OF_FRAMES"] = str(frames)
+            return stream
+        info = {"streams": [pgs(10, "eng", "English BD PGS Sub", frames=440), pgs(11, "ita", "Italian BD PGS Sub", frames=688),
+                            pgs(12, "ita", "Italian Forced", forced=True, frames=12), pgs(13, "ita", "Signs", frames=30),
+                            pgs(14, "ita", "Italian SDH", frames=900)]}
+        tracks = sx.image_tracks(info)
+        self.assertEqual([t.index for t in tracks], [10, 11, 14])
+        self.assertEqual(sx.choose_image([t for t in tracks if t.language == "it"]).index, 14)
+
+    def test_clean_srt(self) -> None:
+        raw = ("2\r\n00:00:05,000 --> 00:00:05,100\r\nShort\r\n\r\n"
+               "1\n00:00:01,000 --> 00:00:02,000\nFirst  \n\n"
+               "3\n00:00:01,000 --> 00:00:02,000\nFirst\n\n"
+               "4\n00:00:09,000 --> 00:00:10,000\n\n")
+        self.assertEqual(sx.clean_srt(raw), "1\n00:00:01,000 --> 00:00:02,000\nFirst\n\n"
+                                            "2\n00:00:05,000 --> 00:00:05,300\nShort\n")
+
+
 class SidecarTests(unittest.TestCase):
     def test_sidecars_by_language(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

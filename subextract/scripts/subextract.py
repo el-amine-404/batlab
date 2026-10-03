@@ -20,7 +20,8 @@ An existing sidecar is checked with ffsubsync, half by half, as the dub keeper
 does; one that does not fit is moved to the recycle bin and replaced. A track
 taken from the file is timed to it, so it is not checked.
 
-Image subtitles (PGS, VobSub) need OCR and are not handled here.
+A language with only a Blu-ray image (PGS) track is OCR'd with Tesseract
+(subextract/ocr), and installed only when its word confidences are high enough.
 
 Run with --dry-run to print decisions, --file VIDEO to handle one file, or
 --all to go through the whole library once.
@@ -189,35 +190,141 @@ class Fit:
         return True, ""
 
 
+IMAGE_CODECS = {"hdmv_pgs_subtitle"}
+OCR_IMAGE = "batlab/pgsocr:1"
+OCR_LANGUAGES = {"en": "eng", "fr": "fra", "ar": "ara", "it": "ita", "es": "spa", "pt": "por", "de": "deu"}
+# What an OCR'd subtitle must reach to be installed; see the README's measurements.
+OCR_MIN_CONFIDENCE = 85.0
+OCR_MAX_LOW_SHARE = 0.05
+OCR_MIN_CUES = 20
+
+
+@dataclass
+class ImageTrack:
+    index: int
+    language: str
+    title: str
+    default: bool
+    frames: int
+
+
+def image_tracks(info: dict) -> list[ImageTrack]:
+    tracks = []
+    for stream in info.get("streams", []):
+        if stream.get("codec_type") != "subtitle" or stream.get("codec_name") not in IMAGE_CODECS:
+            continue
+        tags, disposition = stream.get("tags") or {}, stream.get("disposition") or {}
+        language = (tags.get("language") or "").lower()
+        title = tags.get("title") or ""
+        if language in ("", "und", "zxx", "mis") or disposition.get("forced") or NOT_DIALOGUE.search(title):
+            continue
+        frames = int(tags.get("NUMBER_OF_FRAMES") or tags.get("NUMBER_OF_FRAMES-eng") or 0)
+        tracks.append(ImageTrack(stream["index"], two_letter(language), title, bool(disposition.get("default")), frames))
+    return tracks
+
+
+def choose_image(tracks: list[ImageTrack]) -> ImageTrack | None:
+    """The default track, else the one with the most pictures: a forced or
+    signs track has few, and was already ruled out by its flags or title."""
+    return min(tracks, key=lambda t: (not t.default, -t.frames)) if tracks else None
+
+
+def ocr_verdict(report: dict) -> str:
+    """Why an OCR result is not good enough, or "" when it is."""
+    if report.get("cues", 0) < OCR_MIN_CUES:
+        return f"only {report.get('cues', 0)} lines read"
+    if report.get("mean_confidence", 0) < OCR_MIN_CONFIDENCE:
+        return f"mean confidence {report['mean_confidence']:.0f}%, under {OCR_MIN_CONFIDENCE:.0f}%"
+    if report.get("low_confidence_share", 1) > OCR_MAX_LOW_SHARE:
+        return f"{report['low_confidence_share']:.0%} of words read with under 60% confidence"
+    return ""
+
+
+class Ocr:
+    """Runs subextract/ocr (Tesseract) in its image, on one extracted track."""
+
+    def __init__(self, image: str = OCR_IMAGE, cpus: str = "2") -> None:
+        self.image, self.cpus = image, cpus
+
+    def available(self) -> bool:
+        return subprocess.run(["docker", "image", "inspect", self.image], capture_output=True).returncode == 0
+
+    def run(self, video: Path, track: ImageTrack, language: str, workdir: Path, data_root: Path) -> tuple[str, dict]:
+        sup, srt, report = (workdir / f"image{track.index}.{suffix}" for suffix in ("sup", "srt", "json"))
+        subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(video), "-map", f"0:{track.index}",
+                        "-c", "copy", str(sup)], check=True, capture_output=True)
+
+        def inside(path: Path) -> str:
+            return "/data/" + str(path.relative_to(data_root))
+
+        subprocess.run(["docker", "run", "--rm", "--cpus", self.cpus, "--user", f"{os.getuid()}:{os.getgid()}",
+                        "-v", f"{data_root}:/data", self.image, inside(sup), inside(srt), "--lang", language,
+                        "--report", inside(report), "--jobs", self.cpus], check=True, capture_output=True, timeout=3600)
+        return srt.read_text(encoding="utf-8"), json.loads(report.read_text(encoding="utf-8"))
+
+
+def clean_srt(text: str) -> str:
+    """Sorted, renumbered, without empty or repeated cues, each at least 0.3 s."""
+    cues = []
+    for block in re.split(r"\n\s*\n", text.replace("\r", "").strip()):
+        lines = block.split("\n")
+        for i, line in enumerate(lines):
+            match = SRT_CUE.search(line)
+            if match:
+                a, b, c, d, e, f, g, h = (int(x) for x in match.groups())
+                start, end = ((a * 60 + b) * 60 + c) * 1000 + d, ((e * 60 + f) * 60 + g) * 1000 + h
+                body = "\n".join(part.rstrip() for part in lines[i + 1:] if part.strip())
+                if body:
+                    cues.append((start, max(end, start + 300), body))
+                break
+    cues = sorted(set(cues))
+    out = []
+    for n, (start, end, body) in enumerate(cues, 1):
+        out.append(f"{n}\n{keeper_time(start)} --> {keeper_time(end)}\n{body}\n")
+    return "\n".join(out)
+
+
+def keeper_time(ms: int) -> str:
+    return f"{ms // 3600000:02}:{ms // 60000 % 60:02}:{ms // 1000 % 60:02},{ms % 1000:03}"
+
+
 @dataclass
 class Outcome:
     written: list[str]
     replaced: list[str]
     kept: list[str]
     skipped: list[str]
+    refused: list[str] = None
+
+    def __post_init__(self) -> None:
+        self.refused = self.refused or []
 
 
 def process(video: Path, data_root: Path, container: str, apply: bool,
-            languages: set[str] | None = None) -> Outcome:
+            languages: set[str] | None = None, ocr: "Ocr | None" = None) -> Outcome:
     outcome = Outcome([], [], [], [])
     info = keeper.probe(video)
     by_language: dict[str, list[Track]] = {}
     for track in text_tracks(info):
         if languages is None or track.language in languages:
             by_language.setdefault(track.language, []).append(track)
-    if not by_language:
+    images: dict[str, list[ImageTrack]] = {}
+    for track in image_tracks(info):
+        if (languages is None or track.language in languages) and track.language not in by_language:
+            images.setdefault(track.language, []).append(track)
+    if not by_language and not images:
         return outcome
     existing = sidecars_by_language(video)
     workdir = data_root / "recycle" / ".subextract" / video.stem[:80]
     workdir.mkdir(parents=True, exist_ok=True)
     try:
-        wanted: dict[str, list[Track]] = {}
         fit = Fit(video, info, data_root, workdir, container)
-        for language, tracks in by_language.items():
+        replace: dict[str, list[tuple[Path, str]]] = {}   # language -> sidecars that do not fit
+
+        def needed(language: str) -> bool:
             srts = [p for p in existing.get(language, []) if p.suffix.lower() == ".srt"]
             if not srts:
-                wanted[language] = tracks
-                continue
+                return True
             bad = []
             for sidecar in srts:
                 fits, reason = fit(sidecar)
@@ -225,28 +332,56 @@ def process(video: Path, data_root: Path, container: str, apply: bool,
                     outcome.kept.append(sidecar.name[len(video.stem):])
                 else:
                     bad.append((sidecar, reason))
-            # One sidecar that fits is enough; only a language whose every
-            # sidecar is off gets an SRT from the file instead.
+            # One sidecar that fits is enough for its language.
             if len(bad) == len(srts):
-                wanted[language] = tracks
-                for sidecar, reason in bad:
-                    outcome.replaced.append(f"{sidecar.name[len(video.stem):]} ({reason})")
-                    if apply:
-                        aside = data_root / "recycle" / "subextract" / sidecar.parent.relative_to(data_root) / sidecar.name
-                        aside.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.move(str(sidecar), aside)
-        if wanted:
-            extract(video, [t for tracks in wanted.values() for t in tracks], workdir)
-        for language, tracks in wanted.items():
-            chosen = choose(tracks)
-            if not chosen:
-                outcome.skipped.append(f".{language}: no usable track")
-                continue
+                replace[language] = bad
+                return True
+            return False
+
+        def install(language: str, srt: str, source: str) -> None:
             target = video.with_name(f"{video.stem}.{language}.srt")
+            for sidecar, reason in replace.get(language, []):
+                outcome.replaced.append(f"{sidecar.name[len(video.stem):]} ({reason})")
+                if apply:
+                    aside = data_root / "recycle" / "subextract" / sidecar.parent.relative_to(data_root) / sidecar.name
+                    aside.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(sidecar), aside)
             if apply:
-                target.write_text(chosen.srt, encoding="utf-8")
-            outcome.written.append(f".{language}.srt from {chosen.title or f'track {chosen.index}'} "
-                                   f"({chosen.lines} lines)")
+                target.write_text(clean_srt(srt), encoding="utf-8")
+            outcome.written.append(f".{language}.srt {source}")
+
+        text_wanted = {language: tracks for language, tracks in by_language.items() if needed(language)}
+        if text_wanted:
+            extract(video, [t for tracks in text_wanted.values() for t in tracks], workdir)
+        for language, tracks in text_wanted.items():
+            chosen = choose(tracks)
+            if chosen:
+                install(language, chosen.srt, f"from {chosen.title or f'track {chosen.index}'} ({chosen.lines} lines)")
+            else:
+                outcome.skipped.append(f".{language}: no usable text track")
+
+        for language, tracks in images.items():
+            if not needed(language):
+                continue
+            chosen = choose_image(tracks)
+            if ocr is None:
+                outcome.skipped.append(f".{language}: only a Blu-ray image track, and OCR is off")
+                continue
+            if chosen is None or language not in OCR_LANGUAGES:
+                outcome.skipped.append(f".{language}: no image track OCR can read")
+                continue
+            srt, report = ocr.run(video, chosen, OCR_LANGUAGES[language], workdir, data_root)
+            verdict = ocr_verdict(report)
+            if verdict:
+                outcome.refused.append(f".{language} OCR of {chosen.title or f'track {chosen.index}'}: {verdict}"
+                                       + "".join(f"\n  › {line}" for line in report.get("low_confidence_samples", [])[:2]))
+                continue
+            install(language, srt, f"by OCR of {chosen.title or f'track {chosen.index}'} "
+                                   f"({report['cues']} lines, {report['mean_confidence']:.0f}% confidence)")
+        for language, bad in replace.items():
+            if not any(w.startswith(f".{language}.srt") for w in outcome.written):
+                outcome.refused += [f"{sidecar.name[len(video.stem):]} does not fit ({reason}) and nothing could replace it"
+                                    for sidecar, reason in bad]
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
     return outcome
@@ -315,6 +450,41 @@ def tell_jellyfin(env_file: Path, url: str, paths: list[Path], data_root: Path) 
     urllib.request.urlopen(request, timeout=30).close()
 
 
+def post(webhook: str, title: str, colour: int, sections: list[tuple[str, list[str]]], footer: str) -> None:
+    fields = []
+    for name, lines in sections:
+        if not lines:
+            continue
+        value = ""
+        for index, line in enumerate(lines):
+            addition = ("\n" if value else "") + "• " + line
+            if len(value) + len(addition) > 1000:
+                value += f"\n… and {len(lines) - index} more"
+                break
+            value += addition
+        fields.append({"name": f"{name} ({len(lines)})", "value": value, "inline": False})
+    if not fields or not webhook.startswith("http"):
+        return
+    payload = {"username": "subtitles", "embeds": [{"title": title, "color": colour, "fields": fields[:10],
+                                                     "footer": {"text": footer},
+                                                     "timestamp": dt.datetime.now(dt.timezone.utc).isoformat()}]}
+    request = urllib.request.Request(webhook, data=json.dumps(payload).encode(), method="POST",
+                                     headers={"Content-Type": "application/json", "User-Agent": "batlab-subextract"})
+    urllib.request.urlopen(request, timeout=15).close()
+
+
+def notify(env_file: Path, written: list[str], refused: list[str], replaced: list[str], errors: list[str],
+           footer: str) -> None:
+    """New subtitles to #downloads, anything to look at to #download-issues."""
+    try:
+        post(keeper.env_value(env_file, "DISCORD_WEBHOOK_DOWNLOADS"), "📝 Subtitles added", 3066993,
+             [("written", written)], footer)
+        post(keeper.env_value(env_file, "DISCORD_WEBHOOK_DOWNLOAD_ISSUES"), "🟠 Subtitles need a look", 15105570,
+             [("refused", refused), ("replaced, did not fit the video", replaced), ("errors", errors)], footer)
+    except (urllib.error.URLError, OSError) as error:
+        print(f"Discord was not told: {error}", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dry-run", action="store_true", help="print decisions; write and move nothing")
@@ -326,6 +496,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--radarr-url", default="http://172.19.10.12:7878")
     parser.add_argument("--jellyfin-url", default="", help="default: the jellyfin container's address")
     parser.add_argument("--ffsubsync-container", default="bazarr")
+    parser.add_argument("--no-ocr", action="store_true", help="never OCR Blu-ray image subtitles")
+    parser.add_argument("--ocr-cpus", default="2", help="CPUs for one OCR container (lab2: 2, a thin chassis)")
+    parser.add_argument("--quiet", action="store_true", help="post nothing to Discord")
     parser.add_argument("--languages", default="en,fr,ar",
                         help="two-letter codes to give an SRT, comma-separated (Bazarr's profile); 'all' for every one")
     parser.add_argument("--days", type=float, default=3, help="how far back to look for imports")
@@ -352,6 +525,16 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         videos = sorted(keeper.container_path(p, data_root) for p in imported)
 
+    ocr = None
+    if not args.no_ocr:
+        ocr = Ocr(cpus=args.ocr_cpus)
+        if not ocr.available():
+            print(f"{OCR_IMAGE} is not built (make -C subextract ocr-image); image subtitles are skipped", file=sys.stderr)
+            ocr = None
+    languages = None if args.languages == "all" else {code.strip() for code in args.languages.split(",")}
+    written, refused, replaced, errors = [], [], [], []
+    started = dt.datetime.now()
+
     state_path = Path(args.state_dir) / "handled.json"
     handled: dict[str, int] = json.loads(state_path.read_text()) if state_path.exists() else {}
     changed, failed = [], 0
@@ -363,17 +546,24 @@ def main(argv: list[str] | None = None) -> int:
         if handled.get(str(video)) == size and not args.file:
             continue
         try:
-            languages = None if args.languages == "all" else {code.strip() for code in args.languages.split(",")}
-            outcome = process(video, data_root, args.ffsubsync_container, apply=not args.dry_run, languages=languages)
-        except (subprocess.CalledProcessError, RuntimeError, OSError, ValueError) as error:
+            outcome = process(video, data_root, args.ffsubsync_container, apply=not args.dry_run,
+                              languages=languages, ocr=ocr)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, RuntimeError, OSError, ValueError) as error:
             detail = error.stderr[-300:] if isinstance(error, subprocess.CalledProcessError) and error.stderr else error
+            if isinstance(detail, bytes):
+                detail = detail.decode(errors="replace")
             print(f"{video.name}: {detail}", file=sys.stderr)
+            errors.append(f"`{video.name}`: {str(detail).strip()[-200:]}")
             failed += 1
             continue
+        written += [f"`{video.name}`: {item}" for item in outcome.written]
+        refused += [f"`{video.name}`: {item}" for item in outcome.refused]
+        replaced += [f"`{video.name}`: {item}" for item in outcome.replaced]
         parts = [f"wrote {', '.join(outcome.written)}"] if outcome.written else []
         parts += [f"replaced {', '.join(outcome.replaced)}"] if outcome.replaced else []
         parts += [f"kept {', '.join(outcome.kept)}"] if outcome.kept else []
         parts += [f"skipped {', '.join(outcome.skipped)}"] if outcome.skipped else []
+        parts += [f"refused {'; '.join(outcome.refused)}"] if outcome.refused else []
         if parts:
             print(f"{video.name}: {'; '.join(parts)}")
         if outcome.written:
@@ -383,6 +573,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.dry_run:
         return 1 if failed else 0
+    if not args.quiet:
+        minutes = (dt.datetime.now() - started).total_seconds() / 60
+        scope = "whole library" if args.all else (Path(args.file).name if args.file else "new imports")
+        notify(env_file, written, refused, replaced, errors, f"{scope} · {len(videos)} files · {minutes:.0f} min")
     try:
         tell_jellyfin(env_file, args.jellyfin_url, changed, data_root)
     except (urllib.error.URLError, OSError) as error:
