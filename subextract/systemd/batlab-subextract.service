@@ -1,0 +1,15 @@
+[Unit]
+Description=Give new library videos one SRT per language from their own subtitles
+Wants=network-online.target
+After=network-online.target docker.service batlab-dubkeeper.service
+RequiresMountsFor=/mnt/storage/data
+
+[Service]
+Type=oneshot
+User=potato
+Group=potato
+WorkingDirectory=/home/potato/batlab
+ExecStart=/usr/bin/python3 /home/potato/batlab/subextract/scripts/subextract.py
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=2h

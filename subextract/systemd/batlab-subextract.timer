@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the Batlab subtitle extraction every 15 minutes, after the dub keeper
+
+[Timer]
+OnCalendar=*:07/15
+Persistent=true
+Unit=batlab-subextract.service
+
+[Install]
+WantedBy=timers.target
