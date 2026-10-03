@@ -13,6 +13,11 @@ On 2026-10-03 two things took the port away within an hour:
   and refused (`10.2.0.1:5351: connection refused`). gluetun retries those, but
   the gateway stayed down.
 
+- from 17:35 the port changed every minute or two and the tunnel lost half its
+  packets, in Spain as in the Netherlands. Seven gluetun test containers, left
+  running by `timeout docker run` while checking countries, were connected with
+  the same WireGuard key; stopping them brought loss to 0% and the port held.
+
 Separately, after any port change the trackers keep handing out the old port
 until each torrent's next announce, up to half an hour later.
 
@@ -51,7 +56,9 @@ Throughput was not the limit: 21 MB/s through the tunnel to Hetzner Nuremberg,
 against 12 MB/s measured outside it a moment later. Stalls came from the
 swarm and the missing port, not the exit. More servers in the pool make a bad
 server cheaper, since a reconnect has more to choose from: `SERVER_COUNTRIES`
-takes a comma-separated list (`GLUETUN_SERVER_COUNTRIES` in `compose/.env`).
+takes a comma-separated list (`GLUETUN_SERVER_COUNTRIES` in `compose/.env`),
+set on 2026-10-03 to the seven countries above other than the Netherlands, each
+checked to forward a port that day.
 
 ## One-time installation on the server
 
