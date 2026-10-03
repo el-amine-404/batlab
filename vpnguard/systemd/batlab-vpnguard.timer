@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the Batlab VPN port guard every 5 minutes
+
+[Timer]
+OnBootSec=5m
+OnUnitActiveSec=5m
+Unit=batlab-vpnguard.service
+
+[Install]
+WantedBy=timers.target
