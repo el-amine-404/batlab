@@ -1,0 +1,15 @@
+[Unit]
+Description=Carry audio and subtitles lost in Sonarr upgrades into the new files
+Wants=network-online.target
+After=network-online.target docker.service
+RequiresMountsFor=/mnt/storage/data
+
+[Service]
+Type=oneshot
+User=potato
+Group=potato
+WorkingDirectory=/home/potato/batlab
+ExecStart=/usr/bin/python3 /home/potato/batlab/dubkeeper/scripts/dubkeeper.py
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=2h

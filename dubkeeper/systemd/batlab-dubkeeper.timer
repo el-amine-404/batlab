@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Batlab dub keeper every 15 minutes
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+RandomizedDelaySec=2m
+Unit=batlab-dubkeeper.service
+
+[Install]
+WantedBy=timers.target

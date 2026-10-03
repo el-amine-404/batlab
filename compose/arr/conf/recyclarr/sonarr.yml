@@ -31,9 +31,24 @@ sonarr:
     # are grabbed in whatever genuine form exists, then upgraded: lower
     # qualities stay allowed as fallbacks, and a release missing the original
     # audio is accepted down to min_format_score (see custom_formats).
+    #
+    # The guide's 100 is its lowest tier (Anime Web Tier 06), so the minimum
+    # means "a group someone has reviewed": the LQ list can only name groups
+    # already known to be bad. Simulcasts lose nothing by it, since SubsPlease,
+    # Erai-Raws, VARYG and ToonsHub are all tiered. "Anime (any genuine)" is the
+    # opt-in for a show with no tiered release: same scores, minimum 0, so an
+    # unranked release is taken but can never replace a ranked file. Pair it
+    # with the anime-any tag, whose delay profile holds unranked releases for
+    # 6 h so a tiered one arriving meanwhile wins (Sonarr setting, see
+    # docs/sonarr.md).
     quality_profiles:
       - trash_id: 20e0fc959f1f1704bed501f23bdae76f  # [Anime] Remux-1080p
         name: Anime
+        reset_unmatched_scores:
+          enabled: true
+      - trash_id: 20e0fc959f1f1704bed501f23bdae76f  # [Anime] Remux-1080p
+        name: Anime (any genuine)
+        min_format_score: 0
         reset_unmatched_scores:
           enabled: true
       - trash_id: 76a5053bdb2d1e4a8f16a69a37d46c12  # Remux + WEB 2160p
@@ -135,10 +150,14 @@ sonarr:
         assign_scores_to:
           - name: Anime
             score: 50
+          - name: Anime (any genuine)
+            score: 50
       - trash_ids:
           - 7ba05c6e0e14e793538174c679126996  # MULTi
         assign_scores_to:
           - name: Anime
+            score: 30
+          - name: Anime (any genuine)
             score: 30
           - name: Series 4K
             score: 30
@@ -148,6 +167,8 @@ sonarr:
           - bb158cc88eff25debcbfd864bda44d23  # Audio: Arabic
         assign_scores_to:
           - name: Anime
+            score: 15
+          - name: Anime (any genuine)
             score: 15
           - name: Series 4K
             score: 15

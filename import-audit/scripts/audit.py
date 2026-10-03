@@ -34,6 +34,10 @@ VIDEO_EXTENSIONS = {".mkv", ".mp4", ".avi", ".m4v", ".ts", ".wmv", ".mov"}
 EPISODE_TAG_RE = re.compile(r"(?<![A-Za-z0-9])S(?P<season>\d{1,2})(?P<episodes>(?:[ ._-]?E\d{1,3})+(?:-E?\d{1,3})?)(?![0-9])",
                             re.IGNORECASE)
 EPISODE_NUMBER_RE = re.compile(r"E?(\d{1,3})", re.IGNORECASE)
+# "Show S1 - Ep01", "Show S2 Episode 05": Sonarr takes the S1 for a whole-season
+# file and blocks every episode of the pack.
+LOOSE_EPISODE_RE = re.compile(r"(?<![A-Za-z0-9])S(?P<season>\d{1,2})(?![0-9]).*?(?<![A-Za-z])(?:Ep|Episode)[ ._-]?"
+                              r"(?P<episode>\d{1,3})(?![0-9])", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -55,6 +59,16 @@ def episodes_in_name(name: str) -> tuple[int, list[int]] | None:
     return int(match["season"]), sorted(set(numbers))
 
 
+def episode_for_import(name: str) -> tuple[int, list[int]] | None:
+    """Episodes a file name states outright, in the SxxEyy form or the looser
+    S1 - Ep01 form; None if it states none."""
+    strict = episodes_in_name(name)
+    if strict:
+        return strict
+    match = LOOSE_EPISODE_RE.search(name)
+    return (int(match["season"]), [int(match["episode"])]) if match else None
+
+
 def env_value(env_file: Path, name: str) -> str:
     for line in env_file.read_text(encoding="utf-8").splitlines():
         if line.startswith(name + "="):
@@ -73,6 +87,13 @@ class Arr:
         request = urllib.request.Request(url, headers={"X-Api-Key": self.key})
         with urllib.request.urlopen(request, timeout=60) as response:
             return json.load(response)
+
+    def post(self, endpoint: str, body: object) -> object:
+        request = urllib.request.Request(f"{self.base_url}/api/v3/{endpoint}", data=json.dumps(body).encode(),
+                                         method="POST", headers={"X-Api-Key": self.key, "Content-Type": "application/json"})
+        with urllib.request.urlopen(request, timeout=120) as response:
+            payload = response.read()
+        return json.loads(payload) if payload else None
 
 
 def finished_videos(root: Path, min_age_seconds: int, now: float) -> list[tuple[Path, os.stat_result]]:
@@ -170,10 +191,79 @@ def check_left_behind(sonarr: Arr, radarr: Arr, torrents: Path, min_age: int, no
     return problems
 
 
-def check_queues(apps: list[Arr], min_age: int, now: float) -> list[Problem]:
-    problems = []
+def plan_import(items: list[dict], episodes: list[dict]) -> list[tuple[dict, int, list[int]]] | str:
+    """Each video of a download mapped to the episodes its name states, as
+    (item, season, episode ids), or why the download cannot be mapped."""
+    by_number = {(episode["seasonNumber"], episode["episodeNumber"]): episode["id"] for episode in episodes}
+    plan, taken = [], set()
+    videos = [item for item in items
+              if Path(item["path"]).suffix.lower() in VIDEO_EXTENSIONS and "sample" not in Path(item["path"]).name.lower()]
+    if not videos:
+        return "no video files"
+    for item in videos:
+        name = Path(item["path"]).name
+        parsed = episode_for_import(name)
+        if not parsed:
+            return f"`{name}` names no episode"
+        season, numbers = parsed
+        ids = [by_number.get((season, number)) for number in numbers]
+        if None in ids:
+            return f"`{name}` names S{season:02d}E{numbers[0]:02d}, which the series does not have"
+        if taken & set(ids):
+            return f"`{name}` names an episode another file in the download also names"
+        taken.update(ids)
+        plan.append((item, season, ids))
+    return plan
+
+
+def auto_import(sonarr: Arr, min_age: int, now: float, apply: bool) -> tuple[list[Problem], set[str]]:
+    """Imports downloads Sonarr blocked although every file names its episode,
+    so the import Sonarr wanted happens without waiting for a person. Sonarr
+    re-checks the mapping first (upgrade, quality, sample), and any objection
+    leaves the download to the stuck-in-queue report."""
+    problems, imported = [], set()
+    blocked: dict[str, dict] = {}
+    for item in sonarr.get("queue", pageSize=1000).get("records", []):
+        added = item.get("added")
+        age = now - dt.datetime.fromisoformat(added.replace("Z", "+00:00")).timestamp() if added else 0
+        if item.get("trackedDownloadState") == "importBlocked" and item.get("seriesId") and age >= min_age:
+            blocked.setdefault(item["downloadId"], item)
+    for download, queued in blocked.items():
+        items = sonarr.get("manualimport", downloadId=download, filterExistingFiles="false")
+        plan = plan_import(items, sonarr.get("episode", seriesId=queued["seriesId"]))
+        title = queued.get("title", "?")
+        if isinstance(plan, str):
+            print(f"auto import skipped for {title}: {plan}")
+            continue
+        files = [{"path": item["path"], "seriesId": queued["seriesId"], "seasonNumber": season, "episodeIds": ids,
+                  "quality": item["quality"], "languages": item["languages"], "releaseGroup": item.get("releaseGroup"),
+                  "downloadId": download, "indexerFlags": item.get("indexerFlags", 0),
+                  "releaseType": item.get("releaseType")} for item, season, ids in plan]
+        if not apply:
+            print(f"would auto import {title}: {len(files)} files by their names")
+            continue
+        checked = sonarr.post("manualimport", [dict(file, id=item["id"]) for file, (item, _, _) in zip(files, plan)])
+        objections = sorted({rejection["reason"] for item in checked or [] for rejection in item.get("rejections", [])})
+        if objections or len(checked or []) != len(files):
+            print(f"auto import refused for {title}: {'; '.join(objections) or 'Sonarr did not confirm every file'}")
+            continue
+        sonarr.post("command", {"name": "ManualImport", "importMode": "auto", "files": files})
+        imported.add(download)
+        problems.append(Problem("auto imported", f"auto:{download}",
+                                f"{(queued.get('series') or {}).get('title') or title}: `{title}`, "
+                                f"{len(files)} files filed by the episode in their names"))
+    return problems, imported
+
+
+def check_queues(apps: list[Arr], min_age: int, now: float, skip: set[str] = frozenset()) -> list[Problem]:
+    problems, seen = [], set()
     for app in apps:
         for item in app.get("queue", pageSize=200).get("records", []):
+            # A season pack is one queue record per episode; report it once.
+            download = item.get("downloadId")
+            if download in skip or (app.name, download) in seen:
+                continue
+            seen.add((app.name, download))
             state, status = item.get("trackedDownloadState", ""), item.get("trackedDownloadStatus", "")
             added = item.get("added")
             age = now - dt.datetime.fromisoformat(added.replace("Z", "+00:00")).timestamp() if added else min_age
@@ -240,7 +330,7 @@ def check_duplicates(apps: list[Arr]) -> list[Problem]:
 
 def notify(webhook: str, problems: list[Problem]) -> None:
     fields = []
-    for kind in ("wrong episodes", "left behind", "stuck in queue", "duplicate downloads"):
+    for kind in ("wrong episodes", "left behind", "stuck in queue", "duplicate downloads", "auto imported"):
         lines = [problem.text for problem in problems if problem.kind == kind]
         if not lines:
             continue
@@ -273,6 +363,8 @@ def main(argv: list[str] | None = None) -> int:
     repo = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dry-run", action="store_true", help="print findings; no Discord post, no state change")
+    parser.add_argument("--auto-import", action="store_true",
+                        help="import blocked Sonarr downloads whose file names state their episodes")
     parser.add_argument("--env-file", default=str(repo / "compose/.env"))
     parser.add_argument("--data-root", default="/mnt/storage/data")
     parser.add_argument("--sonarr-url", default="http://172.19.10.11:8989")
@@ -292,11 +384,14 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
+        imports, imported = (auto_import(sonarr, min_age, now, apply=not args.dry_run) if args.auto_import
+                             else ([], set()))
         torrent_videos = finished_videos(data_root / "torrents/tv", 0, now)
         problems = (check_wrong_episodes(sonarr, data_root, torrent_videos)
                     + check_left_behind(sonarr, radarr, data_root / "torrents", min_age, now)
-                    + check_queues([sonarr, radarr], min_age, now)
-                    + check_duplicates([sonarr, radarr]))
+                    + check_queues([sonarr, radarr], min_age, now, skip=imported)
+                    + check_duplicates([sonarr, radarr])
+                    + imports)
     except (urllib.error.URLError, OSError, ValueError) as error:
         print(f"audit could not run: {error}", file=sys.stderr)
         return 1

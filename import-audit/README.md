@@ -33,6 +33,31 @@ import-audit/scripts/audit.py --dry-run     # print what it would report
 python3 -m unittest discover -s import-audit/scripts/tests
 ```
 
+## Auto-import (opt-in)
+
+With `--auto-import`, a Sonarr download blocked although every video names its
+own episode is imported by those names: `SxxEyy`, and the looser `S1 - Ep01`
+that made Sonarr take each file of *Vinland Saga*'s UQW pack (2026-10-02) for the
+whole season. It applies only when every video maps to one existing episode and
+no two map to the same one; Sonarr then re-checks the mapping (upgrade, quality,
+sample) and any objection leaves the download in the stuck-in-queue report. An
+import is posted as `auto imported`. A season pack is now reported once, not
+once per episode.
+
+It is off in the service. To turn it on:
+
+```bash
+sudo systemctl edit batlab-import-audit.service
+# [Service]
+# ExecStart=
+# ExecStart=/usr/bin/python3 /home/potato/batlab/import-audit/scripts/audit.py --auto-import
+```
+
+Check first with `--dry-run --auto-import`, which lists what it would import:
+any download it names will replace library files if Sonarr counts it as an
+upgrade. The [dub keeper](../dubkeeper/README.md) then carries over audio and
+subtitles the upgrade lost.
+
 ## Fixing what it reports
 
 Sonarr or Radarr → Wanted → Manual Import, pick the torrent folder, set each

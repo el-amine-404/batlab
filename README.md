@@ -25,6 +25,8 @@ other related skills that i keep forgetting:
 - [ports management](./docs/ports_management.md)
 - [samba shares](./docs/samba.md)
 - [import audit](./import-audit/README.md)
+- [dub keeper](./dubkeeper/README.md)
+- [sonarr settings outside recyclarr](./docs/sonarr.md)
 - [video recovery and local AI agent](./untrunc/README.md)
 
 official links and descriptions of each hosted service:

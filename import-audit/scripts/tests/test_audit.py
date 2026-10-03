@@ -200,6 +200,72 @@ class CheckTests(unittest.TestCase):
         queue = [{"downloadId": "A", "episodeId": 1}, {"downloadId": "B", "episodeId": 2}, {"downloadId": "A", "episodeId": 3}]
         self.assertEqual(audit.check_duplicates([FakeArr("Radarr", {"queue": {"records": queue}})]), [])
 
+    def test_a_blocked_pack_is_reported_once(self) -> None:
+        record = {"title": "[UQW] Show S1", "downloadId": "P", "added": "2026-09-15T10:00:00Z",
+                  "trackedDownloadState": "importBlocked", "trackedDownloadStatus": "warning"}
+        app = FakeArr("Sonarr", {"queue": {"records": [dict(record, episodeId=n) for n in range(24)]}})
+        self.assertEqual(len(audit.check_queues([app], 3600, time.time())), 1)
+        self.assertEqual(audit.check_queues([app], 3600, time.time(), skip={"P"}), [])
+
+
+class AutoImportTests(unittest.TestCase):
+    EPISODES = [{"id": 100 + n, "seasonNumber": 1, "episodeNumber": n} for n in range(1, 25)]
+
+    def items(self, *names: str) -> list[dict]:
+        return [{"id": i, "path": f"/data/torrents/tv/pack/{name}", "quality": {}, "languages": []}
+                for i, name in enumerate(names)]
+
+    def test_loose_names(self) -> None:
+        cases = {
+            "[UQW] Vinland Saga S1 - Ep01 [BDRip 1080p HEVC FLAC].mkv": (1, [1]),
+            "Show S2 Episode 05 [1080p].mkv": (2, [5]),
+            "Show.S01E03.1080p.mkv": (1, [3]),
+        }
+        for name, expected in cases.items():
+            with self.subTest(name):
+                self.assertEqual(audit.episode_for_import(name), expected)
+        self.assertIsNone(audit.episode_for_import("[SubsPlease] Show - 01 (1080p).mkv"))
+        self.assertIsNone(audit.episode_for_import("Show S1 [BDRip] Extras.mkv"))
+
+    def test_a_pack_maps_one_file_per_episode(self) -> None:
+        names = [f"[UQW] Vinland Saga S1 - Ep{n:02d} [BDRip].mkv" for n in range(1, 25)] + ["readme.txt"]
+        plan = audit.plan_import(self.items(*names), self.EPISODES)
+        self.assertEqual([(season, ids) for _, season, ids in plan][:2], [(1, [101]), (1, [102])])
+        self.assertEqual(len(plan), 24)
+
+    def test_unmappable_downloads_are_left_alone(self) -> None:
+        cases = {
+            "names no episode": ["Show S1 - Ep01.mkv", "Show S1 Creditless OP.mkv"],
+            "does not have": ["Show S1 - Ep25.mkv"],
+            "also names": ["Show S1 - Ep01.mkv", "Show S01E01 v2.mkv"],
+            "no video": ["Show S1 - Ep01.srt"],
+        }
+        for reason, names in cases.items():
+            with self.subTest(reason):
+                self.assertIn(reason, audit.plan_import(self.items(*names), self.EPISODES))
+
+    def test_imports_only_what_sonarr_confirms(self) -> None:
+        posts = []
+
+        class Sonarr(FakeArr):
+            def post(self, endpoint: str, body: object) -> object:
+                posts.append(endpoint)
+                if endpoint == "manualimport":
+                    return [dict(item, rejections=self.responses["rejections"]) for item in body]
+                return {}
+
+        queue = {"records": [{"title": "[UQW] Show S1", "downloadId": "P", "seriesId": 7, "added": "2026-09-15T10:00:00Z",
+                              "trackedDownloadState": "importBlocked"}]}
+        for rejections, imported in (([], {"P"}), ([{"reason": "Not an upgrade"}], set())):
+            with self.subTest(rejections=rejections):
+                posts.clear()
+                sonarr = Sonarr("Sonarr", {"queue": queue, "episode": self.EPISODES, "rejections": rejections,
+                                           "manualimport": self.items("Show S1 - Ep01.mkv", "Show S1 - Ep02.mkv")})
+                problems, done = audit.auto_import(sonarr, 3600, time.time(), apply=True)
+                self.assertEqual(done, imported)
+                self.assertEqual(posts, ["manualimport", "command"] if imported else ["manualimport"])
+                self.assertEqual(len(problems), len(imported))
+
 
 if __name__ == "__main__":
     unittest.main()
