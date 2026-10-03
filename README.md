@@ -27,6 +27,7 @@ other related skills that i keep forgetting:
 - [import audit](./import-audit/README.md)
 - [dub keeper](./dubkeeper/README.md)
 - [vpn port guard](./vpnguard/README.md)
+- [ass2srt, fansub subtitles to SRT](./ass2srt/README.md)
 - [sonarr settings outside recyclarr](./docs/sonarr.md)
 - [video recovery and local AI agent](./untrunc/README.md)
 

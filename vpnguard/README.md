@@ -30,7 +30,9 @@ until each torrent's next announce, up to half an hour later.
 
 Reconnects and the hourly give-up post to `#download-issues`. The control server
 and qBittorrent listen only inside gluetun's namespace, so the calls go through
-`docker exec`.
+`docker exec`. The reconnect route needs `GLUETUN_CONTROL_API_KEY` from
+`compose/.env`; status routes are open to the internal network
+(`compose/arr/conf/gluetun/auth.toml.example`).
 
 ```bash
 vpnguard/scripts/vpnguard.py --dry-run    # print the decision, change nothing

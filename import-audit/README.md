@@ -18,7 +18,10 @@ fifth of the show was missing and a third of the titles were wrong.
 
 Every check reads the current state, so a fixed problem stops being reported.
 Downloads younger than three hours are skipped while they may still be
-importing. Files replaced by an upgrade, and movie extras such as featurettes
+importing, and so is any download still in Sonarr's or Radarr's queue: a file's
+age is its own, and a 110 GB pack whose files finished hours earlier waited 36
+minutes for its import on 2026-10-03. A file that names no episode, in a pack
+whose episodes were imported, is an extra (creditless openings, making-ofs). Files replaced by an upgrade, and movie extras such as featurettes
 next to an imported film, are not problems. Episode numbers are read from the
 file name rather than from Sonarr's parser, which applies the same scene maps
 that caused the original mistake. Each problem is posted once, and again only if
@@ -44,13 +47,12 @@ sample) and any objection leaves the download in the stuck-in-queue report. An
 import is posted as `auto imported`. A season pack is now reported once, not
 once per episode.
 
-It is off in the service. To turn it on:
+It is on in the service since 2026-10-03, once the UQW pack it would have
+imported over hand-made subtitles was gone. Reinstall the unit after pulling:
 
 ```bash
-sudo systemctl edit batlab-import-audit.service
-# [Service]
-# ExecStart=
-# ExecStart=/usr/bin/python3 /home/potato/batlab/import-audit/scripts/audit.py --auto-import
+sudo install -m 644 import-audit/systemd/batlab-import-audit.service /etc/systemd/system/
+sudo systemctl daemon-reload
 ```
 
 Check first with `--dry-run --auto-import`, which lists what it would import:

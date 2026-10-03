@@ -12,6 +12,10 @@ upgrade moves the replaced file there instead of deleting it, which is what lets
 the [dub keeper](../dubkeeper/README.md) carry a lost dub or subtitles into the
 new file, and lets a bad upgrade be undone by hand.
 
+Radarr has the same setting, same folder and period (set 2026-10-03), so a film
+upgrade such as a WEB-DL replaced by a Blu-ray remux can be undone too. Both
+apps clean the whole folder, at the same 14 days.
+
 ## Anime from groups the guide does not rank
 
 The `Anime` profile accepts only release groups in the guide's tiers (minimum
