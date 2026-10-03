@@ -12,6 +12,12 @@ It runs every 15 minutes, seven minutes after the [dub keeper](../dubkeeper/READ
 on Sonarr and Radarr imports at least 30 minutes old: the dub keeper restores
 an upgrade's lost subtitles first, so they are not replaced by extracted ones.
 
+Only the languages of Bazarr's profile get an SRT, English, French and Arabic
+(`--languages`): the library's films carry up to sixteen, and an SRT for each
+would crowd every subtitle menu. Bazarr counts embedded text tracks as present
+(`use_embedded_subs`, on since 2026-10-03, PGS and VobSub still ignored), so it
+no longer downloads English for a file that has MTBB's built in.
+
 ## Choosing the track
 
 Per language:

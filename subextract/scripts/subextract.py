@@ -197,12 +197,14 @@ class Outcome:
     skipped: list[str]
 
 
-def process(video: Path, data_root: Path, container: str, apply: bool) -> Outcome:
+def process(video: Path, data_root: Path, container: str, apply: bool,
+            languages: set[str] | None = None) -> Outcome:
     outcome = Outcome([], [], [], [])
     info = keeper.probe(video)
     by_language: dict[str, list[Track]] = {}
     for track in text_tracks(info):
-        by_language.setdefault(track.language, []).append(track)
+        if languages is None or track.language in languages:
+            by_language.setdefault(track.language, []).append(track)
     if not by_language:
         return outcome
     existing = sidecars_by_language(video)
@@ -324,6 +326,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--radarr-url", default="http://172.19.10.12:7878")
     parser.add_argument("--jellyfin-url", default="", help="default: the jellyfin container's address")
     parser.add_argument("--ffsubsync-container", default="bazarr")
+    parser.add_argument("--languages", default="en,fr,ar",
+                        help="two-letter codes to give an SRT, comma-separated (Bazarr's profile); 'all' for every one")
     parser.add_argument("--days", type=float, default=3, help="how far back to look for imports")
     parser.add_argument("--settle-minutes", type=float, default=30,
                         help="wait this long after an import, so the dub keeper and Bazarr go first")
@@ -359,7 +363,8 @@ def main(argv: list[str] | None = None) -> int:
         if handled.get(str(video)) == size and not args.file:
             continue
         try:
-            outcome = process(video, data_root, args.ffsubsync_container, apply=not args.dry_run)
+            languages = None if args.languages == "all" else {code.strip() for code in args.languages.split(",")}
+            outcome = process(video, data_root, args.ffsubsync_container, apply=not args.dry_run, languages=languages)
         except (subprocess.CalledProcessError, RuntimeError, OSError, ValueError) as error:
             detail = error.stderr[-300:] if isinstance(error, subprocess.CalledProcessError) and error.stderr else error
             print(f"{video.name}: {detail}", file=sys.stderr)
