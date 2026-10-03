@@ -2,8 +2,9 @@
 """Convert a fansub ASS track to a readable SRT.
 
 Keeps dialogue, signs and song lyrics; drops what only makes sense as
-typesetting: Kara Effector output (one event per animated letter), vector
-drawings, and the layer and frame-by-frame copies of a single line. Song
+typesetting: Kara Effector output (one event per animated letter), styles made
+of karaoke syllables, vector drawings, and the layer and frame-by-frame copies
+of a single line. Song
 styles (OP/ED/Song) come out in italics so lyrics read apart from dialogue.
 
 Usage: ass2srt.py INPUT.ass [OUTPUT.srt]   (stdout without OUTPUT)
@@ -41,12 +42,31 @@ def events(text: str):
             yield dict(zip(fields, (v.strip() if k != "text" else v for k, v in zip(fields, values))))
 
 
+def plain_text(raw: str) -> str:
+    return re.sub(r"\{[^}]*\}", "", raw).replace("\\N", " ").replace("\\n", " ").replace("\\h", " ").strip()
+
+
+def syllable_styles(all_events: list[dict]) -> set[str]:
+    """Styles whose events are karaoke syllables ("te", "tsu", "no"): many
+    events, most of them three characters or fewer. Attack on Titan S04's MTBB
+    ending had 4,151 such events, unmarked as effects."""
+    lengths: dict[str, list[int]] = {}
+    for event in all_events:
+        text = plain_text(event.get("text", ""))
+        if text:
+            lengths.setdefault(event.get("style", ""), []).append(len(text))
+    return {style for style, values in lengths.items()
+            if len(values) >= 40 and sorted(values)[len(values) // 2] <= 3}
+
+
 def convert(text: str) -> list[tuple[int, int, str]]:
     cues = set()
     order: dict[str, int] = {}
-    for index, event in enumerate(events(text)):
+    all_events = list(events(text))
+    syllables = syllable_styles(all_events)
+    for index, event in enumerate(all_events):
         raw = event.get("text", "")
-        if "fx" in event.get("effect", "").lower() or re.search(r"\\p[1-9]", raw):
+        if "fx" in event.get("effect", "").lower() or re.search(r"\\p[1-9]", raw) or event.get("style", "") in syllables:
             continue
         body = re.sub(r"\{[^}]*\}", "", raw).replace("\\N", "\n").replace("\\n", "\n").replace("\\h", " ")
         body = "\n".join(part.strip() for part in body.splitlines() if part.strip())

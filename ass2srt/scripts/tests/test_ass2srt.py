@@ -52,6 +52,13 @@ class ConvertTests(unittest.TestCase):
             r"0,0:08:09.63,0:08:13.01,Default,,0,0,0,,{\be2}هل تحسّنت نظرتكم تجاهي؟"))
         self.assertEqual([body for _, _, body in cues], ["هل تحسّنت نظرتكم تجاهي؟"])
 
+    def test_karaoke_syllable_styles_are_dropped(self) -> None:
+        syllables = [f"0,0:22:{10 + n // 10:02d}.{n % 10}0,0:22:{11 + n // 10:02d}.00,snk4p2-ed1-rom,,0,0,0,,{s}"
+                     for n, s in enumerate(["te", "tsu", "no", "ka", "ze"] * 10)]
+        cues = ass2srt.convert(script("0,0:00:03.12,0:00:05.03,Default,,0,0,0,,Hey! What's wrong, Oliver?",
+                                      "0,0:00:05.03,0:00:06.19,Default,,0,0,0,,No.", *syllables))
+        self.assertEqual([body for _, _, body in cues], ["Hey! What's wrong, Oliver?", "No."])
+
     def test_frame_by_frame_sign_and_its_fragment_merge(self) -> None:
         cues = ass2srt.convert(script(
             "0,0:00:14.95,0:00:15.07,Sign,,0,0,0,,Wherefore dost thou forget us",
