@@ -24,6 +24,7 @@ import datetime as dt
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -163,18 +164,22 @@ class Verdict:
     notes: list[str] = field(default_factory=list)
 
 
-def judge(old_path: Path, new_path: Path, old: dict, new: dict) -> Verdict:
+def judge(old_path: Path, new_path: Path, old: dict, new: dict, subtitles: bool = False) -> Verdict:
+    """Whether the old file's audio or sidecar subtitles fit the new file.
+    Subtitles are timed to the release they came with, so they need the same
+    check as audio: on 2026-10-03 a first version restored a WEB release's
+    subtitles onto Blu-ray files without it."""
     verdict = Verdict(carry=missing_audio(old, new))
-    if not verdict.carry:
+    if not verdict.carry and not subtitles:
         return verdict
-    lost = "+".join(language(s) or "?" for s in verdict.carry)
+    lost = "+".join(language(s) or "?" for s in verdict.carry) + " audio" if verdict.carry else "subtitles"
     old_length, new_length = video_length(old), video_length(new)
     if not old_length or not new_length or abs(old_length - new_length) > MAX_LENGTH_DIFFERENCE:
-        verdict.problem = f"{lost} audio lost; videos differ in length ({old_length:.1f}s vs {new_length:.1f}s)"
+        verdict.problem = f"{lost} lost; videos differ in length ({old_length:.1f}s vs {new_length:.1f}s)"
         return verdict
     shared = reference_language(old, new)
     if not shared:
-        verdict.problem = f"{lost} audio lost; no audio language in both files to line them up by"
+        verdict.problem = f"{lost} lost; no audio language in both files to line them up by"
         return verdict
     old_ref = next(s for s in audio_streams(old) if language(s) == shared)
     new_ref = next(s for s in audio_streams(new) if language(s) == shared)
@@ -185,11 +190,11 @@ def judge(old_path: Path, new_path: Path, old: dict, new: dict) -> Verdict:
                                     loudness(new_path, new_ref["index"], start))
         verdict.notes.append(f"{shared} at {start / 60:.0f} min: {lag * 10:+d} ms, r={correlation:.3f}")
         if correlation < MIN_CORRELATION:
-            verdict.problem = f"{lost} audio lost; {shared} audio does not match (r={correlation:.2f})"
+            verdict.problem = f"{lost} lost; {shared} audio does not match (r={correlation:.2f})"
             return verdict
         offsets.append(lag * 10)
     if max(offsets) - min(offsets) > MAX_OFFSET_SPREAD_MS:
-        verdict.problem = f"{lost} audio lost; timing drifts between the files ({offsets[0]:+d} vs {offsets[1]:+d} ms)"
+        verdict.problem = f"{lost} lost; timing drifts between the files ({offsets[0]:+d} vs {offsets[1]:+d} ms)"
         return verdict
     mean = round(sum(offsets) / len(offsets))
     verdict.offset_ms = mean if abs(mean) >= IGNORED_OFFSET_MS else 0
@@ -233,16 +238,47 @@ def sidecars(old_path: Path) -> list[Path]:
         return []
 
 
-def restore_sidecars(old_path: Path, new_path: Path, apply: bool) -> list[str]:
-    restored = []
+def missing_sidecars(old_path: Path, new_path: Path) -> list[tuple[Path, Path, str]]:
+    """Old sidecar subtitles the new file has no counterpart of, as (old file,
+    name next to the new file, suffix such as ".en.srt")."""
+    pairs = []
     for sidecar in sidecars(old_path):
-        target = new_path.with_name(new_path.stem + sidecar.name[len(old_path.stem):])
-        if target.exists():
+        suffix = sidecar.name[len(old_path.stem):]
+        target = new_path.with_name(new_path.stem + suffix)
+        if not target.exists():
+            pairs.append((sidecar, target, suffix))
+    return pairs
+
+
+SRT_TIME = re.compile(r"(\d{2,}):(\d{2}):(\d{2})[,.](\d{3})")
+
+
+def shift_srt(text: str, offset_ms: int) -> str:
+    def shifted(match: re.Match) -> str:
+        h, m, s, ms = (int(group) for group in match.groups())
+        total = max(0, ((h * 60 + m) * 60 + s) * 1000 + ms + offset_ms)
+        return f"{total // 3600000:02}:{total // 60000 % 60:02}:{total // 1000 % 60:02},{total % 1000:03}"
+    return SRT_TIME.sub(shifted, text)
+
+
+def restore_sidecars(pairs: list[tuple[Path, Path, str]], offset_ms: int, apply: bool) -> tuple[list[str], list[str]]:
+    """Copies each sidecar to its new name, shifting SRT timings by the offset
+    between the releases. Returns (restored, skipped): formats other than SRT
+    cannot be shifted here, so they are restored only when no shift is needed."""
+    restored, skipped = [], []
+    for sidecar, target, label in pairs:
+        if offset_ms and sidecar.suffix.lower() != ".srt":
+            skipped.append(label)
             continue
         if apply:
-            shutil.copy2(sidecar, target)
-        restored.append(target.name[len(new_path.stem):])
-    return restored
+            if offset_ms:
+                text = sidecar.read_text(encoding="utf-8-sig", errors="replace")
+                target.write_text(shift_srt(text, offset_ms), encoding="utf-8")
+                shutil.copystat(sidecar, target)
+            else:
+                shutil.copy2(sidecar, target)
+        restored.append(label)
+    return restored, skipped
 
 
 # --- Sonarr history -----------------------------------------------------------
@@ -343,7 +379,8 @@ def process(upgrade: Upgrade, sonarr: Arr, data_root: Path, apply: bool) -> tupl
         return "retry", f"{new_path} is not there yet"
 
     old, new = probe(old_path), probe(new_path)
-    verdict = judge(old_path, new_path, old, new)
+    pairs = missing_sidecars(old_path, new_path)
+    verdict = judge(old_path, new_path, old, new, subtitles=bool(pairs))
     changes = []
     if verdict.problem:
         until = (dt.datetime.fromisoformat(upgrade.date.replace("Z", "+00:00")) + dt.timedelta(days=14)).date()
@@ -361,9 +398,12 @@ def process(upgrade: Upgrade, sonarr: Arr, data_root: Path, apply: bool) -> tupl
             finally:
                 temporary.unlink(missing_ok=True)
         changes.append(describe(verdict))
-    restored = restore_sidecars(old_path, new_path, apply)
+    restored, skipped = restore_sidecars(pairs, verdict.offset_ms, apply)
     if restored:
-        changes.append("subtitles restored: " + ", ".join(restored))
+        shift = f" (shifted {verdict.offset_ms:+d} ms)" if verdict.offset_ms else ""
+        changes.append("subtitles restored: " + ", ".join(restored) + shift)
+    if skipped:
+        changes.append("not restored, would need a shift: " + ", ".join(skipped))
     if not changes:
         return "done", f"{label}: nothing lost"
     if apply:
@@ -376,17 +416,19 @@ def check_pair(old_path: Path, new_path: Path) -> int:
     old, new = probe(old_path), probe(new_path)
     print("old audio:", [language(s) for s in audio_streams(old)], f"video {video_length(old):.3f}s")
     print("new audio:", [language(s) for s in audio_streams(new)], f"video {video_length(new):.3f}s")
-    verdict = judge(old_path, new_path, old, new)
+    pairs = missing_sidecars(old_path, new_path)
+    verdict = judge(old_path, new_path, old, new, subtitles=bool(pairs))
     for note in verdict.notes:
         print("  " + note)
     if verdict.problem:
         print("manual:", verdict.problem)
-    elif verdict.carry:
-        print("would merge:", describe(verdict))
-    else:
-        print("nothing lost")
-    for suffix in restore_sidecars(old_path, new_path, apply=False):
-        print("would restore subtitles:", suffix)
+        return 0
+    print("would merge:", describe(verdict) if verdict.carry else "nothing, no audio lost")
+    restored, skipped = restore_sidecars(pairs, verdict.offset_ms, apply=False)
+    for suffix in restored:
+        print("would restore subtitles:", suffix, f"shifted {verdict.offset_ms:+d} ms" if verdict.offset_ms else "")
+    for suffix in skipped:
+        print("would not restore (needs a shift):", suffix)
     return 0
 
 

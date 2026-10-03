@@ -121,11 +121,30 @@ class FileTests(unittest.TestCase):
         self.touch("recycle/Show/Season 01/Show - S01E01 - older.en.srt")
         new = self.touch("media/Show/Season 01/Show - S01E01 - new.mkv")
         self.touch("media/Show/Season 01/Show - S01E01 - new.en.srt")
-        self.assertEqual(keeper.restore_sidecars(old, new, apply=True), [".ar.srt"])
+        pairs = keeper.missing_sidecars(old, new)
+        self.assertEqual(keeper.restore_sidecars(pairs, 0, apply=True), ([".ar.srt"], []))
         self.assertEqual((new.parent / "Show - S01E01 - new.ar.srt").read_text(),
                          "recycle/Show/Season 01/Show - S01E01 - old.ar.srt")
         self.assertEqual((new.parent / "Show - S01E01 - new.en.srt").read_text(),
                          "media/Show/Season 01/Show - S01E01 - new.en.srt")
+
+    def test_an_offset_shifts_srt_and_skips_other_formats(self) -> None:
+        old = self.touch("recycle/S/Ep - old.mkv")
+        (self.root / "recycle/S/Ep - old.en.srt").write_text("1\n00:00:01,000 --> 00:00:02,500\nHi\n")
+        self.touch("recycle/S/Ep - old.fr.ass")
+        new = self.touch("media/S/Ep - new.mkv")
+        restored, skipped = keeper.restore_sidecars(keeper.missing_sidecars(old, new), 1250, apply=True)
+        self.assertEqual((restored, skipped), ([".en.srt"], [".fr.ass"]))
+        self.assertIn("00:00:02,250 --> 00:00:03,750", (self.root / "media/S/Ep - new.en.srt").read_text())
+        self.assertFalse((self.root / "media/S/Ep - new.fr.ass").exists())
+
+    def test_subtitles_alone_still_need_the_same_video(self) -> None:
+        both = media(stream(1, "audio", "jpn"))
+        with mock.patch.object(keeper, "loudness", return_value=[]), \
+                mock.patch.object(keeper, "best_lag", return_value=(0, 0.3)):
+            verdict = keeper.judge(Path("old"), Path("new"), both, both, subtitles=True)
+        self.assertIn("subtitles lost", verdict.problem)
+        self.assertEqual(keeper.judge(Path("old"), Path("new"), both, both).problem, "")
 
     def test_find_recycled_prefers_same_series(self) -> None:
         self.touch("recycle/Other/Season 01/Ep.mkv")

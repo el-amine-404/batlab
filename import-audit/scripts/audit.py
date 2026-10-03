@@ -148,17 +148,40 @@ def check_wrong_episodes(sonarr: Arr, data_root: Path, torrent_videos: list[tupl
     return problems
 
 
-def check_left_behind(sonarr: Arr, radarr: Arr, torrents: Path, min_age: int, now: float) -> list[Problem]:
+def queued_paths(apps: list[Arr], data_root: Path) -> set[Path]:
+    """Download folders Sonarr or Radarr still hold in their queue."""
+    paths = set()
+    for app in apps:
+        for item in app.get("queue", pageSize=1000).get("records", []):
+            if item.get("outputPath"):
+                paths.add(container_path(item["outputPath"], data_root))
+    return paths
+
+
+def check_left_behind(sonarr: Arr, radarr: Arr, torrents: Path, min_age: int, now: float,
+                      queued: set[Path] = frozenset()) -> list[Problem]:
     problems = []
     episodes_by_series: dict[int, dict[tuple[int, int], bool]] = {}
-    for path, status in finished_videos(torrents / "tv", min_age, now):
+    tv_root = torrents / "tv"
+    tv_videos = finished_videos(tv_root, min_age, now)
+    imported_from = {tv_root / path.relative_to(tv_root).parts[0] for path, status in tv_videos if status.st_nlink > 1}
+    for path, status in tv_videos:
         if status.st_nlink > 1:
+            continue
+        # A finished download stays in the queue until Sonarr has imported it,
+        # which for a 110 GB pack took 36 minutes on 2026-10-03; its files are
+        # older than min_age by then, since the age is the file's, not the pack's.
+        if any(path.is_relative_to(folder) for folder in queued):
             continue
         # Sonarr's parser applies scene-numbering maps that can be wrong for a
         # release, so it only names the series; episodes come from the file name.
         parsed = sonarr.get("parse", title=path.name) or {}
         series = parsed.get("series") or {}
         numbers = episodes_in_name(path.name)
+        # A creditless opening, a making-of or a concert in a pack whose
+        # episodes were imported names no episode: it is an extra.
+        if not numbers and not parsed.get("episodes") and tv_root / path.relative_to(tv_root).parts[0] in imported_from:
+            continue
         if series.get("id") and numbers:
             if series["id"] not in episodes_by_series:
                 episodes_by_series[series["id"]] = {(episode["seasonNumber"], episode["episodeNumber"]): episode["hasFile"]
@@ -173,6 +196,8 @@ def check_left_behind(sonarr: Arr, radarr: Arr, torrents: Path, min_age: int, no
     movie_folders: dict[Path, list[os.stat_result]] = {}
     movie_root = torrents / "movies"
     for path, status in finished_videos(movie_root, min_age, now):
+        if any(path.is_relative_to(folder) for folder in queued):
+            continue
         top = movie_root / path.relative_to(movie_root).parts[0]
         movie_folders.setdefault(top, []).append(status)
     movie_has_file: dict[int, bool] | None = None
@@ -388,7 +413,8 @@ def main(argv: list[str] | None = None) -> int:
                              else ([], set()))
         torrent_videos = finished_videos(data_root / "torrents/tv", 0, now)
         problems = (check_wrong_episodes(sonarr, data_root, torrent_videos)
-                    + check_left_behind(sonarr, radarr, data_root / "torrents", min_age, now)
+                    + check_left_behind(sonarr, radarr, data_root / "torrents", min_age, now,
+                                        queued=queued_paths([sonarr, radarr], data_root))
                     + check_queues([sonarr, radarr], min_age, now, skip=imported)
                     + check_duplicates([sonarr, radarr])
                     + imports)

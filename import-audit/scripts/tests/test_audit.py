@@ -119,6 +119,28 @@ class CheckTests(unittest.TestCase):
         self.assertEqual(len(audit.check_left_behind(missing, radarr, self.data / "torrents", 3600, time.time())), 1)
         self.assertEqual(len(audit.check_left_behind(unknown, radarr, self.data / "torrents", 3600, time.time())), 1)
 
+    def test_a_finished_pack_still_in_the_queue_is_not_left_behind(self) -> None:
+        self.file("torrents/tv/AoT S04 [Kira]/Attack on Titan - Episode 73 - Savagery.mkv")
+        radarr = FakeArr("Radarr", {"parse": {}})
+        sonarr = FakeArr("Sonarr", {"parse": {"series": {"id": 4, "title": "Attack on Titan"},
+                                              "episodes": [{"hasFile": False}]}})
+        torrents = self.data / "torrents"
+        self.assertEqual(len(audit.check_left_behind(sonarr, radarr, torrents, 3600, time.time())), 1)
+        self.assertEqual(audit.check_left_behind(sonarr, radarr, torrents, 3600, time.time(),
+                                                 queued={torrents / "tv/AoT S04 [Kira]"}), [])
+
+    def test_extras_of_an_imported_pack_are_not_reported(self) -> None:
+        episode = self.file("torrents/tv/AoT S04/Attack on Titan - Episode 60.mkv")
+        self.link(episode, "media/tv/Attack on Titan/Season 04/S04E01.mkv")
+        self.file("torrents/tv/AoT S04/Extras/Staff Making Talk.mkv")
+        self.file("torrents/tv/AoT S04/Extras/Creditless OPs & EDs/[Opening 06] Attack on Titan.mkv")
+        self.file("torrents/tv/Other pack/Staff Making Talk.mkv")
+        radarr = FakeArr("Radarr", {"parse": {}})
+        sonarr = FakeArr("Sonarr", {"parse": None})
+        problems = audit.check_left_behind(sonarr, radarr, self.data / "torrents", 3600, time.time())
+        # The pack with nothing imported is still reported: its files may be episodes.
+        self.assertEqual([p.key for p in problems], [f"left:{self.data}/torrents/tv/Other pack/Staff Making Talk.mkv"])
+
     def test_movie_extras_are_not_reported(self) -> None:
         movie = self.file("torrents/movies/Shutter.Island.2010/Shutter.Island.2010.mkv")
         self.file("torrents/movies/Shutter.Island.2010/Into.the.Lighthouse.mkv")
