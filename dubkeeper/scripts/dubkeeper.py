@@ -252,6 +252,36 @@ def missing_sidecars(old_path: Path, new_path: Path) -> list[tuple[Path, Path, s
 SRT_TIME = re.compile(r"(\d{2,}):(\d{2}):(\d{2})[,.](\d{3})")
 
 
+ASS_TIME = re.compile(r"^((?:Dialogue|Comment):\s*[^,]*,)(\d+:\d{2}:\d{2}\.\d{2}),(\d+:\d{2}:\d{2}\.\d{2}),", re.MULTILINE)
+
+
+def ass2srt_module():
+    """The repo's converter (ass2srt/scripts/ass2srt.py), loaded by path."""
+    import importlib.util
+    path = Path(__file__).resolve().parents[2] / "ass2srt/scripts/ass2srt.py"
+    spec = importlib.util.spec_from_file_location("ass2srt", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def ass_to_srt(text: str) -> str:
+    """ASS as SRT, for measuring only: ffsubsync and srt_halves read SRT, and
+    ass2srt drops karaoke and drawings that would read as hundreds of lines."""
+    converter = ass2srt_module()
+    return "".join(f"{n}\n{converter.srt_time(start)} --> {converter.srt_time(end)}\n{body}\n\n"
+                   for n, (start, end, body) in enumerate(converter.convert(text), 1))
+
+
+def shift_ass(text: str, offset_ms: int) -> str:
+    """Moves every event's start and end; ASS keeps centiseconds."""
+    def moved(value: str) -> str:
+        h, m, sec = value.split(":")
+        total = max(0, round((int(h) * 3600 + int(m) * 60 + float(sec)) * 100) + round(offset_ms / 10))
+        return f"{total // 360000}:{total // 6000 % 60:02}:{total // 100 % 60:02}.{total % 100:02}"
+    return ASS_TIME.sub(lambda match: f"{match[1]}{moved(match[2])},{moved(match[3])},", text)
+
+
 def shift_srt(text: str, offset_ms: int) -> str:
     def shifted(match: re.Match) -> str:
         h, m, s, ms = (int(group) for group in match.groups())
@@ -318,9 +348,12 @@ class SubtitleChecker:
 
     def offset(self, sidecar: Path) -> tuple[int | None, str]:
         """(shift in ms, "") to apply, or (None, reason) to leave it out."""
-        if sidecar.suffix.lower() != ".srt":
-            return None, "not SRT, so it cannot be checked here"
+        kind = sidecar.suffix.lower()
+        if kind not in (".srt", ".ass", ".ssa"):
+            return None, f"{kind} cannot be checked here"
         text = sidecar.read_text(encoding="utf-8-sig", errors="replace")
+        if kind != ".srt":
+            text = ass_to_srt(text)
         first, second, n_first, n_second = srt_halves(text, video_length(self.new) * 500)
         if min(n_first, n_second) < MIN_CUES_PER_HALF:
             return None, "too few lines to check its timing"
@@ -347,8 +380,10 @@ def restore_sidecars(pairs: list[tuple[Path, Path, str]], checker: SubtitleCheck
             continue
         if apply:
             if shift:
+                # The original is restored, styling and all; only its times move.
                 text = sidecar.read_text(encoding="utf-8-sig", errors="replace")
-                target.write_text(shift_srt(text, shift), encoding="utf-8")
+                shifted = shift_srt(text, shift) if sidecar.suffix.lower() == ".srt" else shift_ass(text, shift)
+                target.write_text(shifted, encoding="utf-8")
                 shutil.copystat(sidecar, target)
             else:
                 shutil.copy2(sidecar, target)

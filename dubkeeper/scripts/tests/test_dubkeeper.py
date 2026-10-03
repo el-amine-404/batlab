@@ -110,6 +110,43 @@ class SubtitleTimingTests(unittest.TestCase):
         self.assertTrue(second.startswith("11\n"))
 
 
+class AssTests(unittest.TestCase):
+    ASS = ("[Script Info]\nScriptType: v4.00+\n\n[Events]\n"
+           "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+           "Dialogue: 0,0:00:21.25,0:00:22.86,Default,,0,0,0,,{\\be2}Thors!\n"
+           "Comment: 0,0:00:30.00,0:00:31.00,Default,,0,0,0,,note\n"
+           "Dialogue: 0,0:04:28.66,0:04:29.20,mid,lead-in,0,0,0,Effector [fx],{\\pos(710,57)}N\n")
+
+    def test_shift_ass_moves_events_and_keeps_styling(self) -> None:
+        shifted = keeper.shift_ass(self.ASS, 21840)
+        self.assertIn("Dialogue: 0,0:00:43.09,0:00:44.70,Default,,0,0,0,,{\\be2}Thors!", shifted)
+        self.assertIn("Comment: 0,0:00:51.84,0:00:52.84,", shifted)
+        self.assertIn("Format: Layer, Start, End", shifted)
+        self.assertIn("0:00:00.00", keeper.shift_ass(self.ASS, -60_000))
+
+    def test_ass_is_measured_through_ass2srt(self) -> None:
+        srt = keeper.ass_to_srt(self.ASS)
+        self.assertIn("00:00:21,250 --> 00:00:22,860\nThors!", srt)
+        self.assertNotIn("N\n", srt)   # karaoke effect output is not a line to sync
+
+    def test_an_ass_sidecar_is_checked_and_restored_shifted(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            lines = "".join(f"Dialogue: 0,0:{n:02d}:00.00,0:{n:02d}:02.00,Default,,0,0,0,,line {n}\n" for n in range(1, 41))
+            old = root / "recycle/Ep - old.mkv"
+            old.parent.mkdir(parents=True)
+            old.write_text("x")
+            (root / "recycle/Ep - old.ar.ass").write_text(self.ASS.split("Dialogue")[0] + lines)
+            new = root / "media/Ep - new.mkv"
+            new.parent.mkdir(parents=True)
+            new.write_text("x")
+            checker = keeper.SubtitleChecker(new, media(stream(1, "audio", "jpn"), length=2460), root, root, "bazarr")
+            with mock.patch.object(checker, "ffsubsync", side_effect=[1.5, 1.6]):
+                restored, refused = keeper.restore_sidecars(keeper.missing_sidecars(old, new), checker, apply=True)
+            self.assertEqual((restored, refused), ([".ar.ass shifted +1.55 s"], []))
+            self.assertIn("Dialogue: 0,0:01:01.55,0:01:03.55,", (root / "media/Ep - new.ar.ass").read_text())
+
+
 class LagTests(unittest.TestCase):
     def test_best_lag_finds_a_shift(self) -> None:
         signal = [math.sin(i / 7) + math.sin(i / 3.1) * 0.5 for i in range(600)]

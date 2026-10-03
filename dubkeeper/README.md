@@ -41,7 +41,14 @@ Measured afterwards, per subtitle and per half:
 | S04E24 `.ar.hi` (WEB) | −0.11 s | +0.06 s | restored as is |
 
 A video check alone refused E10 and E15, which fit or needed only a shift.
-Only SRT is checked; other formats are left in the recycle bin.
+ASS and SSA are measured through [ass2srt](../ass2srt/README.md), which drops
+the karaoke and drawings that would read as hundreds of lines, and the original
+file is restored, styling kept, with its event times shifted. UQW's *Vinland
+Saga* tracks measured against iAHD's episode 1: English 0 s, Arabic +0.05 s.
+Other formats (VobSub, PGS, WebVTT) stay in the recycle bin.
+
+The three subtitles above were restored on 2026-10-03 this way; measured again
+afterwards, every half was within 0.11 s.
 
 ```bash
 dubkeeper/scripts/dubkeeper.py --dry-run          # print decisions, change nothing
