@@ -204,6 +204,10 @@ sudo systemctl enable --now batlab-mediascan-sweep.timer batlab-mediascan-deep.t
 sudo systemctl enable --now batlab-mediascan-watch.service
 ```
 
+The watcher is also wanted by the data disk's mount, so it starts whenever the
+disk mounts, even late in boot. A watcher enabled before that change needs
+`sudo systemctl reenable batlab-mediascan-watch.service` to pick it up.
+
 Then install the host drop-ins, if the profile has any, as described in
 `hosts/<profile>/README.md`.
 

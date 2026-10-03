@@ -3,6 +3,10 @@ Description=Watch the Batlab media tree and check files as they arrive
 Wants=network-online.target
 After=network-online.target docker.service
 RequiresMountsFor=/mnt/storage/data
+# The data disk can mount after boot has given up on it (2026-10-03: 13 minutes
+# late), which fails this unit on its dependency with no retry. Being wanted by
+# the mount starts it whenever the disk appears; BindsTo stops it if the disk goes.
+BindsTo=mnt-storage-data.mount
 
 [Service]
 Type=simple
@@ -15,4 +19,4 @@ Nice=19
 IOSchedulingClass=idle
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=multi-user.target mnt-storage-data.mount
