@@ -713,8 +713,12 @@ def main(argv: list[str] | None = None) -> int:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            print("another subextract run is active; leaving it to finish", flush=True)
-            return 0
+            if args.all:
+                print("another subextract run is active; waiting to start the library batch", flush=True)
+                fcntl.flock(lock, fcntl.LOCK_EX)
+            else:
+                print("another subextract run is active; leaving it to finish", flush=True)
+                return 0
         try:
             return run_batch(args)
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:

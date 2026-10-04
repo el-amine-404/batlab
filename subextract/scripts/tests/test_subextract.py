@@ -304,8 +304,16 @@ class SafetyTests(unittest.TestCase):
         lockroot.mkdir(parents=True)
         with (lockroot / "run.lock").open("a") as lock, patch.object(sx, "run_batch") as batch, patch("builtins.print"):
             sx.fcntl.flock(lock, sx.fcntl.LOCK_EX | sx.fcntl.LOCK_NB)
-            self.assertEqual(sx.main(["--all", "--data-root", str(self.root)]), 0)
+            self.assertEqual(sx.main(["--data-root", str(self.root)]), 0)
             batch.assert_not_called()
+
+    def test_library_batch_waits_for_a_running_timer(self):
+        with patch.object(sx.fcntl, "flock", side_effect=[BlockingIOError, None]) as flock, \
+                patch.object(sx, "run_batch", return_value=0) as batch, patch("builtins.print"):
+            self.assertEqual(sx.main(["--all", "--data-root", str(self.root)]), 0)
+        self.assertEqual(flock.call_count, 2)
+        self.assertEqual(flock.call_args.args[1], sx.fcntl.LOCK_EX)
+        batch.assert_called_once()
 
 
 if __name__ == "__main__":

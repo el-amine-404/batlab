@@ -136,7 +136,8 @@ ssh lab2 'tail -f /home/potato/subextract-all.log'
 `--all` recursively scans `/mnt/storage/data/media/tv` and `media/movies`,
 excluding downloads and recycle directories. It handles one video at a time;
 OCR is capped at two CPUs and 2 GiB. A lock shared with the timer prevents
-overlapping runs. `--quiet` suppresses Discord posts; Jellyfin is refreshed
+overlapping runs. A manual `--all` batch waits for an active run to finish;
+timer invocations skip when another run owns the lock. `--quiet` suppresses Discord posts; Jellyfin is refreshed
 after successful writes.
 
 Progress is checkpointed atomically after every completed file. Rerunning the
@@ -169,7 +170,7 @@ under the recycle directory, without changing the original library sidecars.
 | Italian BD PGS → Italian SRT | 344 | about 95% | passed, 0.00 s |
 | English SRT deliberately shifted by 30 s | — | n/a | refused, −29.96 s |
 
-The 71 tests across subextract, PGS OCR, ass2srt and dubkeeper pass. Regression
+The 72 tests across subextract, PGS OCR, ass2srt and dubkeeper pass. Regression
 coverage includes failed writes preserving originals, concurrent sidecar
 changes, interrupted-run checkpoints, overlapping runs, malformed/cropped PGS,
 unreadable OCR events, and ffsubsync reporting failure with a zero exit code.
