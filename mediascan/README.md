@@ -218,6 +218,26 @@ Then install the host drop-ins, if the profile has any, as described in
 
 ## Running by hand
 
+The nightly Discord alert includes the number of affected files, counts by
+reason, library versus torrent-extras location, up to three example filenames
+with their findings, each check's result, skipped checks, VirusTotal unknowns,
+quarantine mode/eligible count, and the report directory. Reason counts can
+overlap because one file may have several findings. Malware/security findings
+are shown before routine media-quality findings. A failed scanner or unreadable
+report is reported as an error, not a clean result.
+
+Short/silent/low-bitrate extras are still checked and reported, with an explicit
+note that those thresholds can flag legitimate menus and bonus clips. Reports
+are cleared before their scanner runs, so an early failure cannot summarize or
+quarantine a stale finding from a previous run. Notifications remain bounded
+for Discord; full findings stay in the JSONL reports and service journal.
+
+Test notification summaries without sending messages:
+
+```bash
+python3 -m unittest discover -s mediascan/scripts/tests
+```
+
 ```bash
 sudo mediascan/scripts/sweep.sh                     # nightly checks, reports only
 sudo mediascan/scripts/watch.sh                     # real-time, runs as a service

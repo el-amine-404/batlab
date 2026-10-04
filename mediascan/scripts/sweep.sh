@@ -29,39 +29,54 @@ readonly YARA_REPORT="$MEDIASCAN_REPORT_DIR/yara.jsonl"
 readonly VIRUSTOTAL_REPORT="$MEDIASCAN_REPORT_DIR/virustotal.jsonl"
 
 flagged=0
+summary_arguments=()
 
 run_check() {
-  local label="$1"
-  shift
+  local key="$1" label="$2" report="$3" status=0
+  shift 3
   echo
   echo "== $label"
-  if ! "$@"; then
+  # Do not summarize or quarantine yesterday's results if a scanner fails
+  # before producing today's report.
+  : >"$report"
+  "$@" || status=$?
+  summary_arguments+=(--check "$key=$status")
+  if ((status)); then
     flagged=1
   fi
 }
 
-run_check "File types" python3 "$SCRIPT_DIR/verify-types.py" "${roots[@]}" \
+run_check types "File types" "$TYPES_REPORT" python3 "$SCRIPT_DIR/verify-types.py" "${roots[@]}" \
   "${excludes[@]}" "${ignore_arguments[@]}" --exclude "$MEDIASCAN_QUARANTINE" \
   --report "$TYPES_REPORT" --quiet
 
-run_check "Video containers" python3 "$SCRIPT_DIR/verify-media.py" "${roots[@]}" \
+run_check media "Video containers" "$MEDIA_REPORT" python3 "$SCRIPT_DIR/verify-media.py" "${roots[@]}" \
   "${excludes[@]}" --exclude "$MEDIASCAN_QUARANTINE" \
   --report "$MEDIA_REPORT" --quiet
 
-run_check "Subtitles" python3 "$SCRIPT_DIR/verify-subtitles.py" "${roots[@]}" \
+run_check subtitles "Subtitles" "$SUBTITLES_REPORT" python3 "$SCRIPT_DIR/verify-subtitles.py" "${roots[@]}" \
   "${excludes[@]}" --exclude "$MEDIASCAN_QUARANTINE" \
   --report "$SUBTITLES_REPORT" --quiet
 
-run_check "ClamAV" "$SCRIPT_DIR/scan-clamav.sh"
-run_check "YARA" "$SCRIPT_DIR/scan-yara.sh"
+run_check clamav "ClamAV" "$CLAMAV_REPORT" "$SCRIPT_DIR/scan-clamav.sh"
+if [[ -n "${MEDIASCAN_YARA_RULES:-}" ]]; then
+  run_check yara "YARA" "$YARA_REPORT" "$SCRIPT_DIR/scan-yara.sh"
+else
+  : >"$YARA_REPORT"
+  summary_arguments+=(--check yara=skipped)
+  echo "YARA: skipped (no rules configured)."
+fi
 
 # The example config ships a your_*_here placeholder; with it every lookup fails
 # with 401 after a 16 s pause each, burning hours for nothing.
 if [[ -n "${VT_API_KEY:-}" && "$VT_API_KEY" != your_*_here ]]; then
-  run_check "VirusTotal" python3 "$SCRIPT_DIR/scan-virustotal.py" "${roots[@]}" \
+  run_check virustotal "VirusTotal" "$VIRUSTOTAL_REPORT" python3 "$SCRIPT_DIR/scan-virustotal.py" "${roots[@]}" \
     "${excludes[@]}" --exclude "$MEDIASCAN_QUARANTINE" \
     --report "$VIRUSTOTAL_REPORT" --cache "$MEDIASCAN_STATE_DIR/virustotal-cache.json" \
     --max-lookups "${MEDIASCAN_VT_MAX_LOOKUPS:-400}" --quiet
+else
+  : >"$VIRUSTOTAL_REPORT"
+  summary_arguments+=(--check virustotal=skipped)
 fi
 
 # Verdicts that mean the file has no business being in the library at all, as
@@ -74,6 +89,7 @@ quarantine_arguments=(
 )
 if [[ "${MEDIASCAN_QUARANTINE_APPLY:-0}" == "1" ]]; then
   quarantine_arguments+=(--apply)
+  summary_arguments+=(--quarantine enabled)
 fi
 
 # One pass over the merged reports: a file caught by several engines is moved
@@ -83,6 +99,7 @@ trap 'rm -f "$merged"' EXIT
 cat "$CLAMAV_REPORT" "$YARA_REPORT" "$VIRUSTOTAL_REPORT" "$TYPES_REPORT" \
   "$SUBTITLES_REPORT" "$MEDIA_REPORT" 2>/dev/null >"$merged" || true
 
+quarantine_status=0
 if [[ -s "$merged" ]]; then
   echo
   echo "== Quarantine"
@@ -91,14 +108,23 @@ if [[ -s "$merged" ]]; then
     --quarantine "$MEDIASCAN_QUARANTINE" \
     --scan-root "$MEDIASCAN_LIBRARY_ROOT" \
     --from-jsonl "$merged" \
-    "${quarantine_arguments[@]}"
+    "${quarantine_arguments[@]}" || quarantine_status=$?
 fi
 
 echo
+if ! summary="$(python3 "$SCRIPT_DIR/summarize-sweep.py" --report-dir "$MEDIASCAN_REPORT_DIR" \
+  "${summary_arguments[@]}" --quarantine-status "$quarantine_status")"; then
+  flagged=1
+fi
+if [[ -z "$summary" ]]; then
+  summary="Report summary failed. Inspect journalctl -u batlab-mediascan-sweep.service and $MEDIASCAN_REPORT_DIR"
+  flagged=1
+fi
+printf '%s\n' "$summary"
 if ((flagged)); then
   echo "Sweep finished with findings. Reports are in $MEDIASCAN_REPORT_DIR."
   mediascan_notify "Media scan: findings on $(hostname)" \
-    "One or more checks reported findings. Reports are in $MEDIASCAN_REPORT_DIR"
+    "$summary"
 else
   echo "Sweep finished clean."
 fi
