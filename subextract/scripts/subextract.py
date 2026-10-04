@@ -43,6 +43,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
+import wave
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -212,7 +213,7 @@ class AudioChecker(keeper.SubtitleChecker):
         return self.reference
 
     def ffsubsync(self, subtitle: Path) -> float:
-        reference = self.reference_audio()
+        reference = getattr(self, "segment_reference", None) or self.reference_audio()
         speech = reference.with_suffix(".npz")
         options = [] if speech.exists() else ["--serialize-speech"]
         reference = speech if speech.exists() else reference
@@ -236,6 +237,45 @@ class AudioChecker(keeper.SubtitleChecker):
         if abs(report.get("framerate_scale_factor", 0) - 1) > 0.001:
             raise ValueError("audio alignment required a framerate change")
         return offset
+
+    def offset(self, sidecar: Path) -> tuple[int | None, str]:
+        """Compare each subtitle half to the matching half of the audio.
+
+        Leaving the omitted half as subtitle silence corrupts the alignment
+        score, especially for the second half with a long silent prefix.
+        Rebase both audio and subtitles to zero for each comparison instead.
+        """
+        text = sidecar.read_text(encoding="utf-8-sig", errors="strict")
+        duration_ms = round(keeper.video_length(self.new) * 1000)
+        middle_ms = duration_ms // 2
+        windows = [(0, middle_ms), (middle_ms, duration_ms)]
+        halves = [srt_window(text, start, end) for start, end in windows]
+        if min(len(SRT_CUE.findall(half)) for half in halves) < keeper.MIN_CUES_PER_HALF:
+            return None, "too few lines to check its timing"
+        reference = self.reference_audio()
+        offsets = []
+        try:
+            for name, (start, end), half in zip(("first", "second"), windows, halves):
+                audio = self.workdir / f"{name}-audio.wav"
+                if not audio.exists():
+                    with wave.open(str(reference), "rb") as source:
+                        rate = source.getframerate()
+                        first_frame = round(start * rate / 1000)
+                        last_frame = min(source.getnframes(), round(end * rate / 1000))
+                        if first_frame >= last_frame:
+                            return None, "reference audio does not cover both video halves"
+                        source.setpos(first_frame)
+                        with wave.open(str(audio), "wb") as output:
+                            output.setparams(source.getparams())
+                            output.writeframes(source.readframes(last_frame - first_frame))
+                subtitle = self.workdir / f"{name}.srt"
+                subtitle.write_text(half, encoding="utf-8")
+                self.segment_reference = audio
+                offsets.append(self.ffsubsync(subtitle))
+        finally:
+            self.segment_reference = None
+        shift, reason = keeper.halves_verdict(*offsets)
+        return shift, reason.replace("the releases are cut differently", "timing verification is inconclusive")
 
 
 class Fit:
@@ -367,6 +407,23 @@ def keeper_time(ms: int) -> str:
     return f"{ms // 3600000:02}:{ms // 60000 % 60:02}:{ms // 1000 % 60:02},{ms % 1000:03}"
 
 
+def srt_window(text: str, start_ms: int, end_ms: int) -> str:
+    """Clip cues to an audio window and rebase its timestamps to zero."""
+    cues = []
+    for block in re.split(r"\n\s*\n", text.replace("\r", "").strip()):
+        lines = block.splitlines()
+        match = SRT_CUE.fullmatch(lines[1].strip()) if len(lines) >= 3 else None
+        if not match:
+            raise ValueError("malformed SRT cue")
+        a, b, c, d, e, f, g, h = map(int, match.groups())
+        start = max(((a * 60 + b) * 60 + c) * 1000 + d, start_ms)
+        end = min(((e * 60 + f) * 60 + g) * 1000 + h, end_ms)
+        if end > start:
+            cues.append(f"{len(cues) + 1}\n{keeper_time(start - start_ms)} --> {keeper_time(end - start_ms)}\n"
+                        + "\n".join(lines[2:]) + "\n")
+    return "\n".join(cues)
+
+
 def srt_problem(text: str, duration: float) -> str:
     """Reject malformed, empty, corrupted or out-of-range subtitles."""
     if not math.isfinite(duration) or duration <= 0:
@@ -483,7 +540,7 @@ def process(video: Path, data_root: Path, container: str, apply: bool,
                 checked[language] = True
                 return True
             checked[language] = False
-            outcome.refused += [f"{sidecar.name[len(video.stem):]} does not fit ({reason}); "
+            outcome.refused += [f"{sidecar.name[len(video.stem):]} failed verification ({reason}); "
                                 "left in place because another SRT for this language fits"
                                 for sidecar, reason in bad]
             return False
@@ -562,7 +619,7 @@ def process(video: Path, data_root: Path, container: str, apply: bool,
                                    f"({report['cues']} lines, {report['mean_confidence']:.0f}% confidence)")
         for language, bad in replace.items():
             if not any(w.startswith(f".{language}.srt") for w in outcome.written):
-                outcome.refused += [f"{sidecar.name[len(video.stem):]} does not fit ({reason}) and nothing could replace it"
+                outcome.refused += [f"{sidecar.name[len(video.stem):]} failed verification ({reason}) and nothing could replace it"
                                     for sidecar, reason in bad]
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
@@ -669,7 +726,7 @@ def notify(env_file: Path, written: list[str], refused: list[str], replaced: lis
         post(keeper.env_value(env_file, "DISCORD_WEBHOOK_DOWNLOADS"), "📝 Subtitles added", 3066993,
              [("written", written)], footer)
         post(keeper.env_value(env_file, "DISCORD_WEBHOOK_DOWNLOAD_ISSUES"), "🟠 Subtitles need a look", 15105570,
-             [("refused", refused), ("replaced, did not fit the video", replaced), ("errors", errors)], footer)
+             [("refused", refused), ("replaced after failed verification", replaced), ("errors", errors)], footer)
     except (urllib.error.URLError, OSError) as error:
         print(f"Discord was not told: {error}", file=sys.stderr)
 

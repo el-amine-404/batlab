@@ -55,8 +55,10 @@ one sidecar that fits keeps the language as it is. **Newly extracted and OCR'd
 SRTs must pass the same check before installation.** Both halves must agree
 within 0.3 s and the overall offset must be within 0.5 s. Both framerate
 heuristics are disabled; ffsubsync must explicitly report a successful
-alignment. The default non-commentary audio track is used. Its audio and
-speech detection are cached for the video's remaining checks.
+alignment. The default non-commentary audio track is used. Each subtitle half
+is clipped and rebased to zero and compared with the matching audio half.
+Audio is decoded once; each half's speech detection is cached for the video's
+remaining checks.
 
 Existing full-dialogue SRTs in the requested languages are checked even if the
 video has no embedded subtitles. Untagged `<video>.srt` files are also checked,
@@ -170,10 +172,20 @@ under the recycle directory, without changing the original library sidecars.
 | Italian BD PGS → Italian SRT | 344 | about 95% | passed, 0.00 s |
 | English SRT deliberately shifted by 30 s | — | n/a | refused, −29.96 s |
 
-The 72 tests across subextract, PGS OCR, ass2srt and dubkeeper pass. Regression
+The 75 tests across subextract, PGS OCR, ass2srt and dubkeeper pass. Regression
 coverage includes failed writes preserving originals, concurrent sidecar
 changes, interrupted-run checkpoints, overlapping runs, malformed/cropped PGS,
 unreadable OCR events, and ffsubsync reporting failure with a zero exit code.
+
+The overnight run exposed a false-negative bug in the original half check:
+the second subtitle half retained a silent first half and was compared against
+the entire audio track. On S01E05 this made ffsubsync's score negative despite
+a small offset. Comparing matching audio/subtitle windows instead passes at
++0.16 s and +0.28 s, without relaxing the 0.5 s offset or 0.3 s agreement limits.
+The deliberately shifted subtitle must still be rejected. Earlier
+"audio alignment was unsuccessful" results are inconclusive, not proof that
+the subtitle belongs to another release. Rerun `--all --languages all` to
+recheck the library after installing this correction.
 
 ## One-time installation on the server
 

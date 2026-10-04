@@ -7,6 +7,7 @@ import json
 import sys
 import tempfile
 import unittest
+import wave
 from pathlib import Path
 from unittest.mock import patch, Mock
 
@@ -123,6 +124,53 @@ class SidecarTests(unittest.TestCase):
 
 
 GOOD_SRT = "1\n00:00:01,000 --> 00:00:02,000\nHello.\n\n2\n00:00:31,000 --> 00:00:32,000\nGoodbye.\n"
+
+
+class AudioWindowTests(unittest.TestCase):
+    def test_window_clips_and_rebases_cues(self):
+        text = sx.srt_window(GOOD_SRT, 1500, 31500)
+        self.assertEqual(text, "1\n00:00:00,000 --> 00:00:00,500\nHello.\n\n"
+                               "2\n00:00:29,500 --> 00:00:30,000\nGoodbye.\n")
+        self.assertEqual(sx.srt_window(GOOD_SRT, 40000, 60000), "")
+
+    def test_audio_and_subtitle_halves_have_matching_origins(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            reference = root / "reference.wav"
+            first_audio, second_audio = b"\x01\x00" * 200, b"\x02\x00" * 200
+            with wave.open(str(reference), "wb") as wav:
+                wav.setparams((1, 2, 100, 0, "NONE", "not compressed"))
+                wav.writeframes(first_audio + second_audio)
+            subtitle = root / "full.srt"
+            subtitle.write_text("\n".join(
+                f"{n + 1}\n{sx.keeper_time(n * 100)} --> {sx.keeper_time(n * 100 + 80)}\nLine {n}\n"
+                for n in range(40)))
+            checker = sx.AudioChecker(root / "video.mkv", {"format": {"duration": "4"}}, root, root, "bazarr")
+            checker.reference = reference
+            seen = []
+            def align(path):
+                with wave.open(str(checker.segment_reference), "rb") as wav:
+                    seen.append((path.read_text(), wav.readframes(wav.getnframes())))
+                return .2
+            with patch.object(checker, "ffsubsync", side_effect=align):
+                self.assertEqual(checker.offset(subtitle), (200, ""))
+            self.assertEqual([audio for _, audio in seen], [first_audio, second_audio])
+            self.assertIn("00:00:00,000 --> 00:00:00,080\nLine 0", seen[0][0])
+            self.assertIn("00:00:00,000 --> 00:00:00,080\nLine 20", seen[1][0])
+            self.assertNotIn("Line 0\n", seen[1][0])
+            self.assertIsNone(checker.segment_reference)
+
+    def test_sparse_subtitles_do_not_decode_audio(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            subtitle = root / "sparse.srt"
+            subtitle.write_text(GOOD_SRT)
+            checker = sx.AudioChecker(root / "video.mkv", {"format": {"duration": "60"}}, root, root, "bazarr")
+            with patch.object(checker, "reference_audio") as reference:
+                shift, reason = checker.offset(subtitle)
+            self.assertIsNone(shift)
+            self.assertIn("too few", reason)
+            reference.assert_not_called()
 
 
 class SafetyTests(unittest.TestCase):
