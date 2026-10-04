@@ -38,7 +38,7 @@ SMALL_LINE = 32           # px per line under which an image is doubled
 @dataclass
 class Composition:
     pts: int                                   # 90 kHz ticks
-    objects: list[tuple[int, int, int, bool]]  # object id, x, y, forced
+    objects: list[tuple[int, int, int, bool, tuple | None]]  # id, x, y, forced, crop
     palette_only: bool
 
 
@@ -51,10 +51,14 @@ class Bitmap:
 
 def segments(data: bytes):
     offset = 0
-    while offset + 13 <= len(data):
+    while offset < len(data):
+        if offset + 13 > len(data):
+            raise ValueError("truncated PGS segment header")
         if data[offset:offset + 2] != b"PG":
             raise ValueError(f"not a PGS segment at byte {offset}")
         pts, _dts, kind, size = struct.unpack(">IIBH", data[offset + 2:offset + 13])
+        if offset + 13 + size > len(data):
+            raise ValueError("truncated PGS segment payload")
         yield pts, kind, data[offset + 13:offset + 13 + size]
         offset += 13 + size
 
@@ -63,34 +67,50 @@ def decode_rle(data: bytes, width: int, height: int) -> bytes:
     """PGS run-length coding: a nonzero byte is one pixel; 0x00 then a flag byte
     gives a run (long length if bit 6, explicit colour if bit 7) or, as 0x00 0x00,
     the end of a line."""
+    if not 0 < width <= 8192 or not 0 < height <= 4320:
+        raise ValueError("invalid PGS bitmap dimensions")
     out = bytearray()
+    row, column = 0, 0
     i, n = 0, len(data)
     while i < n:
         byte = data[i]
         i += 1
         if byte:
+            if row >= height or column >= width:
+                raise ValueError("PGS RLE exceeds bitmap dimensions")
             out.append(byte)
+            column += 1
             continue
         if i >= n:
-            break
+            raise ValueError("truncated PGS RLE escape")
         flag = data[i]
         i += 1
         if flag == 0:
-            row = len(out) % width if width else 0
-            if row:
-                out.extend(b"\0" * (width - row))
+            if row >= height:
+                raise ValueError("too many PGS RLE rows")
+            out.extend(b"\0" * (width - column))
+            row, column = row + 1, 0
             continue
         length = flag & 0x3F
         if flag & 0x40:
+            if i >= n:
+                raise ValueError("truncated PGS RLE length")
             length = (length << 8) | data[i]
             i += 1
         colour = 0
         if flag & 0x80:
+            if i >= n:
+                raise ValueError("truncated PGS RLE colour")
             colour = data[i]
             i += 1
+        if length == 0 or row >= height or column + length > width:
+            raise ValueError("invalid PGS RLE run")
         out.extend(bytes([colour]) * length)
+        column += length
     size = width * height
-    return bytes(out[:size]) + b"\0" * max(0, size - len(out))
+    if len(out) != size:
+        raise ValueError("incomplete PGS bitmap")
+    return bytes(out)
 
 
 @dataclass
@@ -111,29 +131,50 @@ def parse(data: bytes) -> list[Event]:
     palette_id = 0
     for pts, kind, payload in segments(data):
         if kind == PCS:
+            if len(payload) < 11:
+                raise ValueError("truncated PGS composition")
             count = payload[10]
             palette_only, palette_id = payload[8] == 0x80, payload[9]
+            if payload[7] == 0x80 and not palette_only:
+                palettes.clear()
+                pending.clear()
+                bitmaps.clear()
             objects, at = [], 11
             for _ in range(count):
+                if len(payload) < at + 8:
+                    raise ValueError("truncated PGS object reference")
                 object_id, _window, flags, x, y = struct.unpack(">HBBHH", payload[at:at + 8])
+                crop = None
+                if flags & 0x80:
+                    if len(payload) < at + 16:
+                        raise ValueError("truncated PGS crop")
+                    crop = struct.unpack(">HHHH", payload[at + 8:at + 16])
                 at += 16 if flags & 0x80 else 8
-                objects.append((object_id, x, y, bool(flags & 0x40)))
+                objects.append((object_id, x, y, bool(flags & 0x40), crop))
             composition = Composition(pts, objects, palette_only)
         elif kind == PDS:
+            if len(payload) < 2 or (len(payload) - 2) % 5:
+                raise ValueError("invalid PGS palette")
             entries = palettes.setdefault(payload[0], {})
             for at in range(2, len(payload) - 4, 5):
                 index, luma, _cr, _cb, alpha = payload[at:at + 5]
                 entries[index] = (luma, alpha)
         elif kind == ODS:
+            if len(payload) < 4:
+                raise ValueError("truncated PGS object")
             object_id, _version, sequence = struct.unpack(">HBB", payload[:4])
             if sequence & 0x80:
-                _length = int.from_bytes(payload[4:7], "big")
+                if len(payload) < 11:
+                    raise ValueError("truncated PGS bitmap header")
+                length = int.from_bytes(payload[4:7], "big") - 4
                 width, height = struct.unpack(">HH", payload[7:11])
-                pending[object_id] = [width, height, bytearray(payload[11:])]
+                pending[object_id] = [width, height, bytearray(payload[11:]), length]
             elif object_id in pending:
                 pending[object_id][2].extend(payload[4:])
             if sequence & 0x40 and object_id in pending:
-                width, height, rle = pending.pop(object_id)
+                width, height, rle, length = pending.pop(object_id)
+                if len(rle) != length:
+                    raise ValueError("incomplete PGS object fragments")
                 bitmaps[object_id] = Bitmap(width, height, decode_rle(bytes(rle), width, height))
         elif kind == END and composition is not None:
             if composition.palette_only and current is not None:
@@ -149,15 +190,28 @@ def parse(data: bytes) -> list[Event]:
                 current.end = composition.pts
                 events.append(current)
                 current = None
-            shown = [(x, y, bitmaps[o]) for o, x, y, _forced in composition.objects if o in bitmaps]
+            shown = []
+            for o, x, y, _forced, crop in composition.objects:
+                if o not in bitmaps:
+                    raise ValueError("PGS composition references a missing bitmap")
+                bitmap = bitmaps[o]
+                if crop:
+                    cx, cy, cw, ch = crop
+                    if not cw or not ch or cx + cw > bitmap.width or cy + ch > bitmap.height:
+                        raise ValueError("invalid PGS object crop")
+                    pixels = b"".join(bitmap.pixels[r * bitmap.width + cx:r * bitmap.width + cx + cw]
+                                      for r in range(cy, cy + ch))
+                    bitmap = Bitmap(cw, ch, pixels)
+                shown.append((x, y, bitmap))
             if shown:
                 palette = dict(palettes.get(palette_id, {}))
                 current = Event(composition.pts, composition.pts,
                                 [(x, y, bitmap, palette) for x, y, bitmap in shown])
             composition = None
     if current is not None:
-        current.end = current.start + 5 * 90000       # a last cue never cleared: give it 5 s
-        events.append(current)
+        raise ValueError("PGS stream ends without clearing its last subtitle")
+    if pending or composition is not None:
+        raise ValueError("incomplete PGS display set")
     return [e for e in events if e.end > e.start]
 
 
@@ -246,13 +300,13 @@ COMMON = [
 
 def clean_line(line: str, language: str) -> str:
     line = line.strip()
-    if language == "eng":
-        for pattern, replacement in ENGLISH_FIXES:
-            line = pattern.sub(replacement, line)
     line = ELLIPSIS.sub("...", line)
     line = (TIGHTEN_FRENCH if language == "fra" else TIGHTEN).sub(r"\1", line)
     for pattern, replacement in COMMON:
         line = pattern.sub(replacement, line)
+    if language == "eng":
+        for pattern, replacement in ENGLISH_FIXES:
+            line = pattern.sub(replacement, line)
     return line.strip()
 
 
@@ -286,6 +340,7 @@ def main(argv: list[str] | None = None) -> int:
         by_event.setdefault(e_index, []).append(text)
 
     cues, confidences, low_lines = [], [], []
+    unreadable = 0
     for e_index, event in enumerate(events):
         lines, words = [], []
         for text in by_event.get(e_index, []):
@@ -293,6 +348,7 @@ def main(argv: list[str] | None = None) -> int:
             words += text.confidences
         lines = [line for line in lines if line]
         if not lines:
+            unreadable += 1
             continue
         confidences += words
         if words and sum(words) / len(words) < LOW_CONFIDENCE:
@@ -307,6 +363,8 @@ def main(argv: list[str] | None = None) -> int:
             out.write(f"{n}\n{srt_time(start)} --> {srt_time(end)}\n" + "\n".join(lines) + "\n\n")
     report = {
         "cues": len(cues),
+        "events": len(events),
+        "unreadable_share": unreadable / len(events) if events else 1.0,
         "words": len(confidences),
         "mean_confidence": round(sum(confidences) / len(confidences), 1) if confidences else 0.0,
         "low_confidence_share": round(sum(c < LOW_CONFIDENCE for c in confidences) / len(confidences), 3) if confidences else 1.0,

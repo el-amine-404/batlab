@@ -50,19 +50,38 @@ WebVTT by ffmpeg. All tracks of a file come out in one read of it.
 
 ## Existing sidecars
 
-A language whose sidecars are SRT is checked with ffsubsync, half by half, as
-the dub keeper checks restored subtitles; one sidecar that fits keeps the
-language as it is. When every one is off (halves disagree, or more than 0.5 s
-out), they move to `/data/recycle/subextract/` and an SRT from the file replaces
-them. A track from the file is timed to it, so it is not checked. A check costs
-a decode of the audio: 4 s for an episode with nothing to check, 108 s for a
-99-minute film whose `.en.srt` was checked.
+A language whose sidecars are SRT is checked with ffsubsync, half by half;
+one sidecar that fits keeps the language as it is. **Newly extracted and OCR'd
+SRTs must pass the same check before installation.** Both halves must agree
+within 0.3 s and the overall offset must be within 0.5 s. Both framerate
+heuristics are disabled; ffsubsync must explicitly report a successful
+alignment. The default non-commentary audio track is used. Its audio and
+speech detection are cached for the video's remaining checks.
+
+Existing full-dialogue SRTs in the requested languages are checked even if the
+video has no embedded subtitles. Untagged `<video>.srt` files are also checked,
+without guessing their language. Failed variants are reported even when another
+SRT for that language passes. If no verified replacement is available, existing
+files are preserved. Forced-only sidecars are excluded from dialogue checks.
+
+Malformed SRTs, corrupt text, invalid timestamps, cues beyond the video, and
+subtitles with fewer than 15 cues in either half are refused. An inconclusive
+check leaves existing sidecars in place. These checks establish structural
+validity and speech timing, **not translation accuracy or semantic agreement
+with spoken words**. Sparse dialogue and different dub timings can cause
+conservative refusals; the log gives the reason.
+
+When all existing SRTs for a language fail and a replacement passes, originals
+are copied into a unique directory under `/data/recycle/subextract/`. The new
+SRT is flushed and atomically installed before redundant bad sidecars are
+removed. Failed writes preserve the original. Changes by an import or Bazarr
+during verification abort installation so a later run can retry.
 
 Jellyfin is told about each file that got a subtitle (`/Library/Media/Updated`).
 
 ## Blu-ray image subtitles (OCR)
 
-A language with no text track but a Blu-ray PGS track is read with Tesseract,
+A language with no usable text track but a Blu-ray PGS track is read with Tesseract,
 in its own image (`ocr/`, built with `make -C subextract ocr-image`): Tesseract
 5 with the `tessdata_best` models for English, French, Arabic, Italian,
 Spanish, Portuguese and German. `ocr/pgsocr.py` parses the PGS stream itself:
@@ -76,7 +95,8 @@ keeping its space before `! ? ; :`.
 The track is the default one, else the one with the most pictures, never a
 forced or signs track. An OCR'd SRT is installed only when Tesseract's word
 confidences reach a mean of 85% with at most 5% of words under 60%, and it has
-20 lines or more; otherwise nothing is written and the reason, with sample
+20 lines or more, with at most 5% of displayed events unreadable; it must also
+pass the audio check above. Otherwise nothing is written and the reason, with sample
 lines, is posted. *Attack on Titan* S04E24, 2026-10-03:
 
 | Track | Lines | Words | Mean confidence | Under 60% | Time (2 CPUs) |
@@ -87,11 +107,13 @@ lines, is posted. *Attack on Titan* S04E24, 2026-10-03:
 Read by eye, the English was right throughout, names included (Zeke, Pyxis,
 Ackermann). OCR uses two CPUs (`--ocr-cpus`) and no GPU: clean white-on-
 transparent Blu-ray text is what Tesseract reads best, and the T1000 would add
-nothing here. A text track is always preferred, since it is exact.
+nothing here. A usable text track is preferred. The PGS parser rejects
+truncated data and honors object cropping. VobSub/DVD, DVB and other image
+codecs are currently unsupported and explicitly logged as skipped.
 
 Every SRT written, from text or OCR, is cleaned: sorted, renumbered, without
 empty or repeated cues, each at least 0.3 s on screen. A sidecar that does not
-fit is moved aside only once its replacement is written; if nothing can replace
+fit is removed only once its replacement is written; if nothing can replace
 it, it stays and is reported.
 
 ## Notifications
@@ -103,23 +125,54 @@ gives the scope, the number of files and the duration.
 
 ## The whole library
 
-The timer only handles new imports. To go through everything once, on lab2:
+The timer only handles new imports. To process the TV and movie library once,
+run this from the laptop (the job runs on lab2 and survives SSH disconnection):
 
 ```bash
-cd ~/batlab && nohup nice -n 19 ionice -c 3 \
-  python3 subextract/scripts/subextract.py --all > ~/subextract-all.log 2>&1 &
-tail -f ~/subextract-all.log      # one line per file it changed
+ssh lab2 'nohup nice -n 19 ionice -c 3 python3 -u /home/potato/batlab/subextract/scripts/subextract.py --all --languages en,fr,ar --quiet > /home/potato/subextract-all.log 2>&1 < /dev/null &'
+ssh lab2 'tail -f /home/potato/subextract-all.log'
 ```
 
-It resumes where it stopped if interrupted: a file is recorded once handled and
-skipped next time unless its size changed. Add `--languages en,fr,ar,it` for
-more languages, or `--dry-run` first to see the decisions without writing.
-`--all` posts one summary at the end.
+`--all` recursively scans `/mnt/storage/data/media/tv` and `media/movies`,
+excluding downloads and recycle directories. It handles one video at a time;
+OCR is capped at two CPUs and 2 GiB. A lock shared with the timer prevents
+overlapping runs. `--quiet` suppresses Discord posts; Jellyfin is refreshed
+after successful writes.
+
+Progress is checkpointed atomically after every completed file. Rerunning the
+command resumes; changed videos, sidecars, languages, scripts, or OCR images
+invalidate the cache. Old size-only cache entries are rechecked. Refusals,
+skips and errors are retried. The log prints each file before processing and
+a final summary; errors or refusals produce exit status 1.
+
+Use `--languages en,fr,ar,it` to include Italian, or `--languages all` for all
+tagged text languages and supported OCR languages. `--dry-run` performs the
+same extraction/OCR/verification using temporary files but leaves library
+subtitles and resume state unchanged. Missing OCR/Bazarr dependencies stop the
+run; `--no-ocr` explicitly opts out of OCR. Refused results need review; they
+are never silently installed.
 
 ```bash
 subextract/scripts/subextract.py --dry-run --file VIDEO   # what it would do to one file
 make -C subextract test
 ```
+
+## Validation on lab2, 2026-10-04
+
+The safety review follows git commit `c422fe2`. Tests use isolated hard links
+under the recycle directory, without changing the original library sidecars.
+
+| S04E24 path | Cues | OCR confidence | Audio check |
+| --- | --- | --- | --- |
+| MTBB ASS → English SRT | 273 | n/a | passed, 0.00 s |
+| English BD PGS → English SRT | 220 | about 96% | passed, +0.16 s |
+| Italian BD PGS → Italian SRT | 344 | about 95% | passed, 0.00 s |
+| English SRT deliberately shifted by 30 s | — | n/a | refused, −29.96 s |
+
+The 71 tests across subextract, PGS OCR, ass2srt and dubkeeper pass. Regression
+coverage includes failed writes preserving originals, concurrent sidecar
+changes, interrupted-run checkpoints, overlapping runs, malformed/cropped PGS,
+unreadable OCR events, and ffsubsync reporting failure with a zero exit code.
 
 ## One-time installation on the server
 

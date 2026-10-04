@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch, Mock
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "subextract.py"
@@ -29,6 +31,11 @@ def track(title: str, default: bool, lines: int, covered: float, overlap: float)
 
 
 class TrackTests(unittest.TestCase):
+    def test_full_dialogue_with_signs_is_not_excluded(self):
+        info = {"streams": [subtitle(2, "ass", "eng", "Full Dialogue + Signs/Songs"),
+                            subtitle(3, "ass", "eng", "Full Commentary")]}
+        self.assertEqual([t.index for t in sx.text_tracks(info)], [2])
+
     def test_signs_forced_and_image_tracks_are_not_candidates(self) -> None:
         info = {"streams": [
             subtitle(4, "ass", "eng", "[MTBB] English ASS", default=True),
@@ -113,6 +120,192 @@ class SidecarTests(unittest.TestCase):
             found = {lang: sorted(p.name[len(video.stem):] for p in paths)
                      for lang, paths in sx.sidecars_by_language(video).items()}
             self.assertEqual(found, {"en": [".en.srt", ".eng.ass"], "ar": [".ar.hi.srt"]})
+
+
+GOOD_SRT = "1\n00:00:01,000 --> 00:00:02,000\nHello.\n\n2\n00:00:31,000 --> 00:00:32,000\nGoodbye.\n"
+
+
+class SafetyTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.video = self.root / "test.mkv"
+        self.video.write_bytes(b"video")
+        self.sidecar = self.root / "test.en.srt"
+        self.info = {"streams": [subtitle(2, "subrip", "eng")], "format": {"duration": "60"}}
+        self.probe = patch.object(sx.subprocess, "run", return_value=Mock(stdout=json.dumps(self.info)))
+        self.probe.start()
+        self.addCleanup(self.probe.stop)
+
+        def extracted(video, tracks, workdir):
+            for t in tracks:
+                t.srt = GOOD_SRT
+                sx.measure(t)
+        self.extract = patch.object(sx, "extract", side_effect=extracted)
+        self.extract.start()
+        self.addCleanup(self.extract.stop)
+
+    def process(self, apply=True, ocr=None):
+        return sx.process(self.video, self.root, "bazarr", apply, {"en"}, ocr)
+
+    def test_new_subtitles_must_pass_audio_check(self):
+        with patch.object(sx, "Fit", return_value=lambda p: (False, "halves disagree")):
+            result = self.process()
+        self.assertFalse(self.sidecar.exists())
+        self.assertFalse(result.written)
+        self.assertIn("halves disagree", result.refused[0])
+
+    def test_existing_srt_without_embedded_track_is_checked(self):
+        sx.subprocess.run.return_value.stdout = json.dumps({"streams": [], "format": {"duration": "60"}})
+        self.sidecar.write_text(GOOD_SRT)
+        checker = Mock(return_value=(True, "timing OK"))
+        with patch.object(sx, "Fit", return_value=checker):
+            result = self.process()
+        checker.assert_called_once_with(self.sidecar)
+        self.assertTrue(result.kept)
+        self.assertFalse(result.written)
+
+    def test_bad_existing_srt_without_replacement_is_preserved(self):
+        sx.subprocess.run.return_value.stdout = json.dumps({"streams": [], "format": {"duration": "60"}})
+        self.sidecar.write_text(GOOD_SRT)
+        with patch.object(sx, "Fit", return_value=lambda p: (False, "30 seconds off")):
+            result = self.process()
+        self.assertIn("nothing could replace it", result.refused[0])
+        self.assertEqual(self.sidecar.read_text(), GOOD_SRT)
+
+    def test_untagged_srt_is_also_checked(self):
+        sx.subprocess.run.return_value.stdout = json.dumps({"streams": [], "format": {"duration": "60"}})
+        untagged = self.root / "test.srt"
+        untagged.write_text(GOOD_SRT)
+        checker = Mock(return_value=(True, "timing OK"))
+        with patch.object(sx, "Fit", return_value=checker):
+            result = self.process()
+        checker.assert_called_once_with(untagged)
+        self.assertTrue(result.kept)
+
+    def test_bad_variant_is_reported_even_when_another_srt_fits(self):
+        self.sidecar.write_text(GOOD_SRT)
+        variant = self.root / "test.en.hi.srt"
+        variant.write_text("wrong")
+        with patch.object(sx, "Fit", return_value=lambda p: (p == self.sidecar, "timing")):
+            result = self.process()
+        self.assertTrue(result.kept)
+        self.assertIn("another SRT", result.refused[0])
+        self.assertEqual(variant.read_text(), "wrong")
+
+    def test_write_failure_preserves_existing_subtitle(self):
+        self.sidecar.write_text("original")
+        with patch.object(sx, "Fit", return_value=lambda p: (p != self.sidecar, "timing")), \
+                patch.object(sx, "atomic_text", side_effect=OSError("disk full")):
+            with self.assertRaisesRegex(OSError, "disk full"):
+                self.process()
+        self.assertEqual(self.sidecar.read_text(), "original")
+
+    def test_replacement_has_backup_and_valid_srt(self):
+        self.sidecar.write_text("original")
+        with patch.object(sx, "Fit", return_value=lambda p: (p != self.sidecar, "timing")):
+            result = self.process()
+        self.assertEqual(self.sidecar.read_text(), sx.clean_srt(GOOD_SRT))
+        self.assertEqual(len(result.replaced), 1)
+        backups = list((self.root / "recycle/subextract").rglob("*.srt"))
+        self.assertEqual([p.read_text() for p in backups], ["original"])
+
+    def test_atomic_replace_failure_does_not_truncate(self):
+        self.sidecar.write_text("original")
+        with patch.object(Path, "replace", side_effect=OSError("replace failed")):
+            with self.assertRaises(OSError):
+                sx.atomic_text(self.sidecar, "replacement")
+        self.assertEqual(self.sidecar.read_text(), "original")
+        self.assertFalse(list(self.root.glob(".subextract-*.tmp")))
+
+    def test_external_sidecar_change_is_preserved(self):
+        self.sidecar.write_text("original")
+        def check(path):
+            if path != self.sidecar:
+                self.sidecar.write_text("Bazarr updated this")
+                return True, "OK"
+            return False, "bad timing"
+        with patch.object(sx, "Fit", return_value=check):
+            with self.assertRaisesRegex(RuntimeError, "sidecars changed"):
+                self.process()
+        self.assertEqual(self.sidecar.read_text(), "Bazarr updated this")
+
+    def test_dry_run_never_replaces(self):
+        self.sidecar.write_text("original")
+        with patch.object(sx, "Fit", return_value=lambda p: (p != self.sidecar, "timing")):
+            result = self.process(apply=False)
+        self.assertTrue(result.written)
+        self.assertEqual(self.sidecar.read_text(), "original")
+        self.assertFalse((self.root / "recycle/subextract").exists())
+
+    def test_unusable_text_falls_back_to_pgs(self):
+        self.info["streams"].append(subtitle(3, "hdmv_pgs_subtitle", "eng"))
+        sx.subprocess.run.return_value.stdout = json.dumps(self.info)
+        worker = Mock()
+        worker.run.return_value = (GOOD_SRT, {"cues": 40, "mean_confidence": 96, "low_confidence_share": 0})
+        with patch.object(sx, "extract"), patch.object(sx, "Fit", return_value=lambda p: (True, "OK")):
+            result = self.process(ocr=worker)
+        self.assertTrue(result.written)
+        worker.run.assert_called_once()
+
+    def test_fingerprint_changes_with_settings_and_sidecars(self):
+        initial = sx.fingerprint(self.video, {"languages": ["en"]})
+        self.assertNotEqual(initial, sx.fingerprint(self.video, {"languages": ["en", "fr"]}))
+        self.sidecar.write_text(GOOD_SRT)
+        self.assertNotEqual(initial, sx.fingerprint(self.video, {"languages": ["en"]}))
+
+    def test_invalid_subtitles_are_rejected(self):
+        for text in ("", "1\n00:00:01,000 --> 00:00:02,000\n<i></i>\n", GOOD_SRT.replace("32,000", "62,000"),
+                     GOOD_SRT.replace("Hello.", "bad\ufffdtext"), GOOD_SRT.replace("02,000", "00,000")):
+            with self.subTest(text=text):
+                self.assertTrue(sx.srt_problem(text, 60))
+        self.assertEqual(sx.srt_problem(GOOD_SRT, 60), "")
+
+    def test_ffsubsync_zero_exit_with_failed_alignment_is_rejected(self):
+        checker = sx.AudioChecker(self.video, self.info, self.root, self.root, "bazarr")
+        checker.reference = self.root / "reference.wav"
+        sx.subprocess.run.return_value = Mock(returncode=0, stdout='SUBEXTRACT_RESULT=' + json.dumps({
+            "sync_was_successful": False, "offset_seconds": 0, "framerate_scale_factor": 1}), stderr="")
+        with self.assertRaisesRegex(ValueError, "unsuccessful"):
+            checker.ffsubsync(self.sidecar)
+        command = sx.subprocess.run.call_args.args[0]
+        self.assertIn("--skip-infer-framerate-ratio", command)
+        self.assertIn("--no-fix-framerate", command)
+
+    def test_ocr_missing_images_cannot_pass_on_confidence_alone(self):
+        report = {"cues": 300, "mean_confidence": 99, "low_confidence_share": 0, "unreadable_share": .2}
+        self.assertIn("unreadable", sx.ocr_verdict(report))
+
+    def test_checkpoint_survives_interruption_on_next_video(self):
+        second = self.root / "second.mkv"
+        second.write_bytes(b"second video")
+        args = ["--all", "--no-ocr", "--quiet", "--data-root", str(self.root), "--state-dir", str(self.root / "state")]
+        with patch.object(sx, "library_videos", return_value=[self.video, second]), \
+                patch.object(sx, "process", side_effect=[sx.Outcome([], [], [], []), KeyboardInterrupt]), \
+                patch("builtins.print"):
+            with self.assertRaises(KeyboardInterrupt):
+                sx.main(args)
+        handled = json.loads((self.root / "state/handled.json").read_text())
+        self.assertIn(str(self.video), handled)
+        self.assertNotIn(str(second), handled)
+
+    def test_refusals_are_retried_and_report_failure(self):
+        args = ["--all", "--no-ocr", "--quiet", "--data-root", str(self.root), "--state-dir", str(self.root / "state")]
+        with patch.object(sx, "library_videos", return_value=[self.video]), \
+                patch.object(sx, "process", return_value=sx.Outcome([], [], [], [], ["bad timing"])) as process, \
+                patch.object(sx, "tell_jellyfin"), patch("builtins.print"):
+            self.assertEqual(sx.main(args), 1)
+            self.assertEqual(sx.main(args), 1)
+            self.assertEqual(process.call_count, 2)
+
+    def test_simultaneous_runs_use_the_same_lock(self):
+        lockroot = self.root / "recycle/.subextract"
+        lockroot.mkdir(parents=True)
+        with (lockroot / "run.lock").open("a") as lock, patch.object(sx, "run_batch") as batch, patch("builtins.print"):
+            sx.fcntl.flock(lock, sx.fcntl.LOCK_EX | sx.fcntl.LOCK_NB)
+            self.assertEqual(sx.main(["--all", "--data-root", str(self.root)]), 0)
+            batch.assert_not_called()
 
 
 if __name__ == "__main__":

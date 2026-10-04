@@ -60,6 +60,33 @@ ROWS = [[0] * 5 + [1] * 70 + [0] * 5, [2] * 80, [0] * 3 + [1] * 77]
 
 
 class ParseTests(unittest.TestCase):
+    def test_empty_rle_rows_are_not_lost(self):
+        self.assertEqual(ocr.decode_rle(b"\0\0\1\1\0\0", 2, 2), b"\0\0\1\1")
+
+    def test_truncated_segments_are_rejected(self):
+        valid = segment(0, ocr.END, b"1234")
+        for data in (b"PG", valid[:-1]):
+            with self.subTest(data=data), self.assertRaises(ValueError):
+                list(ocr.segments(data))
+
+    def test_malformed_rle_is_rejected(self):
+        for data in (b"\0", b"\0\x40", b"\0\x82", b"\0\x03", b"\1"):
+            with self.subTest(data=data), self.assertRaises(ValueError):
+                ocr.decode_rle(data, 2, 1)
+
+    def test_cropped_object_uses_only_visible_pixels(self):
+        header = pcs([])[:-1] + b"\1"
+        cropped = header + struct.pack(">HBBHHHHHH", 0, 0, 0x80, 10, 20, 1, 0, 2, 1)
+        stream = (segment(0, ocr.PCS, cropped) + segment(0, ocr.PDS, pds({1: (235, 255)}))
+                  + segment(0, ocr.ODS, ods(0, [[0, 1, 1, 0]])) + segment(0, ocr.END, b"")
+                  + segment(90000, ocr.PCS, pcs([])) + segment(90000, ocr.END, b""))
+        bitmap = ocr.parse(stream)[0].images[0][2]
+        self.assertEqual((bitmap.width, bitmap.height, bitmap.pixels), (2, 1, b"\1\1"))
+
+    def test_missing_bitmap_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "missing bitmap"):
+            ocr.parse(segment(0, ocr.PCS, pcs([(99, 0, 0)])) + segment(0, ocr.END, b""))
+
     def test_rle_round_trip(self) -> None:
         width = len(ROWS[0])
         pixels = ocr.decode_rle(rle(ROWS), width, len(ROWS))
@@ -105,7 +132,7 @@ class ImageTests(unittest.TestCase):
 
 class CleanTests(unittest.TestCase):
     def test_english_fixes(self) -> None:
-        cases = {"l'm here, l think.": "I'm here, I think.", "lt was | who said it": "It was I who said it",
+        cases = {"l’m here": "I'm here", "l'm here, l think.": "I'm here, I think.", "lt was | who said it": "It was I who said it",
                  "Wait ... what ?": "Wait... what?", "-Hey!": "- Hey!", "He said ‘no’ to “them”": "He said 'no' to \"them\"",
                  "Al l0ve": "Al love", "Lillian will fly": "Lillian will fly"}
         for raw, expected in cases.items():
