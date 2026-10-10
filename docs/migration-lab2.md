@@ -196,8 +196,11 @@ DNS and DHCP are untouched in this phase, so the house keeps its internet.
    as long as their ranges never overlap: lab1 gives `.4`-`.100`, lab2
    `.101`-`.200`. A device takes whichever offer comes first; when its server
    is off, it gets an address from the other one at its next connect, or
-   when its lease runs out. Both hand out both DNS servers, and leases last 7
-   days, so a dead host is noticed only by devices that rejoin. The sync
+   when its lease runs out. Both hand out both DNS servers, each listing
+   itself first: a device that leased from the live host asks the live host
+   first. Many clients always try the first server and some never fall back
+   (see below). Leases last 7 days, so a dead host is noticed only by devices
+   that rejoin. The sync
    never copies DHCP (`FEATURES_DHCP_*=false`): the ranges differ per host.
    The router's own DHCP stays off.
 
@@ -205,7 +208,7 @@ DNS and DHCP are untouched in this phase, so the house keeps its internet.
    both are set in `AdGuardHome.yaml` with AdGuard stopped
    (`/mnt/docker-volumes/adguardhome/conf/`). If one host is down, do the
    live one first: on lab2 everything below, on lab1 only `range_end`,
-   `lease_duration` and `options`.
+   `lease_duration` and `options` (with `.3` first).
 
    ```yaml
    dhcp:
@@ -219,7 +222,7 @@ DNS and DHCP are untouched in this phase, so the house keeps its internet.
        lease_duration: 604800
        icmp_timeout_msec: 1000
        options:
-         - "6 ips 192.168.1.3,192.168.1.201"
+         - "6 ips 192.168.1.201,192.168.1.3"   # lab1: .3 first
    ```
 
    On lab2, open DHCP to devices that have no address yet

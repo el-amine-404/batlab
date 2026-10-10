@@ -23,7 +23,7 @@ NIC    Intel I219-LM, 1 Gbit, enp0s31f6, static 192.168.1.201
 | Container CPU and memory limits | `compose.env` | lab1's, with Ollama at 6 CPUs / 12 GB and Immich ML at 4 GB | twice lab1's RAM and threads | after a week of Netdata |
 | Render group for Jellyfin | `compose.env`, `RENDER_GID` | `992` | Debian assigns the gid at install | on reinstall |
 | Stacks on this host | `stacks.txt` | all but `adguardhome-sync` | lab1 holds the AdGuard settings and pushes them here | when a stack moves |
-| DHCP range | `AdGuardHome.yaml`, `dhcp` | `.101`-`.200`, 7-day leases, DNS `.3` and `.201` | lab1 serves `.4`-`.100`; ranges must never overlap | if a third DHCP host joins |
+| DHCP range | `AdGuardHome.yaml`, `dhcp` | `.101`-`.200`, 7-day leases, DNS `.201` then `.3` (each host lists itself first) | lab1 serves `.4`-`.100`; ranges must never overlap | if a third DHCP host joins |
 | CPU temperature alert | `netdata/cpu-temperature.conf` | warn above 90 C, critical above 95 C on `coretemp` | Tjmax 100 C, thin chassis | after the first heavy week |
 | Netdata docker collector | `netdata/go.d-docker.conf` | on, every 10 s | trial: on lab1 it cost most of two cores | watch `app.dockerd` CPU; turn off with `jobs: []` |
 | Deep media pass limits | `systemd/batlab-mediascan-deep.service.d/limits.conf` | 2 threads, stop above 90 C | decode heats a thin chassis | loosen after a week |
