@@ -25,26 +25,44 @@ fi
 # a_2.4, not a_5: a_5 is WPA3-only, and WPA3 (SAE) cannot use a hashed
 # password, so it would sit on lab2 in plain text. A backup link needs range
 # more than speed, and the TV is on a_2.4 too, so the Wi-Fi log watches its band.
-read -r -p "Wi-Fi name [a_2.4]: " ssid </dev/tty
-ssid="${ssid:-a_2.4}"
-read -r -s -p "Wi-Fi password for $ssid: " pass </dev/tty
-echo
+reuse=n
+if [[ -s "$WPA_CONF" ]]; then
+  read -r -p "Keep the Wi-Fi network already configured in $WPA_CONF? [Y/n] " reuse </dev/tty
+  [[ "$reuse" == [nN]* ]] && reuse=n || reuse=y
+fi
 
 umask 077
-{
-  echo "ctrl_interface=/run/wpa_supplicant"
-  # Strip the plain-text password line wpa_passphrase adds as a comment.
-  wpa_passphrase "$ssid" <<<"$pass" | grep -v '^[[:space:]]*#psk='
-} >"$WPA_CONF"
-unset pass
-echo "wrote $WPA_CONF (root only, password hashed)"
+if [[ "$reuse" == n ]]; then
+  read -r -p "Wi-Fi name [a_2.4]: " ssid </dev/tty
+  ssid="${ssid:-a_2.4}"
+  read -r -s -p "Wi-Fi password for $ssid: " pass </dev/tty
+  echo
+  {
+    echo "ctrl_interface=/run/wpa_supplicant"
+    # Strip the plain-text password line wpa_passphrase adds as a comment.
+    wpa_passphrase "$ssid" <<<"$pass" | grep -v '^[[:space:]]*#psk='
+  } >"$WPA_CONF"
+  unset pass
+  echo "wrote $WPA_CONF (root only, password hashed)"
+fi
+# 20 MHz on 2.4 GHz: with 40 MHz the 8265 also lost half its packets
+# (modprobe.d/iwlwifi.conf has the rest of the fix).
+grep -q 'disable_ht40=1' "$WPA_CONF" || sed -i 's/^\(\s*\)psk=/\1disable_ht40=1\n\1psk=/' "$WPA_CONF"
+
+# Driver power saving off, or the link drops every 15-25 s.
+rm -f /etc/modprobe.d/iwlwifi-test.conf
+install -m 644 "$HERE/modprobe.d/iwlwifi.conf" /etc/modprobe.d/iwlwifi.conf
+ifdown "$IFACE" 2>/dev/null || true
+modprobe -r iwlmvm iwlwifi
+modprobe iwlwifi
+sleep 3
+echo "Wi-Fi driver reloaded with power saving off"
 
 install -m 644 "$HERE/sysctl.d/90-wifi-backup.conf" /etc/sysctl.d/
 sysctl -q -p /etc/sysctl.d/90-wifi-backup.conf
 echo "applied routing and ARP settings"
 
 install -m 644 "$HERE/network/$IFACE" "/etc/network/interfaces.d/$IFACE"
-ifdown "$IFACE" 2>/dev/null || true
 ifup "$IFACE"
 
 echo "waiting for the Wi-Fi to connect..."
@@ -72,6 +90,9 @@ echo "== Result"
 iw dev "$IFACE" link | sed -n '1,3p;/signal/p;/tx bitrate/p'
 ip -br addr show "$IFACE"
 ip route | grep -E "default|192.168.1.0"
+echo "power save: driver $(cat /sys/module/iwlwifi/parameters/power_save), $(iw dev "$IFACE" get power_save)"
+echo "pinging the router over Wi-Fi for 60 s..."
+ping -I "$IFACE" -c 60 -i 1 -W 1 192.168.1.1 | grep -E 'packet loss'
 if ping -c 2 -W 2 -I "$IFACE" 1.1.1.1 >/dev/null; then
   echo "internet over Wi-Fi: ok"
 else
