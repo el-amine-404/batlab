@@ -239,6 +239,12 @@ DNS and DHCP are untouched in this phase, so the house keeps its internet.
    (`icmp_timeout_msec`), so the overlap meanwhile does not hand out a taken
    one.
 
+   Some clients only ever ask the first DNS server: with lab1 off, the
+   Samsung TV's Jellyfin player waited on `.3` and played nothing. While lab1
+   is off for long, lab2 takes `.3` as a second address
+   (`hosts/lab2/systemd/batlab-lab1-standin.service`); **disable it before
+   lab1 is powered on**: `sudo systemctl disable --now batlab-lab1-standin`.
+
    Verify on a client (`nmcli dev show`, `ipconfig /all`): both DNS
    addresses listed. Then power one host off, forget the Wi-Fi on a phone and
    rejoin: it gets an address from the other host's half.
