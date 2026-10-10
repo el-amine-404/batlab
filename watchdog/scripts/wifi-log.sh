@@ -6,8 +6,10 @@
 set -Eeuo pipefail
 
 iface="${1:?usage: $0 <wifi interface>}"
+export PATH="$PATH:/usr/sbin:/sbin"
+link="$(iw dev "$iface" link)"
 
-iw dev "$iface" link | awk -v iface="$iface" '
+awk -v iface="$iface" '
   /^Not connected/ { print iface " not connected"; done = 1; exit }
   $1 == "SSID:"    { ssid = $2 }
   $1 == "freq:"    { freq = $2 }
@@ -16,4 +18,4 @@ iw dev "$iface" link | awk -v iface="$iface" '
   /tx bitrate:/    { tx = $3 }
   END {
     if (!done) printf "%s ssid=%s freq=%sMHz signal=%sdBm rx=%sMbit/s tx=%sMbit/s\n", iface, ssid, freq, signal, rx, tx
-  }'
+  }' <<<"$link"
