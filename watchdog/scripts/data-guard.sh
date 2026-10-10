@@ -27,18 +27,20 @@ stop_data_containers() {
   local reason="$1" names
   names="$(data_containers | awk '$3 == "true" { print $1 }' | xargs)"
 
+  echo "$reason; stopping: ${names:-none}"
+  # Before stopping: a container stuck on a hung disk can keep docker stop
+  # waiting, and the card must go out regardless.
+  watchdog_notify "🔴 Data disk unavailable" "$RED" \
+    "Mount" "\`$WATCHDOG_DATA_ROOT\`" \
+    "Reason" "$reason" \
+    "Stopping" "${names// /, }"
+
   if [[ -n "$names" ]]; then
     install -d -m 750 "$STATE_DIR"
     tr ' ' '\n' <<<"$names" >>"$STOPPED_FILE"
     # shellcheck disable=SC2086
     docker stop $names >/dev/null
   fi
-
-  echo "$reason; stopped: ${names:-none}"
-  watchdog_notify "🔴 Data disk unavailable" "$RED" \
-    "Mount" "\`$WATCHDOG_DATA_ROOT\`" \
-    "Reason" "$reason" \
-    "Stopped" "${names// /, }"
 }
 
 start_data_containers() {
@@ -82,8 +84,14 @@ boot)
   mountpoint -q "$WATCHDOG_DATA_ROOT" ||
     stop_data_containers "booted without the disk"
   ;;
+hung)
+  # From the heartbeat: still mounted, but direct reads keep timing out. An
+  # unmounted disk is the stop path's job.
+  mountpoint -q "$WATCHDOG_DATA_ROOT" || exit 0
+  stop_data_containers "mounted but reads time out; power-cycle it with watchdog/scripts/recover-data-disk.sh"
+  ;;
 *)
-  echo "usage: $0 start|stop|boot" >&2
+  echo "usage: $0 start|stop|boot|hung" >&2
   exit 2
   ;;
 esac

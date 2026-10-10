@@ -10,6 +10,12 @@ source "$SCRIPT_DIR/common.sh"
 load_watchdog_config
 : "${WATCHDOG_HEALTHCHECK_URL:?WATCHDOG_HEALTHCHECK_URL is not configured}"
 
+readonly STATE_DIR="/var/lib/batlab-watchdog"
+readonly FAILING_FILE="$STATE_DIR/heartbeat-failing"
+readonly DISK_FAILS_FILE="$STATE_DIR/data-disk-failures"
+readonly RED=15158332
+readonly GREEN=3066993
+
 failures=()
 
 # A process stuck in uninterruptible I/O ignores SIGKILL, so waiting on a hung
@@ -78,6 +84,41 @@ if [[ -n "${WATCHDOG_DNS_SERVER:-}" ]]; then
 fi
 run_check "sshd" sshd_answers
 run_check "journald" journald_answers
+
+install -d -m 750 "$STATE_DIR"
+
+# A Discord card on the first failed run and on the first good one after it, so
+# a failure reaches the channel even if healthchecks.io is not set to notify.
+if ((${#failures[@]})) && [[ ! -e "$FAILING_FILE" ]]; then
+  printf '%s\n' "${failures[@]}" >"$FAILING_FILE"
+  watchdog_notify "🔴 Self-test failing" "$RED" "Failed" "$(printf '%s\n' "${failures[@]}")"
+elif ((${#failures[@]} == 0)) && [[ -e "$FAILING_FILE" ]]; then
+  watchdog_notify "🟢 Self-test passing again" "$GREEN" "Was failing" "$(<"$FAILING_FILE")"
+  rm -f "$FAILING_FILE"
+fi
+
+# A disk that stays mounted but stops answering never unmounts, so the data
+# guard does not see it. After WATCHDOG_DISK_HUNG_AFTER failed runs in a row it
+# is told directly; in its own unit, because docker stop can hang on the disk.
+if [[ -n "$WATCHDOG_DATA_ROOT" ]]; then
+  disk_fails=0
+  [[ -r "$DISK_FAILS_FILE" ]] && disk_fails="$(<"$DISK_FAILS_FILE")"
+  if [[ " ${failures[*]} " == *" data disk "* ]]; then
+    disk_fails=$((disk_fails + 1))
+    if ((disk_fails == ${WATCHDOG_DISK_HUNG_AFTER:-2})); then
+      systemd-run --no-block --collect --unit="batlab-data-guard-hung-$(date +%s)" \
+        "$SCRIPT_DIR/data-guard.sh" hung || true
+    fi
+  else
+    # Back by itself, without a remount: restart what the guard stopped.
+    if ((disk_fails >= ${WATCHDOG_DISK_HUNG_AFTER:-2})); then
+      systemd-run --no-block --collect --unit="batlab-data-guard-back-$(date +%s)" \
+        "$SCRIPT_DIR/data-guard.sh" start || true
+    fi
+    disk_fails=0
+  fi
+  echo "$disk_fails" >"$DISK_FAILS_FILE"
+fi
 
 if ((${#failures[@]} == 0)); then
   curl -fsS -m 10 --retry 3 -o /dev/null "$WATCHDOG_HEALTHCHECK_URL"

@@ -8,7 +8,11 @@ answering, and nothing told anyone.
   disk answers a direct read, sshd sends its banner, and journald syncs, then
   pings healthchecks.io. A failed or hung check sends `/fail` and alerts at once;
   a frozen or offline server stops pinging and alerts after the grace time. The
-  watcher runs off-site, so it still works when this host cannot.
+  watcher runs off-site, so it still works when this host cannot. The heartbeat
+  also posts its own Discord card when it starts failing and when it passes
+  again, so a failure reaches the channel even if the healthchecks.io check has
+  no integration. On 2026-10-10 it failed every run for ten hours and nobody
+  heard of it.
   On a host serving the network's DNS, set `WATCHDOG_DNS_SERVER` and the
   heartbeat also asks it for a name and fails without an address back. On a
   host without the data disk, leave `WATCHDOG_DATA_ROOT` empty: the disk check is
@@ -16,7 +20,10 @@ answering, and nothing told anyone.
 - **Data guard** — containers that bind-mount `/mnt/storage/data` run only while
   it is mounted. Without the disk they would write into the empty mountpoint on
   the root filesystem. DNS, Caddy, gluetun and everything else are unaffected.
-  Each stop and start posts to Discord.
+  Each stop and start posts to Discord. A disk that hangs while still mounted
+  never unmounts, so the heartbeat stands in: after two failed reads in a row
+  (`WATCHDOG_DISK_HUNG_AFTER`) it runs `data-guard.sh hung`, and when reads
+  work again without a remount it runs `data-guard.sh start`.
 
 - **SMART alerts** — `scripts/smart-notify.sh` turns a smartd warning into the
   same Discord card. Debian ships smartd writing to root's local mailbox, which
