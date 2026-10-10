@@ -24,3 +24,21 @@ sudo systemctl restart networking
 `127.0.0.1` answers once AdGuard runs on this host; until then the second
 line resolves. Update `HostName` in your laptop's `~/.ssh/config` and
 reconnect.
+
+## Time
+
+Debian's `systemd-timesyncd` is already running and asks the Debian pool for
+the time. Pin nearby servers so both hosts agree, and set the time zone that
+`TZ` in `compose/.env` uses, so host logs line up with container logs:
+
+```bash
+sudo install -d /etc/systemd/timesyncd.conf.d
+printf '[Time]\nNTP=ma.pool.ntp.org time.cloudflare.com\nFallbackNTP=0.debian.pool.ntp.org 1.debian.pool.ntp.org\n' \
+  | sudo tee /etc/systemd/timesyncd.conf.d/batlab.conf
+sudo timedatectl set-timezone Africa/Casablanca
+sudo systemctl restart systemd-timesyncd
+timedatectl timesync-status   # Server: one of the above; then `timedatectl` shows synchronized: yes
+```
+
+After a long time offline, timesyncd backs off to polling every ~34 minutes;
+the restart makes it sync at once.
