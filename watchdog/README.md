@@ -13,6 +13,9 @@ answering, and nothing told anyone.
   again, so a failure reaches the channel even if the healthchecks.io check has
   no integration. On 2026-10-10 it failed every run for ten hours and nobody
   heard of it.
+  On a host with a second way out (lab2's Wi-Fi backup), set
+  `WATCHDOG_WIRED_IFACE` and the heartbeat fails while that cable has no link:
+  otherwise it would pass over the Wi-Fi with the house unable to reach it.
   On a host serving the network's DNS, set `WATCHDOG_DNS_SERVER` and the
   heartbeat also asks it for a name and fails without an address back. On a
   host without the data disk, leave `WATCHDOG_DATA_ROOT` empty: the disk check is

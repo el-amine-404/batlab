@@ -1,0 +1,13 @@
+# Wi-Fi as lab2's way out when the cable is down: alerts, SSH on .202,
+# backups. Not a failover for the house: every client uses .201, which stays
+# on the cable. No prefix route of its own, and both routes at metric 600, so
+# the cable always wins while it has a link; sysctl.d/90-wifi-backup.conf
+# makes the kernel skip the cable's routes once the link is gone.
+# Installed to /etc/network/interfaces.d/wlp2s0 by setup-wifi-backup.sh.
+auto wlp2s0
+iface wlp2s0 inet manual
+  wpa-conf /etc/wpa_supplicant/wlp2s0.conf
+  up ip addr add 192.168.1.202/24 dev $IFACE noprefixroute
+  up ip route add 192.168.1.0/24 dev $IFACE src 192.168.1.202 metric 600
+  up ip route add default via 192.168.1.1 dev $IFACE metric 600
+  down ip addr flush dev $IFACE
