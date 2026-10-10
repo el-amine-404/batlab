@@ -15,7 +15,9 @@ HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly HERE
 
 [[ "$(id -u)" == 0 ]] || { echo "run with sudo" >&2; exit 1; }
-if ping -c 2 -W 1 192.168.1.202 >/dev/null 2>&1; then
+# A rerun finds .202 on this host already, which answers its own ping.
+if ! ip -4 -o addr show | grep -q ' 192\.168\.1\.202/' &&
+  ping -c 2 -W 1 192.168.1.202 >/dev/null 2>&1; then
   echo "192.168.1.202 already answers; pick another address" >&2
   exit 1
 fi
