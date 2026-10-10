@@ -20,8 +20,11 @@ if ping -c 2 -W 1 192.168.1.202 >/dev/null 2>&1; then
   exit 1
 fi
 
-read -r -p "Wi-Fi name [a_5]: " ssid </dev/tty
-ssid="${ssid:-a_5}"
+# a_2.4, not a_5: a_5 is WPA3-only, and WPA3 (SAE) cannot use a hashed
+# password, so it would sit on lab2 in plain text. A backup link needs range
+# more than speed, and the TV is on a_2.4 too, so the Wi-Fi log watches its band.
+read -r -p "Wi-Fi name [a_2.4]: " ssid </dev/tty
+ssid="${ssid:-a_2.4}"
 read -r -s -p "Wi-Fi password for $ssid: " pass </dev/tty
 echo
 
@@ -46,6 +49,7 @@ echo "waiting for the Wi-Fi to connect..."
 for _ in $(seq 30); do iw dev "$IFACE" link | grep -q '^Connected' && break; sleep 1; done
 if ! iw dev "$IFACE" link | grep -q '^Connected'; then
   echo "not connected after 30 s; check the name and password, then run this again" >&2
+  echo "(a WPA3-only network never connects with this setup: it writes a WPA2 key)" >&2
   journalctl -n 15 --no-pager -t wpa_supplicant >&2 || true
   exit 1
 fi
