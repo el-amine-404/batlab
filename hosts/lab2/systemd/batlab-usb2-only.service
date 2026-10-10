@@ -1,0 +1,17 @@
+[Unit]
+Description=Run USB devices at USB 2 speed: the data disk's JMS578 bridge resets under USB 3
+# Before any disk is checked or mounted: the data disk drops off once and
+# comes back at 480M, and the mount waits for it (x-systemd.device-timeout).
+DefaultDependencies=no
+After=systemd-udev-trigger.service
+Before=local-fs-pre.target
+Wants=local-fs-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/batlab-usb2-only
+ExecStart=/usr/bin/udevadm settle --timeout=30
+
+[Install]
+WantedBy=local-fs-pre.target

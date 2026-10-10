@@ -28,7 +28,8 @@ NIC    Intel I219-LM, 1 Gbit, enp0s31f6, static 192.168.1.201
 | Netdata docker collector | `netdata/go.d-docker.conf` | on, every 10 s | trial: on lab1 it cost most of two cores | watch `app.dockerd` CPU; turn off with `jobs: []` |
 | Deep media pass limits | `systemd/batlab-mediascan-deep.service.d/limits.conf` | 2 threads, stop above 90 C | decode heats a thin chassis | loosen after a week |
 | Data disk without UAS | `modprobe.d/usb-quirks.conf` | `usb-storage quirks=152d:0578:u` | the JMS578 enclosure moves with the disk; known to reset under UAS | after the USB 3 test in `docs/migration-lab2.md` |
-| Data disk port | physical | blue USB 3 port, `usb-storage` at 5000M | passed 2026-10-01 with no reset or I/O error in the kernel log: 100 GB written at 172 MB/s, falling to ~36 MB/s once the SMR cache fills; under UAS the same test wrote at 147 MB/s and read at ~200 MB/s | move to USB 2 if the kernel log ever shows a reset |
+| Data disk port | physical | blue USB 3 port, `usb-storage` | passed 2026-10-01 at 5000M (100 GB written at 172 MB/s). It then reset on 2026-10-03, re-enumerated ~8 times, and from 2026-10-10 12:15 every read timed out (`ASC=0x44`, 383 I/O errors in a week); lab2 has no USB 2 port | a different enclosure (ASMedia bridge) would allow USB 3 again |
+| USB 2 only | `systemd/batlab-usb2-only.service`, `watchdog/scripts/usb2-only.sh` | every root-hub USB 3 port disabled at boot, so devices connect at 480M (~35 MB/s) | the JMS578 bridge hangs under USB 3; installed by `recover-data-disk.sh --usb2` | drop with a new enclosure: `systemctl disable batlab-usb2-only` |
 | SMART monitoring | `smartd.conf` | root SSD and data disk by serial | USB names move between reboots | check both with `smartctl -a` once |
 | Battery | BIOS | charge limit ~80% if offered, power on after AC loss | a worn battery kept at 100% swells | check for swelling now and then |
 

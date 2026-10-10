@@ -111,6 +111,19 @@ sudo systemctl start smbd nmbd batlab-mediascan-watch.service batlab-watchdog-he
 `umount -l` is safe here: nothing can write through a device that is gone. The
 mount runs fsck first, then the data guard starts the containers it stopped.
 
+When the disk is still on the bus but hangs (reads time out after 180 s with
+`Sense Key : Hardware Error`, processes stuck in `D` state), only a power cycle
+of the enclosure frees it. `scripts/recover-data-disk.sh` walks through that:
+it pauses Samba, mediascan and every `batlab-*` timer, unmounts, asks you to
+unplug and replug the enclosure, checks SMART, runs fsck through the mount,
+reads 1 GB as a test and resumes everything. `--usb2` first moves every USB port
+to USB 2 (`scripts/usb2-only.sh`) and makes that permanent with the host's
+`batlab-usb2-only.service`:
+
+```bash
+ssh -t lab2 sudo ~/batlab/watchdog/scripts/recover-data-disk.sh --usb2
+```
+
 ## Planned maintenance
 
 Unmounting the data disk makes the heartbeat fail. Pause the `lab1` check in
