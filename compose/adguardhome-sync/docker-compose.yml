@@ -1,8 +1,9 @@
 name: adguardhome-sync
 # Runs on lab1 only (hosts/lab2/stacks.txt leaves it out): it copies lab1's
 # AdGuard settings to lab2's every 10 minutes. lab1 is the one to edit; changes
-# made on lab2 are overwritten. DHCP is never copied: the replica would start a
-# second DHCP server on the same network.
+# made on lab2 are overwritten. DHCP is never copied: each host serves its own
+# half of the range (docs/migration-lab2.md, phase 3), and a copy would make
+# the ranges overlap.
 services:
   adguardhome-sync:
     image: ${IMAGE_ADGUARDHOME_SYNC}:${TAG_ADGUARDHOME_SYNC}

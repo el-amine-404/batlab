@@ -43,14 +43,14 @@ sudo ufw allow from 192.168.1.0/24 to any port 137:138 proto udp
 sudo ufw allow in from 172.19.0.0/16                            # containers -> host: Netdata, AdGuard
 ```
 
-DNS, by role. A host that is only a DNS replica (lab2):
+DNS, by role. A host that serves DNS but not DHCP:
 
 ```bash
 sudo ufw allow from 192.168.1.0/24 to any port 53
 ```
 
-The host serving DHCP (lab1) answers devices that have no address yet, so
-neither rule can filter by source:
+A host serving DHCP (lab1 and lab2, each on half the range) answers devices
+that have no address yet, so neither rule can filter by source:
 
 ```bash
 sudo ufw allow 53
@@ -65,7 +65,7 @@ sudo ufw enable
 sudo systemctl restart docker
 ```
 
-On the DHCP host, check that a phone reconnecting to Wi-Fi still gets an
+On each DHCP host, check that a phone reconnecting to Wi-Fi still gets an
 address. `sudo ufw disable` undoes everything at once.
 
 ## 3. fail2ban

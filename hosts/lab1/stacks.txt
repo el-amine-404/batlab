@@ -1,4 +1,4 @@
-# Stacks lab1 runs since the move to lab2: DNS and DHCP for the house, and the
+# Stacks lab1 runs since the move to lab2: DNS and DHCP (.4-.100), and the
 # sync that copies its AdGuard settings to lab2.
 adguardhome
 adguardhome-sync

@@ -139,7 +139,7 @@
     - AdGuard Home:
         icon: adguard-home
         href: http://adh.homelab.lan
-        description: Ad Blocking, DNS and DHCP (lab1, edit here)
+        description: Ad Blocking, DNS and DHCP .4-.100 (lab1, edit here)
         siteMonitor: http://192.168.1.3:3000
         statusStyle: "dot"
         widget:
@@ -150,7 +150,7 @@
     - AdGuard Home 2:
         icon: adguard-home
         href: http://adh2.homelab.lan
-        description: Backup DNS (lab2, synced copy)
+        description: Backup DNS, DHCP .101-.200 (lab2, synced copy)
         siteMonitor: http://192.168.1.201:3000
         statusStyle: "dot"
         widget:

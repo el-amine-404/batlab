@@ -9,13 +9,15 @@ phase 0 done 2026-10-01.
 | --- | --- | --- |
 | Machine | Asus K55N, AMD A8-4500M, 15 GB, no battery | Fujitsu LIFEBOOK U748, i5-8350U, 31 GB, battery at 32% health |
 | LAN address | `192.168.1.3` (unchanged) | `192.168.1.201` (new, static, outside the DHCP range) |
-| Role | DNS and DHCP for the house | everything else |
+| Role | DNS, DHCP for `.4`-`.100` | everything else, plus DNS and DHCP for `.101`-`.200` |
 | Stacks | `adguardhome`, `unbound`, `adguardhome-sync` | all other stacks, plus a second `adguardhome` and `unbound` |
 | Data disk | none after the move | the 4 TB USB disk |
 | Host units | watchdog heartbeat, smartd | every `batlab-*` unit, samba, smartd, restic |
 
-The internet depends on lab1 alone only for DHCP. DNS answers from both
-hosts, so either one can be off without the house losing name resolution.
+DNS answers from both hosts, and each runs a DHCP server on its own half of
+the range (phase 3, step 4), so either one can be off without the house
+losing addresses or name resolution. Until that step was done DHCP lived on
+lab1 alone, and on 2026-10-10 lab1 being off took every device off the Wi-Fi.
 
 lab1 keeps `192.168.1.3` because every device on the network was told that
 address as its DNS server, and it is hardcoded in `adh.caddy` and the Homepage
@@ -190,20 +192,56 @@ DNS and DHCP are untouched in this phase, so the house keeps its internet.
 3. On lab1's AdGuard: change the rewrite to `*.homelab.lan -> 192.168.1.201`.
    Every `*.homelab.lan` site now reaches lab2's Caddy; `adh.homelab.lan`
    still proxies to lab1 on 3000.
-4. DHCP on lab1: hand out both DNS servers and lengthen leases, so a dead lab1
-   only stops new devices from joining for days, not hours. Stop AdGuard,
-   edit `AdGuardHome.yaml`, start it:
+4. **DHCP on both hosts, range split.** Two servers on one network are safe
+   as long as their ranges never overlap: lab1 gives `.4`-`.100`, lab2
+   `.101`-`.200`. A device takes whichever offer comes first; when its server
+   is off, it gets an address from the other one at its next connect, or
+   when its lease runs out. Both hand out both DNS servers, and leases last 7
+   days, so a dead host is noticed only by devices that rejoin. The sync
+   never copies DHCP (`FEATURES_DHCP_*=false`): the ranges differ per host.
+   The router's own DHCP stays off.
+
+   The AdGuard UI refuses to enable DHCP while it sees another server, so
+   both are set in `AdGuardHome.yaml` with AdGuard stopped
+   (`/mnt/docker-volumes/adguardhome/conf/`). If one host is down, do the
+   live one first: on lab2 everything below, on lab1 only `range_end`,
+   `lease_duration` and `options`.
 
    ```yaml
    dhcp:
+     enabled: true
+     interface_name: enp0s31f6        # lab2; lab1 keeps its own
      dhcpv4:
+       gateway_ip: 192.168.1.1
+       subnet_mask: 255.255.255.0
+       range_start: 192.168.1.101     # lab1: .4
+       range_end: 192.168.1.200       # lab1: .100
        lease_duration: 604800
+       icmp_timeout_msec: 1000
        options:
          - "6 ips 192.168.1.3,192.168.1.201"
    ```
 
-   Verify on a client after it renews (`nmcli dev show`, `ipconfig /all`):
-   both addresses listed. The router's own DHCP stays off.
+   On lab2, open DHCP to devices that have no address yet
+   (`docs/install/07-security.md`, the DHCP-host rules):
+
+   ```bash
+   sudo ufw allow 53
+   sudo ufw allow 67/udp
+   ```
+
+   Static leases are not synced either: add the DVR's (`.2`, Hikvision,
+   `24:28:fd:12:90:11`) in lab2's UI, Settings > DHCP, so it keeps its
+   address whichever server answers. lab1 and lab2 set their address on the
+   host (`docs/install/04-static-ip.md`) and need no lease. Done on lab2
+   2026-10-10, with lab1 off. Devices holding a lab1 lease above `.100` move
+   on their next renewal; AdGuard pings an address before offering it
+   (`icmp_timeout_msec`), so the overlap meanwhile does not hand out a taken
+   one.
+
+   Verify on a client (`nmcli dev show`, `ipconfig /all`): both DNS
+   addresses listed. Then power one host off, forget the Wi-Fi on a phone and
+   rejoin: it gets an address from the other host's half.
 5. On lab1: disable samba and the data guard, keep the heartbeat with an
    empty `WATCHDOG_DATA_ROOT` and `WATCHDOG_DNS_SERVER=127.0.0.1`. Its
    healthchecks.io check (`lab1`) now watches DNS. Add `hosts/lab1/stacks.txt`
@@ -231,9 +269,10 @@ Everything below must pass before the old state on lab1 is deleted.
   `batlab-mediascan-watch`, `batlab-data-guard`, `smartd`, `fail2ban`,
   `clamav-daemon`, `clamav-freshclam`, `unattended-upgrades`. On lab1 only
   `batlab-watchdog-heartbeat` and `batlab-updater` remain.
-- **Failover drill**: power lab1 off; a phone still browses and
-  `*.homelab.lan` still resolves. Power it back on. Then stop lab2's
-  AdGuard; the same holds.
+- **Failover drill**: power lab1 off; a phone that forgets the Wi-Fi and
+  rejoins gets an address in `.101`-`.200`, browses, and `*.homelab.lan`
+  still resolves. Power it back on. Then stop lab2's AdGuard; the same holds
+  with an address in `.4`-`.100`.
 
 ## Rollback
 
