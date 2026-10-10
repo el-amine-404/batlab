@@ -53,13 +53,6 @@ sshd_answers() {
   head -c 4 <&3 | grep -q '^SSH-'
 }
 
-# With a second way out (lab2's Wi-Fi backup) every other check still passes
-# when the cable is pulled, and the heartbeat would stay green while the house
-# cannot reach this host. Reading carrier fails outright on a downed interface.
-cable_connected() {
-  [[ "$(<"/sys/class/net/$WATCHDOG_WIRED_IFACE/carrier")" == 1 ]]
-}
-
 journald_answers() {
   journalctl --sync
 }
@@ -88,9 +81,6 @@ if [[ -n "$WATCHDOG_DATA_ROOT" ]]; then
 fi
 if [[ -n "${WATCHDOG_DNS_SERVER:-}" ]]; then
   run_check "dns" dns_answers
-fi
-if [[ -n "${WATCHDOG_WIRED_IFACE:-}" ]]; then
-  run_check "network cable ($WATCHDOG_WIRED_IFACE)" cable_connected
 fi
 run_check "sshd" sshd_answers
 run_check "journald" journald_answers

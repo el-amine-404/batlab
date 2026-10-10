@@ -1,7 +1,0 @@
-[Unit]
-Description=Log lab2's Wi-Fi link: signal, bitrate, connected or not
-After=network.target
-
-[Service]
-Type=oneshot
-ExecStart=/home/potato/batlab/watchdog/scripts/wifi-log.sh wlp2s0
