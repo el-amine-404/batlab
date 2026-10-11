@@ -79,7 +79,11 @@ http://nodecast.homelab.lan, stack `compose/nodecast`. Login `admin` and
   `/api/settings` and `/api/proxy/stream?url=` (fetches any URL from inside
   `home_server`, gluetun's control server included) all answered 200 without
   one. Only user management checks the token. The Caddy password hash is
-  `NODECAST_PASS_HASH`, single-quoted in `compose/.env`.
+  `NODECAST_PASS_HASH`, single-quoted in `compose/.env`. After login the app
+  sends its own token in `Authorization`, which replaces the browser's basic
+  credentials; Caddy lets those requests through only if NodeCast's
+  `/api/auth/me` accepts the token (`forward_auth`), else the app loops back
+  to its login page.
 - The browser gets the Dispatcharr stream URL, `nodecast` user and Xtream
   password included; that user can only play.
 - First start: the first `POST /api/auth/setup` creates the admin, with no
