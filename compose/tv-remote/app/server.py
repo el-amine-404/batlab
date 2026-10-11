@@ -26,6 +26,7 @@ import socket
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from http import HTTPStatus
@@ -45,6 +46,13 @@ VERSION = Path(__file__).with_name("VERSION").read_text().strip()
 
 TVS_FILE = DATA_DIR / "tvs.json"
 TOKENS_DIR = DATA_DIR / "tokens"
+# The inputs the page offers, as keys the TV accepts; labels are per TV.
+INPUTS = {"TV": "KEY_TV", "HDMI 1": "KEY_HDMI1", "HDMI 2": "KEY_HDMI2", "HDMI 3": "KEY_HDMI3", "HDMI 4": "KEY_HDMI4"}
+YOUTUBE_URL_ID = re.compile(r"(?:v=|youtu\.be/|/shorts/|/live/)([A-Za-z0-9_-]{11})(?:[?&#]|$)")
+# A bare ID; an 11-letter search word looks the same unless it has a digit,
+# - or _, or a capital after a small letter, as generated IDs nearly always do.
+YOUTUBE_BARE_ID = re.compile(r"^(?=.*(?:[0-9_-]|[a-z].*[A-Z]))[A-Za-z0-9_-]{11}$")
+
 MAC_RE = re.compile(r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$")
 
 # Keys the page may send; anything else is refused.
@@ -53,12 +61,16 @@ KEYS = {
     "KEY_UP", "KEY_DOWN", "KEY_LEFT", "KEY_RIGHT", "KEY_ENTER",
     "KEY_VOLUP", "KEY_VOLDOWN", "KEY_MUTE", "KEY_CHUP", "KEY_CHDOWN",
     "KEY_PLAY", "KEY_PAUSE", "KEY_STOP", "KEY_REWIND", "KEY_FF", "KEY_GUIDE",
+    "KEY_TV", "KEY_HDMI1", "KEY_HDMI2", "KEY_HDMI3", "KEY_HDMI4",
     *(f"KEY_{d}" for d in range(10)),
 }
 
-# Shortcuts the page offers; each is shown only if installed on that TV.
+# Shortcuts the page offers; each is shown only if installed on that TV. TVs
+# from 2020 on no longer list their apps, so an app is only found by its ID
+# (3202010022079, the browser, checked on the 2025 Q8F).
 KNOWN_APPS = {
     "111299001912": "YouTube",
+    "3202010022079": "Internet",
     "AprZAARz4r.Jellyfin": "Jellyfin",
     "3201907018807": "Netflix",
     "3201910019365": "Prime Video",
@@ -355,6 +367,32 @@ def set_mute(ip: str, mute: bool) -> None:
     upnp(ip, "SetMute", f"<DesiredMute>{int(mute)}</DesiredMute>")
 
 
+def set_volume(ip: str, level: int) -> None:
+    upnp(ip, "SetVolume", f"<DesiredVolume>{level}</DesiredVolume>")
+
+
+# ---------------------------------------------------------------- YouTube
+
+def youtube(ip: str, text: str) -> str:
+    """Play a video link or ID on the TV, else open YouTube's search for the
+    text, over DIAL (port 8080), the way a phone casts. YouTube's own keyboard
+    takes no text from the remote."""
+    t = text.strip()
+    m = YOUTUBE_URL_ID.search(t)
+    vid = m.group(1) if m else (t if YOUTUBE_BARE_ID.match(t) else None)
+    if vid:
+        body, what = f"v={vid}", "video"
+    else:
+        body, what = "search_query=" + urllib.parse.quote(text.strip()), "search"
+    req = urllib.request.Request(
+        f"http://{ip}:8080/ws/apps/YouTube", data=body.encode(), method="POST",
+        headers={"Content-Type": "text/plain; charset=utf-8"},
+    )
+    with urllib.request.urlopen(req, timeout=8):
+        pass
+    return what
+
+
 # ------------------------------------------------------------------ power
 
 def status(mac: str) -> dict:
@@ -454,7 +492,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"version": VERSION})
         if path == "/api/tvs":
             return self._json(200, [{"mac": m, **t} for m, t in load_tvs().items()])
-        m = re.fullmatch(r"/api/tv/([0-9a-f:]{17})/(status|apps)", path)
+        m = re.fullmatch(r"/api/tv/([0-9a-f:]{17})/(status|apps|inputs)", path)
         if m:
             mac, what = m.groups()
             if mac not in load_tvs():
@@ -466,6 +504,9 @@ class Handler(BaseHTTPRequestHandler):
                     # The page is open: connect now, so the first press is quick.
                     threading.Thread(target=r.run, args=(lambda tv: None,), daemon=True).start()
                 return self._json(200, st)
+            if what == "inputs":
+                labels = load_tvs()[mac].get("inputs", {})
+                return self._json(200, [{"name": n, "label": labels.get(n, "")} for n in INPUTS])
             return self._json(200, installed_apps(mac))
         name = "index.html" if path == "/" else path.lstrip("/")
         file = (WEB_DIR / name).resolve()
@@ -493,7 +534,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not MAC_RE.match(mac) or ipaddress.ip_address(ip) not in TV_SUBNET:
                     return self._json(400, {"error": "bad TV"})
                 return self._json(200, {"mac": mac, **pair(mac, ip)})
-            m = re.fullmatch(r"/api/tv/([0-9a-f:]{17})/(key|text|enter-text|app|power|mute|cursor|click|forget)", path)
+            m = re.fullmatch(r"/api/tv/([0-9a-f:]{17})/(key|text|enter-text|app|power|mute|volume|input|label|youtube|cursor|click|forget)", path)
             if not m:
                 return self._json(404, {"error": "not found"})
             mac, action = m.groups()
@@ -526,6 +567,36 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     set_mute(ip, not now)
                 return self._json(200, audio(ip))
+            elif action == "volume":
+                level = max(0, min(100, int(body.get("level", 0))))
+                ip = load_tvs()[mac]["ip"]
+                set_volume(ip, level)
+                return self._json(200, audio(ip))
+            elif action == "input":
+                name = str(body.get("name", ""))
+                if name not in INPUTS:
+                    return self._json(400, {"error": "unknown input"})
+                r.run(lambda tv: tv.send_key(INPUTS[name]))
+            elif action == "label":
+                name, label = str(body.get("name", "")), str(body.get("label", "")).strip()[:40]
+                if name not in INPUTS:
+                    return self._json(400, {"error": "unknown input"})
+                with store_lock:
+                    tvs = load_tvs()
+                    labels = tvs[mac].setdefault("inputs", {})
+                    if label:
+                        labels[name] = label
+                    else:
+                        labels.pop(name, None)
+                    save_tvs(tvs)
+            elif action == "youtube":
+                text = str(body.get("text", ""))[:300]
+                if not text.strip():
+                    return self._json(400, {"error": "type a link or a search"})
+                try:
+                    return self._json(200, {"ok": True, "did": youtube(load_tvs()[mac]["ip"], text)})
+                except (OSError, urllib.error.URLError) as err:
+                    raise ConnectionError("YouTube on the TV did not answer") from err
             elif action == "cursor":
                 dx, dy = int(body.get("dx", 0)), int(body.get("dy", 0))
                 dx, dy = max(-400, min(400, dx)), max(-400, min(400, dy))

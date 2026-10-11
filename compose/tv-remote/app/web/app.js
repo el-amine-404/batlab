@@ -150,24 +150,36 @@ function openRemote(tv) {
 
 // The TV's state as last read: power on/standby/off, mute, volume, app in front.
 let state = {};
-let busy = false; // a power change is running; its own result wins
+let busy = false;     // a power change is running; its own result wins
+let volHeld = false;  // a volume key is held: the page counts, polls wait
+let sliding = false;  // the slider is being dragged: don't move it under the finger
 
 function render() {
   const dot = $("#status-dot");
   const on = state.power === "on";
   dot.className = "dot " + (busy ? "busy" : on ? "on" : state.power ? "off" : "");
   dot.title = busy ? "working…" : on ? "on" : state.power === "standby" ? "standby" : "off";
+  // Muted, or at 0, looks muted; the level stays visible so you know what returns.
+  const known = on && state.volume != null;
+  const silent = on && (state.mute || state.volume === 0);
   const mute = $("#mute");
-  mute.setAttribute("aria-pressed", String(!!state.mute));
-  mute.querySelector("use").setAttribute("href", state.mute ? "#i-mute" : "#i-volume");
-  mute.querySelector("span").textContent = state.mute ? "Muted" : "Mute";
-  $("#vol-label").textContent = on && state.volume != null ? `VOL ${state.volume}` : "VOL";
+  mute.setAttribute("aria-pressed", String(!!(on && state.mute)));
+  mute.querySelector("use").setAttribute("href", silent ? "#i-mute" : "#i-volume");
+  mute.querySelector("span").textContent = on && state.mute ? "Muted" : "Mute";
+  $("#vol-label").textContent = known ? `VOL ${state.volume}` : "VOL";
+  $("#vol-num").textContent = known ? state.volume : "–";
+  $("#vol-icon use").setAttribute("href", silent ? "#i-mute" : "#i-volume");
+  $("#vol-rocker").classList.toggle("muted", silent);
+  $("#vol-row").classList.toggle("muted", silent);
+  const slider = $("#vol-slider");
+  slider.disabled = !known;
+  if (known && !sliding) slider.value = state.volume;
   $("#tv-now").hidden = !(on && state.app);
   $("#tv-now").textContent = state.app ? `Now: ${state.app}` : "";
 }
 
 async function refreshStatus() {
-  if (!current || busy) return;
+  if (!current || busy || volHeld || sliding) return;
   try {
     state = await api(`/api/tv/${current.mac}/status`);
   } catch {
@@ -201,14 +213,21 @@ async function loadApps() {
     box.append(el("button", { class: "btn", onclick: () => launch(app) }, app.name));
   }
   box.hidden = apps.length === 0;
+  $("#yt").hidden = !apps.some((a) => a.name === "YouTube");
 }
 
 async function send(key) {
   if (!current) return;
   buzz();
   try {
+    if (key.startsWith("KEY_VOL") && state.volume != null) {
+      // Count on the page at once; the TV is read again after release.
+      state.volume = Math.max(0, Math.min(100, state.volume + (key === "KEY_VOLUP" ? 1 : -1)));
+      state.mute = false; // a volume key unmutes the TV
+      render();
+    }
     await api(`/api/tv/${current.mac}/key`, { key });
-    if (key.startsWith("KEY_VOL")) refreshSoon();
+    if (key.startsWith("KEY_VOL")) refreshSoon(1200);
   } catch (e) {
     toast(e.message, true);
   }
@@ -256,6 +275,130 @@ async function toggleMute() {
   }
 }
 
+// ------------------------------------------------------------ volume slider
+
+function bindSlider(slider) {
+  let timer;
+  const sendLevel = async () => {
+    try {
+      Object.assign(state, await api(`/api/tv/${current.mac}/volume`, { level: Number(slider.value) }));
+    } catch (e) {
+      toast(e.message, true);
+    }
+  };
+  slider.addEventListener("input", () => {
+    sliding = true;
+    state.volume = Number(slider.value);
+    state.mute = false;
+    render();
+    clearTimeout(timer);
+    timer = setTimeout(sendLevel, 150); // follow the finger, not every pixel
+  });
+  slider.addEventListener("change", async () => {
+    clearTimeout(timer);
+    await sendLevel();
+    sliding = false;
+    render();
+  });
+}
+
+// ------------------------------------------------------------------- inputs
+
+async function openInputs() {
+  const list = $("#inputs-list");
+  list.replaceChildren();
+  let inputs = [];
+  try { inputs = await api(`/api/tv/${current.mac}/inputs`); } catch (e) { return toast(e.message, true); }
+  for (const inp of inputs) list.append(inputRow(inp));
+  $("#inputs").showModal();
+}
+
+function inputRow(inp) {
+  const pick = el("button", { class: "btn pick", onclick: () => chooseInput(inp) },
+    el("b", {}, inp.name), el("span", {}, inp.label ? `· ${inp.label}` : ""));
+  const edit = el("button", { class: "btn btn-ghost btn-icon", "aria-label": `Name ${inp.name}`, onclick: () => editLabel(inp, row) }, icon("pencil"));
+  const row = el("div", { class: "input-item" }, pick, edit);
+  return row;
+}
+
+function editLabel(inp, row) {
+  const field = el("input", { type: "text", value: inp.label, placeholder: `What is on ${inp.name}?`, maxlength: "40", enterkeyhint: "done" });
+  const save = async () => {
+    try {
+      await api(`/api/tv/${current.mac}/label`, { name: inp.name, label: field.value });
+      inp.label = field.value.trim();
+    } catch (e) {
+      toast(e.message, true);
+    }
+    row.replaceWith(inputRow(inp));
+  };
+  field.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); field.blur(); } });
+  field.addEventListener("blur", save, { once: true });
+  row.replaceChildren(field);
+  field.focus();
+}
+
+async function chooseInput(inp) {
+  buzz();
+  $("#inputs").close();
+  try {
+    await api(`/api/tv/${current.mac}/input`, { name: inp.name });
+    toast(`Switching to ${inp.label || inp.name}`);
+    refreshSoon(2500);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// ------------------------------------------------------------------ YouTube
+
+async function sendYoutube(e) {
+  e.preventDefault();
+  const input = $("#yt-text");
+  if (!input.value.trim()) return;
+  buzz();
+  try {
+    const r = await api(`/api/tv/${current.mac}/youtube`, { text: input.value });
+    toast(r.did === "video" ? "Playing on the TV" : "Searching on the TV");
+    input.value = "";
+    input.blur();
+    refreshSoon(3000);
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+// ---------------------------------------------------------------- scrolling
+
+// The cursor protocol has no wheel. Up/Down scroll lists and menus; in the
+// browser CH+/CH- scroll the page. Natural direction: drag up to read further down.
+function scrollStep(down) {
+  const browser = state.app === "Internet";
+  send(browser ? (down ? "KEY_CHDOWN" : "KEY_CHUP") : (down ? "KEY_DOWN" : "KEY_UP"));
+}
+
+function bindScrollStrip(strip) {
+  const STEP = 28; // finger pixels per scroll step
+  let lastY = null, acc = 0;
+  strip.addEventListener("pointerdown", (e) => {
+    strip.setPointerCapture(e.pointerId);
+    strip.classList.add("active");
+    lastY = e.clientY; acc = 0;
+  });
+  strip.addEventListener("pointermove", (e) => {
+    if (lastY === null) return;
+    acc += lastY - e.clientY; // up is positive
+    lastY = e.clientY;
+    while (Math.abs(acc) >= STEP) {
+      scrollStep(acc > 0);
+      acc -= Math.sign(acc) * STEP;
+    }
+  });
+  const end = () => { lastY = null; strip.classList.remove("active"); };
+  strip.addEventListener("pointerup", end);
+  strip.addEventListener("pointercancel", end);
+}
+
 // ----------------------------------------------------------------- touchpad
 
 function setMode(mode) {
@@ -267,7 +410,10 @@ function setMode(mode) {
 
 function bindPad(pad) {
   const SPEED = 1.6; // TV pixels per finger pixel
+  const SCROLL_STEP = 28;
   let last = null, moved = 0, downAt = 0, dx = 0, dy = 0, sending = false;
+  const fingers = new Map(); // pointerId -> y, for two-finger scrolling
+  let scrollAcc = 0, scrolled = false;
 
   async function flush() {
     if (sending || (!dx && !dy)) return;
@@ -282,11 +428,25 @@ function bindPad(pad) {
   pad.addEventListener("pointerdown", (e) => {
     pad.setPointerCapture(e.pointerId);
     pad.classList.add("active");
+    fingers.set(e.pointerId, e.clientY);
+    if (fingers.size === 2) { scrollAcc = 0; scrolled = true; return; }
     last = { x: e.clientX, y: e.clientY };
     moved = 0;
+    scrolled = false;
     downAt = performance.now();
   });
   pad.addEventListener("pointermove", (e) => {
+    if (fingers.size >= 2) {
+      const prev = fingers.get(e.pointerId);
+      if (prev === undefined) return;
+      fingers.set(e.pointerId, e.clientY);
+      scrollAcc += (prev - e.clientY) / 2; // two fingers each report the move
+      while (Math.abs(scrollAcc) >= SCROLL_STEP) {
+        scrollStep(scrollAcc > 0);
+        scrollAcc -= Math.sign(scrollAcc) * SCROLL_STEP;
+      }
+      return;
+    }
     if (!last) return;
     const mx = e.clientX - last.x, my = e.clientY - last.y;
     last = { x: e.clientX, y: e.clientY };
@@ -295,17 +455,19 @@ function bindPad(pad) {
     dy += my * SPEED;
     flush();
   });
-  const end = async () => {
-    if (!last) return;
+  const end = async (e) => {
+    fingers.delete(e.pointerId);
+    if (fingers.size) return;
     pad.classList.remove("active");
+    if (!last) return;
     last = null;
-    if (moved < 6 && performance.now() - downAt < 300) {
+    if (!scrolled && moved < 6 && performance.now() - downAt < 300) {
       buzz();
       try { await api(`/api/tv/${current.mac}/click`, {}); } catch (e) { toast(e.message, true); }
     }
   };
   pad.addEventListener("pointerup", end);
-  pad.addEventListener("pointercancel", () => { last = null; pad.classList.remove("active"); });
+  pad.addEventListener("pointercancel", (e) => { fingers.delete(e.pointerId); last = null; pad.classList.remove("active"); });
 }
 
 // Press-and-hold repeats keys marked data-repeat (volume).
@@ -317,9 +479,15 @@ function bindKeys(root) {
       return;
     }
     let timer = null;
-    const stop = () => { clearInterval(timer); timer = null; b.classList.remove("pressed"); };
+    const stop = () => {
+      if (!timer) return;
+      clearInterval(timer); timer = null; b.classList.remove("pressed");
+      volHeld = false;
+      refreshSoon(1200);
+    };
     b.addEventListener("pointerdown", (e) => {
       e.preventDefault();
+      volHeld = true;
       b.classList.add("pressed");
       send(key);
       timer = setInterval(() => send(key), 250);
@@ -355,7 +523,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#power").addEventListener("click", power);
   $("#mute").addEventListener("click", toggleMute);
   document.querySelectorAll(".seg button").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.mode)));
-  bindPad($("#pad"));
+  bindPad($("#pad-area"));
+  bindScrollStrip($("#pad-scroll"));
+  bindSlider($("#vol-slider"));
+  $("#input-btn").addEventListener("click", openInputs);
+  $("#inputs-close").addEventListener("click", () => $("#inputs").close());
+  $("#inputs-tv-menu").addEventListener("click", () => $("#inputs").close());
+  $("#yt").addEventListener("submit", sendYoutube);
   let mode = "buttons";
   try { mode = localStorage.getItem("tv-remote:mode") || "buttons"; } catch {}
   setMode(mode);
