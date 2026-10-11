@@ -595,6 +595,7 @@ class FakeLidarr:
         self.albums = {}  # release group id -> album
         self.files = {}  # album id -> path of the song's file
         self.searched = []
+        self.removed = []
 
     def album(self, group_id):
         return self.albums.get(group_id)
@@ -609,6 +610,11 @@ class FakeLidarr:
 
     def track_file(self, album_id, recording_ids, title):
         return self.files.get(album_id)
+
+    def remove_track_file(self, group_id, path):
+        os.unlink(path)  # Lidarr moves it to its recycle bin
+        self.removed.append((group_id, path))
+        return True
 
 
 class Upgrades(GuardTestCase):
@@ -658,6 +664,44 @@ class Upgrades(GuardTestCase):
         self.guard.upgrade_pass()
         self.assertFalse(os.path.exists(os.path.join(self.extras, "Drake")), "copy, lyrics, cover, folders gone")
         self.assertTrue(os.path.exists(lidarr_file))
+
+    def test_a_lidarr_single_gets_its_album_then_goes(self):
+        self.guard.config.lidarr_root = self.music
+        single = os.path.join(self.music, "Drake", "One Dance (2016)", "01 - One Dance.flac")
+        os.makedirs(os.path.dirname(single))
+        tone(single, extra=("-c:a", "flac"))
+        audio = mutagen.File(single)
+        audio["title"], audio["artist"] = "One Dance", "Drake"
+        audio["musicbrainz_albumtype"] = "single"
+        audio["musicbrainz_releasegroupid"] = "6f4c3295-db6b-4954-b0f0-c95a6b79b458"
+        audio["musicbrainz_trackid"] = "57c319d6-31ed-4668-acf1-13350ab8b67b"
+        audio.save()
+        with mock.patch.object(guard.upgrade, "recording", return_value={"id": "rec-1", "releases": []}):
+            self.guard.roots_pass()
+            self.guard.upgrade_pass()
+            self.assertEqual(self.lidarr.searched, ["views"], "the album is requested")
+            self.assertTrue(os.path.exists(single))
+
+            album_file = os.path.join(self.music, "Drake", "Views (2016)", "12 - One Dance.flac")
+            os.makedirs(os.path.dirname(album_file))
+            tone(album_file, extra=("-c:a", "flac"))
+            self.lidarr.files[1] = album_file
+            self.guard.roots_pass()
+            self.guard.upgrade_pass()
+        self.assertEqual(self.lidarr.removed, [("6f4c3295-db6b-4954-b0f0-c95a6b79b458", single)])
+        self.assertTrue(os.path.exists(album_file))
+
+    def test_an_album_track_is_never_taken_for_a_single(self):
+        self.guard.config.lidarr_root = self.music
+        path = os.path.join(self.music, "Drake", "Views (2016)", "12 - One Dance.flac")
+        os.makedirs(os.path.dirname(path))
+        tone(path, extra=("-c:a", "flac"))
+        audio = mutagen.File(path)
+        audio["title"], audio["artist"], audio["musicbrainz_albumtype"] = "One Dance", "Drake", "album"
+        audio.save()
+        self.guard.roots_pass()
+        self.guard.upgrade_pass()
+        self.assertEqual(self.lidarr.searched, [])
 
     def test_song_musicbrainz_does_not_know_is_kept_and_asked_weekly(self):
         path = self.extras_song()

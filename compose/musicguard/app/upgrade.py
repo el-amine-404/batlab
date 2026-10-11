@@ -7,6 +7,11 @@ has Lidarr monitor and search that album, and removes the YouTube copy once
 Lidarr's file for the same recording is in the library. Lidarr then keeps
 upgrading it to lossless like any other album.
 
+The same goes for a single in Lidarr's own library: a song Lidarr filed as a
+one-track release ("a lot", "Glimpse of Us") gets the album it is on, and the
+single is removed through Lidarr (to its recycle bin) and unmonitored once
+the album's copy is in the library and verified, so the song is there once.
+
 A song MusicBrainz does not know (much Moroccan music is only on streaming
 services) cannot be fetched by Lidarr, whose catalogue is MusicBrainz: it keeps
 its YouTube copy and is looked up again a week later.
@@ -50,6 +55,26 @@ def _musicbrainz(query, attempts=3):
 
 def _quoted(text):
     return '"' + text.replace("\\", " ").replace('"', " ") + '"'
+
+
+def recording(recording_id, attempts=3):
+    """A MusicBrainz recording with its releases and their release groups."""
+    global _last_request
+    wait = 2.0 - (time.monotonic() - _last_request)
+    if wait > 0:
+        time.sleep(wait)
+    _last_request = time.monotonic()
+    url = f"{MUSICBRAINZ}/{urllib.parse.quote(recording_id)}?" + urllib.parse.urlencode(
+        {"inc": "releases release-groups", "fmt": "json"})
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return json.loads(response.read(4 * 1024 * 1024))
+    except urllib.error.HTTPError as error:
+        if error.code == 503 and attempts > 1:
+            time.sleep(5)
+            return recording(recording_id, attempts - 1)
+        raise
 
 
 def recordings_for(title, artist, isrc=""):
@@ -129,6 +154,23 @@ class Lidarr:
         if not album.get("monitored"):
             self.call("PUT", "album/monitor", {"albumIds": [album["id"]], "monitored": True})
             self.call("POST", "command", {"name": "AlbumSearch", "albumIds": [album["id"]]})
+
+    def remove_track_file(self, group_id, path):
+        """Delete the file at path from the album of that release group (Lidarr
+        moves it to its recycle bin), and unmonitor the album once it has no
+        file left, so Lidarr does not fetch it again."""
+        album = self.album(group_id)
+        if not album:
+            return False
+        files = self.call("GET", "trackfile", albumId=album["id"]) or []
+        removed = False
+        for item in files:
+            if item.get("path") == path:
+                self.call("DELETE", f"trackfile/{item['id']}")
+                removed = True
+        if removed and len(files) == 1:
+            self.call("PUT", "album/monitor", {"albumIds": [album["id"]], "monitored": False})
+        return removed
 
     def track_file(self, album_id, recording_ids, title):
         """Path of Lidarr's file for this song on that album, or None."""

@@ -116,6 +116,15 @@ It runs in three ways:
   Moroccan music, e.g. Stormy's "PIRATE", is only on streaming services) is
   reported once as `NOT_IN_MUSICBRAINZ`, keeps its YouTube copy, and is looked
   up again weekly: Lidarr's catalogue is MusicBrainz, so it cannot fetch it.
+  **Singles in Lidarr's library** (files tagged `musicbrainz_albumtype`
+  `single`) get the same: the album their recording is on (MusicBrainz by
+  recording ID, then title and artist) is monitored and searched, and once its
+  copy of the song is in the library and verified, the single is deleted
+  through Lidarr (to its recycle bin) and unmonitored, so the song is there
+  once. A single on no album (many Moroccan releases) is looked at again
+  monthly. On 2026-10-11 this requested *i am > i was* (21 Savage), *SMITHEREENS*
+  (Joji) and *The Dichotomy* (David Kushner); the other eight singles are on
+  no album.
   `docker exec musicguard python /app/guard.py upgrade` runs one pass
   (`MUSICGUARD_DRY_RUN=1` to only list what it would request).
 - **Programs and archives in a library** (`.exe`, `.zip`, `.lnk`, `.html`…, or
