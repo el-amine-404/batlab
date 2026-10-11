@@ -38,6 +38,10 @@ services:
       # SongRec keeps a little state in its home; the image is read-only.
       - HOME=/state/home
       - DISCORD_WEBHOOK=${DISCORD_WEBHOOK_DOWNLOAD_ISSUES:-}
+      # "Ready to play in Navidrome", after the scan that indexed new music.
+      # Lidarr's own import message is off: it came before the checks, when
+      # the music was not playable yet.
+      - MUSICGUARD_READY_WEBHOOK=${DISCORD_WEBHOOK_DOWNLOADS:-}
       # The host's clamd (installed for mediascan). Files are held in the
       # inbox, not passed, while it is down.
       - CLAMD_SOCKET=/run/clamav/clamd.ctl

@@ -192,6 +192,12 @@ playlist library setup fails with 403), so it has its own, `aurral`, and
 reaches Navidrome at `http://caddy:4534`, a Caddy listener that is not
 published on the host. musicguard alone calls `navidrome:4533` directly.
 
+After each scan musicguard posts the albums that just became playable to
+`#downloads` ("Ready to play in Navidrome", `MUSICGUARD_READY_WEBHOOK`).
+Lidarr's own Discord connection for `#downloads` has *On Release Import* and
+*On Upgrade* off since 2026-10-11: it announced music minutes before anyone
+could play it.
+
 A scan forgets files that are gone
 (`ND_SCANNER_PURGEMISSING=always`): an upgrade that replaces an MP3 with a FLAC
 or a Lidarr rename would otherwise leave the old album greyed out next to the

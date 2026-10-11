@@ -97,6 +97,9 @@ class Config:
         self.clamd_max = int(env("CLAMD_MAX_BYTES", str(25 * 1024 * 1024)))
         self.lyrics = env("MUSICGUARD_LYRICS", "1") == "1"
         self.webhook = env("DISCORD_WEBHOOK")
+        # Where "ready to play" goes: new music is announced once Navidrome
+        # has it, not when it lands (Lidarr's own import message is off).
+        self.ready_webhook = env("MUSICGUARD_READY_WEBHOOK")
         self.inbox_interval = int(env("MUSICGUARD_INBOX_INTERVAL", "60"))
         # Short, because Navidrome only shows new music after a library pass.
         self.roots_interval = int(env("MUSICGUARD_ROOTS_INTERVAL", "120"))
@@ -148,6 +151,8 @@ class Guard:
         # Navidrome is told to scan once a library pass leaves nothing unchecked.
         self.library_changed = True
         self.scan_reported = False
+        # Library files that became playable since the last scan, announced after it.
+        self.ready = []
 
     # --- state ------------------------------------------------------------------
 
@@ -192,6 +197,7 @@ class Guard:
         self.events.append(record)
         if kind in LIBRARY_CHANGES:
             self.library_changed = True
+
         log(f"{kind} {reason} {path} {detail}".rstrip())
         if self.config.dry_run:
             return
@@ -489,6 +495,8 @@ class Guard:
         "copy" (migration, source untouched), "inplace" (rewrite where it is),
         "verify" (check where it is, change nothing unless it must go)."""
         from_link = mode == "import"
+        # A file new to the libraries is announced once Navidrome has it.
+        new = mode != "copy" and path not in self.state["files"]
         notes = []
         with tempfile.TemporaryDirectory(prefix="musicguard-") as workdir:
             try:
@@ -521,6 +529,8 @@ class Guard:
                 if not self.config.dry_run:
                     self.remember(path)
                 self.event("verified", path, notes=notes)
+                if new:
+                    self.ready.append(path)
                 if self.config.lyrics and not self.config.dry_run:
                     self.fetch_lyrics(path, found, seconds)
                 return path
@@ -571,6 +581,8 @@ class Guard:
             self.remember(target)
             self.event("filed" if mode != "inplace" else "cleaned", path,
                        detail="" if mode == "inplace" else target, notes=notes)
+            if new:
+                self.ready.append(target)
             if mode == "import":
                 self.remove_with_sidecars(path)
             if self.config.lyrics:
@@ -812,7 +824,37 @@ class Guard:
             return
         self.scan_reported = False
         self.library_changed = False
-        log("navidrome scan started")
+        log("navidrome scan done")
+        self.announce_ready()
+
+    def announce_ready(self):
+        """One Discord message per scan: the albums that just became playable."""
+        new, self.ready = self.ready, []
+        albums = {}
+        for path in new:
+            if not os.path.exists(path):
+                continue  # replaced or quarantined since
+            for root in self.config.roots:
+                if path.startswith(root + os.sep):
+                    parts = os.path.relpath(path, root).split(os.sep)
+                    if len(parts) >= 3:
+                        key = f"{parts[0]} – {parts[1]}"
+                        albums[key] = albums.get(key, 0) + 1
+        if not albums or not self.config.ready_webhook:
+            return
+        lines = ["**Ready to play in Navidrome**"]
+        for name, count in sorted(albums.items())[:20]:
+            lines.append(f"- {name}" + (f" ({count} songs)" if count > 1 else ""))
+        if len(albums) > 20:
+            lines.append(f"... and {len(albums) - 20} more")
+        body = json.dumps({"content": "\n".join(lines)[:1900], "allowed_mentions": {"parse": []}})
+        request = urllib.request.Request(self.config.ready_webhook, data=body.encode(), method="POST",
+                                         headers={"Content-Type": "application/json",
+                                                  "User-Agent": "batlab-musicguard"})
+        try:
+            urllib.request.urlopen(request, timeout=15).close()
+        except Exception as error:
+            log(f"ready notification failed: {error}")
 
     def orphaned(self, path, stat):
         """A lyrics sidecar whose track has been gone for an hour."""
