@@ -31,6 +31,7 @@ import identify  # noqa: E402
 import layout  # noqa: E402
 import lyrics  # noqa: E402
 import media  # noqa: E402
+import reference  # noqa: E402
 import tags  # noqa: E402
 import upgrade  # noqa: E402
 
@@ -134,9 +135,12 @@ class GuardTestCase(unittest.TestCase):
         self.shazam.start()
         self.credit_lookup = mock.patch.object(guard.credit_fix.Credits, "wanted", return_value=None)
         self.credit_lookup.start()
+        self.reference = mock.patch.object(guard.reference, "compare", return_value=None)
+        self.reference.start()
         self.guard = guard.Guard(guard.Config())
 
     def tearDown(self):
+        self.reference.stop()
         self.credit_lookup.stop()
         self.shazam.stop()
         self.musicbrainz.stop()
@@ -425,6 +429,25 @@ class Libraries(GuardTestCase):
         self.assertEqual(suspects[0]["reason"], "LOSSY_SOURCE")
         self.assertTrue(os.path.exists(fake), "a suspect is reported, never moved")
 
+    def test_a_genuine_mp3_320_is_not_a_suspect(self):
+        os.makedirs(os.path.join(self.music, "Band", "Record"))
+        source = os.path.join(self.tmp, "source.flac")
+        noise(source)
+        genuine = os.path.join(self.music, "Band", "Record", "01 - Song.mp3")
+        ffmpeg("-i", source, "-c:a", "libmp3lame", "-b:a", "320k", genuine)
+        self.guard.roots_pass()
+        self.assertEqual([e for e in self.guard.events if e["event"] == "suspect"], [])
+
+    def test_an_mp3_320_made_from_a_128k_one_is_a_suspect(self):
+        os.makedirs(os.path.join(self.music, "Band", "Record"))
+        source, lossy = os.path.join(self.tmp, "source.flac"), os.path.join(self.tmp, "lossy.mp3")
+        noise(source)
+        ffmpeg("-i", source, "-c:a", "libmp3lame", "-b:a", "128k", lossy)
+        upscaled = os.path.join(self.music, "Band", "Record", "01 - Song.mp3")
+        ffmpeg("-i", lossy, "-c:a", "libmp3lame", "-b:a", "320k", upscaled)
+        self.guard.roots_pass()
+        self.assertEqual([e["reason"] for e in self.guard.events if e["event"] == "suspect"], ["LOSSY_SOURCE"])
+
 
 class Migration(GuardTestCase):
     def test_old_layout_is_copied_into_the_new_one(self):
@@ -470,23 +493,40 @@ class Identification(GuardTestCase):
         audio = mutagen.File(path, easy=True)
         audio["title"], audio["artist"] = "Stormy", "Georgie Fame"
         audio.save()
-        guard.identify.recognise.return_value = identify.Match("PIRATE", "Stormy")
+        guard.identify.recognise.return_value = identify.Match("PIRATE", "Stormy", isrc="FRIDO2417560")
         self.guard.roots_pass()
         self.assertEqual(self.quarantined_reasons(), ["WRONG_SONG"])
 
-    def test_shazam_is_overruled_by_the_recording_length(self):
+    def lidarr_4l(self):
         path = os.path.join(self.music, "21 Savage", "i am i was (2018)", "15 - 4L.mp3")
         os.makedirs(os.path.dirname(path))
         tone(path)
         audio = mutagen.File(path, easy=True)
         audio["title"], audio["artist"] = "4L", "21 Savage"
-        audio["musicbrainz_trackid"] = "57c319d6-31ed-4668-acf1-13350ab8b67b"
         audio.save()
-        guard.identify.recognise.return_value = identify.Match("Just TEN", "Thedjnino")
-        with mock.patch.object(guard.upgrade, "recording", return_value={"length": 8000}):
-            self.guard.roots_pass()
+        return path
+
+    def test_the_real_song_overrules_shazam(self):
+        path = self.lidarr_4l()
+        guard.identify.recognise.return_value = identify.Match("Just TEN", "Thedjnino", isrc="QZ0000000001")
+        guard.reference.compare.return_value = 0.99
+        self.guard.roots_pass()
         self.assertTrue(os.path.exists(path))
-        self.assertIn("SHAZAM_DISAGREES", [e["reason"] for e in self.guard.events])
+        self.assertIn("SHAZAM_OVERRULED", [e["reason"] for e in self.guard.events])
+
+    def test_a_file_unlike_the_real_song_is_wrong_whatever_shazam_is(self):
+        self.lidarr_4l()
+        guard.identify.recognise.return_value = identify.Match("Just TEN", "Thedjnino")
+        guard.reference.compare.return_value = 0.55
+        self.guard.roots_pass()
+        self.assertEqual(self.quarantined_reasons(), ["WRONG_SONG"])
+
+    def test_a_weak_shazam_entry_alone_moves_nothing(self):
+        path = self.lidarr_4l()
+        guard.identify.recognise.return_value = identify.Match("Just TEN", "Thedjnino")
+        self.guard.roots_pass()
+        self.assertTrue(os.path.exists(path))
+        self.assertIn("SHAZAM_UNSURE", [e["reason"] for e in self.guard.events])
 
     def test_an_audited_file_is_reported_not_moved(self):
         path = os.path.join(self.music, "A", "B (2004)", "01 - Stormy.mp3")
@@ -740,6 +780,30 @@ class Upgrades(GuardTestCase):
         self.assertTrue(os.path.exists(path))
         self.assertEqual(guard.upgrade.recordings_for.call_count, 1)
         self.assertEqual([e["reason"] for e in self.guard.events], ["NOT_IN_MUSICBRAINZ"])
+
+
+class ReferenceRules(unittest.TestCase):
+    def test_similarity_finds_the_preview_inside_the_song(self):
+        song = [(i * 2654435761) & 0xFFFFFFFF for i in range(300)]
+        self.assertEqual(reference.similarity(song[100:140], song), 1.0)
+        other = [(i * 40503 + 7) & 0xFFFFFFFF for i in range(40)]
+        self.assertLess(reference.similarity(other, song), reference.SAME)
+
+    def test_fpcalc_tells_the_same_song_from_another(self):
+        if not shutil.which("fpcalc"):
+            self.skipTest("fpcalc not installed (it is in the image)")
+        workdir = tempfile.mkdtemp()
+        try:
+            song, clip, other = (os.path.join(workdir, n) for n in ("song.flac", "clip.flac", "other.flac"))
+            noise(song, seconds=60)
+            ffmpeg("-ss", "20", "-t", "30", "-i", song, clip)
+            noise(other, seconds=30)
+            same = reference.similarity(reference.fingerprint(clip), reference.fingerprint(song))
+            different = reference.similarity(reference.fingerprint(other), reference.fingerprint(song))
+            self.assertGreaterEqual(same, reference.SAME)
+            self.assertLess(different, reference.OTHER)
+        finally:
+            shutil.rmtree(workdir)
 
 
 class UpgradeRules(unittest.TestCase):

@@ -142,12 +142,18 @@ and streaming-only music than MusicBrainz's AcoustID.
   title nor artist in common, is quarantined as `WRONG_SONG`; a monitored album
   then makes Lidarr fetch another copy. A remix, a feature or a translated title
   shares one of them and is not called wrong. No match is never a verdict.
-  Nor is Shazam alone when the file is as long as the MusicBrainz recording
-  it is tagged with (within 3 s): that is reported as `SHAZAM_DISAGREES` and
-  the file stays. Shazam's catalogue has re-uploads of hits under other
-  names: on 2026-10-11 it heard 21 Savage's "4L" (288 s, as MusicBrainz says)
-  as "Thedjnino - Just TEN" at every point of the song, and the real track
-  was quarantined until this rule.
+  Before anything moves, the file is compared with **the real song**
+  (`app/reference.py`): Apple Music's 30 s preview of the song its tags name,
+  Chromaprint fingerprints of both (AcoustID's technique), the preview slid
+  along the file. 0.85 or more of the fingerprint bits alike: it is that song,
+  kept (`SHAZAM_OVERRULED`). Below 0.70: it is not, `WRONG_SONG`. With no
+  preview (the song is not on Apple), Shazam decides only when its answer is
+  a real release, with an ISRC or an Apple Music ID; an entry with neither
+  moves nothing (`SHAZAM_UNSURE`, reported). Shazam's catalogue has re-uploads
+  of hits under other names: on 2026-10-11 it heard 21 Savage's "4L" as
+  "Thedjnino - Just TEN" (no ISRC, not on Apple) at every point of the song,
+  and the real track was quarantined; compared with Apple's "4L" it scored
+  0.99, and with another song 0.58.
 - `guard.py audit` compares every track with Shazam and only reports; the
   files it saw count as checked, so it is safe on an old library.
 
@@ -171,7 +177,10 @@ docker exec musicguard python /app/guard.py check /data/media/music-extras/<file
 of 25 dB or more between two bands that ends 50 dB below the whole signal. A
 128k MP3 cuts at about 16-17 kHz, a 320k one at 20 kHz (`POSSIBLE_LOSSY_SOURCE`,
 because some old masters stop there too). AAC and Opus keep the top band, so a
-FLAC made from them is not caught.
+FLAC made from them is not caught. `POSSIBLE_LOSSY_SOURCE` applies to lossless
+files only: a cut at 20 kHz is how every genuine MP3 320 is made, and until
+2026-10-11 every 320k album (Post Malone, UTOPIA) was reported for it. An MP3
+cut below 19 kHz is still `LOSSY_SOURCE`: a 320k file made from a 128k one.
 
 ## Navidrome
 

@@ -38,6 +38,7 @@ import layout
 import lyrics
 import media
 import musicbrainz
+import reference
 import navidrome
 import tags as tagging
 import upgrade
@@ -64,8 +65,6 @@ LYRICS_RETRY_SECONDS = 30 * 86400
 UPGRADE_RETRY_SECONDS = 7 * 86400
 # A single whose song is on no album yet is looked at again after a month.
 SINGLE_RETRY_SECONDS = 30 * 86400
-# A file this close to its MusicBrainz recording's length is that recording.
-LENGTH_AGREES_SECONDS = 3
 ORPHAN_SECONDS = 3600
 STATE_VERSION = 1
 # Events after which Navidrome has something new to index.
@@ -413,13 +412,14 @@ class Guard:
             cover = None
         return found, cover
 
-    def wrong_song(self, path, found, root, seconds=0):
-        """For a file new to a library: Shazam sure it is a different song
-        (both title and artists differ) means a wrong or fake download,
-        unless the file is as long as the MusicBrainz recording it is tagged
-        with: Shazam's catalogue has re-uploads of hits under other names
-        (21 Savage's "4L" as "Thedjnino - Just TEN"), and a wrong download
-        is almost never the same length to the second."""
+    def wrong_song(self, path, found, root):
+        """For a file new to a library: Shazam hearing a different song (both
+        title and artists differ) is checked against the real song before
+        anything moves (reference.py): the file is compared with Apple Music's
+        preview of the song its tags name. It sounds like it: kept, whatever
+        Shazam says. It clearly does not: wrong song. No preview to compare
+        with: Shazam decides only if its answer is a real release (an ISRC or
+        an Apple Music ID); otherwise the file stays and is reported."""
         stat = os.stat(path)
         key = f"{stat.st_size}"
         if self.state["audited"].get(path) == key:
@@ -431,29 +431,29 @@ class Guard:
         title, artist = layout.first(found, "title"), layout.first(found, "artist")
         if identify.contradicts(match, title, artist):
             detail = f"tagged {artist} - {title}, Shazam hears {match!r}"
-            expected = self.recording_seconds(layout.first(found, "musicbrainz_trackid"))
-            if expected and abs(expected - seconds) <= LENGTH_AGREES_SECONDS:
-                self.event("suspect", path, "SHAZAM_DISAGREES",
-                           f"{detail}; kept: as long as MusicBrainz's recording ({expected:.0f} s)")
+            try:
+                score = reference.compare(path, title, artist)
+            except Exception as error:  # Apple or fpcalc failed: no evidence either way
+                log(f"reference comparison failed for {path}: {error}")
+                score = None
+            if score is not None and score >= reference.SAME:
+                self.event("reported", path, "SHAZAM_OVERRULED",
+                           f"{detail}; kept: it is Apple Music's {artist} - {title} ({score:.2f} alike)")
                 return None
-            return detail
+            if score is not None and score < reference.OTHER:
+                return f"{detail}; not Apple Music's {artist} - {title} ({score:.2f} alike)"
+            if match.isrc or match.apple_id:
+                return detail
+            self.event("suspect", path, "SHAZAM_UNSURE",
+                       f"{detail}, an entry with no ISRC or Apple Music release, and no preview "
+                       f"to compare with; kept")
+            return None
         if not identify.same_title(match.title, title):
             # Same artist, another title: the classic wrong match within an
             # artist's catalogue, but a translated or renamed title looks the
             # same, so it is reported rather than moved.
             self.event("suspect", path, "WRONG_TITLE", f"tagged {artist} - {title}, Shazam hears {match!r}")
         return None
-
-    def recording_seconds(self, recording_id):
-        """The length MusicBrainz has for a recording, or None."""
-        if not recording_id:
-            return None
-        try:
-            length = upgrade.recording(recording_id).get("length")
-        except Exception as error:
-            log(f"musicbrainz recording lookup failed for {recording_id}: {error}")
-            return None
-        return length / 1000 if length else None
 
     def fix_credits(self, path, found):
         try:
@@ -505,6 +505,10 @@ class Guard:
         if not (lossless or high_lossy):
             return
         verdict, levels = media.spectrum_verdict(clean, index, seconds, int(stream.get("sample_rate") or 0))
+        if verdict == "POSSIBLE_LOSSY_SOURCE" and not lossless:
+            # A cut near 20 kHz is how every genuine MP3 320 or AAC 256 is
+            # encoded; only a lower cut means it was made from a worse file.
+            verdict = None
         if verdict:
             what = "lossless file" if lossless else f"{bit_rate // 1000}k {codec}"
             self.event("suspect", path, verdict,
@@ -541,7 +545,7 @@ class Guard:
                     self.quarantine(path, rejection.reason, rejection.detail, base)
                 return None
             if mode in ("verify", "inplace"):
-                wrong = self.wrong_song(path, found, base, seconds)
+                wrong = self.wrong_song(path, found, base)
                 if wrong:
                     self.quarantine(path, "WRONG_SONG", wrong, base)
                     return None
