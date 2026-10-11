@@ -147,6 +147,15 @@
           url: http://192.168.1.3:3000
           username: "{{HOMEPAGE_VAR_ADGUARD_USER}}"
           password: "{{HOMEPAGE_VAR_ADGUARD_PASS}}"
+    - NetAlertX:
+        icon: netalertx
+        href: http://netalertx.homelab.lan
+        description: New devices on the network, to Discord
+        siteMonitor: http://172.19.0.1:20211
+        statusStyle: "dot"
+        widget:
+          type: netalertx
+          url: http://172.19.0.1:20211
     - AdGuard Home 2:
         icon: adguard-home
         href: http://adh2.homelab.lan

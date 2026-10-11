@@ -1,0 +1,54 @@
+name: netalertx
+# Watches the LAN with arp-scan every few minutes and posts to Discord when a
+# device it has never seen joins. Host networking is what lets arp-scan reach
+# the LAN; the web UI listens only on the home_server gateway, which is how
+# Caddy reaches it (like Netdata). Settings in APP_CONF_OVERRIDE are forced on
+# every start and cannot be changed in the UI; everything else can.
+services:
+  netalertx:
+    image: ${IMAGE_NETALERTX}:${TAG_NETALERTX}
+    container_name: netalertx
+    restart: unless-stopped
+    network_mode: host
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN        # arp-scan, nmap
+      - NET_RAW          # raw sockets for the scans
+      - NET_BIND_SERVICE # nbtscan
+      - CHOWN            # root entrypoint chowns /data and /tmp, then drops to 20211
+      - SETUID
+      - SETGID
+    volumes:
+      - ${VOLUMES_ROOT}/netalertx:/data
+      - /etc/localtime:/etc/localtime:ro
+    tmpfs:
+      - "/tmp:mode=1700,uid=0,gid=0,rw,noexec,nosuid,nodev,async,noatime,nodiratime"
+    environment:
+      - LISTEN_ADDR=${HOME_SERVER_GATEWAY_IP}
+      - PORT=${NETALERTX_PORT}
+      - GRAPHQL_PORT=${NETALERTX_API_PORT}
+      # The defaults plus WEBHOOK, the publisher that posts to Discord.
+      - LOADED_PLUGINS=['ARPSCAN','AVAHISCAN','CSVBCKP','DBCLNP','DIGSCAN','INTRNT','MAINT','NEWDEV','NBTSCAN','NSLOOKUP','NTFPRCS','SETPWD','SYNC','VNDRPDT','WORKFLOWS','UI','WEBHOOK']
+      # A Discord webhook URL is posted to its Slack-compatible endpoint by the
+      # plugin itself. Notify on new devices; down alerts only fire for devices
+      # flagged "Alert Down" in the UI.
+      - >-
+        APP_CONF_OVERRIDE={
+        "SCAN_SUBNETS": "['${NETALERTX_SUBNET:?set in hosts/<profile>/compose.env} --interface=${NETALERTX_INTERFACE:?set in hosts/<profile>/compose.env}']",
+        "TIMEZONE": "${TZ}",
+        "BACKEND_API_URL": "/server",
+        "WEBHOOK_RUN": "on_notification",
+        "WEBHOOK_URL": "${DISCORD_WEBHOOK_ALERTS:?set in compose/.env}",
+        "WEBHOOK_REQUEST_METHOD": "POST",
+        "WEBHOOK_PAYLOAD": "text",
+        "NTFPRCS_INCLUDED_SECTIONS": "['new_devices','down_devices','down_reconnected']"
+        }
+    mem_limit: 1g
+    pids_limit: 512
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

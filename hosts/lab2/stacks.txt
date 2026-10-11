@@ -12,6 +12,7 @@ homepage
 immich
 jellyfin
 navidrome
+netalertx
 netdata
 open-webui
 paperless

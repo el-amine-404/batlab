@@ -1,0 +1,4 @@
+http://netalertx.homelab.lan {
+  import localSubnets
+	reverse_proxy @localSubnets 172.19.0.1:20211
+}

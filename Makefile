@@ -192,6 +192,7 @@ setup: check-env
 		$(VOLUMES_ROOT)/jellyfin/data \
 		$(VOLUMES_ROOT)/jellyfin/cache \
 		$(VOLUMES_ROOT)/jellyfin/log \
+		$(VOLUMES_ROOT)/netalertx \
 		$(VOLUMES_ROOT)/netdata/conf \
 		$(VOLUMES_ROOT)/netdata/lib \
 		$(VOLUMES_ROOT)/netdata/cache \
