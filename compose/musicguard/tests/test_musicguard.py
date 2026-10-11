@@ -128,6 +128,18 @@ class GuardTestCase(unittest.TestCase):
             "DISCORD_WEBHOOK": "",
         })
         self.environment.start()
+        # Run inside the live container, the real Discord, Lidarr and
+        # Navidrome settings are in the environment: none may reach a test.
+        for key in list(os.environ):
+            if key.startswith(("MUSICGUARD_", "DISCORD_", "LIDARR_", "NAVIDROME_")) \
+                    and key not in ("MUSICGUARD_INBOX", "MUSICGUARD_EXTRAS", "MUSICGUARD_ROOTS",
+                                    "MUSICGUARD_VERIFY_ONLY", "MUSICGUARD_CREDITS", "MUSICGUARD_QUARANTINE",
+                                    "MUSICGUARD_STATE", "MUSICGUARD_LYRICS", "MUSICGUARD_SETTLE_SECONDS"):
+                del os.environ[key]
+        # And no test talks to the network unless it says so.
+        self.offline = mock.patch.object(guard.urllib.request, "urlopen",
+                                         side_effect=OSError("tests are offline"))
+        self.offline.start()
         self.musicbrainz = mock.patch.object(guard.musicbrainz, "artist_side", return_value=None)
         self.musicbrainz.start()
         # Offline by default: no Shazam, no MusicBrainz credits.
@@ -140,6 +152,7 @@ class GuardTestCase(unittest.TestCase):
         self.guard = guard.Guard(guard.Config())
 
     def tearDown(self):
+        self.offline.stop()
         self.reference.stop()
         self.credit_lookup.stop()
         self.shazam.stop()
