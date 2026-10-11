@@ -470,8 +470,9 @@ class Handler(BaseHTTPRequestHandler):
         name = "index.html" if path == "/" else path.lstrip("/")
         file = (WEB_DIR / name).resolve()
         if file.parent == WEB_DIR.resolve() and file.is_file() and file.suffix in STATIC_TYPES:
-            cache = "no-cache" if file.suffix in (".html", ".webmanifest") else "max-age=3600"
-            return self._send(200, file.read_bytes(), STATIC_TYPES[file.suffix], cache)
+            # no-cache: the browser revalidates, so a new version reaches every
+            # phone at once instead of an old script running against new HTML.
+            return self._send(200, file.read_bytes(), STATIC_TYPES[file.suffix], "no-cache")
         self._json(404, {"error": "not found"})
 
     # POST: everything that does something
