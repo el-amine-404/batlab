@@ -38,6 +38,9 @@ services:
     volumes:
       - ${VOLUMES_ROOT}/cleanuparr:/config
       - ${DATA_ROOT}/torrents:/data/torrents:ro
+      # Malware Blocker lists of our own: the official blacklist is for video
+      # and lists *.flac and *.mp3 (docs/music.md).
+      - ${CONFIGS_ROOT}/arr/conf/cleanuparr:/blocklists:ro
       - /etc/localtime:/etc/localtime:ro
     environment:
       - TZ=${TZ}

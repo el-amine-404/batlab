@@ -216,9 +216,13 @@ Configured through its API on 2026-10-11:
 qBittorrent's excluded file names and Cleanuparr's malware blocker already
 stop programs inside torrents (hosts/lab1/cleanuparr.md). Cleanuparr keeps its
 settings in its own database; since 2026-10-11 it has a Lidarr instance
-(`http://lidarr:8686`), the Malware Blocker on for Lidarr with the same
-official blacklist as Sonarr and Radarr, and `music` in the unlinked categories
-and the `unlinked` seeding rule. Seeker is deliberately off for Lidarr: it
+(`http://lidarr:8686`), the Malware Blocker on for Lidarr as a **whitelist**
+(`/blocklists/lidarr-whitelist`, from `compose/arr/conf/cleanuparr/`: audio,
+covers, lyrics, cue/log/nfo/checksums, booklet PDFs; anything else and the
+whole torrent is removed), and `music` in the unlinked categories and the
+`unlinked` seeding rule. Not the official blacklist Sonarr and Radarr use: it
+is written for video and lists `*.flac`, `*.mp3` and `*.m4a`, so it removed
+every music torrent. Seeker is deliberately off for Lidarr: it
 would search upgrades for every monitored album.
 
 **Monitoring decides what gets downloaded.** A monitored album with missing
