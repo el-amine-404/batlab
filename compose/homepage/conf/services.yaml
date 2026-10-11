@@ -25,6 +25,12 @@
           url: http://seerr:5055
           key: "{{HOMEPAGE_VAR_SEERR_KEY}}"
           fields: ["pending", "approved", "completed"]
+    - Aurral:
+        icon: mdi-music-circle
+        href: http://aurral.homelab.lan
+        description: Request & Discover Music
+        siteMonitor: http://aurral:3001
+        statusStyle: "dot"
     - Jellyfin:
         icon: jellyfin
         href: http://jellyfin.homelab.lan
@@ -63,6 +69,33 @@
           user: "{{HOMEPAGE_VAR_NAVIDROME_USER}}"
           token: "{{HOMEPAGE_VAR_NAVIDROME_TOKEN}}"
           salt: "{{HOMEPAGE_VAR_NAVIDROME_SALT}}"
+    - MeTube:
+        icon: metube
+        href: http://metube.homelab.lan
+        description: Paste a YouTube link, get the song
+        siteMonitor: http://metube:8081
+        statusStyle: "dot"
+        # No MeTube widget in Homepage; its /history lists each queue.
+        widget:
+          type: customapi
+          url: http://metube:8081/history
+          refreshInterval: 30000
+          mappings:
+            - field: queue
+              label: Downloading
+              format: size
+            - field: pending
+              label: Waiting
+              format: size
+            - field: done
+              label: Done
+              format: size
+    - spotDL:
+        icon: mdi-spotify
+        href: http://spotdl.homelab.lan
+        description: Paste a Spotify link, get the song
+        siteMonitor: http://spotdl:8800
+        statusStyle: "dot"
 
 - Library:
     - Sonarr:
@@ -140,6 +173,23 @@
           url: http://gluetun:8080
           username: "{{HOMEPAGE_VAR_QBIT_USER}}"
           password: "{{HOMEPAGE_VAR_QBIT_PASS}}"
+    - slskd:
+        icon: slskd
+        href: http://slskd.homelab.lan
+        description: Soulseek Client (via VPN)
+        siteMonitor: http://gluetun:5030/health
+        statusStyle: "dot"
+        widget:
+          type: slskd
+          url: http://gluetun:5030
+          key: "{{HOMEPAGE_VAR_SLSKD_KEY}}"
+          fields: ["slskStatus", "downloads", "uploads", "sharedFiles"]
+    - Soularr:
+        icon: mdi-music-note-plus
+        href: http://soularr.homelab.lan
+        description: Lidarr's missing albums from Soulseek
+        siteMonitor: http://soularr:8265
+        statusStyle: "dot"
     - Cleanuparr:
         icon: cleanuparr
         href: http://cleanuparr.homelab.lan

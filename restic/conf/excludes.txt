@@ -3,6 +3,8 @@
 /mnt/storage/data/media/**
 /mnt/storage/data/torrents/**
 /mnt/storage/data/usenet/**
+/mnt/storage/data/soulseek/**
+/mnt/storage/data/inbox/**
 /mnt/storage/data/.quarantine/**
 
 # Models can be downloaded again and are several gigabytes.

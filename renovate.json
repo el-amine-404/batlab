@@ -18,6 +18,17 @@
       ],
       "datasourceTemplate": "docker",
       "versioningTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "PYPI_X / VERSION_X pairs in compose/versions.env: Python packages a local image installs",
+      "managerFilePatterns": [
+        "/^compose/versions\\.env$/"
+      ],
+      "matchStrings": [
+        "PYPI_[A-Z0-9_]+=(?<depName>[^\\s]+)\\nVERSION_[A-Z0-9_]+=(?<currentValue>[^\\s]+)"
+      ],
+      "datasourceTemplate": "pypi"
     }
   ],
   "dependencyDashboard": true,

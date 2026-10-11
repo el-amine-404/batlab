@@ -3,6 +3,7 @@
 adguardhome
 ai
 arr
+aurral
 caddy
 diun
 dozzle
@@ -12,6 +13,8 @@ homepage
 immich
 isponsorblocktv
 jellyfin
+music-links
+musicguard
 navidrome
 netalertx
 netdata

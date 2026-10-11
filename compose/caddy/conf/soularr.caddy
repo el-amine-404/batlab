@@ -1,0 +1,4 @@
+http://soularr.homelab.lan {
+  import localSubnets
+	reverse_proxy @localSubnets http://soularr:8265
+}

@@ -1,0 +1,48 @@
+name: ${AURRAL_PROJECT_NAME}
+# Music requests and discovery, the Seerr of the music stack (docs/music.md).
+# Albums requested here go to Lidarr; single tracks, playlists and flows are
+# downloaded by Aurral itself (slskd first, its built-in yt-dlp as fallback)
+# into music-aurral, which musicguard checks like every other library.
+#
+# Every path is the same inside Aurral, Lidarr, slskd and Navidrome (/data/...),
+# so a path one of them reports is valid in the others.
+services:
+  aurral:
+    image: ${IMAGE_AURRAL}:${TAG_AURRAL}
+    container_name: aurral
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - PORT=${AURRAL_HTTP_PORT}
+      # One proxy hop: Caddy. "true" trusts any X-Forwarded-For, which lets a
+      # client pick its own address, and Aurral's rate limiter refuses it.
+      - TRUST_PROXY=1
+      - DOWNLOAD_FOLDER=/data/media/music-aurral
+    volumes:
+      - ${VOLUMES_ROOT}/aurral:/config
+      # Lidarr's library: read to reuse tracks, never written (Aurral promises
+      # not to, and the mount enforces it).
+      - ${DATA_ROOT}/media/music:/data/media/music:ro
+      - ${DATA_ROOT}/media/music-aurral:/data/media/music-aurral
+      # slskd's finished downloads, which Aurral moves into its own folder.
+      - ${DATA_ROOT}/soulseek:/data/soulseek
+    networks:
+      - home_server
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+      - FOWNER
+    mem_limit: 1g
+
+networks:
+  home_server:
+    external: true
+    name: home_server

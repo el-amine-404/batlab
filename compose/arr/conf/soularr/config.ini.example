@@ -1,0 +1,68 @@
+# Soularr: Lidarr's missing albums, fetched through slskd (docs/music.md).
+# Copy to ${VOLUMES_ROOT}/soularr/config.ini and fill in the two API keys:
+# LIDARR_API_KEY and SLSKD_API_KEY from compose/.env. Restart soularr after.
+# Upstream reference: https://github.com/mrusse/soularr/blob/main/config.ini
+
+[Lidarr]
+api_key = your_lidarr_api_key_here
+host_url = http://lidarr:8686
+# Where Lidarr sees slskd's finished downloads. Both mount the same folder at
+# the same path, so this equals [Slskd] download_dir.
+download_dir = /data/soulseek/complete
+disable_sync = False
+
+[Slskd]
+api_key = your_slskd_api_key_here
+# slskd shares gluetun's network, so it is reached through gluetun's name.
+host_url = http://gluetun:5030
+url_base = /
+download_dir = /data/soulseek/complete
+delete_searches = False
+stalled_timeout = 3600
+remote_queue_timeout = 300
+
+[Release Settings]
+use_selected_lidarr_release = False
+use_most_common_tracknum = True
+allow_multi_disc = True
+accepted_countries = Europe,Japan,United Kingdom,United States,[Worldwide],Australia,Canada
+# The country list above would skip Moroccan, French and most other releases.
+skip_region_check = True
+accepted_formats = CD,Digital Media,Vinyl
+
+[Search Settings]
+search_timeout = 5000
+maximum_peer_queue = 50
+minimum_peer_upload_speed = 0
+# How closely a folder's file names must match the album's track titles.
+minimum_filename_match_ratio = 0.8
+minimum_search_interval = 5
+# Best first. Plain "mp3" (any bitrate) is left out on purpose: 128k rips are
+# what a library fills up with otherwise. Lidarr's quality profile agrees.
+allowed_filetypes = flac 24/192,flac 24/96,flac 24/48,flac 16/44.1,flac,mp3 320
+ignored_users =
+album_prepend_artist = False
+search_type = incrementing_page
+number_of_albums_to_grab = 10
+# Folder names containing these are never downloaded.
+title_blacklist = karaoke,instrumental version,8-bit,ringtone
+search_blacklist =
+search_source = missing
+failed_import_denylist = True
+
+[Download Settings]
+download_filtering = True
+# Only audio and these extras are downloaded from a folder; programs, archives,
+# playlists and shortcuts that some shares carry never reach the disk.
+use_extension_whitelist = True
+extensions_whitelist = jpg,jpeg,png,lrc
+rename_download_folders = True
+
+[Logging]
+level = INFO
+format = [%(levelname)s|%(module)s|L%(lineno)d] %(asctime)s: %(message)s
+datefmt = %Y-%m-%dT%H:%M:%S%z
+log_to_file = True
+log_file = soularr.log
+max_bytes = 1048576
+backup_count = 3

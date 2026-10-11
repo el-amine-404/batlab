@@ -22,6 +22,7 @@ services:
       - HOMEPAGE_VAR_SONARR_KEY=${SONARR_API_KEY}
       - HOMEPAGE_VAR_RADARR_KEY=${RADARR_API_KEY}
       - HOMEPAGE_VAR_LIDARR_KEY=${LIDARR_API_KEY}
+      - HOMEPAGE_VAR_SLSKD_KEY=${SLSKD_HOMEPAGE_KEY:-}
       - HOMEPAGE_VAR_READARR_KEY=${READARR_API_KEY}
       - HOMEPAGE_VAR_PROWLARR_KEY=${PROWLARR_API_KEY}
       - HOMEPAGE_VAR_BAZARR_KEY=${BAZARR_API_KEY}
@@ -40,7 +41,11 @@ services:
       - PUID=${PUID}
       - PGID=${PGID}
     networks:
-      - home_server
+      home_server:
+        # Fixed so slskd can accept the widget's key from this address alone
+        # (docs/music.md): slskd's read-only role still allows searches and
+        # downloads, so the address is the real restriction.
+        ipv4_address: 172.19.10.30
     mem_limit: ${HOMEPAGE_MEM_LIMIT:?set in hosts/<profile>/compose.env}
     mem_reservation: ${HOMEPAGE_MEM_RESERVATION:?set in hosts/<profile>/compose.env}
     memswap_limit: ${HOMEPAGE_MEM_LIMIT:?set in hosts/<profile>/compose.env}

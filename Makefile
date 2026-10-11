@@ -215,7 +215,12 @@ setup: check-env
 		$(VOLUMES_ROOT)/ollama \
 		$(VOLUMES_ROOT)/open-webui \
 		$(VOLUMES_ROOT)/tv-remote \
-		$(VOLUMES_ROOT)/isponsorblocktv
+		$(VOLUMES_ROOT)/isponsorblocktv \
+		$(VOLUMES_ROOT)/aurral \
+		$(VOLUMES_ROOT)/slskd \
+		$(VOLUMES_ROOT)/soularr \
+		$(VOLUMES_ROOT)/metube \
+		$(VOLUMES_ROOT)/musicguard
 
 	@echo "==> Creating data directories..."
 	sudo mkdir -p \
@@ -226,7 +231,15 @@ setup: check-env
 		$(DATA_ROOT)/files \
 		$(DATA_ROOT)/documents/media \
 		$(DATA_ROOT)/documents/export \
-		$(DATA_ROOT)/documents/consume
+		$(DATA_ROOT)/documents/consume \
+		$(DATA_ROOT)/media/music \
+		$(DATA_ROOT)/media/music-aurral \
+		$(DATA_ROOT)/media/music-extras \
+		$(DATA_ROOT)/inbox/music/metube \
+		$(DATA_ROOT)/inbox/music/spotdl \
+		$(DATA_ROOT)/soulseek/complete \
+		$(DATA_ROOT)/soulseek/incomplete \
+		$(DATA_ROOT)/.quarantine/musicguard
 
 	@echo "==> Setting ownership..."
 	sudo chown $(PUID):$(PGID) \
@@ -263,7 +276,18 @@ setup: check-env
 		$(DATA_ROOT)/documents/export \
 		$(DATA_ROOT)/documents/consume \
 		$(DATA_ROOT)/photos \
-		$(DATA_ROOT)/files
+		$(DATA_ROOT)/files \
+		$(VOLUMES_ROOT)/aurral \
+		$(VOLUMES_ROOT)/slskd \
+		$(VOLUMES_ROOT)/soularr \
+		$(VOLUMES_ROOT)/metube \
+		$(VOLUMES_ROOT)/musicguard \
+		$(DATA_ROOT)/media/music \
+		$(DATA_ROOT)/media/music-aurral \
+		$(DATA_ROOT)/media/music-extras \
+		$(DATA_ROOT)/inbox \
+		$(DATA_ROOT)/soulseek \
+		$(DATA_ROOT)/.quarantine/musicguard
 
 	@echo "==> Symlinking .env to all stacks..."
 	@for d in compose/*; do \

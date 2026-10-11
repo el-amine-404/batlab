@@ -1,0 +1,4 @@
+http://aurral.homelab.lan {
+  import localSubnets
+	reverse_proxy @localSubnets http://aurral:3001
+}

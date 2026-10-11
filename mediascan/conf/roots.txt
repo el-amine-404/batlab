@@ -2,6 +2,10 @@
 # list trees that do not exist yet.
 /mnt/storage/data/media
 /mnt/storage/data/torrents
+# Soulseek downloads and pasted-link downloads (docs/music.md); musicguard
+# checks them too, but this is the same sweep every other download gets.
+/mnt/storage/data/soulseek
+/mnt/storage/data/inbox
 
 # Immich manages its own upload store and is not part of the arr library.
 # Uncomment to sweep it as well.

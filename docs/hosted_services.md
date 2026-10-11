@@ -15,6 +15,12 @@ This document provides a summary of the self-hosted services configured in this 
 | **Sonarr**       | A TV show collection manager that automates downloading and organizing Usenet and BitTorrent files.      | [sonarr.tv](https://sonarr.tv)                                           |
 | **Radarr**       | A movie collection manager that automates downloading and organizing Usenet and BitTorrent files.        | [radarr.video](https://radarr.video)                                     |
 | **Lidarr**       | A music collection manager that automates downloading and organizing Usenet and BitTorrent files.        | [lidarr.audio](https://lidarr.audio)                                     |
+| **Aurral**       | Music requests and discovery, the Seerr of the music stack; also imports Spotify and YouTube Music playlists. | [docs.aurral.org](https://docs.aurral.org)                               |
+| **slskd**        | A Soulseek client with a web UI, run inside the VPN, for albums torrent sites do not carry.                | [github.com/slskd/slskd](https://github.com/slskd/slskd)                 |
+| **Soularr**      | Hands Lidarr's missing albums to slskd and has Lidarr import what it finds.                                | [github.com/mrusse/soularr](https://github.com/mrusse/soularr)           |
+| **MeTube**       | A web UI for yt-dlp: paste a YouTube link, the song lands in the music inbox.                              | [github.com/alexta69/metube](https://github.com/alexta69/metube)         |
+| **spotDL**       | Paste a Spotify link, the same song is fetched from YouTube Music into the music inbox.                     | [spotdl.rtfd.io](https://spotdl.readthedocs.io)                          |
+| **musicguard**   | (custom) Checks every music file, keeps only audio and clean tags, adds lyrics, quarantines the rest.     | [docs/music.md](music.md)                                                |
 | **Readarr**      | An ebook and audiobook manager that automates downloading and organizing Usenet and BitTorrent files.    | [readarr.com](https://readarr.com)                                       |
 | **Prowlarr**     | An indexer manager and proxy that syncs torrent track and Usenet indexers with the Arr stack.            | [prowlarr.com](https://prowlarr.com)                                     |
 | **Bazarr**       | A companion application that automatically searches, downloads, and manages subtitles for Sonarr/Radarr. | [bazarr.media](https://www.bazarr.media)                                 |

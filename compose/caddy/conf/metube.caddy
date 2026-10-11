@@ -1,0 +1,4 @@
+http://metube.homelab.lan {
+  import localSubnets
+	reverse_proxy @localSubnets http://metube:8081
+}

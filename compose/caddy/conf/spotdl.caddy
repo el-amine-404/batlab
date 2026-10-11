@@ -1,0 +1,4 @@
+http://spotdl.homelab.lan {
+  import localSubnets
+	reverse_proxy @localSubnets http://spotdl:8800
+}

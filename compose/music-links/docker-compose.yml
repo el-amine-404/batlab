@@ -1,0 +1,89 @@
+name: ${MUSIC_LINKS_PROJECT_NAME}
+# Paste a link, get the song (docs/music.md). MeTube takes YouTube and the other
+# sites yt-dlp knows; spotDL takes Spotify links and finds the same song on
+# YouTube Music. Both only write into the inbox: musicguard checks each file,
+# keeps the audio and clean tags, adds lyrics, and files it under music-extras.
+# Nothing they download is ever played straight from where they wrote it.
+#
+# Both connect directly, not through the VPN: YouTube answers VPN addresses with
+# "sign in to confirm you're not a bot".
+services:
+  metube:
+    image: ${IMAGE_METUBE}:${TAG_METUBE}
+    container_name: metube
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - UMASK=022
+      - TZ=${TZ}
+      - PORT=${METUBE_HTTP_PORT}
+      - DOWNLOAD_DIR=/downloads
+      - STATE_DIR=/state
+      # Partial downloads stay on the SSD; the inbox only ever sees whole files.
+      - TEMP_DIR=/state/tmp
+      # Everything lands in one inbox folder; no folder picker in the UI.
+      - CUSTOM_DIRS=false
+      - CLEAR_COMPLETED_AFTER=86400
+      - DEFAULT_THEME=auto
+      # Per-download yt-dlp options can run commands in the container.
+      - ALLOW_YTDL_OPTIONS_OVERRIDES=false
+    volumes:
+      - ${VOLUMES_ROOT}/metube:/state
+      - ${DATA_ROOT}/inbox/music/metube:/downloads
+    networks:
+      - home_server
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+      - FOWNER
+    mem_limit: 1g
+
+  spotdl:
+    image: local/batlab-spotdl
+    build:
+      context: ./spotdl
+      network: host
+      args:
+        BASE_IMAGE: ${IMAGE_SPOTDL}:${TAG_SPOTDL}
+        YTDLP_VERSION: ${VERSION_YTDLP}
+    # Rebuild on every `make up`, so a bumped VERSION_YTDLP is always deployed.
+    pull_policy: build
+    container_name: spotdl
+    # The image's own user is 1000:1000 and keeps Deno (yt-dlp's JavaScript
+    # runtime) in its home, so nothing is mounted over that home.
+    user: "${PUID}:${PGID}"
+    command:
+      - web
+      - --host=0.0.0.0
+      - --port=${SPOTDL_HTTP_PORT}
+      - --keep-alive
+      - --web-use-output-dir
+      - --output=/music/{artists} - {title}.{output-ext}
+      # YouTube Music's own Opus stream, copied without converting: converting
+      # to MP3 would only lose quality.
+      - --format=opus
+      - --bitrate=disable
+    environment:
+      - TZ=${TZ}
+    volumes:
+      - ${DATA_ROOT}/inbox/music/spotdl:/music
+    networks:
+      - home_server
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 1g
+
+networks:
+  home_server:
+    external: true
+    name: home_server

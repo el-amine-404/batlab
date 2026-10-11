@@ -150,6 +150,9 @@ services:
     container_name: lidarr
     volumes:
       - ${VOLUMES_ROOT}/lidarr:/config
+      # Same /data view as qBittorrent, slskd and Aurral, so a download is
+      # imported by hardlink or move instead of being invisible to Lidarr.
+      - ${DATA_ROOT}:/data
       - /etc/localtime:/etc/localtime:ro
     environment:
       - TZ=${TZ}
@@ -247,6 +250,77 @@ services:
         soft: 65536
         hard: 131072
       nproc: 8192
+
+  # Soulseek client (docs/music.md). It shares gluetun's network like
+  # qBittorrent, so peers only ever see the VPN's address, and it connects to
+  # Soulseek only while gluetun reports the tunnel up. gluetun's one forwarded
+  # port belongs to qBittorrent, so slskd has no inbound port: it can still
+  # download from every peer that accepts connections, which is most of them.
+  slskd:
+    image: ${IMAGE_SLSKD}:${TAG_SLSKD}
+    container_name: slskd
+    depends_on:
+      gluetun:
+        condition: service_healthy
+        restart: true
+    user: ${PUID}:${PGID}
+    environment:
+      - TZ=${TZ}
+      - SLSKD_HTTP_PORT=${SLSKD_WEBUI_PORT}
+      - SLSKD_NO_HTTPS=true
+      - SLSKD_REMOTE_CONFIGURATION=false
+      - SLSKD_SLSK_USERNAME=${SLSKD_SLSK_USERNAME:?set in compose/.env}
+      - SLSKD_SLSK_PASSWORD=${SLSKD_SLSK_PASSWORD:?set in compose/.env}
+      - SLSKD_USERNAME=${SLSKD_WEB_USER:?set in compose/.env}
+      - SLSKD_PASSWORD=${SLSKD_WEB_PASS:?set in compose/.env}
+      - SLSKD_API_KEY=${SLSKD_API_KEY:?set in compose/.env}
+      - SLSKD_DOWNLOADS_DIR=/data/soulseek/complete
+      - SLSKD_INCOMPLETE_DIR=/data/soulseek/incomplete
+      # Many users refuse peers who share nothing. The Lidarr library is shared
+      # read-only; nothing else on the disk is visible to slskd.
+      - SLSKD_SHARED_DIR=/data/media/music
+      - SLSKD_UPLOAD_SLOTS=5
+      - SLSKD_UPLOAD_SPEED_LIMIT=2048
+      # Hold the Soulseek connection until gluetun's control server reports the
+      # tunnel running (GET /v1/vpn/status is open, see conf/gluetun).
+      - SLSKD_VPN=true
+      - SLSKD_VPN_GLUETUN_URL=http://127.0.0.1:8000
+    volumes:
+      - ${VOLUMES_ROOT}/slskd:/app
+      - ${DATA_ROOT}/soulseek:/data/soulseek
+      - ${DATA_ROOT}/media/music:/data/media/music:ro
+    network_mode: service:gluetun
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  # Hands Lidarr's missing albums to slskd and tells Lidarr to import the
+  # result. Its config (with the API keys) is ${VOLUMES_ROOT}/soularr/config.ini,
+  # made from conf/soularr/config.ini.example.
+  soularr:
+    image: ${IMAGE_SOULARR}:${TAG_SOULARR}
+    container_name: soularr
+    depends_on:
+      - lidarr
+      - slskd
+    user: ${PUID}:${PGID}
+    environment:
+      - TZ=${TZ}
+      - SCRIPT_INTERVAL=600
+      - WEBUI_ENABLED=true
+      - WEBUI_PORT=${SOULARR_WEBUI_PORT}
+    volumes:
+      - ${VOLUMES_ROOT}/soularr:/data
+      - ${DATA_ROOT}/soulseek:/data/soulseek
+    networks:
+      - home_server
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
   radarr:
     image: ${IMAGE_RADARR}:${TAG_RADARR}
