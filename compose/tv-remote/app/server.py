@@ -124,15 +124,32 @@ def scan() -> list[dict]:
 class Remote:
     """One paired TV: its control connection, rebuilt when it drops."""
 
-    # The TV closes a quiet control socket without telling the client, so the
-    # next key would vanish: past this many idle seconds, reconnect first.
-    IDLE_RECONNECT = 15
+    # A quiet control socket goes stale without the client noticing, which lost
+    # the first press, and opening a new one takes 1.5 s. So the socket is
+    # pinged while the remote is in use, and let go after KEEP seconds unused.
+    PING_EVERY = 8
+    KEEP = 600
 
     def __init__(self, mac: str) -> None:
         self.mac = mac
         self.lock = threading.Lock()
         self.tv: SamsungTVWS | None = None
         self.last_used = 0.0
+        threading.Thread(target=self._keepalive, daemon=True).start()
+
+    def _keepalive(self) -> None:
+        while True:
+            time.sleep(self.PING_EVERY)
+            with self.lock:
+                if self.tv is None:
+                    continue
+                if time.monotonic() - self.last_used > self.KEEP:
+                    self._drop()
+                    continue
+                try:
+                    self.tv.connection.ping()
+                except Exception:  # noqa: BLE001 - stale socket: reopen on next use
+                    self._drop()
 
     def _ip(self) -> str:
         return load_tvs()[self.mac]["ip"]
@@ -166,8 +183,6 @@ class Remote:
     def run(self, fn):
         """fn(tv) with one reconnect, and one relocation, on failure."""
         with self.lock:
-            if time.monotonic() - self.last_used > self.IDLE_RECONNECT:
-                self._drop()
             for attempt in range(3):
                 try:
                     result = fn(self._connect())
