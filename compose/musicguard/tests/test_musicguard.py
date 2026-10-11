@@ -795,9 +795,13 @@ class ReferenceRules(unittest.TestCase):
         workdir = tempfile.mkdtemp()
         try:
             song, clip, other = (os.path.join(workdir, n) for n in ("song.flac", "clip.flac", "other.flac"))
-            noise(song, seconds=60)
+            # Two different melodies: Chromaprint hears pitch, so noise
+            # against noise would look alike (0.76) without being a song.
+            ffmpeg("-f", "lavfi", "-i", "aevalsrc=0.4*sin(2*PI*(262+131*floor(mod(t*2\\,4)))*t)"
+                   "+0.2*sin(2*PI*(392+98*floor(mod(t*3\\,5)))*t):d=60:s=44100", song)
             ffmpeg("-ss", "20", "-t", "30", "-i", song, clip)
-            noise(other, seconds=30)
+            ffmpeg("-f", "lavfi", "-i", "aevalsrc=0.4*sin(2*PI*(311+155*floor(mod(t*5\\,3)))*t)"
+                   "+0.2*sin(2*PI*(466+117*floor(mod(t*1.5\\,6)))*t):d=30:s=44100", other)
             same = reference.similarity(reference.fingerprint(clip), reference.fingerprint(song))
             different = reference.similarity(reference.fingerprint(other), reference.fingerprint(song))
             self.assertGreaterEqual(same, reference.SAME)
