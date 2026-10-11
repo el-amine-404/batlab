@@ -19,7 +19,7 @@ it on the way. Set up on 2026-10-11.
 | Path under `DATA_ROOT` | What | Who writes it | Navidrome sees it at |
 | --- | --- | --- | --- |
 | `media/music` | albums Lidarr manages, and the music that was here before | Lidarr | `/music` |
-| `media/music-aurral` | single tracks, playlists and flows requested in Aurral | Aurral | `/music-aurral` |
+| `media/music-aurral` | single tracks, playlists and flows requested in Aurral | Aurral | `/data/media/music-aurral` |
 | `media/music-extras` | songs from pasted links | musicguard | `/music-extras` |
 | `inbox/music/{metube,spotdl}` | link downloads waiting to be checked | MeTube, spotDL | never |
 | `soulseek/{incomplete,complete}` | slskd downloads before Lidarr or Aurral import them | slskd | never |
@@ -120,7 +120,10 @@ FLAC made from them is not caught.
 
 Navidrome has one library per folder (Settings > Libraries, as an admin):
 `/music` (Lidarr's, the original library), `/music-extras` (pasted links) and
-`/music-aurral`, which Aurral creates through the API once it is connected.
+`/data/media/music-aurral`, which Aurral creates through the API once it is
+connected. On 2026-10-11 Aurral sent its own path for that library, which
+Navidrome refused (400) while the folder was mounted at `/music-aurral`, so the
+mount now uses Aurral's path.
 Give every user access to all three. Lyrics need no setting.
 
 ## Pasted links
@@ -163,7 +166,7 @@ admin account, then:
 | slskd | `http://gluetun:5030`, `SLSKD_API_KEY` |
 | yt-dlp | on (built in), lowest priority |
 | Navidrome | `http://navidrome:4533`, an admin account |
-| Remote path mappings | Navidrome `/music` → `/data/media/music`; Navidrome `/music-aurral` → `/data/media/music-aurral` |
+| Remote path mappings | Navidrome `/music` → `/data/media/music` (Aurral's own folder has the same path in both, so it needs none) |
 
 ## Lidarr
 

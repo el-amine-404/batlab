@@ -18,10 +18,12 @@ services:
     volumes:
       - ${VOLUMES_ROOT}/navidrome/data:/data
       # Three libraries (docs/music.md): Lidarr's, Aurral's and the pasted
-      # links'. Aurral sees them under /data/media, so it maps these paths
-      # (Settings > Download clients > Remote path mappings).
+      # links'. Aurral's sits at the path Aurral itself uses, because Aurral
+      # creates that library through Navidrome's API with its own path; inside
+      # Navidrome's data folder this leaves only an empty mount point behind.
+      # Lidarr's stays at /music, mapped in Aurral (Remote path mappings).
       - ${DATA_ROOT}/media/music:/music:ro
-      - ${DATA_ROOT}/media/music-aurral:/music-aurral:ro
+      - ${DATA_ROOT}/media/music-aurral:/data/media/music-aurral:ro
       - ${DATA_ROOT}/media/music-extras:/music-extras:ro
       - /etc/localtime:/etc/localtime:ro
     cap_drop:
