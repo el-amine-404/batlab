@@ -5,7 +5,14 @@ name: nodecast
 # through the VPN. Remuxes or transcodes (Quick Sync) what a browser can't play.
 services:
   nodecast:
-    image: ${IMAGE_NODECAST}:${TAG_NODECAST}
+    # The image with one fix to its guide sync (Dockerfile).
+    image: local/batlab-nodecast
+    build:
+      context: .
+      network: host
+      args:
+        BASE_IMAGE: ${IMAGE_NODECAST}:${TAG_NODECAST}
+    pull_policy: build
     container_name: nodecast
     user: ${PUID}:${PGID}
     environment:
