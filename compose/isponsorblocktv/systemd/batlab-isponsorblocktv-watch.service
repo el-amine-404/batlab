@@ -1,0 +1,8 @@
+[Unit]
+Description=Restart iSponsorBlockTV when YouTube starts on the TV
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/potato/batlab/compose/isponsorblocktv/watch.sh

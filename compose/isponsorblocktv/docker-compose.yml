@@ -4,6 +4,10 @@ name: isponsorblocktv
 # a casting client (YouTube's Lounge API, like the tv-remote stack). Nothing is
 # installed on the TV. config.json lives in its volume: it holds the TV's
 # YouTube screen id; config.json.template is the shape, setup.sh fills it.
+# It never notices when the TV's YouTube restarts: watch.sh, on a 20 s timer,
+# restarts it then. Install: sudo install -m 644 systemd/* /etc/systemd/system/
+# && sudo systemctl daemon-reload && sudo systemctl enable --now
+# batlab-isponsorblocktv-watch.timer
 services:
   isponsorblocktv:
     image: ${IMAGE_ISPONSORBLOCKTV}:${TAG_ISPONSORBLOCKTV}

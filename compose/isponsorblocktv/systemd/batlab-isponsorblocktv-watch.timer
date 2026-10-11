@@ -1,0 +1,10 @@
+[Unit]
+Description=Check every 20 s whether YouTube started on the TV
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=20s
+AccuracySec=2s
+
+[Install]
+WantedBy=timers.target
