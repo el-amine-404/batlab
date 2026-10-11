@@ -27,9 +27,16 @@ chosen because of this machine.
   and deleted the data. Big packs stay covered by `stalled`, which only strikes
   a download that makes no progress.
 - Malware Blocker: remove the whole download if any file matches; Sonarr and
-  Radarr use the official blacklist.
+  Radarr use `/blocklists/blacklist` (`compose/arr/conf/cleanuparr/blacklist`),
+  the official blacklist without audio, covers, cue, log, nfo, txt and pdf,
+  which music torrents need (docs/music.md). Lidarr uses a whitelist.
 - Blacklist Sync writes the same list into qBittorrent's excluded file names,
   replacing a hand-made list whose `*.ha*`-style patterns skipped real films.
+  Both must use the same list: files qBittorrent already skips are not
+  checked, so an entry in the blocker's list but not in qBittorrent's would
+  remove whole downloads for a `.nfo`.
+- The copy of the official list does not update itself; to refresh it, take
+  the upstream file and drop every line that `lidarr-whitelist` also has.
 - Seeker instances: monitored only, below cutoff included, custom format score
   included, 3 active downloads, 7-day minimum cycle. The score is what keeps a
   fallback copy (a dub, an unranked release) searched once its quality already
