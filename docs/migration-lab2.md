@@ -235,9 +235,11 @@ DNS and DHCP are untouched in this phase, so the house keeps its internet.
 
    Static leases are not synced either: add the DVR's (`.2`, Hikvision,
    `24:28:fd:12:90:11`) in lab2's UI, Settings > DHCP, so it keeps its
-   address whichever server answers. lab1 and lab2 set their address on the
-   host (`docs/install/04-static-ip.md`) and need no lease. Done on lab2
-   2026-10-10, with lab1 off. Devices holding a lab1 lease above `.100` move
+   address whichever server answers, and the Samsung TV's (`.113`,
+   `74:6d:fa:e6:e0:7a`), which the TV remote (`compose/tv-remote`) talks to.
+   lab1 and lab2 set their address on the host
+   (`docs/install/04-static-ip.md`) and need no lease. Both done on lab2
+   2026-10-10/11, with lab1 off; add both on lab1 when it is back. Devices holding a lab1 lease above `.100` move
    on their next renewal; AdGuard pings an address before offering it
    (`icmp_timeout_msec`), so the overlap meanwhile does not hand out a taken
    one.
