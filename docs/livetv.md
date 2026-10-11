@@ -1,13 +1,17 @@
 # Live TV
 
-Jellyfin's Live TV gets its channels from Dispatcharr, which runs in the `arr`
-stack inside gluetun's network namespace: every stream is fetched through
-ProtonVPN, so the stream hosts see the VPN's address, not ours.
+Dispatcharr runs in the `arr` stack inside gluetun's network namespace and
+fetches every stream through ProtonVPN, so the stream hosts see the VPN's
+address, not ours. Two players use it:
 
 ```
-iptv-org playlist ──> Dispatcharr (gluetun:9191) ──> Jellyfin Live TV ──> TV app
-epgshare01 guide  ──┘       HDHomeRun tuner + XMLTV
+iptv-org playlist ──> Dispatcharr (gluetun:9191) ──> NodeCast TV ──> browsers (PCs, phones)
+epgshare01 guide  ──┘   Xtream Codes API      └───> Jellyfin Live TV (HDHomeRun + XMLTV)
 ```
+
+Jellyfin's Live TV pages do not cope with 11k channels: its Channels page took
+6 minutes in Firefox on 2026-10-11, while Dispatcharr's own list of the same
+channels is instant. NodeCast is the player for PCs and phones.
 
 - Web UI: http://dispatcharr.homelab.lan, user and password in `compose/.env`
   (`DISPATCHARR_USER`, `DISPATCHARR_PASS`).
@@ -53,6 +57,36 @@ Set once through the API, held in its database under
   ```
 
   then EPG, `epgshare01 all`, Refresh.
+
+## NodeCast TV
+
+http://nodecast.homelab.lan, stack `compose/nodecast`. Login `admin` and
+`NODECAST_PASS` from `compose/.env`, asked twice: by Caddy, then by the app.
+
+- Source: Xtream Codes, `http://gluetun:9191`, Dispatcharr user `nodecast`
+  (`DISPATCHARR_XC_USER`/`_PASS`). That user is a Streamer (level 0, plays
+  only); its Xtream password is the custom property `xc_password`. It sees all
+  183 groups and 11172 channels; NodeCast syncs them and the guide (82k
+  programmes) in under a minute, every 24 h.
+- Settings, Transcoding: **Force Backend Proxy** on, stream format **TS**,
+  encoder auto (VAAPI on lab2, `h264_vaapi`). Dispatcharr sends MPEG-TS, which
+  browsers cannot play: NodeCast probes each stream and remuxes it to MP4
+  (H.264/AAC, the usual case) or transcodes on the GPU.
+- `JWT_SECRET` must be set: without it the image signs logins with a key
+  published in its source.
+- **Basic auth at Caddy is not optional.** NodeCast checks its login only in
+  the browser: on 2.1.1, `/api/sources` (with the Dispatcharr password),
+  `/api/settings` and `/api/proxy/stream?url=` (fetches any URL from inside
+  `home_server`, gluetun's control server included) all answered 200 without
+  one. Only user management checks the token. The Caddy password hash is
+  `NODECAST_PASS_HASH`, single-quoted in `compose/.env`.
+- The browser gets the Dispatcharr stream URL, `nodecast` user and Xtream
+  password included; that user can only play.
+- First start: the first `POST /api/auth/setup` creates the admin, with no
+  login, until a user exists. Create it right after the container starts.
+- Pinned to `2.1.1`. The project's last commit was 2026-03-02; if it breaks
+  or stays abandoned, IPTVnator (very active, but configured per browser) is
+  the fallback.
 
 ## How Jellyfin is set up
 
@@ -117,5 +151,5 @@ If live TV stutters or the VPN slows downloads, take Dispatcharr out of
 gluetun's namespace: in `compose/arr/docker-compose.yml` replace
 `network_mode: service:gluetun` and the `depends_on` block with
 `networks: [home_server]`, then point `dispatcharr.caddy`, the homepage tile
-and Jellyfin's tuner and guide URLs at `dispatcharr:9191` instead of
-`gluetun:9191`. Then `make up STACK=arr SERVICE=dispatcharr`.
+Jellyfin's tuner and guide URLs and NodeCast's source (Settings, Content
+Sources) at `dispatcharr:9191` instead of `gluetun:9191`. Then `make up STACK=arr SERVICE=dispatcharr`.

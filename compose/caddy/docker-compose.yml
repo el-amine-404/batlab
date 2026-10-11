@@ -21,6 +21,8 @@ services:
       - TZ=${TZ}
       # tv-remote.caddy: the remote's port.
       - TV_REMOTE_PORT=${TV_REMOTE_PORT:?set in compose/.env}
+      # nodecast.caddy: bcrypt hash of NODECAST_PASS (caddy hash-password).
+      - NODECAST_PASS_HASH=${NODECAST_PASS_HASH:?set in compose/.env}
     networks:
       - home_server
     healthcheck:

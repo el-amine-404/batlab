@@ -1,0 +1,13 @@
+# NodeCast checks its login only in the browser: its API (sources with the
+# Dispatcharr password, settings, a proxy that fetches any URL) answers without
+# one. Basic auth here covers all of it; same user and password as the app.
+http://nodecast.homelab.lan {
+  import localSubnets
+	basic_auth @localSubnets {
+		admin {$NODECAST_PASS_HASH}
+	}
+	reverse_proxy @localSubnets http://nodecast:3000 {
+		# Streams: send bytes as they come.
+		flush_interval -1
+	}
+}

@@ -45,6 +45,12 @@
         description: Live TV Channels
         siteMonitor: http://gluetun:9191/hdhr/discover.json
         statusStyle: "dot"
+    - NodeCast TV:
+        icon: mdi-television-play
+        href: http://nodecast.homelab.lan
+        description: Live TV in the Browser
+        siteMonitor: http://nodecast:3000/api/auth/setup-required
+        statusStyle: "dot"
     - Navidrome:
         icon: navidrome
         href: http://navidrome.homelab.lan

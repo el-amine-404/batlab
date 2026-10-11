@@ -10,6 +10,7 @@ This document provides a summary of the self-hosted services configured in this 
 | **Homepage**     | A highly customizable, modern application dashboard with real-time docker container metrics.             | [gethomepage.dev](https://gethomepage.dev)                               |
 | **Jellyfin**     | An open-source media system that lets you stream your movies, shows, and music to any device.            | [jellyfin.org](https://jellyfin.org)                                     |
 | **Dispatcharr**  | An IPTV stream manager that feeds the iptv-org channels to Jellyfin Live TV, through the VPN.            | [dispatcharr.github.io](https://dispatcharr.github.io/Dispatcharr-Docs/) |
+| **NodeCast TV**  | A web player for live TV on PCs and phones, fed by Dispatcharr's Xtream Codes API.                       | [github.com/technomancer702/nodecast-tv](https://github.com/technomancer702/nodecast-tv) |
 | **qBittorrent**  | A lightweight, open-source BitTorrent download client with a clean web interface.                        | [qbittorrent.org](https://www.qbittorrent.org)                           |
 | **Sonarr**       | A TV show collection manager that automates downloading and organizing Usenet and BitTorrent files.      | [sonarr.tv](https://sonarr.tv)                                           |
 | **Radarr**       | A movie collection manager that automates downloading and organizing Usenet and BitTorrent files.        | [radarr.video](https://radarr.video)                                     |

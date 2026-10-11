@@ -15,6 +15,7 @@ jellyfin
 navidrome
 netalertx
 netdata
+nodecast
 open-webui
 paperless
 portainer

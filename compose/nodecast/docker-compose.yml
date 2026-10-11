@@ -1,0 +1,44 @@
+name: nodecast
+# Web player for live TV on PCs and phones, at nodecast.homelab.lan. It logs
+# into Dispatcharr's Xtream Codes API (gluetun:9191) and proxies every stream
+# itself, so browsers never talk to Dispatcharr and the streams still leave
+# through the VPN. Remuxes or transcodes (Quick Sync) what a browser can't play.
+services:
+  nodecast:
+    image: ${IMAGE_NODECAST}:${TAG_NODECAST}
+    container_name: nodecast
+    user: ${PUID}:${PGID}
+    environment:
+      - TZ=${TZ}
+      - NODE_ENV=production
+      - PORT=3000
+      # Signs the login tokens; the image's default is public.
+      - JWT_SECRET=${NODECAST_JWT_SECRET:?set in compose/.env}
+    volumes:
+      - ${VOLUMES_ROOT}/nodecast/data:/app/data
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${RENDER_GID:?set in hosts/<profile>/compose.env}"
+      - "44"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - home_server
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:3000/api/auth/setup-required"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    cpus: ${NODECAST_CPUS:?set in hosts/<profile>/compose.env}
+    mem_limit: ${NODECAST_MEM_LIMIT:?set in hosts/<profile>/compose.env}
+    mem_reservation: ${NODECAST_MEM_RESERVATION:?set in hosts/<profile>/compose.env}
+    restart: unless-stopped
+
+networks:
+  home_server:
+    external: true
+    name: home_server
