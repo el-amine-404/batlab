@@ -945,6 +945,27 @@ class LyricsRules(unittest.TestCase):
         self.assertTrue(lyrics.synced_ok("[ar: Band]\n[00:01.00] one\n"))
         self.assertFalse(lyrics.synced_ok("one\n[00:01.00] two\n"))
 
+    def test_lookalike_letters_are_latinised_only_inside_latin_words(self):
+        text = lyrics.clean("Rani nkhmmem fik ri7t\u0435k\n\u041f\u0440\u0438\u0432\u0435\u0442 \u03b1\u03b2\u03b3\n")
+        self.assertEqual(text, "Rani nkhmmem fik ri7tek\n\u041f\u0440\u0438\u0432\u0435\u0442 \u03b1\u03b2\u03b3\n")
+
+    def test_an_ai_synced_file_is_replaced_by_a_human_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "01 - Song.mp3")
+            open(path, "wb").close()
+            with open(os.path.join(tmp, "01 - Song.lrc"), "w", encoding="utf-8") as out:
+                out.write("[by:AI-generated, not checked by a person]\n[00:01.00] la\n")
+            g = guard.Guard.__new__(guard.Guard)
+            g.config = mock.Mock(dry_run=True)
+            g.state = {"lyrics": {}}
+            g.events = []
+            self.assertFalse(g.has_synced_lyrics(path))
+            with mock.patch.object(lyrics, "lookup", return_value=("synced", "[00:01.20] la\n")):
+                g.fetch_lyrics(path, {"artist": ["Band"], "title": ["Song"]}, 180)
+            with open(os.path.join(tmp, "01 - Song.lrc"), encoding="utf-8") as handle:
+                self.assertEqual(handle.read(), "[00:01.20] la\n")
+            self.assertTrue(g.has_synced_lyrics(path))
+
     def test_pick_by_length(self):
         results = [{"duration": 200, "plainLyrics": "a"}, {"duration": 181, "syncedLyrics": "[00:01.00] b"}]
         self.assertEqual(lyrics.pick(results, 180)["duration"], 181)

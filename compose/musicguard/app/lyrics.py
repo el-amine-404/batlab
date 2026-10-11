@@ -54,14 +54,42 @@ def _get(path, params, attempts=3):
     return json.loads(body)
 
 
+# Cyrillic and Greek letters drawn like Latin ones. Inside a Latin word they
+# are a typing or copying accident ("ri7tеk" in LRCLIB's KATANA had a
+# Cyrillic е): the word reads the same but is not found by a search.
+LOOKALIKES = str.maketrans("аеорсухіјѕАВЕКМНОРСТХІЈЅοΑΒΕΗΙΚΜΝΟΡΤΧΥΖ",
+                           "aeopcyxijsABEKMHOPCTXIJSoABEHIKMNOPTXYZ")
+WORD = re.compile(r"\w+")
+# What an AI-synced .lrc starts with (ai-sync on a workstation): its timings
+# were not checked by a person, so a human-synced one replaces it.
+AI_MARK = "[by:AI-generated"
+
+
+def latinise(match):
+    word = match.group(0)
+    if any("a" <= c.lower() <= "z" for c in word):
+        return word.translate(LOOKALIKES)
+    return word  # a word in Russian or Greek is left as it is
+
+
+def is_ai(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            return AI_MARK in handle.read(4096)
+    except OSError:
+        return False
+
+
 def clean(text):
-    """Lyrics as plain text: no control characters, bounded size."""
+    """Lyrics as plain text: no control characters, no look-alike letters
+    inside Latin words, bounded size."""
     if not isinstance(text, str):
         return ""
     text = unicodedata.normalize("NFC", text.replace("\r\n", "\n").replace("\r", "\n"))
     lines = []
     for line in text.split("\n")[:MAX_LINES]:
         line = "".join(c for c in line if c == "\t" or unicodedata.category(c) != "Cc")
+        line = WORD.sub(latinise, line)
         lines.append(line.rstrip()[:MAX_LINE])
     return "\n".join(lines).strip() + "\n"
 

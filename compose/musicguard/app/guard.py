@@ -666,7 +666,11 @@ class Guard:
         return any(os.path.exists(stem + e) for e in LYRIC_EXTENSIONS)
 
     def has_synced_lyrics(self, path):
-        return os.path.exists(os.path.splitext(path)[0] + ".lrc")
+        """Synced by a person: an AI-synced .lrc (lyrics.AI_MARK) is asked
+        about again like plain lyrics, and replaced by LRCLIB's when a person
+        has synced the song there."""
+        sidecar = os.path.splitext(path)[0] + ".lrc"
+        return os.path.exists(sidecar) and not lyrics.is_ai(sidecar)
 
     def fetch_lyrics(self, path, found, seconds):
         """Synced lyrics (.lrc) when LRCLIB has them, else plain (.txt). A song

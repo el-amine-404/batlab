@@ -221,6 +221,29 @@ follow a move. The purge has no guard against an empty mount of its own; the
 data guard (watchdog/README.md) is that guard, stopping Navidrome while the disk
 is unmounted.
 
+## AI-synced lyrics
+
+Songs whose lyrics exist only as plain text (most often Moroccan ones nobody
+has synced on LRCLIB) can be synced by AI on a workstation with a GPU: the
+voice is separated (Demucs), three aligners place each known line (Whisper
+large-v3-turbo, Whisper large-v3, Meta's MMS) and the median time wins. On 8
+songs a person had synced, this put 86% of lines within 1 s of the person's
+timing; on the lines where the aligners agree (two thirds), 94%.
+
+Every such file says so in its first lines, as LRC info tags players ignore:
+
+```
+[by:AI-generated, not checked by a person]
+[re:batlab ai-sync 2026-10-11: Demucs htdemucs + Whisper large-v3-turbo + Whisper large-v3 + MMS, median vote]
+[#:uncertain lines (the methods disagree): 3, 12, 19]
+```
+
+musicguard treats a file with that `[by:` line as not synced by a person: it
+keeps asking LRCLIB monthly, and replaces it with a human-synced one when
+there is one. Lyrics musicguard writes also lose look-alike letters inside
+Latin words (a Cyrillic `е` in "ri7tеk"), which read the same but defeat
+search; Russian and Greek words are left alone.
+
 ## Feishin
 
 `feishin.homelab.lan` is a better player than Navidrome's own web page: synced
