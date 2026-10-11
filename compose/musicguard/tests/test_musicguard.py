@@ -517,6 +517,77 @@ class Identification(GuardTestCase):
         self.assertEqual(os.stat(path).st_ino, os.stat(link).st_ino, "edited in place")
 
 
+class LinkMetadata(GuardTestCase):
+    def apple_release(self):
+        track = {"wrapperType": "track", "collectionName": "OMEGA - EP", "trackName": "PIRATE",
+                 "artistName": "Stormy", "trackNumber": 5, "trackCount": 6, "discNumber": 1,
+                 "discCount": 1, "releaseDate": "2025-01-09T12:00:00Z", "primaryGenreName": "Hip-Hop/Rap",
+                 "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/x/cover.jpg/100x100bb.jpg"}
+        release = guard.apple.Release(track, {"artistName": "Stormy"})
+        release.cover = lambda: None
+        return release
+
+    def test_apple_music_gives_the_album_track_number_and_genre(self):
+        path = os.path.join(self.inbox, "metube", "Georgie Fame - Stormy.mp3")
+        tone(path)
+        audio = mutagen.File(path, easy=True)
+        audio["title"], audio["artist"], audio["genre"] = "Stormy", "Georgie Fame", "Soul Jazz"
+        audio.save()
+        self.guard.config.identify = True
+        guard.identify.recognise.return_value = identify.Match("PIRATE", "Stormy", album="OMEGA - EP",
+                                                               year="2025", apple_id="1786653398",
+                                                               genre="Hip-Hop/Rap")
+        with mock.patch.object(guard.apple, "release", return_value=self.apple_release()):
+            self.inbox_twice()
+        self.assertEqual(self.all_files(self.extras), ["Stormy/OMEGA (2025)/05 - PIRATE.mp3"])
+        done = mutagen.File(os.path.join(self.extras, "Stormy/OMEGA (2025)/05 - PIRATE.mp3"), easy=True)
+        self.assertEqual((done["genre"], done["tracknumber"], done["date"], done["musicbrainz_albumtype"]),
+                         (["Hip-Hop/Rap"], ["5/6"], ["2025-01-09"], ["ep"]))
+
+    def test_a_song_already_in_the_library_is_not_filed_twice(self):
+        existing = os.path.join(self.music, "Drake", "Views (2016)", "12 - One Dance.mp3")
+        os.makedirs(os.path.dirname(existing))
+        for path in (existing, os.path.join(self.inbox, "metube", "Drake - One Dance.mp3")):
+            tone(path)
+            audio = mutagen.File(path, easy=True)
+            audio["title"], audio["artist"] = "One Dance", "Drake"
+            audio.save()
+        self.inbox_twice()
+        self.assertEqual(self.all_files(self.extras), [])
+        self.assertEqual(self.all_files(os.path.join(self.inbox, "metube")), [])
+        self.assertIn("ALREADY_IN_LIBRARY", [e["reason"] for e in self.guard.events])
+
+
+class NavidromeScans(GuardTestCase):
+    def setUp(self):
+        super().setUp()
+        self.guard.config.navidrome_user = "musicguard"
+        self.scan = mock.patch.object(guard.navidrome, "start_scan")
+        self.scan.start()
+
+    def tearDown(self):
+        self.scan.stop()
+        super().tearDown()
+
+    def test_navidrome_scans_only_once_every_file_is_checked(self):
+        path = os.path.join(self.music, "A", "B (2020)", "01 - C.mp3")
+        os.makedirs(os.path.dirname(path))
+        tone(path)
+        self.guard.config.settle = 3600  # just arrived: not checked yet
+        self.guard.roots_pass()
+        self.guard.scan_navidrome()
+        guard.navidrome.start_scan.assert_not_called()
+
+        self.guard.config.settle = 0
+        self.guard.roots_pass()
+        self.guard.scan_navidrome()
+        guard.navidrome.start_scan.assert_called_once()
+
+        self.guard.roots_pass()  # nothing new: no second scan
+        self.guard.scan_navidrome()
+        guard.navidrome.start_scan.assert_called_once()
+
+
 class FakeLidarr:
     """Lidarr's API as upgrade.Lidarr uses it."""
 
@@ -618,9 +689,12 @@ class IdentifyRules(unittest.TestCase):
     def test_parse(self):
         answer = {"track": {"title": "PIRATE", "subtitle": "Stormy", "isrc": "FRIDO2417560",
                             "sections": [{"metadata": [{"title": "Album", "text": "OMEGA - EP"},
-                                                       {"title": "Released", "text": "2025"}]}]}}
+                                                       {"title": "Released", "text": "2025"}]}],
+                            "genres": {"primary": "Hip-Hop/Rap"},
+                            "hub": {"actions": [{"type": "applemusicplay", "id": "1786653398"}]}}}
         match = identify.parse(answer)
         self.assertEqual((match.title, match.artist, match.album, match.year), ("PIRATE", "Stormy", "OMEGA - EP", "2025"))
+        self.assertEqual((match.apple_id, match.genre), ("1786653398", "Hip-Hop/Rap"))
         self.assertIsNone(identify.parse({"matches": []}))
 
     def test_agreement(self):

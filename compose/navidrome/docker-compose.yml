@@ -8,7 +8,11 @@ services:
       - PUID=${PUID}
       - PGID=${PGID}
       - TZ=${TZ}
-      - ND_SCANSCHEDULE=1h
+      # No scanning of its own: musicguard asks for a scan once every new
+      # file has been checked (compose/musicguard/app/navidrome.py), so nothing
+      # unchecked is ever playable. Aurral's account is not an admin, so it
+      # cannot start scans either.
+      - ND_SCANNER_ENABLED=false
       # Forget files that are gone (an upgrade replaced the MP3 with a FLAC,
       # Lidarr renamed it) instead of listing them greyed out. Moves are
       # matched before the purge, so a moved song keeps its plays and stars.

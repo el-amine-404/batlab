@@ -94,6 +94,17 @@ It runs in three ways:
   cover's end marker, `NOT_AN_IMAGE`). A file that must go is still
   quarantined. A codec musicguard cannot rebuild (WMA, APE) is reported and
   left.
+- **Songs from links get Apple Music's album data.** Shazam's answer names the
+  song's Apple Music track; Apple's public lookup API (no account) gives the
+  album without Apple's " - EP"/" - Single" suffix, the release type, track
+  and disc numbers, the release date, the genre and a 1200 px cover, which
+  replaces the video thumbnail. So a song files as
+  `Stormy/OMEGA (2025)/05 - PIRATE.mp3`, not as a single of its own. When
+  Shazam hears a different song than the link said, every old tag goes,
+  genre included.
+- **A song already in a library is not filed twice**: same title, an artist
+  in common and the same length within 5 s (so a remix or live take still
+  files) and the new download is dropped (`duplicate ALREADY_IN_LIBRARY`).
 - **Songs from links are upgraded** (`app/upgrade.py`), after each library
   pass: musicguard looks the song up on MusicBrainz (by ISRC, else title and
   artist), picks the release it belongs to (the full album, else the EP, else
@@ -157,7 +168,18 @@ Navidrome refused (400) while the folder was mounted at `/music-aurral`, so the
 mount now uses Aurral's path.
 Give every user access to all three. Lyrics need no setting.
 
-It rescans hourly and on start, and forgets files that are gone
+**Navidrome never scans on its own** (`ND_SCANNER_ENABLED=false`). With its
+scanner on, a song Lidarr imported was playable minutes before musicguard had
+checked it. musicguard asks for a scan (Subsonic `startScan`, account
+`NAVIDROME_MUSICGUARD_USER`, an admin because only admins may scan) after a
+library pass that changed something, and only when no audio file in any
+library is unchecked; a held or failed file keeps new music out of Navidrome
+until it is resolved, rather than letting it in unchecked. New music shows up
+2 to 5 minutes after it lands. Aurral used to scan after its own downloads with
+the admin `potato`; it now has the non-admin account `NAVIDROME_AURRAL_USER`,
+which can read every library but not scan.
+
+A scan forgets files that are gone
 (`ND_SCANNER_PURGEMISSING=always`): an upgrade that replaces an MP3 with a FLAC
 or a Lidarr rename would otherwise leave the old album greyed out next to the
 new one. Navidrome matches moved files before purging, so plays and stars
@@ -204,7 +226,7 @@ admin account, then:
 | Downloads Folder | `/data/media/music-aurral` |
 | slskd | `http://gluetun:5030`, `SLSKD_API_KEY` |
 | yt-dlp | on (built in), lowest priority |
-| Navidrome | `http://navidrome:4533`, an admin account |
+| Navidrome | `http://navidrome:4533`, user `aurral` (`NAVIDROME_AURRAL_PASSWORD`), not an admin |
 | Remote path mappings | Navidrome `/music` → `/data/media/music` (Aurral's own folder has the same path in both, so it needs none) |
 
 ## Lidarr

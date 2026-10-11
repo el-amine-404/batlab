@@ -45,6 +45,10 @@ services:
       # Songs from links are handed to Lidarr, which fetches their album.
       - MUSICGUARD_LIDARR_URL=http://lidarr:8686
       - LIDARR_API_KEY=${LIDARR_API_KEY:-}
+      # Navidrome scans only when musicguard asks (an admin account).
+      - NAVIDROME_URL=http://navidrome:4533
+      - NAVIDROME_USER=${NAVIDROME_MUSICGUARD_USER:-}
+      - NAVIDROME_PASSWORD=${NAVIDROME_MUSICGUARD_PASSWORD:-}
     volumes:
       - ${VOLUMES_ROOT}/musicguard:/state
       - ${DATA_ROOT}/inbox/music:/inbox

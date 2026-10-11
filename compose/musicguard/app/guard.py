@@ -29,13 +29,16 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
+import apple
 import clamd
+import mutagen
 import credits as credit_fix
 import identify
 import layout
 import lyrics
 import media
 import musicbrainz
+import navidrome
 import tags as tagging
 import upgrade
 
@@ -61,6 +64,9 @@ LYRICS_RETRY_SECONDS = 30 * 86400
 UPGRADE_RETRY_SECONDS = 7 * 86400
 ORPHAN_SECONDS = 3600
 STATE_VERSION = 1
+# Events after which Navidrome has something new to index.
+LIBRARY_CHANGES = {"filed", "cleaned", "verified", "credited", "quarantined", "reported", "lyrics",
+                   "removed", "upgraded"}
 
 
 def env(name, default=None):
@@ -90,13 +96,18 @@ class Config:
         self.lyrics = env("MUSICGUARD_LYRICS", "1") == "1"
         self.webhook = env("DISCORD_WEBHOOK")
         self.inbox_interval = int(env("MUSICGUARD_INBOX_INTERVAL", "60"))
-        self.roots_interval = int(env("MUSICGUARD_ROOTS_INTERVAL", "600"))
+        # Short, because Navidrome only shows new music after a library pass.
+        self.roots_interval = int(env("MUSICGUARD_ROOTS_INTERVAL", "120"))
         self.settle = int(env("MUSICGUARD_SETTLE_SECONDS", "120"))
         self.dry_run = env("MUSICGUARD_DRY_RUN", "0") == "1"
         # Songs from links are handed to Lidarr for a proper copy (upgrade.py).
         self.lidarr_url = env("MUSICGUARD_LIDARR_URL", "http://lidarr:8686")
         self.lidarr_key = env("LIDARR_API_KEY")
         self.upgrade = env("MUSICGUARD_UPGRADE", "1") == "1" and bool(self.lidarr_key)
+        # Navidrome scans only when asked (navidrome.py).
+        self.navidrome_url = env("NAVIDROME_URL", "http://navidrome:4533")
+        self.navidrome_user = env("NAVIDROME_USER")
+        self.navidrome_password = env("NAVIDROME_PASSWORD")
 
 
 class Hold(Exception):
@@ -129,6 +140,11 @@ class Guard:
         self.held_reported = set()
         self.last_inbox = 0.0
         self.credits = credit_fix.Credits(self.state["releases"])
+        # path -> (size, mtime, title, artist, seconds), for finding duplicates.
+        self.songs = {}
+        # Navidrome is told to scan once a library pass leaves nothing unchecked.
+        self.library_changed = True
+        self.scan_reported = False
 
     # --- state ------------------------------------------------------------------
 
@@ -170,6 +186,8 @@ class Guard:
         record = {"time": now_iso(), "event": kind, "path": path, "reason": reason, "detail": detail}
         record.update(extra)
         self.events.append(record)
+        if kind in LIBRARY_CHANGES:
+            self.library_changed = True
         log(f"{kind} {reason} {path} {detail}".rstrip())
         if self.config.dry_run:
             return
@@ -287,14 +305,23 @@ class Guard:
                 # yt-dlp names files "Artist - Title" when the video had no tags.
                 found["title"] = [tagging.clean_text(stem, notes)]
             found = tagging.fill_from_link(found, musicbrainz.artist_side)
-            found = self.shazam_over_title(path, found, notes)
+            found, apple_cover = self.link_identity(path, found, notes)
+        else:
+            apple_cover = None
         found = tagging.complete(found, layout.component(stem, "Unknown Title"))
 
         cover = None
         cover_path = os.path.join(workdir, "cover.jpg")
         cover_index = media.cover_stream(info)
+        if apple_cover:
+            downloaded = os.path.join(workdir, "apple-cover")
+            with open(downloaded, "wb") as out:
+                out.write(apple_cover)
+            if not media.sniff(downloaded) and media.extract_cover(downloaded, None, cover_path, square=True):
+                cover = cover_path
         # Video thumbnails are 16:9; album art is square.
-        if cover_index is not None and media.extract_cover(path, cover_index, cover_path, square=from_link):
+        if cover is None and cover_index is not None \
+                and media.extract_cover(path, cover_index, cover_path, square=from_link):
             cover = cover_path
         elif from_link:
             for extension_ in IMAGE_EXTENSIONS:
@@ -336,21 +363,43 @@ class Guard:
             log(f"shazam failed for {path}: {error}")
             return None
 
-    def shazam_over_title(self, path, found, notes):
-        """A link's title is a video's; what Shazam heard wins over it. The
-        file's IDs went with the old identity and are dropped with it."""
+    def link_identity(self, path, found, notes):
+        """A link's title is a video's; what Shazam heard wins over it, and
+        Apple Music's catalogue supplies the album, track number, date, genre
+        and cover. Returns (tags, cover bytes or None). When Shazam hears
+        another song, every tag of the old identity goes, genre included."""
         match = self.shazam(path)
+        if not match:
+            return found, None
         title, artist = layout.first(found, "title"), layout.first(found, "artist")
-        if not match or identify.agrees(match, title, artist):
-            return found
-        notes.append(f"identified by Shazam as {match!r} (file said {artist} - {title})")
-        checked, _ = tagging.collect([("title", match.title), ("artist", match.artist),
-                                      ("albumartist", match.artist), ("album", match.album),
-                                      ("date", match.year), ("isrc", match.isrc)])
-        for key in ("genre",):
-            if key in found:
-                checked[key] = found[key]
-        return checked
+        if not identify.agrees(match, title, artist):
+            notes.append(f"identified by Shazam as {match!r} (file said {artist} - {title})")
+            found, _ = tagging.collect([("title", match.title), ("artist", match.artist),
+                                        ("albumartist", match.artist), ("album", match.album),
+                                        ("date", match.year), ("isrc", match.isrc),
+                                        ("genre", match.genre)])
+        elif match.isrc and "isrc" not in found:
+            found["isrc"] = [match.isrc]
+        release = None
+        if match.apple_id:
+            try:
+                release = apple.release(match.apple_id)
+            except Exception as error:  # Apple down: Shazam's data is still right
+                log(f"apple lookup failed for {path}: {error}")
+        if not release:
+            return found, None
+        notes.append(f"album from Apple Music: {release!r}")
+        album, _ = tagging.collect(release.tags())
+        for key in ("album", "albumartist", "date", "genre", "tracknumber", "discnumber",
+                    "musicbrainz_albumtype"):
+            found.pop(key, None)
+        found.update(album)
+        try:
+            cover = release.cover()
+        except Exception as error:
+            log(f"apple cover failed for {path}: {error}")
+            cover = None
+        return found, cover
 
     def wrong_song(self, path, found, root):
         """For a file new to a library: Shazam sure it is a different song
@@ -471,6 +520,13 @@ class Guard:
                 if self.config.lyrics and not self.config.dry_run:
                     self.fetch_lyrics(path, found, seconds)
                 return path
+            if mode == "import":
+                existing = self.already_in_library(found, seconds)
+                if existing:
+                    self.event("duplicate", path, "ALREADY_IN_LIBRARY", existing)
+                    if not self.config.dry_run:
+                        self.remove_with_sidecars(path)
+                    return existing
             self.spectrum(clean, stream, seconds, path)
             extension = os.path.splitext(clean)[1]
             if mode == "inplace":
@@ -516,6 +572,41 @@ class Guard:
             if self.config.lyrics:
                 self.fetch_lyrics(target, found, seconds)
             return target
+
+    def already_in_library(self, found, seconds):
+        """A library file that is this song (same title, an artist in common,
+        same length within 5 s, so a remix or live take is not one), or None."""
+        song = identify.Match(layout.first(found, "title"), layout.first(found, "artist"))
+        present = set()
+        for root in self.config.roots:
+            for directory, dirnames, filenames in os.walk(root):
+                dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+                for name in filenames:
+                    if name.startswith(".") or os.path.splitext(name)[1].lower() not in AUDIO_EXTENSIONS:
+                        continue
+                    path = os.path.join(directory, name)
+                    try:
+                        stat = os.stat(path)
+                    except FileNotFoundError:
+                        continue
+                    present.add(path)
+                    cached = self.songs.get(path)
+                    if not cached or cached[:2] != (stat.st_size, stat.st_mtime_ns):
+                        try:
+                            audio = mutagen.File(path, easy=True)
+                        except Exception:
+                            audio = None
+                        tags_ = (audio.tags if audio is not None and audio.tags is not None else {}) or {}
+                        cached = (stat.st_size, stat.st_mtime_ns, (tags_.get("title") or [""])[0],
+                                  (tags_.get("artist") or [""])[0],
+                                  getattr(getattr(audio, "info", None), "length", 0) or 0)
+                        self.songs[path] = cached
+                    if abs(cached[4] - seconds) <= 5 and identify.agrees(song, cached[2], cached[3]):
+                        return path
+        for path in list(self.songs):
+            if path not in present:
+                self.songs.pop(path)
+        return None
 
     def remove_with_sidecars(self, path):
         stem = os.path.splitext(path)[0]
@@ -676,6 +767,48 @@ class Guard:
             if path not in present:
                 known.pop(path)
                 self.state["lyrics"].pop(path, None)
+                self.library_changed = True
+
+    def unchecked(self):
+        """Audio files in the libraries musicguard has not passed (new, held,
+        or failed with an error). Navidrome must not index any of them."""
+        known = self.state["files"]
+        count = 0
+        for root in self.config.roots:
+            for directory, dirnames, filenames in os.walk(root):
+                dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+                for name in filenames:
+                    if name.startswith(".") or os.path.splitext(name)[1].lower() not in AUDIO_EXTENSIONS:
+                        continue
+                    path = os.path.join(directory, name)
+                    try:
+                        stat = os.lstat(path)
+                    except FileNotFoundError:
+                        continue
+                    if known.get(path) != [stat.st_size, stat.st_mtime_ns]:
+                        count += 1
+        return count
+
+    def scan_navidrome(self):
+        """After a library pass: have Navidrome index what changed, but only
+        when every audio file in the libraries has been checked."""
+        if not self.library_changed or not self.config.navidrome_user or self.config.dry_run:
+            return
+        waiting = self.unchecked()
+        if waiting:
+            log(f"navidrome scan waits: {waiting} file(s) not checked yet")
+            return
+        try:
+            navidrome.start_scan(self.config.navidrome_url, self.config.navidrome_user,
+                                 self.config.navidrome_password)
+        except Exception as error:
+            if not self.scan_reported:
+                self.scan_reported = True
+                self.event("error", self.config.navidrome_url, "NAVIDROME_SCAN", str(error)[:300])
+            return
+        self.scan_reported = False
+        self.library_changed = False
+        log("navidrome scan started")
 
     def orphaned(self, path, stat):
         """A lyrics sidecar whose track has been gone for an hour."""
@@ -914,6 +1047,7 @@ def main(argv=None):
         if time.monotonic() - last_roots >= config.roots_interval or arguments.command == "once":
             guard.roots_pass()
             guard.upgrade_pass()
+            guard.scan_navidrome()
             last_roots = time.monotonic()
         guard.save_state()
         guard.notify()

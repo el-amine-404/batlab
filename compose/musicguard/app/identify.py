@@ -23,12 +23,14 @@ _last_request = 0.0
 
 
 class Match:
-    def __init__(self, title, artist, album="", year="", isrc=""):
+    def __init__(self, title, artist, album="", year="", isrc="", apple_id="", genre=""):
         self.title = title
         self.artist = artist
         self.album = album
         self.year = year
         self.isrc = isrc
+        self.apple_id = apple_id  # the Apple Music track, for apple.py
+        self.genre = genre
 
     def __repr__(self):
         return f"{self.artist} - {self.title}" + (f" [{self.album}]" if self.album else "")
@@ -47,7 +49,13 @@ def parse(answer):
                 album = (item.get("text") or "").strip()
             elif item.get("title") == "Released":
                 year = (item.get("text") or "").strip()[:4]
-    return Match(title, artist, album, year if year.isdigit() else "", (track.get("isrc") or "").strip())
+    apple_id = ""
+    for action in (track.get("hub") or {}).get("actions") or []:
+        if action.get("type") == "applemusicplay" and str(action.get("id") or "").isdigit():
+            apple_id = str(action["id"])
+    genre = ((track.get("genres") or {}).get("primary") or "").strip()
+    return Match(title, artist, album, year if year.isdigit() else "", (track.get("isrc") or "").strip(),
+                 apple_id, genre)
 
 
 def recognise(path):
