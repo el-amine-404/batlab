@@ -1,13 +1,15 @@
 name: ${MUSICGUARD_PROJECT_NAME}
 # Checks every music file before anyone plays it (app/guard.py, docs/music.md):
-# files from pasted links (MeTube, spotDL) are rebuilt and filed into
-# music-extras; new files in the Lidarr, Aurral and extras libraries are
-# rebuilt where they are. Rejected files go to .quarantine/musicguard with a
-# note saying why. Nothing is deleted.
+# files from pasted links (MeTube, spotDL) are identified (Shazam), rebuilt and
+# filed into music-extras; new files in Aurral's and the extras library are
+# rebuilt where they are, Lidarr's are verified and get MusicBrainz's full
+# artist credits. Rejected files go to .quarantine/musicguard with a note
+# saying why. Nothing is deleted.
 #
 # It parses files chosen by strangers, so it runs unprivileged, read-only, with
-# no capabilities, on its own network (it needs the internet only for lyrics
-# and Discord), and sees only the music folders.
+# no capabilities, on its own network (it needs the internet only for lyrics,
+# MusicBrainz, Shazam fingerprints and Discord), and sees only the music
+# folders.
 services:
   musicguard:
     image: local/batlab-musicguard
@@ -17,6 +19,8 @@ services:
       network: host
       args:
         BASE_IMAGE: ${IMAGE_MUSICGUARD_BASE}:${TAG_MUSICGUARD_BASE}
+        RUST_IMAGE: ${IMAGE_MUSICGUARD_RUST}:${TAG_MUSICGUARD_RUST}
+        SONGREC_VERSION: ${VERSION_SONGREC}
     # Rebuild on every `make up`, so code changes are always deployed.
     pull_policy: build
     container_name: musicguard
@@ -31,6 +35,8 @@ services:
       - TZ=${TZ}
       # Work files on the SSD rather than in memory: a FLAC can be 100 MB.
       - TMPDIR=/state/tmp
+      # SongRec keeps a little state in its home; the image is read-only.
+      - HOME=/state/home
       - DISCORD_WEBHOOK=${DISCORD_WEBHOOK_DOWNLOAD_ISSUES:-}
       # The host's clamd (installed for mediascan). Files are held in the
       # inbox, not passed, while it is down.

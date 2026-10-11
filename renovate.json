@@ -29,6 +29,17 @@
         "PYPI_[A-Z0-9_]+=(?<depName>[^\\s]+)\\nVERSION_[A-Z0-9_]+=(?<currentValue>[^\\s]+)"
       ],
       "datasourceTemplate": "pypi"
+    },
+    {
+      "customType": "regex",
+      "description": "CRATE_X / VERSION_X pairs in compose/versions.env: Rust crates a local image compiles",
+      "managerFilePatterns": [
+        "/^compose/versions\\.env$/"
+      ],
+      "matchStrings": [
+        "CRATE_[A-Z0-9_]+=(?<depName>[^\\s]+)\\nVERSION_[A-Z0-9_]+=(?<currentValue>[^\\s]+)"
+      ],
+      "datasourceTemplate": "crate"
     }
   ],
   "dependencyDashboard": true,

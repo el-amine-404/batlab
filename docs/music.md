@@ -98,6 +98,24 @@ It runs in three ways:
   anything that starts like one, a "cover.jpg" that is an ELF binary included)
   are quarantined; other odd files are reported once and left.
 
+**Identification (Shazam).** musicguard asks Shazam what a recording is,
+through SongRec (an open-source Shazam client, compiled into the image): only
+a fingerprint leaves the server, never audio. Shazam knows far more Moroccan
+and streaming-only music than MusicBrainz's AcoustID.
+
+- A pasted link takes Shazam's artist, title and album over the video's title
+  whenever they disagree, and loses the IDs it came with.
+- A file new to a library that Shazam hears as a different song, with neither
+  title nor artist in common, is quarantined as `WRONG_SONG`; a monitored album
+  then makes Lidarr fetch another copy. A remix, a feature or a translated title
+  shares one of them and is not called wrong. No match is never a verdict.
+- `guard.py audit` compares every track with Shazam and only reports; the
+  files it saw count as checked, so it is safe on an old library.
+
+On 2026-10-11 Shazam named the two files beets had mis-tagged: "Georgie Fame -
+Stormy" was Stormy - PIRATE, "Ombladon - Made in Romania" was Ionuț Cercel -
+Made In Romania.
+
 When clamd is down, inbox files are **held**, not passed: they stay in the
 inbox and `#download-issues` hears about it once. Findings go to Discord
 `#download-issues` (`DISCORD_WEBHOOK_DOWNLOAD_ISSUES`) and every event to
@@ -183,8 +201,12 @@ Configured through its API on 2026-10-11:
 - Naming on: artist folder `{Artist Name}`, tracks
   `{Album Title} ({Release Year})/{track:00} - {Track Title}`, multi-disc
   `{Album Title} ({Release Year})/{medium:0}-{track:00} - {Track Title}`.
-- Tags written for every file from MusicBrainz, existing tags scrubbed, cover
-  embedded; fingerprinting (AcoustID) for all files. Replaced files go to the
+- Tags written from MusicBrainz for each new import (`newFiles`), existing
+  tags scrubbed, cover embedded; fingerprinting (AcoustID) for all files.
+  Lidarr writes only its one artist name ("Manal" for "Manal & Stormy"), so
+  musicguard then writes MusicBrainz's full credit into artist, album artist
+  and ARTISTS, in place. Lidarr does not retag existing files, so the two never
+  undo each other. Replaced files go to the
   recycle bin `recycle/lidarr` for 14 days.
 - Discord: imports and upgrades to `#downloads`, health and failed imports to
   `#download-issues`, like Sonarr.

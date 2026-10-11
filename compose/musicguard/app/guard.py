@@ -29,6 +29,8 @@ import urllib.request
 from datetime import datetime, timezone
 
 import clamd
+import credits as credit_fix
+import identify
 import layout
 import lyrics
 import media
@@ -71,6 +73,11 @@ class Config:
         # Libraries whose manager owns the tags: checked, never rewritten.
         verify = env("MUSICGUARD_VERIFY_ONLY", "/data/media/music")
         self.verify_only = {r for r in verify.split(":") if r}
+        # Shazam (SongRec) identification, and MusicBrainz credits for the
+        # libraries whose files carry Lidarr's MusicBrainz IDs.
+        self.identify = env("MUSICGUARD_IDENTIFY", "1") == "1"
+        fix = env("MUSICGUARD_CREDITS", "/data/media/music")
+        self.credit_roots = {r for r in fix.split(":") if r}
         self.quarantine = env("MUSICGUARD_QUARANTINE", "/quarantine")
         self.state_dir = env("MUSICGUARD_STATE", "/state")
         self.clamd_socket = env("CLAMD_SOCKET", "/run/clamav/clamd.ctl")
@@ -113,6 +120,7 @@ class Guard:
         self.seen_sizes = {}
         self.held_reported = set()
         self.last_inbox = 0.0
+        self.credits = credit_fix.Credits(self.state["releases"])
 
     # --- state ------------------------------------------------------------------
 
@@ -121,10 +129,12 @@ class Guard:
             with open(self.state_path, encoding="utf-8") as handle:
                 state = json.load(handle)
             if state.get("version") == STATE_VERSION:
+                state.setdefault("audited", {})
+                state.setdefault("releases", {})
                 return state
         except (OSError, ValueError):
             pass
-        return {"version": STATE_VERSION, "files": {}, "lyrics": {}}
+        return {"version": STATE_VERSION, "files": {}, "lyrics": {}, "audited": {}, "releases": {}}
 
     def save_state(self):
         if self.config.dry_run:
@@ -267,6 +277,7 @@ class Guard:
                 # yt-dlp names files "Artist - Title" when the video had no tags.
                 found["title"] = [tagging.clean_text(stem, notes)]
             found = tagging.fill_from_link(found, musicbrainz.artist_side)
+            found = self.shazam_over_title(path, found, notes)
         found = tagging.complete(found, layout.component(stem, "Unknown Title"))
 
         cover = None
@@ -304,6 +315,62 @@ class Guard:
         if abs(rebuilt_seconds - seconds) > max(1.0, seconds * 0.01):
             raise Reject("REBUILD_FAILED", f"length changed from {seconds:.1f} to {rebuilt_seconds:.1f} s")
         return clean, found, stream, seconds, cover_bytes
+
+    def shazam(self, path):
+        """identify.Match, or None (no match, or Shazam unreachable)."""
+        if not self.config.identify:
+            return None
+        try:
+            return identify.recognise(path)
+        except Exception as error:  # never block a file on Shazam being down
+            log(f"shazam failed for {path}: {error}")
+            return None
+
+    def shazam_over_title(self, path, found, notes):
+        """A link's title is a video's; what Shazam heard wins over it. The
+        file's IDs went with the old identity and are dropped with it."""
+        match = self.shazam(path)
+        title, artist = layout.first(found, "title"), layout.first(found, "artist")
+        if not match or identify.agrees(match, title, artist):
+            return found
+        notes.append(f"identified by Shazam as {match!r} (file said {artist} - {title})")
+        checked, _ = tagging.collect([("title", match.title), ("artist", match.artist),
+                                      ("albumartist", match.artist), ("album", match.album),
+                                      ("date", match.year), ("isrc", match.isrc)])
+        for key in ("genre",):
+            if key in found:
+                checked[key] = found[key]
+        return checked
+
+    def wrong_song(self, path, found, root):
+        """For a file new to a library: Shazam sure it is a different song
+        (both title and artists differ) means a wrong or fake download."""
+        stat = os.stat(path)
+        key = f"{stat.st_size}"
+        if self.state["audited"].get(path) == key:
+            return None
+        match = self.shazam(path)
+        self.state["audited"][path] = key
+        if not match:
+            return None
+        title, artist = layout.first(found, "title"), layout.first(found, "artist")
+        if identify.contradicts(match, title, artist):
+            return f"tagged {artist} - {title}, Shazam hears {match!r}"
+        return None
+
+    def fix_credits(self, path, found):
+        try:
+            wanted = self.credits.wanted(found)
+        except Exception as error:
+            log(f"musicbrainz credits failed for {path}: {error}")
+            return
+        if not wanted or self.config.dry_run:
+            return
+        artist, artists, album_artist = wanted
+        changed = credit_fix.apply(path, artist, artists, album_artist)
+        if changed:
+            self.event("credited", path, detail=f"{artist} / album {album_artist}")
+            self.remember(path)
 
     def verify(self, path, workdir, notes):
         """The checks without the rewrite, for a library whose manager owns its
@@ -374,7 +441,14 @@ class Guard:
                 else:
                     self.quarantine(path, rejection.reason, rejection.detail, base)
                 return None
+            if mode in ("verify", "inplace"):
+                wrong = self.wrong_song(path, found, base)
+                if wrong:
+                    self.quarantine(path, "WRONG_SONG", wrong, base)
+                    return None
             if mode == "verify":
+                if base in self.config.credit_roots:
+                    self.fix_credits(path, found)
                 self.spectrum(path, stream, seconds, path, index=stream["index"])
                 if not self.config.dry_run:
                     self.remember(path)
@@ -633,6 +707,37 @@ class Guard:
             if not self.config.dry_run:
                 self.remember(path)
 
+    def audit(self, roots):
+        """Ask Shazam about every track and compare: a report, and every file
+        seen is marked audited, so only files that arrive later are
+        quarantined for being the wrong song."""
+        rows = []
+        for root in roots:
+            for directory, dirnames, filenames in os.walk(root):
+                dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+                for name in sorted(filenames):
+                    path = os.path.join(directory, name)
+                    if name.startswith(".") or os.path.splitext(name)[1].lower() not in AUDIO_EXTENSIONS:
+                        continue
+                    items = tagging.read_mutagen(path)
+                    found, _ = tagging.collect(items or [])
+                    title, artist = layout.first(found, "title"), layout.first(found, "artist")
+                    match = self.shazam(path)
+                    if not match:
+                        verdict = "unknown"
+                    elif identify.agrees(match, title, artist):
+                        verdict = "ok"
+                    elif identify.contradicts(match, title, artist):
+                        verdict = "WRONG"
+                    else:
+                        verdict = "differs"
+                    self.state["audited"][path] = f"{os.stat(path).st_size}"
+                    rows.append({"verdict": verdict, "path": path, "tags": f"{artist} - {title}",
+                                 "shazam": repr(match) if match else ""})
+                    print(json.dumps(rows[-1], ensure_ascii=False), flush=True)
+        self.save_state()
+        return rows
+
     def migrate(self, source, destination):
         """Copy an old library into the layout. The source is never changed."""
         files = []
@@ -662,6 +767,10 @@ def main(argv=None):
     migrate.add_argument("destination")
     check = commands.add_parser("check", help="check one file and say what would happen")
     check.add_argument("path")
+    audit = commands.add_parser("audit", help="compare every track's tags with what Shazam hears")
+    audit.add_argument("roots", nargs="*")
+    ident = commands.add_parser("identify", help="ask Shazam what files are")
+    ident.add_argument("paths", nargs="+")
     arguments = parser.parse_args(argv)
 
     config = Config()
@@ -673,6 +782,13 @@ def main(argv=None):
     if arguments.command == "check":
         guard.process(os.path.abspath(arguments.path), "copy", os.path.dirname(arguments.path),
                       "/would-be-library")
+        return 0
+    if arguments.command == "identify":
+        for path in arguments.paths:
+            print(f"{path}: {guard.shazam(path)!r}", flush=True)
+        return 0
+    if arguments.command == "audit":
+        guard.audit(arguments.roots or config.roots)
         return 0
     if arguments.command == "migrate":
         guard.migrate(arguments.source, arguments.destination)

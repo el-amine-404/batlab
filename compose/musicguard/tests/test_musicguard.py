@@ -25,7 +25,9 @@ import mutagen  # noqa: E402
 from mutagen.id3 import APIC, COMM, ID3, TIT2, TPE1, TXXX, WXXX  # noqa: E402
 
 import clamd  # noqa: E402
+import credits  # noqa: E402
 import guard  # noqa: E402
+import identify  # noqa: E402
 import layout  # noqa: E402
 import lyrics  # noqa: E402
 import media  # noqa: E402
@@ -115,6 +117,7 @@ class GuardTestCase(unittest.TestCase):
             "MUSICGUARD_EXTRAS": self.extras,
             "MUSICGUARD_ROOTS": f"{self.music}:{self.aurral}",
             "MUSICGUARD_VERIFY_ONLY": self.music,
+            "MUSICGUARD_CREDITS": self.music,
             "MUSICGUARD_QUARANTINE": self.quarantine,
             "MUSICGUARD_STATE": self.state,
             "CLAMD_SOCKET": self.socket_path,
@@ -125,9 +128,16 @@ class GuardTestCase(unittest.TestCase):
         self.environment.start()
         self.musicbrainz = mock.patch.object(guard.musicbrainz, "artist_side", return_value=None)
         self.musicbrainz.start()
+        # Offline by default: no Shazam, no MusicBrainz credits.
+        self.shazam = mock.patch.object(guard.identify, "recognise", return_value=None)
+        self.shazam.start()
+        self.credit_lookup = mock.patch.object(guard.credit_fix.Credits, "wanted", return_value=None)
+        self.credit_lookup.start()
         self.guard = guard.Guard(guard.Config())
 
     def tearDown(self):
+        self.credit_lookup.stop()
+        self.shazam.stop()
         self.musicbrainz.stop()
         self.environment.stop()
         self.clamd.stop()
@@ -440,6 +450,85 @@ class Migration(GuardTestCase):
                                           "02 - Circles.mp3"), easy=True)
         self.assertEqual(moved["musicbrainz_trackid"], ["6511d5dc-f8ee-4454-844f-e87246a8931c"])
         self.assertEqual(moved["tracknumber"], ["2/17"])
+
+
+class Identification(GuardTestCase):
+    def test_shazam_names_a_link_better_than_its_video_title(self):
+        path = os.path.join(self.inbox, "metube", "Georgie Fame - Stormy.mp3")
+        tone(path)
+        self.guard.config.identify = True
+        guard.identify.recognise.return_value = identify.Match(
+            "PIRATE", "Stormy", album="OMEGA - EP", year="2025", isrc="FRIDO2417560")
+        self.inbox_twice()
+        self.assertEqual(self.all_files(self.extras), ["Stormy/OMEGA - EP (2025)/PIRATE.mp3"])
+
+    def test_a_wrong_song_in_a_library_is_quarantined_once_new(self):
+        path = os.path.join(self.music, "Georgie Fame", "Hits (2004)", "26 - Stormy.mp3")
+        os.makedirs(os.path.dirname(path))
+        tone(path)
+        audio = mutagen.File(path, easy=True)
+        audio["title"], audio["artist"] = "Stormy", "Georgie Fame"
+        audio.save()
+        guard.identify.recognise.return_value = identify.Match("PIRATE", "Stormy")
+        self.guard.roots_pass()
+        self.assertEqual(self.quarantined_reasons(), ["WRONG_SONG"])
+
+    def test_an_audited_file_is_reported_not_moved(self):
+        path = os.path.join(self.music, "A", "B (2004)", "01 - Stormy.mp3")
+        os.makedirs(os.path.dirname(path))
+        tone(path)
+        audio = mutagen.File(path, easy=True)
+        audio["title"], audio["artist"] = "Stormy", "Georgie Fame"
+        audio.save()
+        guard.identify.recognise.return_value = identify.Match("PIRATE", "Stormy")
+        rows = self.guard.audit([self.music])
+        self.assertEqual([r["verdict"] for r in rows], ["WRONG"])
+        self.guard.roots_pass()
+        self.assertTrue(os.path.exists(path))
+
+    def test_lidarr_artist_credit_is_completed(self):
+        path = os.path.join(self.music, "Manal", "KATANA (2026)", "01 - KATANA.flac")
+        os.makedirs(os.path.dirname(path))
+        tone(path, extra=("-c:a", "flac"))
+        audio = mutagen.File(path)
+        audio["title"], audio["artist"], audio["albumartist"] = "KATANA", "Manal", "Manal"
+        audio["musicbrainz_albumid"] = "2fcb0039-ea58-4755-95b6-b88826699c4b"
+        audio.save()
+        link = os.path.join(self.tmp, "seed.flac")
+        os.link(path, link)
+        guard.credit_fix.Credits.wanted.return_value = ("Manal & Stormy", ["Manal", "Stormy"], "Manal & Stormy")
+        self.guard.roots_pass()
+        done = mutagen.File(path)
+        self.assertEqual((done["artist"], done["albumartist"], done["artists"]),
+                         (["Manal & Stormy"], ["Manal & Stormy"], ["Manal", "Stormy"]))
+        self.assertEqual(os.stat(path).st_ino, os.stat(link).st_ino, "edited in place")
+
+
+class IdentifyRules(unittest.TestCase):
+    def test_parse(self):
+        answer = {"track": {"title": "PIRATE", "subtitle": "Stormy", "isrc": "FRIDO2417560",
+                            "sections": [{"metadata": [{"title": "Album", "text": "OMEGA - EP"},
+                                                       {"title": "Released", "text": "2025"}]}]}}
+        match = identify.parse(answer)
+        self.assertEqual((match.title, match.artist, match.album, match.year), ("PIRATE", "Stormy", "OMEGA - EP", "2025"))
+        self.assertIsNone(identify.parse({"matches": []}))
+
+    def test_agreement(self):
+        match = identify.Match("KATANA", "Manal & Stormy")
+        self.assertTrue(identify.agrees(match, "KATANA", "Manal"))
+        self.assertFalse(identify.contradicts(match, "KATANA (Remix)", "Someone"))
+        self.assertTrue(identify.contradicts(identify.Match("PIRATE", "Stormy"), "Stormy", "Georgie Fame"))
+        self.assertTrue(identify.agrees(identify.Match("One Dance (feat. Wizkid & Kyla)", "Drake"),
+                                        "One Dance", "Drake"))
+
+    def test_release_credits(self):
+        release = {"artist-credit": [{"name": "Manal", "joinphrase": " & "}, {"name": "Stormy"}],
+                   "media": [{"tracks": [{"id": "t1", "recording": {"id": "r1"},
+                                          "artist-credit": [{"name": "Manal", "joinphrase": " feat. "},
+                                                            {"name": "Stormy"}]}]}]}
+        found = credits.release_credits(release)
+        self.assertEqual(found["album"], ("Manal & Stormy", ["Manal", "Stormy"]))
+        self.assertEqual(found["tracks"]["r1"], ("Manal feat. Stormy", ["Manal", "Stormy"]))
 
 
 class TagRules(unittest.TestCase):
