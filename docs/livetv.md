@@ -72,6 +72,16 @@ no longer answer: with the full guide it ran at 20% an hour. Cancelling it
 waits for the logo downloads in flight, several minutes. Jellyfin keeps the XMLTV file in `/cache/xmltv`; after changing the
 guide in Dispatcharr, delete it before refreshing or Jellyfin reuses the old one.
 
+## What goes through the VPN
+
+Streams, the playlist, the guide download and channel logos (Dispatcharr's
+logo cache): Dispatcharr's address on 2026-10-11 was ProtonVPN's in Lisbon,
+lab2's own was not. One thing does not: Jellyfin pre-caches **programme
+artwork** itself, from the hosts the guide names (`dtil.tmsimg.com`,
+`jiotv.catchup.cdn.jio.com`, `metadata-static.plex.tv`, ...; half the
+programmes carry one). Those hosts see our address fetching TV-guide pictures,
+no stream. Dispatcharr has no switch to leave them out of its XMLTV.
+
 ## What to expect
 
 On 2026-10-11, 19 of 29 sampled channels played (Al Jazeera, DW, 2M Monde +1,
