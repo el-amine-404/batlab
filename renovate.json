@@ -90,7 +90,8 @@
         "!deluan/navidrome",
         "!filebrowser/filebrowser",
         "!louislam/uptime-kuma",
-        "!amir20/dozzle"
+        "!amir20/dozzle",
+        "!ghcr.io/netalertx/netalertx"
       ],
       "groupName": "weekly minor and patch updates",
       "schedule": [
@@ -115,7 +116,8 @@
         "deluan/navidrome",
         "filebrowser/filebrowser",
         "louislam/uptime-kuma",
-        "amir20/dozzle"
+        "amir20/dozzle",
+        "ghcr.io/netalertx/netalertx"
       ],
       "matchUpdateTypes": [
         "minor",

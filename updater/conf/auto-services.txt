@@ -19,3 +19,4 @@ navidrome
 filebrowser
 uptime-kuma
 dozzle
+netalertx

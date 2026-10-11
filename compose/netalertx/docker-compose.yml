@@ -3,7 +3,9 @@ name: netalertx
 # device it has never seen joins. Host networking is what lets arp-scan reach
 # the LAN; the web UI listens only on the home_server gateway, which is how
 # Caddy reaches it (like Netdata). Settings in APP_CONF_OVERRIDE are forced on
-# every start and cannot be changed in the UI; everything else can.
+# every start and cannot be changed in the UI; everything else can. The API
+# (GRAPHQL_PORT, all interfaces) is closed to the LAN by ufw; Homepage reads it
+# over the home_server gateway with API_TOKEN.
 services:
   netalertx:
     image: ${IMAGE_NETALERTX}:${TAG_NETALERTX}
@@ -39,6 +41,7 @@ services:
         "SCAN_SUBNETS": "['${NETALERTX_SUBNET:?set in hosts/<profile>/compose.env} --interface=${NETALERTX_INTERFACE:?set in hosts/<profile>/compose.env}']",
         "TIMEZONE": "${TZ}",
         "BACKEND_API_URL": "/server",
+        "API_TOKEN": "${NETALERTX_API_TOKEN:?set in compose/.env}",
         "WEBHOOK_RUN": "on_notification",
         "WEBHOOK_URL": "${DISCORD_WEBHOOK_ALERTS:?set in compose/.env}",
         "WEBHOOK_REQUEST_METHOD": "POST",

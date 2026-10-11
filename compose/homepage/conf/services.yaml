@@ -155,7 +155,10 @@
         statusStyle: "dot"
         widget:
           type: netalertx
-          url: http://172.19.0.1:20211
+          # Version 2 reads the backend API (NetAlertX after 26.1.17).
+          url: http://172.19.0.1:20212
+          key: "{{HOMEPAGE_VAR_NETALERTX_KEY}}"
+          version: 2
     - AdGuard Home 2:
         icon: adguard-home
         href: http://adh2.homelab.lan
