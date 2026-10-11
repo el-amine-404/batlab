@@ -98,9 +98,9 @@
         <div class="media-times muted small"><span id="media-pos">0:00</span><span id="media-dur">0:00</span></div>
         <div class="media-ctrl">
           <button class="btn btn-ghost btn-icon skip" data-media="prev" aria-label="Previous"><svg class="ic"><use href="#i-prev"/></svg></button>
-          <button class="btn btn-ghost btn-icon" data-media="rel" data-value="-10" aria-label="Rewind"><svg class="ic"><use href="#i-back10"/></svg></button>
+          <button class="btn btn-ghost btn-icon seekbtn" data-media="rel" data-value="-10" aria-label="Rewind"><svg class="ic"><use href="#i-back10"/></svg><small id="seek-back">10</small></button>
           <button class="btn btn-primary btn-round btn-icon media-main" id="media-toggle" aria-label="Play or pause"><svg class="ic"><use href="#i-pause"/></svg></button>
-          <button class="btn btn-ghost btn-icon" data-media="rel" data-value="10" aria-label="Fast forward"><svg class="ic"><use href="#i-fwd10"/></svg></button>
+          <button class="btn btn-ghost btn-icon seekbtn" data-media="rel" data-value="10" aria-label="Fast forward"><svg class="ic"><use href="#i-fwd10"/></svg><small id="seek-fwd">10</small></button>
           <button class="btn btn-ghost btn-icon skip" data-media="next" aria-label="Next"><svg class="ic"><use href="#i-next"/></svg></button>
         </div>
       </section>
@@ -138,11 +138,11 @@
       <div class="row three">
         <button class="btn btn-key" data-key="KEY_RETURN" aria-label="Back"><svg class="ic"><use href="#i-back"/></svg><span>Back</span></button>
         <button class="btn btn-key" data-key="KEY_HOME" aria-label="Home"><svg class="ic"><use href="#i-home"/></svg><span>Home</span></button>
-        <button class="btn btn-key" id="kb-toggle" aria-label="Keyboard"><svg class="ic"><use href="#i-keyboard"/></svg><span>Type</span></button>
+        <button class="btn btn-key" id="kb-toggle" aria-label="Keyboard: type into the TV"><svg class="ic"><use href="#i-keyboard"/></svg><span>Keyboard</span></button>
       </div>
 
       <form id="kb" class="card kb" hidden autocomplete="off">
-        <label for="kb-text" class="small muted">Types into the TV's own keyboard (browser, Jellyfin, settings). YouTube has its own keyboard: use the YouTube box below.</label>
+        <label for="kb-text" class="small muted">Sends text to the keyboard open on the TV (browser, Jellyfin, settings).</label>
         <div class="kb-row">
           <input id="kb-text" type="text" placeholder="Type here" enterkeyhint="send" autocapitalize="off" spellcheck="false">
           <button class="btn btn-primary btn-icon" type="submit" aria-label="Send text"><svg class="ic"><use href="#i-send"/></svg></button>
@@ -178,7 +178,8 @@
       <div id="apps" class="apps" hidden></div>
 
       <form id="yt" class="card kb" hidden autocomplete="off">
-        <label for="yt-text" class="small muted">Play a YouTube link, or search, on the TV</label>
+        <div class="card-title"><svg class="ic"><use href="#i-youtube"/></svg><label for="yt-text">YouTube</label></div>
+        <p class="small muted">Paste a video link to play it, or type to search.</p>
         <div class="kb-row">
           <div class="field">
             <input id="yt-text" type="text" placeholder="Paste a link or type a search" enterkeyhint="go" autocapitalize="off" spellcheck="false">

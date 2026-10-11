@@ -220,7 +220,10 @@ function render() {
 async function refreshStatus() {
   if (!current || busy || volHeld || sliding) return;
   try {
-    state = await api(`/api/tv/${current.mac}/status`);
+    const s = await api(`/api/tv/${current.mac}/status`);
+    const m = s.media;
+    state = s;
+    mergeMedia(m);
   } catch {
     state = {};
   }
@@ -229,6 +232,18 @@ async function refreshStatus() {
 // ------------------------------------------------------------- now playing
 
 let seeking = false; // the timeline is being dragged
+let pending = null;   // {state, until}: what a tap just asked for, until the TV says so
+
+// The TV reports a change a moment after it happens; until then the page keeps
+// what was asked for, instead of jumping back to the old state.
+function mergeMedia(incoming) {
+  if (incoming && pending && Date.now() < pending.until && incoming.state !== pending.state) {
+    incoming.state = pending.state;
+  } else {
+    pending = null;
+  }
+  state.media = incoming;
+}
 
 function clock(sec) {
   sec = Math.max(0, Math.floor(sec || 0));
@@ -249,6 +264,9 @@ function renderMedia() {
   $("#media-title").textContent = m.title || "";
   $("#media-sub").textContent = m.subtitle || "";
   $("#media-source").textContent = m.source === "youtube" ? "YouTube" : "Jellyfin";
+  // YouTube seeks exactly; Jellyfin's keys go back 10 s and forward 30 s.
+  $("#seek-back").textContent = "10";
+  $("#seek-fwd").textContent = m.source === "youtube" ? "10" : "30";
   $("#media-toggle use").setAttribute("href", playing ? "#i-pause" : "#i-play");
   document.querySelectorAll("#media .skip").forEach((b) => { b.hidden = !m.can_skip; });
   const seek = $("#media-seek");
@@ -258,6 +276,17 @@ function renderMedia() {
   $("#media-pos").textContent = clock(seeking ? seek.value : m.position);
   $("#media-dur").textContent = clock(m.duration);
 }
+
+// While a card shows, its media is read every second (a light call), so play,
+// pause and seeks show up at once; the full status stays at every 4 s.
+setInterval(async () => {
+  if (!current || document.hidden || !state.media || seeking || busy) return;
+  try {
+    const r = await api(`/api/tv/${current.mac}/media`);
+    mergeMedia(r.media);
+    renderMedia();
+  } catch {}
+}, 1000);
 
 // Between polls the position advances on the page, one second at a time.
 setInterval(() => {
@@ -272,12 +301,12 @@ async function mediaAction(action, value = 0) {
   buzz();
   if (action === "toggle" && state.media) {
     state.media.state = state.media.state === "playing" ? "paused" : "playing"; // at once
+    pending = { state: state.media.state, until: Date.now() + 3000 };
     renderMedia();
   }
   try {
     const r = await api(`/api/tv/${current.mac}/media`, { action, value });
-    if (r.media !== undefined) { state.media = r.media; renderMedia(); }
-    refreshSoon(1200);
+    if (r.media !== undefined) { mergeMedia(r.media); renderMedia(); }
   } catch (e) {
     toast(e.message, true);
     refreshSoon(300);
@@ -629,6 +658,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   setMode(mode);
   api("/api/info").then((i) => { $("#version").textContent = `TV Remote v${i.version}`; }).catch(() => {});
   $("#kb-toggle").addEventListener("click", () => {
+    if (state.app === "YouTube" && !$("#yt").hidden) {
+      // YouTube ignores text sent to the TV's keyboard; its box searches instead.
+      $("#yt").scrollIntoView({ behavior: "smooth", block: "center" });
+      $("#yt-text").focus();
+      toast("YouTube has its own keyboard: type here");
+      return;
+    }
     const kb = $("#kb");
     kb.hidden = !kb.hidden;
     if (!kb.hidden) $("#kb-text").focus();

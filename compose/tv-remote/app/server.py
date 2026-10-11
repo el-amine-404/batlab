@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import calendar
 import getpass
 import hashlib
 import hmac
@@ -588,14 +587,9 @@ def jellyfin_session() -> dict | None:
         sessions = []
     tv = next((x for x in sessions if x.get("Client") == "Jellyfin for Tizen"), None)
     if tv and not tv.get("NowPlayingItem"):
-        # Not playing: count it as open only shortly after its last request,
-        # or "Now: Jellyfin" stays long after leaving it.
-        try:
-            last = calendar.timegm(time.strptime(tv["LastActivityDate"][:19], "%Y-%m-%dT%H:%M:%S"))
-            if time.time() - last > 60:
-                tv = None
-        except (KeyError, ValueError):
-            tv = None
+        # Only while it plays: the app keeps talking to its server from the
+        # background, so recent activity still said "Now: Jellyfin" at Home.
+        tv = None
     _jf_cache = (time.monotonic(), tv)
     return tv
 
@@ -701,10 +695,9 @@ def status(mac: str) -> dict:
     if dev["power"] != "on":
         return {"power": "standby"}
     app = app_in_front(mac)
-    jf = jellyfin_session()
     m = media(mac)
-    if not app and (jf or (m and m["source"] == "jellyfin")):
-        app = "Jellyfin"  # no app ID for the store version; its server knows it is open
+    if not app and m and m["source"] == "jellyfin":
+        app = "Jellyfin"  # no app ID for the store version; its server knows what plays
     if m and m["source"] == "youtube":
         app = "YouTube"
     return {"power": "on", **audio(ip), "app": app, "media": m}
@@ -884,11 +877,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(401, {"error": "log in"})
         if path == "/api/tvs":
             return self._json(200, [{"mac": m, **t} for m, t in load_tvs().items()])
-        m = re.fullmatch(r"/api/tv/([0-9a-f:]{17})/(status|apps)", path)
+        m = re.fullmatch(r"/api/tv/([0-9a-f:]{17})/(status|apps|media)", path)
         if m:
             mac, what = m.groups()
             if mac not in load_tvs():
                 return self._json(404, {"error": "unknown TV"})
+            if what == "media":  # light: polled every second while a card shows
+                return self._json(200, {"media": media(mac)})
             if what == "status":
                 st = status(mac)
                 r = remote(mac)
