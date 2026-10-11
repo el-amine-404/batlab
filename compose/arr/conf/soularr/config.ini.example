@@ -47,7 +47,8 @@ number_of_albums_to_grab = 10
 # Folder names containing these are never downloaded.
 title_blacklist = karaoke,instrumental version,8-bit,ringtone
 search_blacklist =
-search_source = missing
+# missing and cutoff_unmet: complete albums and upgrade them towards FLAC.
+search_source = all
 failed_import_denylist = True
 
 [Download Settings]

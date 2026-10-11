@@ -222,10 +222,12 @@ and the `unlinked` seeding rule. Seeker is deliberately off for Lidarr: it
 would search upgrades for every monitored album.
 
 **Monitoring decides what gets downloaded.** A monitored album with missing
-tracks is "wanted", and Lidarr (torrents) and Soularr (Soulseek) both fetch
-wanted albums on their own, and upgrade monitored ones towards FLAC. Monitor an
-album only when the whole album is wanted: request it in Aurral, or tick it in
-Lidarr.
+tracks is "wanted", and Lidarr (torrents) and Soularr (Soulseek,
+`search_source = all`) both fetch wanted albums on their own, and upgrade
+monitored ones until they reach FLAC. Since 2026-10-11 every album with a
+track in the library is monitored, so albums are completed and upgraded
+(14 to complete and 24 to upgrade that day); an album only partly wanted
+should be unmonitored in Lidarr.
 
 ## Soulseek
 
