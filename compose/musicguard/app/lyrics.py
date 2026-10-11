@@ -30,7 +30,7 @@ METADATA_LINE = re.compile(r"^\[(?:ar|al|ti|au|length|by|offset|re|ve|#):", re.I
 _last_request = 0.0
 
 
-def _get(path, params):
+def _get(path, params, attempts=3):
     global _last_request
     # One request a second at most: this is someone else's free service.
     wait = 1.0 - (time.monotonic() - _last_request)
@@ -45,6 +45,9 @@ def _get(path, params):
     except urllib.error.HTTPError as error:
         if error.code == 404:
             return None
+        if error.code in (429, 503) and attempts > 1:
+            time.sleep(5 * (4 - attempts))  # busy: 5 s, then 10 s
+            return _get(path, params, attempts - 1)
         raise
     if len(body) > MAX_BYTES:
         raise ValueError("LRCLIB answer too large")
