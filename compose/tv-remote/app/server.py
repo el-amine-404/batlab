@@ -185,7 +185,12 @@ class Remote:
         with self.lock:
             for attempt in range(3):
                 try:
+                    started = time.monotonic()
+                    fresh = self.tv is None
                     result = fn(self._connect())
+                    took = time.monotonic() - started
+                    if took > 0.5:
+                        log.info("%s: slow command %.2fs (new connection: %s)", self.mac, took, fresh)
                     self.last_used = time.monotonic()
                     return result
                 except Exception as err:  # noqa: BLE001 - library raises many kinds
@@ -199,10 +204,16 @@ class Remote:
 remotes: dict[str, Remote] = {}
 
 
+remotes_lock = threading.Lock()
+
+
 def remote(mac: str) -> Remote:
     if mac not in load_tvs():
         raise KeyError(mac)
-    return remotes.setdefault(mac, Remote(mac))
+    with remotes_lock:
+        if mac not in remotes:  # one Remote, and one keepalive thread, per TV
+            remotes[mac] = Remote(mac)
+        return remotes[mac]
 
 
 def pair(mac: str, ip: str) -> dict:
