@@ -193,9 +193,11 @@ Configured through its API on 2026-10-11:
 
 qBittorrent's excluded file names and Cleanuparr's malware blocker already
 stop programs inside torrents (hosts/lab1/cleanuparr.md). Cleanuparr keeps its
-settings in its own database, so Lidarr is added there by hand: Lidarr
-instance `http://lidarr:8686` with `LIDARR_API_KEY`, Malware Blocker on for it,
-and `music` added to the Download Cleaner's categories.
+settings in its own database; since 2026-10-11 it has a Lidarr instance
+(`http://lidarr:8686`), the Malware Blocker on for Lidarr with the same
+official blacklist as Sonarr and Radarr, and `music` in the unlinked categories
+and the `unlinked` seeding rule. Seeker is deliberately off for Lidarr: it
+would search upgrades for every monitored album.
 
 **Monitoring decides what gets downloaded.** A monitored album with missing
 tracks is "wanted", and Lidarr (torrents) and Soularr (Soulseek) both fetch
