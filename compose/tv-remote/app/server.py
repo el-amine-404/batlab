@@ -460,7 +460,12 @@ class Handler(BaseHTTPRequestHandler):
             if mac not in load_tvs():
                 return self._json(404, {"error": "unknown TV"})
             if what == "status":
-                return self._json(200, status(mac))
+                st = status(mac)
+                r = remote(mac)
+                if st["power"] == "on" and r.tv is None and not r.lock.locked():
+                    # The page is open: connect now, so the first press is quick.
+                    threading.Thread(target=r.run, args=(lambda tv: None,), daemon=True).start()
+                return self._json(200, st)
             return self._json(200, installed_apps(mac))
         name = "index.html" if path == "/" else path.lstrip("/")
         file = (WEB_DIR / name).resolve()
