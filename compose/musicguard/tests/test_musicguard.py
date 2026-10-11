@@ -486,6 +486,18 @@ class Identification(GuardTestCase):
         self.guard.roots_pass()
         self.assertTrue(os.path.exists(path))
 
+    def test_same_artist_other_title_is_reported(self):
+        path = os.path.join(self.music, "Stormy", "Captain (2021)", "01 - Captain - la releve.mp3")
+        os.makedirs(os.path.dirname(path))
+        tone(path)
+        audio = mutagen.File(path, easy=True)
+        audio["title"], audio["artist"] = "Captain - la relève", "Stormy"
+        audio.save()
+        guard.identify.recognise.return_value = identify.Match("Hugo", "Stormy")
+        self.guard.roots_pass()
+        self.assertTrue(os.path.exists(path))
+        self.assertIn("WRONG_TITLE", [e["reason"] for e in self.guard.events])
+
     def test_lidarr_artist_credit_is_completed(self):
         path = os.path.join(self.music, "Manal", "KATANA (2026)", "01 - KATANA.flac")
         os.makedirs(os.path.dirname(path))

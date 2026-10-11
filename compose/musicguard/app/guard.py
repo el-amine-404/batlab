@@ -356,6 +356,11 @@ class Guard:
         title, artist = layout.first(found, "title"), layout.first(found, "artist")
         if identify.contradicts(match, title, artist):
             return f"tagged {artist} - {title}, Shazam hears {match!r}"
+        if not identify.same_title(match.title, title):
+            # Same artist, another title: the classic wrong match within an
+            # artist's catalogue, but a translated or renamed title looks the
+            # same, so it is reported rather than moved.
+            self.event("suspect", path, "WRONG_TITLE", f"tagged {artist} - {title}, Shazam hears {match!r}")
         return None
 
     def fix_credits(self, path, found):

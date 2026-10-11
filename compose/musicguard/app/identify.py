@@ -84,19 +84,18 @@ def names(artist):
     return {simple(part) for part in FEAT.split(artist or "") if simple(part)}
 
 
+def same_title(one, other):
+    a, b = simple(one), simple(other)
+    return bool(a and b) and (a == b or (min(len(a), len(b)) >= 4 and (a in b or b in a)))
+
+
 def agrees(match, title, artist):
     """True when the file's title and artists are the recording Shazam heard."""
-    a, b = simple(match.title), simple(title)
-    if not a or not b:
-        return False
-    title_ok = a == b or (min(len(a), len(b)) >= 4 and (a in b or b in a))
-    return title_ok and bool(names(match.artist) & names(artist))
+    return same_title(match.title, title) and bool(names(match.artist) & names(artist))
 
 
 def contradicts(match, title, artist):
     """True only when Shazam is sure of something else: neither the title nor
     any artist overlaps. A remix, a feature or a translated title still shares
     one of them and is not called wrong."""
-    a, b = simple(match.title), simple(title)
-    title_overlap = bool(a and b) and (a == b or (min(len(a), len(b)) >= 4 and (a in b or b in a)))
-    return not title_overlap and not (names(match.artist) & names(artist))
+    return not same_title(match.title, title) and not (names(match.artist) & names(artist))
