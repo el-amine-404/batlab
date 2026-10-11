@@ -55,7 +55,7 @@ What every file goes through, in order:
 | tags: only an allow-list is written back, each value checked (below) | — |
 | cover art is decoded and encoded again as a plain JPEG, at most 1200 px; covers from links are cropped square | — |
 | a lossless or 256k+ file whose top band is empty is reported as `LOSSY_SOURCE` (made from a lossy file) | reported, never refused |
-| lyrics from LRCLIB when none are beside the track; retried after 30 days | — |
+| lyrics from LRCLIB when none are beside the track; retried after 30 days, and so is a track with only plain lyrics (`.txt`), since players scroll only synced ones (`.lrc`, written beside the `.txt`, which is kept) | — |
 
 Rebuilding is what makes the rest safe. Whatever a file carried besides the
 audio (private frames, extra streams, chapters, bytes appended after the audio

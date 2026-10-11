@@ -665,8 +665,16 @@ class Guard:
         stem = os.path.splitext(path)[0]
         return any(os.path.exists(stem + e) for e in LYRIC_EXTENSIONS)
 
+    def has_synced_lyrics(self, path):
+        return os.path.exists(os.path.splitext(path)[0] + ".lrc")
+
     def fetch_lyrics(self, path, found, seconds):
-        if self.has_lyrics(path):
+        """Synced lyrics (.lrc) when LRCLIB has them, else plain (.txt). A song
+        with only plain lyrics is asked again every LYRICS_RETRY_SECONDS:
+        players only scroll synced ones, and people add timings to LRCLIB.
+        The .txt is kept beside a new .lrc (Navidrome prefers the .lrc), so
+        lyrics written by hand are never lost."""
+        if self.has_synced_lyrics(path):
             return
         attempted = self.state["lyrics"].get(path, 0)
         if time.time() - attempted < LYRICS_RETRY_SECONDS:
@@ -681,6 +689,8 @@ class Guard:
             log(f"lyrics lookup failed for {path}: {error}")
             return
         self.state["lyrics"][path] = int(time.time())
+        if kind == "plain" and self.has_lyrics(path):
+            return  # still no timings; the plain lyrics are already there
         if kind in ("synced", "plain"):
             sidecar = os.path.splitext(path)[0] + (".lrc" if kind == "synced" else ".txt")
             with open(sidecar, "w", encoding="utf-8") as out:
@@ -688,7 +698,7 @@ class Guard:
             self.event("lyrics", path, kind)
 
     def lyrics_for_existing(self, path):
-        if not self.config.lyrics or self.has_lyrics(path):
+        if not self.config.lyrics or self.has_synced_lyrics(path):
             return
         if time.time() - self.state["lyrics"].get(path, 0) < LYRICS_RETRY_SECONDS:
             return

@@ -963,6 +963,26 @@ class LyricsRules(unittest.TestCase):
                 with open(os.path.join(tmp, "01 - Song.lrc"), encoding="utf-8") as handle:
                     self.assertEqual(handle.read(), "[00:01.00] la\n")
 
+    def test_plain_lyrics_are_upgraded_to_synced_later(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "01 - Song.mp3")
+            open(path, "wb").close()
+            with open(os.path.join(tmp, "01 - Song.txt"), "w", encoding="utf-8") as out:
+                out.write("words written by hand\n")
+            g = guard.Guard.__new__(guard.Guard)
+            g.config = mock.Mock(dry_run=True)
+            g.state = {"lyrics": {path: 0}}  # last asked long ago
+            g.events = []
+            with mock.patch.object(lyrics, "lookup", return_value=("plain", "other words\n")):
+                g.fetch_lyrics(path, {"artist": ["Band"], "title": ["Song"]}, 180)
+            with open(os.path.join(tmp, "01 - Song.txt"), encoding="utf-8") as handle:
+                self.assertEqual(handle.read(), "words written by hand\n", "plain lyrics are not replaced")
+            g.state["lyrics"][path] = 0
+            with mock.patch.object(lyrics, "lookup", return_value=("synced", "[00:01.00] la\n")):
+                g.fetch_lyrics(path, {"artist": ["Band"], "title": ["Song"]}, 180)
+            self.assertTrue(os.path.exists(os.path.join(tmp, "01 - Song.lrc")))
+            self.assertTrue(os.path.exists(os.path.join(tmp, "01 - Song.txt")), "kept beside the synced ones")
+
 
 class PictureEnds(unittest.TestCase):
     def test_jpeg_with_a_thumbnail_inside(self):
