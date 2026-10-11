@@ -1,7 +1,6 @@
+# The remote has its own login (compose/tv-remote): a phone's home-screen app
+# cannot show basic auth's prompt.
 http://tv.homelab.lan {
   import localSubnets
-	basic_auth @localSubnets {
-		{$TV_REMOTE_USER} {$TV_REMOTE_PASSWORD_HASH}
-	}
 	reverse_proxy @localSubnets 172.19.0.1:{$TV_REMOTE_PORT}
 }

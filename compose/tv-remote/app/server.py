@@ -17,13 +17,20 @@ send without a CORS preflight this server never answers.
 from __future__ import annotations
 
 import asyncio
+import base64
+import calendar
+import getpass
+import hashlib
+import hmac
 import html
 import ipaddress
 import json
 import logging
 import os
 import re
+import secrets
 import socket
+import sys
 import threading
 import time
 import urllib.error
@@ -457,12 +464,14 @@ class YouTubeLink(EventListener):
         m = dict(self.media)
         if m.get("state") == "playing" and "position" in m:  # extrapolate between events
             m["position"] = min(m.get("duration") or 1e9, m["position"] + time.time() - m["at"])
-        return {"source": "youtube", "can_seek": True, **m}
+        return {"source": "youtube", "can_seek": True, "can_skip": True, **m}
 
     # the connection
     def _save(self) -> None:
+        # auth.serialize(), not store_auth_state(): the latter drops "version",
+        # which load_auth_state() requires (pyytlounge 3.4.0).
         if self.api:
-            self.auth_file.write_text(json.dumps(self.api.store_auth_state()))
+            self.auth_file.write_text(json.dumps(self.api.auth.serialize()))
             self.auth_file.chmod(0o600)
 
     async def _run(self) -> None:
@@ -472,12 +481,12 @@ class YouTubeLink(EventListener):
             except Exception as err:  # noqa: BLE001 - keep trying, quietly
                 log.info("%s: YouTube link: %s", self.mac, err)
             self.connected = False
+            # Every 10 s; every 2 s while a link waits to be played.
             try:
                 await asyncio.wait_for(self.hurry.wait(), timeout=10)
             except asyncio.TimeoutError:
                 pass
-            if self.hurry.is_set():
-                await asyncio.sleep(1)
+            await asyncio.sleep(2)
 
     async def _session(self) -> None:
         if self.mac not in load_tvs():
@@ -490,7 +499,11 @@ class YouTubeLink(EventListener):
             self.api = api
             try:
                 if self.auth_file.exists():
-                    api.load_auth_state(json.loads(self.auth_file.read_text()))
+                    try:
+                        api.load_auth_state(json.loads(self.auth_file.read_text()))
+                    except (KeyError, ValueError):
+                        log.info("%s: YouTube pairing unreadable, pairing again", self.mac)
+                        self.auth_file.unlink(missing_ok=True)
                 if not (api.paired() and await api.refresh_auth()):
                     if not screen_id or not await api.pair_with_screen_id(screen_id):
                         return
@@ -520,6 +533,9 @@ class YouTubeLink(EventListener):
             deadline = time.monotonic() + 30
             while not self.connected and time.monotonic() < deadline:
                 time.sleep(0.5)
+            LOOP.call_soon_threadsafe(self.hurry.clear)
+        if not self.connected:
+            raise ConnectionError("YouTube opened, but the casting link did not come up")
         self.command("play_video", video_id)
 
 
@@ -571,6 +587,15 @@ def jellyfin_session() -> dict | None:
     except (OSError, ValueError, urllib.error.URLError):
         sessions = []
     tv = next((x for x in sessions if x.get("Client") == "Jellyfin for Tizen"), None)
+    if tv and not tv.get("NowPlayingItem"):
+        # Not playing: count it as open only shortly after its last request,
+        # or "Now: Jellyfin" stays long after leaving it.
+        try:
+            last = calendar.timegm(time.strptime(tv["LastActivityDate"][:19], "%Y-%m-%dT%H:%M:%S"))
+            if time.time() - last > 60:
+                tv = None
+        except (KeyError, ValueError):
+            tv = None
     _jf_cache = (time.monotonic(), tv)
     return tv
 
@@ -593,7 +618,11 @@ def jellyfin_media(session: dict) -> dict | None:
         "state": "paused" if ps.get("IsPaused") else "playing",
         "position": (ps.get("PositionTicks") or 0) / 1e7,
         "duration": (item.get("RunTimeTicks") or 0) / 1e7,
-        "can_seek": bool(ps.get("CanSeek")), "at": time.time(),
+        # The Tizen app takes no commands from the server, only the TV's media
+        # keys: no seeking to a position, no previous/next.
+        "remote": bool(session.get("SupportsRemoteControl")),
+        "can_seek": bool(ps.get("CanSeek")) and bool(session.get("SupportsRemoteControl")),
+        "can_skip": bool(session.get("SupportsRemoteControl")), "at": time.time(),
     }
 
 
@@ -635,7 +664,7 @@ def media_action(mac: str, action: str, value: float = 0) -> None:
         elif action == "stop":
             r.run(lambda tv: tv.send_key("KEY_RETURN"))
         return
-    if m and m["source"] == "jellyfin":
+    if m and m["source"] == "jellyfin" and m.get("remote"):
         sid = m["session"]
         cmd = {"toggle": "PlayPause", "play": "Unpause", "pause": "Pause", "next": "NextTrack",
                "prev": "PreviousTrack", "stop": "Stop"}.get(action)
@@ -648,7 +677,9 @@ def media_action(mac: str, action: str, value: float = 0) -> None:
             return
         if action == "toggle":
             key = "KEY_PAUSE" if m["state"] == "playing" else "KEY_PLAY"
-    if action == "toggle" and not key:
+    if action == "toggle" and m:
+        key = "KEY_PAUSE" if m.get("state") == "playing" else "KEY_PLAY"
+    elif action == "toggle":
         # Nothing reports what plays (an HDMI box, the TV's own player): alternate.
         r.paused = not getattr(r, "paused", False)
         key = "KEY_PAUSE" if r.paused else "KEY_PLAY"
@@ -713,6 +744,68 @@ def mouse(cmd: dict):
     return lambda tv: tv.send_command(RemoteControlCommand({**cmd, "TypeOfRemote": "ProcessMouseDevice"}), key_press_delay=0)
 
 
+# ------------------------------------------------------------------- login
+# A login of the page's own, not Caddy's basic auth: a phone's home-screen
+# app cannot show the browser's password prompt (iOS opened a black screen,
+# Android could not fetch the icon). The password is stored as an scrypt hash;
+# a session is a signed cookie, so nothing is kept per device.
+
+AUTH_FILE = DATA_DIR / "auth.json"
+SESSION_DAYS = 180
+_fails: dict[str, list[float]] = {}
+
+
+def _scrypt(password: str, salt: bytes) -> bytes:
+    return hashlib.scrypt(password.encode(), salt=salt, n=2**15, r=8, p=1, maxmem=64 * 2**20, dklen=32)
+
+
+def set_password(password: str) -> None:
+    salt = secrets.token_bytes(16)
+    data = {"salt": salt.hex(), "hash": _scrypt(password, salt).hex(),
+            "secret": secrets.token_hex(32)}  # a new secret logs every device out
+    tmp = AUTH_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data))
+    tmp.chmod(0o600)
+    tmp.replace(AUTH_FILE)
+
+
+def _auth() -> dict | None:
+    try:
+        return json.loads(AUTH_FILE.read_text())
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def check_password(password: str) -> bool:
+    a = _auth()
+    return bool(a) and hmac.compare_digest(_scrypt(password, bytes.fromhex(a["salt"])).hex(), a["hash"])
+
+
+def make_session() -> str:
+    exp = str(int(time.time()) + SESSION_DAYS * 86400)
+    sig = hmac.new(bytes.fromhex(_auth()["secret"]), exp.encode(), "sha256").hexdigest()
+    return f"{exp}.{sig}"
+
+
+def valid_session(cookie_header: str | None) -> bool:
+    a = _auth()
+    if not a or not cookie_header:
+        return False
+    m = re.search(r"(?:^|;\s*)tvr=(\d+)\.([0-9a-f]{64})", cookie_header)
+    if not m or int(m.group(1)) < time.time():
+        return False
+    want = hmac.new(bytes.fromhex(a["secret"]), m.group(1).encode(), "sha256").hexdigest()
+    return hmac.compare_digest(want, m.group(2))
+
+
+def too_many_tries(who: str) -> bool:
+    """At most 10 wrong passwords per address in 10 minutes."""
+    now = time.time()
+    tries = [t for t in _fails.get(who, []) if now - t < 600]
+    _fails[who] = tries
+    return len(tries) >= 10
+
+
 # ------------------------------------------------------------------- HTTP
 
 STATIC_TYPES = {
@@ -736,6 +829,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", cache)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
+        for k, v in getattr(self, "_extra_headers", []):
+            self.send_header(k, v)
+        self._extra_headers = []
         self.send_header(
             "Content-Security-Policy",
             "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "
@@ -744,8 +840,18 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _json(self, status: int, obj) -> None:
+    def _json(self, status: int, obj, cookie: str | None = None) -> None:
+        if cookie is not None:
+            self._extra_headers = [("Set-Cookie", cookie)]
         self._send(status, json.dumps(obj).encode(), "application/json")
+
+    def _client(self) -> str:
+        # Behind Caddy: the client's address is the last hop it adds.
+        fwd = self.headers.get("X-Forwarded-For", "")
+        return fwd.split(",")[-1].strip() or self.client_address[0]
+
+    def _authed(self) -> bool:
+        return valid_session(self.headers.get("Cookie"))
 
     def _body(self) -> dict:
         if self.headers.get("X-Remote") != "1" or not (
@@ -764,6 +870,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, b"ok", "text/plain")
         if path == "/api/info":
             return self._json(200, {"version": VERSION})
+        if path == "/api/me":
+            if not _auth():
+                return self._json(503, {"error": "no password set", "setup": True})
+            return self._json(200 if self._authed() else 401, {"ok": self._authed()})
+        if path == "/reload":
+            # Clear-Site-Data drops this site's cache (Chrome, Firefox, Safari 17+),
+            # then the page loads fresh; for phones where clearing is hard.
+            self._extra_headers = [("Clear-Site-Data", '"cache"')]
+            return self._send(200, b'<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=/">'
+                              b"<title>Reloading</title><p>Reloading...</p>", "text/html; charset=utf-8")
+        if path.startswith("/api/") and not self._authed():
+            return self._json(401, {"error": "log in"})
         if path == "/api/tvs":
             return self._json(200, [{"mac": m, **t} for m, t in load_tvs().items()])
         m = re.fullmatch(r"/api/tv/([0-9a-f:]{17})/(status|apps)", path)
@@ -782,9 +900,13 @@ class Handler(BaseHTTPRequestHandler):
         name = "index.html" if path == "/" else path.lstrip("/")
         file = (WEB_DIR / name).resolve()
         if file.parent == WEB_DIR.resolve() and file.is_file() and file.suffix in STATIC_TYPES:
-            # no-cache: the browser revalidates, so a new version reaches every
-            # phone at once instead of an old script running against new HTML.
-            return self._send(200, file.read_bytes(), STATIC_TYPES[file.suffix], "no-cache")
+            body = file.read_bytes()
+            if file.name == "index.html":
+                # The version in every asset URL: a new release is a new URL,
+                # so no browser can mix an old script with new HTML.
+                body = re.sub(rb'(href|src)="(style\.css|app\.js)"',
+                              lambda m: m.group(1) + b'="' + m.group(2) + b"?v=" + VERSION.encode() + b'"', body)
+            return self._send(200, body, STATIC_TYPES[file.suffix], "no-cache")
         self._json(404, {"error": "not found"})
 
     # POST: everything that does something
@@ -796,6 +918,23 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as err:
             return self._json(400, {"error": str(err)})
         path = self.path.split("?", 1)[0]
+        if path == "/api/login":
+            who = self._client()
+            if not _auth():
+                return self._json(503, {"error": "no password set", "setup": True})
+            if too_many_tries(who):
+                return self._json(429, {"error": "too many tries; wait 10 minutes"})
+            if not check_password(str(body.get("password", ""))):
+                _fails.setdefault(who, []).append(time.time())
+                time.sleep(1)
+                return self._json(401, {"error": "wrong password"})
+            _fails.pop(who, None)
+            cookie = f"tvr={make_session()}; Max-Age={SESSION_DAYS * 86400}; Path=/; HttpOnly; SameSite=Lax"
+            return self._json(200, {"ok": True}, cookie)
+        if path == "/api/logout":
+            return self._json(200, {"ok": True}, "tvr=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax")
+        if not self._authed():
+            return self._json(401, {"error": "log in"})
         try:
             if path == "/api/discover":
                 paired = load_tvs()
@@ -889,6 +1028,15 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    if sys.argv[1:] == ["set-password"]:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        p1 = getpass.getpass("New password for the TV remote: ")
+        p2 = getpass.getpass("Again: ")
+        if p1 != p2 or len(p1) < 10:
+            sys.exit("the passwords differ, or are under 10 characters; nothing changed")
+        set_password(p1)
+        print("password set; every device must log in again")
+        return
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     TOKENS_DIR.mkdir(parents=True, exist_ok=True)
     os.chmod(TOKENS_DIR, 0o700)

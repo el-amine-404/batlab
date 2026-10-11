@@ -23,6 +23,10 @@ async function api(path, body) {
   };
   const res = await fetch(path, opts);
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && path !== "/api/login") {
+    showLogin(); // the session ran out, or was logged out elsewhere
+    throw new Error("log in again");
+  }
   if (!res.ok) throw new Error(data.error || `request failed (${res.status})`);
   return data;
 }
@@ -53,8 +57,42 @@ function el(tag, attrs = {}, ...children) {
 }
 
 function show(view) {
+  $("#view-login").hidden = view !== "login";
   $("#view-tvs").hidden = view !== "tvs";
   $("#view-remote").hidden = view !== "remote";
+  $("#logout-wrap").hidden = view === "login";
+}
+
+// ---------------------------------------------------------------------- login
+
+function showLogin(setup = false) {
+  stopStatus();
+  show("login");
+  $("#login-setup").hidden = !setup;
+  $("#login").hidden = setup;
+  if (!setup) setTimeout(() => $("#login-pass").focus(), 50);
+}
+
+async function login(e) {
+  e.preventDefault();
+  const pass = $("#login-pass");
+  try {
+    await api("/api/login", { password: pass.value });
+    pass.value = "";
+    start();
+  } catch (err) {
+    toast(err.message, true);
+    pass.select();
+  }
+}
+
+async function start() {
+  const me = await fetch("/api/me").then((r) => r.json().then((d) => ({ status: r.status, ...d }))).catch(() => ({ status: 0 }));
+  if (me.setup) return showLogin(true);
+  if (me.status !== 200) return showLogin();
+  const tvs = await api("/api/tvs").catch(() => []);
+  const saved = tvs.find((t) => t.mac === remembered()) || (tvs.length === 1 ? tvs[0] : null);
+  saved ? openRemote(saved) : showTvs();
 }
 
 // ------------------------------------------------------------------ TV list
@@ -212,6 +250,7 @@ function renderMedia() {
   $("#media-sub").textContent = m.subtitle || "";
   $("#media-source").textContent = m.source === "youtube" ? "YouTube" : "Jellyfin";
   $("#media-toggle use").setAttribute("href", playing ? "#i-pause" : "#i-play");
+  document.querySelectorAll("#media .skip").forEach((b) => { b.hidden = !m.can_skip; });
   const seek = $("#media-seek");
   seek.disabled = !m.can_seek || !m.duration;
   seek.max = Math.max(1, Math.round(m.duration || 0));
@@ -614,7 +653,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  const tvs = await api("/api/tvs").catch(() => []);
-  const saved = tvs.find((t) => t.mac === remembered()) || (tvs.length === 1 ? tvs[0] : null);
-  saved ? openRemote(saved) : showTvs();
+  $("#login").addEventListener("submit", login);
+  $("#logout").addEventListener("click", async (e) => {
+    e.preventDefault();
+    await api("/api/logout", {}).catch(() => {});
+    showLogin();
+  });
+  start();
 });
