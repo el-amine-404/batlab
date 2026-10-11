@@ -20,3 +20,4 @@ filebrowser
 uptime-kuma
 dozzle
 netalertx
+isponsorblocktv

@@ -25,6 +25,16 @@ services:
       - ${VOLUMES_ROOT}/isponsorblocktv:/app/data
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=16m
+    # Healthy when its config parses and SponsorBlock answers: the updater
+    # waits for this before keeping a new image, and rolls back otherwise.
+    # Every 5 minutes (every 5 s while starting), to stay light on SponsorBlock.
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import json, urllib.request; json.load(open('/app/data/config.json')); urllib.request.urlopen('https://sponsor.ajay.app/api/status', timeout=8)"]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+      start_interval: 5s
     mem_limit: 128m
     pids_limit: 64
     networks:

@@ -91,7 +91,8 @@
         "!filebrowser/filebrowser",
         "!louislam/uptime-kuma",
         "!amir20/dozzle",
-        "!ghcr.io/netalertx/netalertx"
+        "!ghcr.io/netalertx/netalertx",
+        "!ghcr.io/dmunozv04/isponsorblocktv"
       ],
       "groupName": "weekly minor and patch updates",
       "schedule": [
@@ -117,7 +118,8 @@
         "filebrowser/filebrowser",
         "louislam/uptime-kuma",
         "amir20/dozzle",
-        "ghcr.io/netalertx/netalertx"
+        "ghcr.io/netalertx/netalertx",
+        "ghcr.io/dmunozv04/isponsorblocktv"
       ],
       "matchUpdateTypes": [
         "minor",
