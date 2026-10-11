@@ -13,6 +13,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import identify
+
 API = "https://lrclib.net/api"
 USER_AGENT = "batlab-musicguard/1.0 (self-hosted music library)"
 TIMEOUT = 20
@@ -67,28 +69,63 @@ def synced_ok(text):
     return bool(lines) and all(SYNCED_LINE.match(line) for line in lines)
 
 
-def pick(results, seconds):
-    """The search result whose length is closest to the track, within 3 s."""
-    best, best_gap = None, 3.5
+def pick(results, seconds, title=None, artist=None):
+    """The best entry for the track: same length within 3 s (and, when given,
+    the same title and an artist in common), synced lyrics before plain ones,
+    then the closest length. LRCLIB often holds a song several times, under
+    each way of writing its credit; only one may have timings."""
+    best, best_key = None, None
     for result in results or []:
         try:
             gap = abs(float(result.get("duration") or 0) - seconds)
         except (TypeError, ValueError):
             continue
-        if gap < best_gap and (result.get("syncedLyrics") or result.get("plainLyrics")
-                               or result.get("instrumental")):
-            best, best_gap = result, gap
+        if gap >= 3.5:
+            continue
+        if title and not identify.same_title(result.get("trackName") or "", title):
+            continue
+        if artist and not identify.names(result.get("artistName") or "") & identify.names(artist):
+            continue
+        synced = clean(result.get("syncedLyrics") or "")
+        if synced.strip() and synced_ok(synced):
+            rank = 0
+        elif (result.get("plainLyrics") or "").strip() or result.get("instrumental"):
+            rank = 1
+        else:
+            continue
+        key = (rank, gap)
+        if best_key is None or key < best_key:
+            best, best_key = result, key
     return best
 
 
+def rank_synced(result, seconds):
+    """True for an entry with usable synced lyrics of about this length."""
+    try:
+        if abs(float(result.get("duration") or 0) - seconds) >= 3.5:
+            return False
+    except (TypeError, ValueError):
+        return False
+    synced = clean(result.get("syncedLyrics") or "")
+    return bool(synced.strip()) and synced_ok(synced)
+
+
 def lookup(artist, title, album, seconds):
-    """("synced"|"plain"|"instrumental"|None, text)."""
+    """("synced"|"plain"|"instrumental"|None, text). Every entry with this
+    title is considered (an exact match, a search under the full credit, a
+    search by title alone, which finds the song under each artist's name),
+    and synced lyrics win."""
     params = {"artist_name": artist, "track_name": title, "duration": int(round(seconds))}
     if album:
         params["album_name"] = album
-    found = _get("get", params)
-    if not found:
-        found = pick(_get("search", {"artist_name": artist, "track_name": title}), seconds)
+    candidates = []
+    exact = _get("get", params)
+    if exact:
+        candidates.append(exact)
+    candidates += _get("search", {"artist_name": artist, "track_name": title}) or []
+    if not any(rank_synced(c, seconds) for c in candidates):
+        candidates += _get("search", {"track_name": title}) or []
+    found = pick(candidates, seconds, title, artist)
     if not found:
         return None, ""
     if found.get("instrumental"):

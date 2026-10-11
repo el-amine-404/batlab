@@ -1158,6 +1158,7 @@ def main(argv=None):
     audit = commands.add_parser("audit", help="compare every track's tags with what Shazam hears")
     audit.add_argument("roots", nargs="*")
     commands.add_parser("upgrade", help="one pass handing songs from links to Lidarr")
+    commands.add_parser("lyrics", help="ask LRCLIB now for every track without synced lyrics")
     ident = commands.add_parser("identify", help="ask Shazam what files are")
     ident.add_argument("paths", nargs="+")
     arguments = parser.parse_args(argv)
@@ -1175,6 +1176,17 @@ def main(argv=None):
     if arguments.command == "identify":
         for path in arguments.paths:
             print(f"{path}: {guard.shazam(path)!r}", flush=True)
+        return 0
+    if arguments.command == "lyrics":
+        for root in config.roots:
+            for directory, dirnames, filenames in os.walk(root):
+                dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+                for name in sorted(filenames):
+                    path = os.path.join(directory, name)
+                    if name.startswith(".") or os.path.splitext(name)[1].lower() not in AUDIO_EXTENSIONS:
+                        continue
+                    guard.state["lyrics"].pop(path, None)  # ignore the 30-day wait
+                    guard.lyrics_for_existing(path)
         return 0
     if arguments.command == "upgrade":
         guard.upgrade_pass()

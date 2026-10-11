@@ -950,6 +950,16 @@ class LyricsRules(unittest.TestCase):
         self.assertEqual(lyrics.pick(results, 180)["duration"], 181)
         self.assertIsNone(lyrics.pick(results, 100))
 
+    def test_synced_lyrics_win_over_a_closer_plain_entry(self):
+        results = [
+            {"trackName": "KATANA", "artistName": "Manal & Stormy", "duration": 157, "plainLyrics": "words"},
+            {"trackName": "KATANA", "artistName": "Manal", "duration": 158, "syncedLyrics": "[00:13.73] words"},
+            {"trackName": "KATANA", "artistName": "Someone Else", "duration": 157, "syncedLyrics": "[00:01.00] x"},
+            {"trackName": "Other", "artistName": "Manal", "duration": 157, "syncedLyrics": "[00:01.00] y"},
+        ]
+        best = lyrics.pick(results, 156.6, "KATANA", "Manal & Stormy")
+        self.assertEqual((best["artistName"], best["duration"]), ("Manal", 158))
+
     def test_sidecar_written_after_filing(self):
         with mock.patch.object(lyrics, "lookup", return_value=("synced", "[00:01.00] la\n")):
             with tempfile.TemporaryDirectory() as tmp:
