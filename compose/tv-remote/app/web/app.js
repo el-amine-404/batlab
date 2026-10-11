@@ -202,11 +202,10 @@ function render() {
   const silent = on && (state.mute || state.volume === 0);
   const mute = $("#mute");
   mute.setAttribute("aria-pressed", String(!!(on && state.mute)));
+  mute.setAttribute("aria-label", on && state.mute ? "Unmute" : "Mute");
   mute.querySelector("use").setAttribute("href", silent ? "#i-mute" : "#i-volume");
-  mute.querySelector("span").textContent = on && state.mute ? "Muted" : "Mute";
   $("#vol-label").textContent = known ? `VOL ${state.volume}` : "VOL";
   $("#vol-num").textContent = known ? state.volume : "–";
-  $("#vol-icon use").setAttribute("href", silent ? "#i-mute" : "#i-volume");
   $("#vol-rocker").classList.toggle("muted", silent);
   $("#vol-row").classList.toggle("muted", silent);
   const slider = $("#vol-slider");
@@ -255,18 +254,16 @@ function renderMedia() {
   const m = state.power === "on" ? state.media : null;
   const card = $("#media");
   card.hidden = !m;
-  const playing = !!m && m.state === "playing";
-  // The play/pause key in the main rows follows what plays, when it is known.
-  const pp = $("#playpause");
-  pp.querySelector("use").setAttribute("href", playing ? "#i-pause" : "#i-play");
-  pp.querySelector("span").textContent = m ? (playing ? "Pause" : "Play") : "Play/Pause";
+  // One place for playback: the card when it shows, else the plain keys.
+  $("#keys-row").hidden = !!m;
   if (!m) return;
+  const playing = m.state === "playing";
   $("#media-title").textContent = m.title || "";
   $("#media-sub").textContent = m.subtitle || "";
   $("#media-source").textContent = m.source === "youtube" ? "YouTube" : "Jellyfin";
   // YouTube seeks exactly; Jellyfin's keys go back 10 s and forward 30 s.
-  $("#seek-back").textContent = "10";
-  $("#seek-fwd").textContent = m.source === "youtube" ? "10" : "30";
+  $("#seek-back").textContent = "−10s";
+  $("#seek-fwd").textContent = m.source === "youtube" ? "+10s" : "+30s";
   $("#media-toggle use").setAttribute("href", playing ? "#i-pause" : "#i-play");
   document.querySelectorAll("#media .skip").forEach((b) => { b.hidden = !m.can_skip; });
   const seek = $("#media-seek");

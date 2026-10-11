@@ -186,8 +186,13 @@ p { margin: 0; }
 
 /* Volume slider */
 .vol-row { display: flex; align-items: center; gap: 12px; padding: 4px 6px; }
-.vol-row .ic { color: var(--muted); }
-.vol-row.muted .ic { color: var(--danger); }
+.vol-mute {
+  appearance: none; border: 0; background: transparent; color: var(--muted); cursor: pointer;
+  width: 40px; height: 40px; margin: -6px; border-radius: 10px; display: grid; place-items: center; touch-action: manipulation;
+}
+.vol-mute:active { background: var(--key); }
+.vol-mute:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
+.vol-row.muted .vol-mute { color: var(--danger); }
 .vol-num { min-width: 2.5ch; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
 input[type="range"] {
   flex: 1; height: 28px; margin: 0; background: transparent; -webkit-appearance: none; appearance: none; touch-action: pan-y;
@@ -233,16 +238,17 @@ dialog.sheet { text-align: left; align-items: stretch; max-width: 380px; gap: 10
 .sheet-head h2 { margin: 0; }
 
 /* Now playing */
-.media { display: flex; flex-direction: column; gap: 10px; padding: 16px; }
+.media { display: flex; flex-direction: column; gap: 14px; padding: 16px; }
 .media-head { display: flex; align-items: flex-start; gap: 10px; }
 .media-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .media-text b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .media-text span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.media-times { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; margin-top: -8px; }
+.media-progress { display: flex; flex-direction: column; gap: 2px; }
+.media-times { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; padding: 0 2px; }
 .media-ctrl { display: flex; align-items: center; justify-content: space-between; padding: 0 4px; }
 .seekbtn { position: relative; }
-.seekbtn .ic { transform: translateY(-5px); }
-.seekbtn small { position: absolute; bottom: 0; font-size: 10px; font-weight: 600; color: var(--muted); }
+.seekbtn { flex-direction: column; gap: 1px; min-width: 52px; }
+.seekbtn small { font-size: 10px; font-weight: 600; line-height: 1; color: var(--muted); font-variant-numeric: tabular-nums; }
 .media-main { width: 52px; height: 52px; }
 .media input[type="range"]:disabled { opacity: 0.5; }
 
