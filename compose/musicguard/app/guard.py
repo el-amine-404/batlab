@@ -64,6 +64,8 @@ LYRICS_RETRY_SECONDS = 30 * 86400
 UPGRADE_RETRY_SECONDS = 7 * 86400
 # A single whose song is on no album yet is looked at again after a month.
 SINGLE_RETRY_SECONDS = 30 * 86400
+# A file this close to its MusicBrainz recording's length is that recording.
+LENGTH_AGREES_SECONDS = 3
 ORPHAN_SECONDS = 3600
 STATE_VERSION = 1
 # Events after which Navidrome has something new to index.
@@ -411,9 +413,13 @@ class Guard:
             cover = None
         return found, cover
 
-    def wrong_song(self, path, found, root):
+    def wrong_song(self, path, found, root, seconds=0):
         """For a file new to a library: Shazam sure it is a different song
-        (both title and artists differ) means a wrong or fake download."""
+        (both title and artists differ) means a wrong or fake download,
+        unless the file is as long as the MusicBrainz recording it is tagged
+        with: Shazam's catalogue has re-uploads of hits under other names
+        (21 Savage's "4L" as "Thedjnino - Just TEN"), and a wrong download
+        is almost never the same length to the second."""
         stat = os.stat(path)
         key = f"{stat.st_size}"
         if self.state["audited"].get(path) == key:
@@ -424,13 +430,30 @@ class Guard:
             return None
         title, artist = layout.first(found, "title"), layout.first(found, "artist")
         if identify.contradicts(match, title, artist):
-            return f"tagged {artist} - {title}, Shazam hears {match!r}"
+            detail = f"tagged {artist} - {title}, Shazam hears {match!r}"
+            expected = self.recording_seconds(layout.first(found, "musicbrainz_trackid"))
+            if expected and abs(expected - seconds) <= LENGTH_AGREES_SECONDS:
+                self.event("suspect", path, "SHAZAM_DISAGREES",
+                           f"{detail}; kept: as long as MusicBrainz's recording ({expected:.0f} s)")
+                return None
+            return detail
         if not identify.same_title(match.title, title):
             # Same artist, another title: the classic wrong match within an
             # artist's catalogue, but a translated or renamed title looks the
             # same, so it is reported rather than moved.
             self.event("suspect", path, "WRONG_TITLE", f"tagged {artist} - {title}, Shazam hears {match!r}")
         return None
+
+    def recording_seconds(self, recording_id):
+        """The length MusicBrainz has for a recording, or None."""
+        if not recording_id:
+            return None
+        try:
+            length = upgrade.recording(recording_id).get("length")
+        except Exception as error:
+            log(f"musicbrainz recording lookup failed for {recording_id}: {error}")
+            return None
+        return length / 1000 if length else None
 
     def fix_credits(self, path, found):
         try:
@@ -518,7 +541,7 @@ class Guard:
                     self.quarantine(path, rejection.reason, rejection.detail, base)
                 return None
             if mode in ("verify", "inplace"):
-                wrong = self.wrong_song(path, found, base)
+                wrong = self.wrong_song(path, found, base, seconds)
                 if wrong:
                     self.quarantine(path, "WRONG_SONG", wrong, base)
                     return None

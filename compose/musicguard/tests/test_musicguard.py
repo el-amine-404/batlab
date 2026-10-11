@@ -474,6 +474,20 @@ class Identification(GuardTestCase):
         self.guard.roots_pass()
         self.assertEqual(self.quarantined_reasons(), ["WRONG_SONG"])
 
+    def test_shazam_is_overruled_by_the_recording_length(self):
+        path = os.path.join(self.music, "21 Savage", "i am i was (2018)", "15 - 4L.mp3")
+        os.makedirs(os.path.dirname(path))
+        tone(path)
+        audio = mutagen.File(path, easy=True)
+        audio["title"], audio["artist"] = "4L", "21 Savage"
+        audio["musicbrainz_trackid"] = "57c319d6-31ed-4668-acf1-13350ab8b67b"
+        audio.save()
+        guard.identify.recognise.return_value = identify.Match("Just TEN", "Thedjnino")
+        with mock.patch.object(guard.upgrade, "recording", return_value={"length": 8000}):
+            self.guard.roots_pass()
+        self.assertTrue(os.path.exists(path))
+        self.assertIn("SHAZAM_DISAGREES", [e["reason"] for e in self.guard.events])
+
     def test_an_audited_file_is_reported_not_moved(self):
         path = os.path.join(self.music, "A", "B (2004)", "01 - Stormy.mp3")
         os.makedirs(os.path.dirname(path))

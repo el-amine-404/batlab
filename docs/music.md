@@ -142,6 +142,12 @@ and streaming-only music than MusicBrainz's AcoustID.
   title nor artist in common, is quarantined as `WRONG_SONG`; a monitored album
   then makes Lidarr fetch another copy. A remix, a feature or a translated title
   shares one of them and is not called wrong. No match is never a verdict.
+  Nor is Shazam alone when the file is as long as the MusicBrainz recording
+  it is tagged with (within 3 s): that is reported as `SHAZAM_DISAGREES` and
+  the file stays. Shazam's catalogue has re-uploads of hits under other
+  names: on 2026-10-11 it heard 21 Savage's "4L" (288 s, as MusicBrainz says)
+  as "Thedjnino - Just TEN" at every point of the song, and the real track
+  was quarantined until this rule.
 - `guard.py audit` compares every track with Shazam and only reports; the
   files it saw count as checked, so it is safe on an old library.
 
