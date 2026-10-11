@@ -16,6 +16,7 @@ send without a CORS preflight this server never answers.
 
 from __future__ import annotations
 
+import asyncio
 import html
 import ipaddress
 import json
@@ -33,6 +34,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from pyytlounge import EventListener, State, YtLoungeApi
 from samsungtvws import SamsungTVWS
 from samsungtvws.remote import RemoteControlCommand
 
@@ -41,13 +43,13 @@ PORT = int(os.environ.get("PORT", "8080"))
 TV_SUBNET = ipaddress.ip_network(os.environ.get("TV_SUBNET", "192.168.1.0/24"), strict=False)
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 REMOTE_NAME = os.environ.get("REMOTE_NAME", "batlab remote")
+JELLYFIN_URL = os.environ.get("JELLYFIN_URL", "").rstrip("/")
+JELLYFIN_API_KEY = os.environ.get("JELLYFIN_API_KEY", "")
 WEB_DIR = Path(__file__).with_name("web")
 VERSION = Path(__file__).with_name("VERSION").read_text().strip()
 
 TVS_FILE = DATA_DIR / "tvs.json"
 TOKENS_DIR = DATA_DIR / "tokens"
-# The inputs the page offers, as keys the TV accepts; labels are per TV.
-INPUTS = {"TV": "KEY_TV", "HDMI 1": "KEY_HDMI1", "HDMI 2": "KEY_HDMI2", "HDMI 3": "KEY_HDMI3", "HDMI 4": "KEY_HDMI4"}
 YOUTUBE_URL_ID = re.compile(r"(?:v=|youtu\.be/|/shorts/|/live/)([A-Za-z0-9_-]{11})(?:[?&#]|$)")
 # A bare ID; an 11-letter search word looks the same unless it has a digit,
 # - or _, or a capital after a small letter, as generated IDs nearly always do.
@@ -61,7 +63,7 @@ KEYS = {
     "KEY_UP", "KEY_DOWN", "KEY_LEFT", "KEY_RIGHT", "KEY_ENTER",
     "KEY_VOLUP", "KEY_VOLDOWN", "KEY_MUTE", "KEY_CHUP", "KEY_CHDOWN",
     "KEY_PLAY", "KEY_PAUSE", "KEY_STOP", "KEY_REWIND", "KEY_FF", "KEY_GUIDE",
-    "KEY_TV", "KEY_HDMI1", "KEY_HDMI2", "KEY_HDMI3", "KEY_HDMI4",
+    "KEY_TV",
     *(f"KEY_{d}" for d in range(10)),
 }
 
@@ -371,26 +373,291 @@ def set_volume(ip: str, level: int) -> None:
     upnp(ip, "SetVolume", f"<DesiredVolume>{level}</DesiredVolume>")
 
 
+# ------------------------------------------------------------ async loop
+# pyytlounge is asyncio; it runs on one loop in its own thread, and request
+# handlers hand it work with run_coroutine_threadsafe.
+
+LOOP = asyncio.new_event_loop()
+threading.Thread(target=LOOP.run_forever, daemon=True, name="asyncio").start()
+
+
+def on_loop(coro, timeout: float = 15):
+    return asyncio.run_coroutine_threadsafe(coro, LOOP).result(timeout)
+
+
 # ---------------------------------------------------------------- YouTube
 
-def youtube(ip: str, text: str) -> str:
-    """Play a video link or ID on the TV, else open YouTube's search for the
-    text, over DIAL (port 8080), the way a phone casts. YouTube's own keyboard
-    takes no text from the remote."""
-    t = text.strip()
-    m = YOUTUBE_URL_ID.search(t)
-    vid = m.group(1) if m else (t if YOUTUBE_BARE_ID.match(t) else None)
-    if vid:
-        body, what = f"v={vid}", "video"
-    else:
-        body, what = "search_query=" + urllib.parse.quote(text.strip()), "search"
+def dial_youtube(ip: str) -> tuple[str, str | None]:
+    """The YouTube app's DIAL state (running, stopped) and, while it runs,
+    the screenId a casting client pairs with."""
+    with urllib.request.urlopen(f"http://{ip}:8080/ws/apps/YouTube", timeout=3) as r:
+        x = r.read().decode("utf-8", "replace")
+    state = re.search(r"<state>([^<]+)</state>", x)
+    screen = re.search(r"<screenId>([^<]+)</screenId>", x)
+    return (state.group(1) if state else "unknown", screen.group(1) if screen else None)
+
+
+def youtube_title(video_id: str) -> tuple[str | None, str | None]:
+    try:
+        q = urllib.parse.quote(f"https://www.youtube.com/watch?v={video_id}", safe="")
+        with urllib.request.urlopen(f"https://www.youtube.com/oembed?format=json&url={q}", timeout=5) as r:
+            d = json.load(r)
+        return d.get("title"), d.get("author_name")
+    except (OSError, ValueError, urllib.error.URLError):
+        return None, None
+
+
+class YouTubeLink(EventListener):
+    """The TV's YouTube app as a casting client sees it: what plays, where,
+    and commands to it, over YouTube's Lounge API (pyytlounge). Pairs by
+    itself through DIAL the first time YouTube is open on the TV; the pairing
+    is kept in DATA_DIR. Polls the TV's DIAL (local) while YouTube is closed."""
+
+    def __init__(self, mac: str) -> None:
+        super().__init__()
+        self.mac = mac
+        self.api: YtLoungeApi | None = None
+        self.connected = False
+        self.hurry = asyncio.Event()  # a command waits: poll fast
+        self.media: dict = {}
+        self.auth_file = DATA_DIR / f"youtube-{mac.replace(':', '')}.json"
+        asyncio.run_coroutine_threadsafe(self._run(), LOOP)
+
+    # events from the TV
+    async def now_playing_changed(self, event) -> None:
+        vid = event.video_id
+        if not vid:
+            self.media = {}
+            return
+        if vid != self.media.get("id"):
+            title, channel = await asyncio.to_thread(youtube_title, vid)
+            self.media = {"id": vid, "title": title or "YouTube", "subtitle": channel or ""}
+        self._update(event.state, event.current_time, event.duration)
+
+    async def playback_state_changed(self, event) -> None:
+        self._update(event.state, event.current_time, event.duration)
+
+    async def disconnected(self, event) -> None:
+        self.connected = False
+        self.media = {}
+
+    def _update(self, state, position, duration) -> None:
+        names = {State.Playing: "playing", State.Paused: "paused", State.Starting: "buffering",
+                 State.Buffering: "ended", State.Advertisement: "ad", State.Cued: "buffering"}
+        self.media["state"] = names.get(state, "stopped")
+        if position is not None:
+            self.media["position"] = position
+        if duration:
+            self.media["duration"] = duration
+        self.media["at"] = time.time()
+
+    def snapshot(self) -> dict | None:
+        if not self.connected or not self.media.get("id"):
+            return None
+        m = dict(self.media)
+        if m.get("state") == "playing" and "position" in m:  # extrapolate between events
+            m["position"] = min(m.get("duration") or 1e9, m["position"] + time.time() - m["at"])
+        return {"source": "youtube", "can_seek": True, **m}
+
+    # the connection
+    def _save(self) -> None:
+        if self.api:
+            self.auth_file.write_text(json.dumps(self.api.store_auth_state()))
+            self.auth_file.chmod(0o600)
+
+    async def _run(self) -> None:
+        while True:
+            try:
+                await self._session()
+            except Exception as err:  # noqa: BLE001 - keep trying, quietly
+                log.info("%s: YouTube link: %s", self.mac, err)
+            self.connected = False
+            try:
+                await asyncio.wait_for(self.hurry.wait(), timeout=10)
+            except asyncio.TimeoutError:
+                pass
+            if self.hurry.is_set():
+                await asyncio.sleep(1)
+
+    async def _session(self) -> None:
+        if self.mac not in load_tvs():
+            return
+        ip = load_tvs()[self.mac]["ip"]
+        state, screen_id = await asyncio.to_thread(dial_youtube, ip)
+        if state != "running":
+            return  # YouTube is closed: nothing to connect to
+        async with YtLoungeApi(REMOTE_NAME, self) as api:
+            self.api = api
+            try:
+                if self.auth_file.exists():
+                    api.load_auth_state(json.loads(self.auth_file.read_text()))
+                if not (api.paired() and await api.refresh_auth()):
+                    if not screen_id or not await api.pair_with_screen_id(screen_id):
+                        return
+                self._save()
+                if not await api.connect():
+                    return
+                self.connected = True
+                self.hurry.clear()
+                log.info("%s: YouTube link up", self.mac)
+                await api.subscribe()  # until the app closes or the link drops
+            finally:
+                self.connected = False
+                self.api = None
+
+    # commands
+    def command(self, name: str, *args):
+        if not self.connected or not self.api:
+            raise ConnectionError("YouTube is not connected yet")
+        return on_loop(getattr(self.api, name)(*args))
+
+    def play_video(self, video_id: str) -> None:
+        """Opens YouTube if needed, waits for the link, then plays."""
+        if not self.connected:
+            ip = load_tvs()[self.mac]["ip"]
+            rest(ip, "applications/111299001912", "POST", timeout=6)
+            LOOP.call_soon_threadsafe(self.hurry.set)
+            deadline = time.monotonic() + 30
+            while not self.connected and time.monotonic() < deadline:
+                time.sleep(0.5)
+        self.command("play_video", video_id)
+
+
+links: dict[str, YouTubeLink] = {}
+
+
+def youtube_link(mac: str) -> YouTubeLink:
+    with remotes_lock:
+        if mac not in links:
+            links[mac] = YouTubeLink(mac)
+        return links[mac]
+
+
+def youtube_search(ip: str, text: str) -> None:
+    """Open YouTube's search on the TV over DIAL; checked to work on the Q8F."""
     req = urllib.request.Request(
-        f"http://{ip}:8080/ws/apps/YouTube", data=body.encode(), method="POST",
+        f"http://{ip}:8080/ws/apps/YouTube",
+        data=("search_query=" + urllib.parse.quote(text.strip())).encode(), method="POST",
         headers={"Content-Type": "text/plain; charset=utf-8"},
     )
     with urllib.request.urlopen(req, timeout=8):
         pass
-    return what
+
+
+# --------------------------------------------------------------- Jellyfin
+
+def jellyfin(path: str, method: str = "GET"):
+    req = urllib.request.Request(
+        JELLYFIN_URL + path, method=method,
+        headers={"Authorization": f'MediaBrowser Token="{JELLYFIN_API_KEY}"'},
+    )
+    with urllib.request.urlopen(req, timeout=3) as r:
+        body = r.read()
+    return json.loads(body) if body else None
+
+
+_jf_cache: tuple[float, dict | None] = (0.0, None)
+
+
+def jellyfin_session() -> dict | None:
+    """The Jellyfin app on the TV, as Jellyfin's server sees it."""
+    global _jf_cache
+    if not (JELLYFIN_URL and JELLYFIN_API_KEY):
+        return None
+    if time.monotonic() - _jf_cache[0] < 2:
+        return _jf_cache[1]
+    try:
+        sessions = jellyfin("/Sessions?ActiveWithinSeconds=180") or []
+    except (OSError, ValueError, urllib.error.URLError):
+        sessions = []
+    tv = next((x for x in sessions if x.get("Client") == "Jellyfin for Tizen"), None)
+    _jf_cache = (time.monotonic(), tv)
+    return tv
+
+
+def jellyfin_media(session: dict) -> dict | None:
+    item = session.get("NowPlayingItem")
+    if not item:
+        return None
+    ps = session.get("PlayState") or {}
+    sub = ""
+    if item.get("SeriesName"):
+        sub = item["SeriesName"]
+        if item.get("ParentIndexNumber") is not None and item.get("IndexNumber") is not None:
+            sub += f" · S{item['ParentIndexNumber']}E{item['IndexNumber']}"
+    elif item.get("ProductionYear"):
+        sub = str(item["ProductionYear"])
+    return {
+        "source": "jellyfin", "id": item.get("Id"), "session": session.get("Id"),
+        "title": item.get("Name") or "Jellyfin", "subtitle": sub,
+        "state": "paused" if ps.get("IsPaused") else "playing",
+        "position": (ps.get("PositionTicks") or 0) / 1e7,
+        "duration": (item.get("RunTimeTicks") or 0) / 1e7,
+        "can_seek": bool(ps.get("CanSeek")), "at": time.time(),
+    }
+
+
+def jellyfin_command(session_id: str, command: str, query: str = "") -> bool:
+    try:
+        jellyfin(f"/Sessions/{session_id}/Playing/{command}{query}", "POST")
+        return True
+    except (OSError, urllib.error.URLError):
+        return False
+
+
+# ------------------------------------------------------------------ media
+
+def media(mac: str) -> dict | None:
+    m = youtube_link(mac).snapshot()
+    if m:
+        return m
+    s = jellyfin_session()
+    return jellyfin_media(s) if s else None
+
+
+def media_action(mac: str, action: str, value: float = 0) -> None:
+    """Play/pause/seek/skip through the app that plays, else the TV's keys."""
+    m = media(mac)
+    r = remote(mac)
+    key = {"play": "KEY_PLAY", "pause": "KEY_PAUSE", "next": "KEY_FF", "prev": "KEY_REWIND",
+           "stop": "KEY_STOP"}.get(action)
+    if m and m["source"] == "youtube":
+        link = youtube_link(mac)
+        if action == "toggle":
+            link.command("pause" if m.get("state") == "playing" else "play")
+        elif action in ("seek", "rel"):
+            to = value if action == "seek" else m.get("position", 0) + value
+            link.command("seek_to", max(0.0, min(to, m.get("duration") or to)))
+        elif action in ("play", "pause", "next", "previous"):
+            link.command(action)
+        elif action == "prev":
+            link.command("previous")
+        elif action == "stop":
+            r.run(lambda tv: tv.send_key("KEY_RETURN"))
+        return
+    if m and m["source"] == "jellyfin":
+        sid = m["session"]
+        cmd = {"toggle": "PlayPause", "play": "Unpause", "pause": "Pause", "next": "NextTrack",
+               "prev": "PreviousTrack", "stop": "Stop"}.get(action)
+        if action in ("seek", "rel"):
+            to = value if action == "seek" else m["position"] + value
+            ticks = int(max(0.0, min(to, m["duration"] or to)) * 1e7)
+            if jellyfin_command(sid, "Seek", f"?seekPositionTicks={ticks}") or action == "seek":
+                return  # no key seeks to a position
+        elif cmd and jellyfin_command(sid, cmd):
+            return
+        if action == "toggle":
+            key = "KEY_PAUSE" if m["state"] == "playing" else "KEY_PLAY"
+    if action == "toggle" and not key:
+        # Nothing reports what plays (an HDMI box, the TV's own player): alternate.
+        r.paused = not getattr(r, "paused", False)
+        key = "KEY_PAUSE" if r.paused else "KEY_PLAY"
+    if action == "rel":
+        key = "KEY_FF" if value > 0 else "KEY_REWIND"
+    if action == "seek":
+        return
+    if key:
+        r.run(lambda tv: tv.send_key(key))
 
 
 # ------------------------------------------------------------------ power
@@ -402,7 +669,14 @@ def status(mac: str) -> dict:
         return {"power": "off"}
     if dev["power"] != "on":
         return {"power": "standby"}
-    return {"power": "on", **audio(ip), "app": app_in_front(mac)}
+    app = app_in_front(mac)
+    jf = jellyfin_session()
+    m = media(mac)
+    if not app and (jf or (m and m["source"] == "jellyfin")):
+        app = "Jellyfin"  # no app ID for the store version; its server knows it is open
+    if m and m["source"] == "youtube":
+        app = "YouTube"
+    return {"power": "on", **audio(ip), "app": app, "media": m}
 
 
 def wait_for(mac: str, want, seconds: float) -> dict:
@@ -492,7 +766,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"version": VERSION})
         if path == "/api/tvs":
             return self._json(200, [{"mac": m, **t} for m, t in load_tvs().items()])
-        m = re.fullmatch(r"/api/tv/([0-9a-f:]{17})/(status|apps|inputs)", path)
+        m = re.fullmatch(r"/api/tv/([0-9a-f:]{17})/(status|apps)", path)
         if m:
             mac, what = m.groups()
             if mac not in load_tvs():
@@ -504,9 +778,6 @@ class Handler(BaseHTTPRequestHandler):
                     # The page is open: connect now, so the first press is quick.
                     threading.Thread(target=r.run, args=(lambda tv: None,), daemon=True).start()
                 return self._json(200, st)
-            if what == "inputs":
-                labels = load_tvs()[mac].get("inputs", {})
-                return self._json(200, [{"name": n, "label": labels.get(n, "")} for n in INPUTS])
             return self._json(200, installed_apps(mac))
         name = "index.html" if path == "/" else path.lstrip("/")
         file = (WEB_DIR / name).resolve()
@@ -534,7 +805,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not MAC_RE.match(mac) or ipaddress.ip_address(ip) not in TV_SUBNET:
                     return self._json(400, {"error": "bad TV"})
                 return self._json(200, {"mac": mac, **pair(mac, ip)})
-            m = re.fullmatch(r"/api/tv/([0-9a-f:]{17})/(key|text|enter-text|app|power|mute|volume|input|label|youtube|cursor|click|forget)", path)
+            m = re.fullmatch(r"/api/tv/([0-9a-f:]{17})/(key|text|enter-text|app|power|mute|volume|media|youtube|cursor|click|forget)", path)
             if not m:
                 return self._json(404, {"error": "not found"})
             mac, action = m.groups()
@@ -572,30 +843,26 @@ class Handler(BaseHTTPRequestHandler):
                 ip = load_tvs()[mac]["ip"]
                 set_volume(ip, level)
                 return self._json(200, audio(ip))
-            elif action == "input":
-                name = str(body.get("name", ""))
-                if name not in INPUTS:
-                    return self._json(400, {"error": "unknown input"})
-                r.run(lambda tv: tv.send_key(INPUTS[name]))
-            elif action == "label":
-                name, label = str(body.get("name", "")), str(body.get("label", "")).strip()[:40]
-                if name not in INPUTS:
-                    return self._json(400, {"error": "unknown input"})
-                with store_lock:
-                    tvs = load_tvs()
-                    labels = tvs[mac].setdefault("inputs", {})
-                    if label:
-                        labels[name] = label
-                    else:
-                        labels.pop(name, None)
-                    save_tvs(tvs)
+            elif action == "media":
+                what = str(body.get("action", ""))
+                if what not in ("toggle", "play", "pause", "seek", "rel", "next", "prev", "stop"):
+                    return self._json(400, {"error": "unknown media action"})
+                media_action(mac, what, float(body.get("value", 0)))
+                return self._json(200, {"ok": True, "media": media(mac)})
             elif action == "youtube":
                 text = str(body.get("text", ""))[:300]
                 if not text.strip():
                     return self._json(400, {"error": "type a link or a search"})
+                t = text.strip()
+                m = YOUTUBE_URL_ID.search(t)
+                vid = m.group(1) if m else (t if YOUTUBE_BARE_ID.match(t) else None)
                 try:
-                    return self._json(200, {"ok": True, "did": youtube(load_tvs()[mac]["ip"], text)})
-                except (OSError, urllib.error.URLError) as err:
+                    if vid:
+                        youtube_link(mac).play_video(vid)
+                        return self._json(200, {"ok": True, "did": "video"})
+                    youtube_search(load_tvs()[mac]["ip"], t)
+                    return self._json(200, {"ok": True, "did": "search"})
+                except (OSError, urllib.error.URLError, TimeoutError) as err:
                     raise ConnectionError("YouTube on the TV did not answer") from err
             elif action == "cursor":
                 dx, dy = int(body.get("dx", 0)), int(body.get("dy", 0))

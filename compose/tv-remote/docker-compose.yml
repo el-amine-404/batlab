@@ -30,6 +30,9 @@ services:
       - PORT=${TV_REMOTE_PORT}
       - TV_SUBNET=${TV_REMOTE_SUBNET:?set in hosts/<profile>/compose.env}
       - REMOTE_NAME=batlab remote
+      # What Jellyfin on the TV plays, through Jellyfin's own API (via Caddy).
+      - JELLYFIN_URL=http://jellyfin.homelab.lan
+      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:?set in compose/.env}
       - DATA_DIR=/data
     volumes:
       - ${VOLUMES_ROOT}/tv-remote:/data

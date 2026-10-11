@@ -174,6 +174,7 @@ function render() {
   const slider = $("#vol-slider");
   slider.disabled = !known;
   if (known && !sliding) slider.value = state.volume;
+  renderMedia();
   $("#tv-now").hidden = !(on && state.app);
   $("#tv-now").textContent = state.app ? `Now: ${state.app}` : "";
 }
@@ -187,6 +188,72 @@ async function refreshStatus() {
   }
   render();
 }
+// ------------------------------------------------------------- now playing
+
+let seeking = false; // the timeline is being dragged
+
+function clock(sec) {
+  sec = Math.max(0, Math.floor(sec || 0));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  return (h ? `${h}:${String(m).padStart(2, "0")}` : `${m}`) + `:${String(s).padStart(2, "0")}`;
+}
+
+function renderMedia() {
+  const m = state.power === "on" ? state.media : null;
+  const card = $("#media");
+  card.hidden = !m;
+  const playing = !!m && m.state === "playing";
+  // The play/pause key in the main rows follows what plays, when it is known.
+  const pp = $("#playpause");
+  pp.querySelector("use").setAttribute("href", playing ? "#i-pause" : "#i-play");
+  pp.querySelector("span").textContent = m ? (playing ? "Pause" : "Play") : "Play/Pause";
+  if (!m) return;
+  $("#media-title").textContent = m.title || "";
+  $("#media-sub").textContent = m.subtitle || "";
+  $("#media-source").textContent = m.source === "youtube" ? "YouTube" : "Jellyfin";
+  $("#media-toggle use").setAttribute("href", playing ? "#i-pause" : "#i-play");
+  const seek = $("#media-seek");
+  seek.disabled = !m.can_seek || !m.duration;
+  seek.max = Math.max(1, Math.round(m.duration || 0));
+  if (!seeking) seek.value = Math.round(m.position || 0);
+  $("#media-pos").textContent = clock(seeking ? seek.value : m.position);
+  $("#media-dur").textContent = clock(m.duration);
+}
+
+// Between polls the position advances on the page, one second at a time.
+setInterval(() => {
+  const m = state.media;
+  if (!m || m.state !== "playing" || seeking) return;
+  m.position = Math.min(m.duration || Infinity, (m.position || 0) + 1);
+  renderMedia();
+}, 1000);
+
+async function mediaAction(action, value = 0) {
+  if (!current) return;
+  buzz();
+  if (action === "toggle" && state.media) {
+    state.media.state = state.media.state === "playing" ? "paused" : "playing"; // at once
+    renderMedia();
+  }
+  try {
+    const r = await api(`/api/tv/${current.mac}/media`, { action, value });
+    if (r.media !== undefined) { state.media = r.media; renderMedia(); }
+    refreshSoon(1200);
+  } catch (e) {
+    toast(e.message, true);
+    refreshSoon(300);
+  }
+}
+
+function bindSeek(seek) {
+  seek.addEventListener("input", () => { seeking = true; $("#media-pos").textContent = clock(seek.value); });
+  seek.addEventListener("change", async () => {
+    if (state.media) state.media.position = Number(seek.value);
+    await mediaAction("seek", Number(seek.value));
+    seeking = false;
+  });
+}
+
 // Soon after an action, so the page follows the TV without a reload.
 let soonTimer;
 function refreshSoon(ms = 700) {
@@ -302,65 +369,44 @@ function bindSlider(slider) {
   });
 }
 
-// ------------------------------------------------------------------- inputs
-
-async function openInputs() {
-  const list = $("#inputs-list");
-  list.replaceChildren();
-  let inputs = [];
-  try { inputs = await api(`/api/tv/${current.mac}/inputs`); } catch (e) { return toast(e.message, true); }
-  for (const inp of inputs) list.append(inputRow(inp));
-  $("#inputs").showModal();
-}
-
-function inputRow(inp) {
-  const pick = el("button", { class: "btn pick", onclick: () => chooseInput(inp) },
-    el("b", {}, inp.name), el("span", {}, inp.label ? `· ${inp.label}` : ""));
-  const edit = el("button", { class: "btn btn-ghost btn-icon", "aria-label": `Name ${inp.name}`, onclick: () => editLabel(inp, row) }, icon("pencil"));
-  const row = el("div", { class: "input-item" }, pick, edit);
-  return row;
-}
-
-function editLabel(inp, row) {
-  const field = el("input", { type: "text", value: inp.label, placeholder: `What is on ${inp.name}?`, maxlength: "40", enterkeyhint: "done" });
-  const save = async () => {
-    try {
-      await api(`/api/tv/${current.mac}/label`, { name: inp.name, label: field.value });
-      inp.label = field.value.trim();
-    } catch (e) {
-      toast(e.message, true);
-    }
-    row.replaceWith(inputRow(inp));
-  };
-  field.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); field.blur(); } });
-  field.addEventListener("blur", save, { once: true });
-  row.replaceChildren(field);
-  field.focus();
-}
-
-async function chooseInput(inp) {
-  buzz();
-  $("#inputs").close();
-  try {
-    await api(`/api/tv/${current.mac}/input`, { name: inp.name });
-    toast(`Switching to ${inp.label || inp.name}`);
-    refreshSoon(2500);
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-
 // ------------------------------------------------------------------ YouTube
 
+const HISTORY_KEY = "tv-remote:yt-history";
+const HISTORY_MAX = 30; // newest first; the oldest drops off
+
+function history() {
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY)) || []; } catch { return []; }
+}
+function saveHistory(list) {
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, HISTORY_MAX))); } catch {}
+  renderHistory();
+}
+function rememberSearch(text) {
+  saveHistory([text, ...history().filter((t) => t !== text)]);
+}
+function renderHistory() {
+  const list = history();
+  $("#yt-history").hidden = list.length === 0;
+  $("#yt-history-list").replaceChildren(...list.map((t) =>
+    el("button", { type: "button", class: "history-item", title: t, onclick: () => { $("#yt-text").value = t; syncClear(); sendYoutube(); } }, t)));
+}
+function syncClear() {
+  $("#yt-clear").hidden = !$("#yt-text").value;
+}
+
 async function sendYoutube(e) {
-  e.preventDefault();
+  if (e) e.preventDefault();
   const input = $("#yt-text");
-  if (!input.value.trim()) return;
+  const text = input.value.trim();
+  if (!text) return;
   buzz();
+  rememberSearch(text);
+  toast("Sending to YouTube…");
   try {
-    const r = await api(`/api/tv/${current.mac}/youtube`, { text: input.value });
+    const r = await api(`/api/tv/${current.mac}/youtube`, { text });
     toast(r.did === "video" ? "Playing on the TV" : "Searching on the TV");
     input.value = "";
+    syncClear();
     input.blur();
     refreshSoon(3000);
   } catch (err) {
@@ -502,13 +548,14 @@ const HOTKEYS = {
   ArrowUp: "KEY_UP", ArrowDown: "KEY_DOWN", ArrowLeft: "KEY_LEFT", ArrowRight: "KEY_RIGHT",
   Enter: "KEY_ENTER", Backspace: "KEY_RETURN", Escape: "KEY_RETURN",
   h: "KEY_HOME", "+": "KEY_VOLUP", "=": "KEY_VOLUP", "-": "KEY_VOLDOWN",
-  " ": "KEY_PLAY",
+
 };
 document.addEventListener("keydown", (e) => {
   if ($("#view-remote").hidden || e.target.closest("input, textarea, dialog")) return;
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const key = HOTKEYS[e.key];
   if (e.key === "m") { e.preventDefault(); return toggleMute(); }
+  if (e.key === " ") { e.preventDefault(); return mediaAction("toggle"); }
   if (!key) return;
   e.preventDefault();
   send(key);
@@ -526,10 +573,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   bindPad($("#pad-area"));
   bindScrollStrip($("#pad-scroll"));
   bindSlider($("#vol-slider"));
-  $("#input-btn").addEventListener("click", openInputs);
-  $("#inputs-close").addEventListener("click", () => $("#inputs").close());
-  $("#inputs-tv-menu").addEventListener("click", () => $("#inputs").close());
   $("#yt").addEventListener("submit", sendYoutube);
+  $("#yt-text").addEventListener("input", syncClear);
+  $("#yt-clear").addEventListener("click", () => { $("#yt-text").value = ""; syncClear(); $("#yt-text").focus(); });
+  $("#yt-history-clear").addEventListener("click", () => { saveHistory([]); toast("History cleared"); });
+  renderHistory();
+  bindSeek($("#media-seek"));
+  $("#media-toggle").addEventListener("click", () => mediaAction("toggle"));
+  $("#playpause").addEventListener("click", () => mediaAction("toggle"));
+  document.querySelectorAll("[data-media]").forEach((b) =>
+    b.addEventListener("click", () => mediaAction(b.dataset.media, Number(b.dataset.value || 0))));
+  // No copy menu on a long press over the controls.
+  document.addEventListener("contextmenu", (e) => { if (e.target.closest("button, .pad, .dpad, .rocker")) e.preventDefault(); });
   let mode = "buttons";
   try { mode = localStorage.getItem("tv-remote:mode") || "buttons"; } catch {}
   setMode(mode);
