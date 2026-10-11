@@ -8,6 +8,9 @@ services:
     image: local/batlab-tv-remote
     build:
       context: .
+      # The builder drops 127.0.0.1 from the host's resolv.conf, which on lab2
+      # leaves only lab1's DNS; on the host network it uses AdGuard like the rest.
+      network: host
       args:
         BASE_IMAGE: ${IMAGE_TV_REMOTE_BASE}:${TAG_TV_REMOTE_BASE}
     # Rebuild on every `make up`, so code changes are always deployed.
