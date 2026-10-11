@@ -147,8 +147,11 @@ class Remote:
                     self._drop()
                     continue
                 try:
+                    if not self.tv.is_alive():
+                        raise ConnectionError("closed by the TV")
                     self.tv.connection.ping()
-                except Exception:  # noqa: BLE001 - stale socket: reopen on next use
+                except Exception as err:  # noqa: BLE001 - stale socket: reopen on next use
+                    log.info("%s: keepalive dropped the connection: %s", self.mac, err)
                     self._drop()
 
     def _ip(self) -> str:
@@ -166,10 +169,14 @@ class Remote:
 
     def _connect(self) -> SamsungTVWS:
         if self.tv is None:
-            self.tv = SamsungTVWS(
+            tv = SamsungTVWS(
                 host=self._ip(), port=8002, token_file=str(token_file(self.mac)),
                 name=REMOTE_NAME, timeout=5, key_press_delay=0,
             )
+            # Opens the socket and reads what the TV sends on a thread of its
+            # own: left unread, the connection went stale within a minute.
+            tv.start_listening()
+            self.tv = tv
         return self.tv
 
     def _drop(self) -> None:
