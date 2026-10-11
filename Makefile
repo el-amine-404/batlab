@@ -213,7 +213,8 @@ setup: check-env
 		$(VOLUMES_ROOT)/paperless/db \
 		$(VOLUMES_ROOT)/paperless/redis \
 		$(VOLUMES_ROOT)/ollama \
-		$(VOLUMES_ROOT)/open-webui
+		$(VOLUMES_ROOT)/open-webui \
+		$(VOLUMES_ROOT)/tv-remote
 
 	@echo "==> Creating data directories..."
 	sudo mkdir -p \
@@ -235,6 +236,7 @@ setup: check-env
 		$(VOLUMES_ROOT)/caddy/config \
 		$(VOLUMES_ROOT)/diun/data \
 		$(VOLUMES_ROOT)/filebrowser \
+		$(VOLUMES_ROOT)/tv-remote \
 		$(VOLUMES_ROOT)/homepage/icons \
 		$(VOLUMES_ROOT)/homepage/images \
 		$(VOLUMES_ROOT)/homepage/logs \

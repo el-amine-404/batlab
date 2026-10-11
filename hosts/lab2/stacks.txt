@@ -19,6 +19,7 @@ paperless
 portainer
 seerr
 speed_test
+tv-remote
 unbound
 untrunc
 uptime_kuma

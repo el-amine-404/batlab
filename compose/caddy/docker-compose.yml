@@ -19,6 +19,10 @@ services:
       - PUID=${PUID}
       - PGID=${PGID}
       - TZ=${TZ}
+      # tv-remote.caddy: the remote's port and its login.
+      - TV_REMOTE_PORT=${TV_REMOTE_PORT:?set in compose/.env}
+      - TV_REMOTE_USER=${TV_REMOTE_USER:?set in compose/.env}
+      - TV_REMOTE_PASSWORD_HASH=${TV_REMOTE_PASSWORD_HASH:?set in compose/.env}
     networks:
       - home_server
     healthcheck:

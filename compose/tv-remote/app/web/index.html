@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="TV Remote">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>TV Remote</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <svg width="0" height="0" class="sprite" aria-hidden="true">
+    <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+    <symbol id="i-source" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-mute" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="m22 9-6 6M16 9l6 6"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m7 4 12 8-12 8V4z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+    <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="i-tv" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8"/></symbol>
+    <symbol id="i-swap" viewBox="0 0 24 24"><path d="M7 4 3 8l4 4"/><path d="M3 8h13"/><path d="m17 12 4 4-4 4"/><path d="M21 16H8"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4 20-7z"/></symbol>
+  </svg>
+
+  <main class="app">
+    <!-- TV list and discovery -->
+    <section id="view-tvs" class="view" hidden>
+      <header class="bar">
+        <div>
+          <h1>TV Remote</h1>
+          <p class="muted">Pick a TV, or scan the network for one.</p>
+        </div>
+      </header>
+      <div id="tv-list" class="stack"></div>
+      <button id="scan" class="btn btn-primary btn-wide"><svg class="ic"><use href="#i-search"/></svg><span>Scan for TVs</span></button>
+      <p id="scan-note" class="muted small center" hidden></p>
+    </section>
+
+    <!-- The remote -->
+    <section id="view-remote" class="view" hidden>
+      <header class="bar">
+        <div class="tv-title">
+          <span id="status-dot" class="dot" title="checking"></span>
+          <div>
+            <h1 id="tv-name">TV</h1>
+            <p id="tv-model" class="muted small"></p>
+          </div>
+        </div>
+        <button id="switch" class="btn btn-ghost btn-icon" aria-label="Switch TV"><svg class="ic"><use href="#i-swap"/></svg></button>
+      </header>
+
+      <div class="row three">
+        <button class="btn btn-danger btn-round" id="power" aria-label="Power"><svg class="ic"><use href="#i-power"/></svg></button>
+        <button class="btn btn-key" data-key="KEY_SOURCE" aria-label="Input"><svg class="ic"><use href="#i-source"/></svg><span>Input</span></button>
+        <button class="btn btn-key" data-key="KEY_MENU" aria-label="Settings menu"><svg class="ic"><use href="#i-menu"/></svg><span>Menu</span></button>
+      </div>
+
+      <div class="dpad" role="group" aria-label="Navigation">
+        <button class="dpad-btn up" data-key="KEY_UP" aria-label="Up"><svg class="ic"><use href="#i-up"/></svg></button>
+        <button class="dpad-btn right" data-key="KEY_RIGHT" aria-label="Right"><svg class="ic"><use href="#i-up"/></svg></button>
+        <button class="dpad-btn down" data-key="KEY_DOWN" aria-label="Down"><svg class="ic"><use href="#i-up"/></svg></button>
+        <button class="dpad-btn left" data-key="KEY_LEFT" aria-label="Left"><svg class="ic"><use href="#i-up"/></svg></button>
+        <button class="dpad-ok" data-key="KEY_ENTER" aria-label="OK">OK</button>
+      </div>
+
+      <div class="row three">
+        <button class="btn btn-key" data-key="KEY_RETURN" aria-label="Back"><svg class="ic"><use href="#i-back"/></svg><span>Back</span></button>
+        <button class="btn btn-key" data-key="KEY_HOME" aria-label="Home"><svg class="ic"><use href="#i-home"/></svg><span>Home</span></button>
+        <button class="btn btn-key" id="kb-toggle" aria-label="Keyboard"><svg class="ic"><use href="#i-keyboard"/></svg><span>Type</span></button>
+      </div>
+
+      <form id="kb" class="card kb" hidden autocomplete="off">
+        <label for="kb-text" class="small muted">Types into the box that is open on the TV (a search field, for example).</label>
+        <div class="kb-row">
+          <input id="kb-text" type="text" placeholder="Type here" enterkeyhint="send" autocapitalize="off" spellcheck="false">
+          <button class="btn btn-primary btn-icon" type="submit" aria-label="Send text"><svg class="ic"><use href="#i-send"/></svg></button>
+        </div>
+        <button id="kb-done" class="btn btn-ghost btn-wide small" type="button">Done: close the TV keyboard</button>
+      </form>
+
+      <div class="row two">
+        <div class="rocker" role="group" aria-label="Volume">
+          <button class="btn btn-key" data-key="KEY_VOLUP" data-repeat aria-label="Volume up"><svg class="ic"><use href="#i-plus"/></svg></button>
+          <span class="rocker-label">VOL</span>
+          <button class="btn btn-key" data-key="KEY_VOLDOWN" data-repeat aria-label="Volume down"><svg class="ic"><use href="#i-minus"/></svg></button>
+        </div>
+        <div class="rocker" role="group" aria-label="Channel">
+          <button class="btn btn-key" data-key="KEY_CHUP" aria-label="Channel up"><svg class="ic"><use href="#i-up"/></svg></button>
+          <span class="rocker-label">CH</span>
+          <button class="btn btn-key flip" data-key="KEY_CHDOWN" aria-label="Channel down"><svg class="ic"><use href="#i-up"/></svg></button>
+        </div>
+      </div>
+
+      <div class="row three">
+        <button class="btn btn-key" data-key="KEY_MUTE" aria-label="Mute"><svg class="ic"><use href="#i-mute"/></svg><span>Mute</span></button>
+        <button class="btn btn-key" data-key="KEY_PLAY" aria-label="Play"><svg class="ic"><use href="#i-play"/></svg><span>Play</span></button>
+        <button class="btn btn-key" data-key="KEY_PAUSE" aria-label="Pause"><svg class="ic"><use href="#i-pause"/></svg><span>Pause</span></button>
+      </div>
+
+      <div id="apps" class="apps" hidden></div>
+
+      <p class="muted small center hint">On a computer: arrow keys, Enter, Backspace for back, H for home, + and − for volume.</p>
+    </section>
+  </main>
+
+  <dialog id="pairing" class="card">
+    <svg class="ic ic-lg"><use href="#i-tv"/></svg>
+    <h2>Look at the TV</h2>
+    <p class="muted">Choose <b>Allow</b> with the TV's remote. This is asked once per TV.</p>
+    <div class="spinner" aria-hidden="true"></div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

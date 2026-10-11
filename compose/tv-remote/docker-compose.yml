@@ -1,0 +1,41 @@
+name: tv-remote
+# A web remote for the Samsung TVs on the LAN (app/server.py). Host networking
+# lets it scan the subnet for TVs and send Wake-on-LAN broadcasts; it listens
+# only on the home_server gateway, where Caddy serves it at tv.homelab.lan with
+# a password (like Netdata). Pairing tokens live in /data, one per TV.
+services:
+  tv-remote:
+    image: local/batlab-tv-remote
+    build:
+      context: .
+      args:
+        BASE_IMAGE: ${IMAGE_TV_REMOTE_BASE}:${TAG_TV_REMOTE_BASE}
+    # Rebuild on every `make up`, so code changes are always deployed.
+    pull_policy: build
+    container_name: tv-remote
+    # The owner of VOLUMES_ROOT, so it can keep its tokens without root.
+    user: "${PUID}:${PGID}"
+    restart: unless-stopped
+    network_mode: host
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - LISTEN_ADDR=${HOME_SERVER_GATEWAY_IP}
+      - PORT=${TV_REMOTE_PORT}
+      - TV_SUBNET=${TV_REMOTE_SUBNET:?set in hosts/<profile>/compose.env}
+      - REMOTE_NAME=batlab remote
+      - DATA_DIR=/data
+    volumes:
+      - ${VOLUMES_ROOT}/tv-remote:/data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    mem_limit: 128m
+    pids_limit: 128
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

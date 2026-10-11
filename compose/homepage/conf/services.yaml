@@ -159,6 +159,10 @@
           url: http://172.19.0.1:20212
           key: "{{HOMEPAGE_VAR_NETALERTX_KEY}}"
           version: 2
+    - TV Remote:
+        icon: mdi-remote-tv
+        href: http://tv.homelab.lan
+        description: Remote for the Samsung TV
     - AdGuard Home 2:
         icon: adguard-home
         href: http://adh2.homelab.lan
