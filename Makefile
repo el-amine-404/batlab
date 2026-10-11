@@ -214,7 +214,8 @@ setup: check-env
 		$(VOLUMES_ROOT)/paperless/redis \
 		$(VOLUMES_ROOT)/ollama \
 		$(VOLUMES_ROOT)/open-webui \
-		$(VOLUMES_ROOT)/tv-remote
+		$(VOLUMES_ROOT)/tv-remote \
+		$(VOLUMES_ROOT)/isponsorblocktv
 
 	@echo "==> Creating data directories..."
 	sudo mkdir -p \
@@ -237,6 +238,7 @@ setup: check-env
 		$(VOLUMES_ROOT)/diun/data \
 		$(VOLUMES_ROOT)/filebrowser \
 		$(VOLUMES_ROOT)/tv-remote \
+		$(VOLUMES_ROOT)/isponsorblocktv \
 		$(VOLUMES_ROOT)/homepage/icons \
 		$(VOLUMES_ROOT)/homepage/images \
 		$(VOLUMES_ROOT)/homepage/logs \

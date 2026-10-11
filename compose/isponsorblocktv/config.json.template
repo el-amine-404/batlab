@@ -1,0 +1,15 @@
+{
+  "devices": [
+    { "screen_id": "SCREEN_ID", "name": "Samsung TV", "offset": 0 }
+  ],
+  "skip_categories": ["sponsor", "selfpromo", "interaction"],
+  "skip_count_tracking": false,
+  "mute_ads": true,
+  "skip_ads": true,
+  "minimum_skip_length": 1,
+  "auto_play": true,
+  "join_name": "iSponsorBlockTV",
+  "apikey": "",
+  "channel_whitelist": [],
+  "use_proxy": false
+}

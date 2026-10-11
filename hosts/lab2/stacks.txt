@@ -10,6 +10,7 @@ filebrowser
 gotenberg
 homepage
 immich
+isponsorblocktv
 jellyfin
 navidrome
 netalertx

@@ -1,0 +1,36 @@
+name: isponsorblocktv
+# Skips sponsor segments in YouTube on the TV, presses "Skip ad" the moment it
+# appears and mutes ads that cannot be skipped, by joining the TV's YouTube as
+# a casting client (YouTube's Lounge API, like the tv-remote stack). Nothing is
+# installed on the TV. config.json lives in its volume: it holds the TV's
+# YouTube screen id; config.json.template is the shape, setup.sh fills it.
+services:
+  isponsorblocktv:
+    image: ${IMAGE_ISPONSORBLOCKTV}:${TAG_ISPONSORBLOCKTV}
+    container_name: isponsorblocktv
+    restart: unless-stopped
+    user: "${PUID}:${PGID}"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - TZ=${TZ}
+    volumes:
+      - ${VOLUMES_ROOT}/isponsorblocktv:/app/data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    mem_limit: 128m
+    pids_limit: 64
+    networks:
+      - home_server
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  home_server:
+    external: true
