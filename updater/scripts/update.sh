@@ -142,8 +142,15 @@ main() {
   mapfile -t allowed < <(grep -vE '^\s*(#|$)' "$SCRIPT_DIR/../conf/auto-services.txt")
   local failures=0 checked=0 changed=0 stack_file stack
 
+  # The host's stacks only, as `make up` runs them: another host's stack may not
+  # even render here (adguardhome-sync needs lab1's ADGUARD_ORIGIN_IP), and its
+  # failure printed a traceback every night.
+  local host_stacks="hosts/$HOST_PROFILE_NAME/stacks.txt"
   for stack_file in compose/*/docker-compose.yml; do
     stack="$(basename "$(dirname "$stack_file")")"
+    if [[ -f "$host_stacks" ]] && ! grep -vE '^\s*(#|$)' "$host_stacks" | grep -qxF "$stack"; then
+      continue
+    fi
     while IFS=$'\t' read -r service container desired; do
       local running_image state
       state="$(docker inspect -f '{{.State.Status}}' "$container" 2>/dev/null || echo missing)"
