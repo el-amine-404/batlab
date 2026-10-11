@@ -2,8 +2,12 @@
 
 Finds TVs by asking every address in TV_SUBNET for the TV's public device
 info (port 8001), pairs with one over its token-protected control channel
-(port 8002, the TV asks "Allow?" once), and relays remote keys, app launches,
-text and Wake-on-LAN from the web page. Standard library plus samsungtvws.
+(port 8002, the TV asks "Allow?" once), and relays keys, text, the cursor and
+Wake-on-LAN from the web page. Apps are launched and the app in front is read
+over the TV's REST API (port 8001): this TV ignores launches sent over the
+control channel. Mute and volume are read and set over UPnP RenderingControl
+(port 9197), so the page shows the TV's real state. Standard library plus
+samsungtvws.
 
 The page is served behind Caddy (LAN only, basic auth). Requests that change
 anything must be JSON with the X-Remote header, which a cross-site form cannot
@@ -29,6 +33,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from samsungtvws import SamsungTVWS
+from samsungtvws.remote import RemoteControlCommand
 
 LISTEN_ADDR = os.environ.get("LISTEN_ADDR", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8080"))
@@ -36,6 +41,7 @@ TV_SUBNET = ipaddress.ip_network(os.environ.get("TV_SUBNET", "192.168.1.0/24"), 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 REMOTE_NAME = os.environ.get("REMOTE_NAME", "batlab remote")
 WEB_DIR = Path(__file__).with_name("web")
+VERSION = Path(__file__).with_name("VERSION").read_text().strip()
 
 TVS_FILE = DATA_DIR / "tvs.json"
 TOKENS_DIR = DATA_DIR / "tokens"
@@ -101,7 +107,7 @@ def device_info(ip: str, timeout: float = 0.8) -> dict | None:
         "ip": ip,
         "name": html.unescape(dev.get("name") or "Samsung TV"),
         "model": dev.get("modelName") or "",
-        "power": (dev.get("PowerState") or "on").lower(),
+        "power": "on" if (dev.get("PowerState") or "on").lower() == "on" else "standby",
         "tokenAuth": dev.get("TokenAuthSupport") == "true",
     }
 
@@ -118,10 +124,15 @@ def scan() -> list[dict]:
 class Remote:
     """One paired TV: its control connection, rebuilt when it drops."""
 
+    # The TV closes a quiet control socket without telling the client, so the
+    # next key would vanish: past this many idle seconds, reconnect first.
+    IDLE_RECONNECT = 15
+
     def __init__(self, mac: str) -> None:
         self.mac = mac
         self.lock = threading.Lock()
         self.tv: SamsungTVWS | None = None
+        self.last_used = 0.0
 
     def _ip(self) -> str:
         return load_tvs()[self.mac]["ip"]
@@ -155,9 +166,13 @@ class Remote:
     def run(self, fn):
         """fn(tv) with one reconnect, and one relocation, on failure."""
         with self.lock:
+            if time.monotonic() - self.last_used > self.IDLE_RECONNECT:
+                self._drop()
             for attempt in range(3):
                 try:
-                    return fn(self._connect())
+                    result = fn(self._connect())
+                    self.last_used = time.monotonic()
+                    return result
                 except Exception as err:  # noqa: BLE001 - library raises many kinds
                     log.info("%s: attempt %d failed: %s", self.mac, attempt + 1, err)
                     self._drop()
@@ -215,19 +230,130 @@ def wake(mac: str) -> None:
             time.sleep(0.1)
 
 
+def rest(ip: str, path: str, method: str = "GET", timeout: float = 3):
+    req = urllib.request.Request(f"http://{ip}:8001/api/v2/{path}", method=method)
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read() or b"null")
+
+
+_apps_cache: dict[str, tuple[float, list[dict]]] = {}
+
+
 def installed_apps(mac: str) -> list[dict]:
+    """KNOWN_APPS present on the TV; asked again every 10 minutes."""
+    hit = _apps_cache.get(mac)
+    if hit and time.monotonic() - hit[0] < 600:
+        return hit[1]
     ip = load_tvs()[mac]["ip"]
 
     def check(item):
         app_id, name = item
         try:
-            with urllib.request.urlopen(f"http://{ip}:8001/api/v2/applications/{app_id}", timeout=2):
-                return {"id": app_id, "name": name}
-        except (OSError, urllib.error.URLError):
+            rest(ip, f"applications/{app_id}", timeout=2)
+            return {"id": app_id, "name": name}
+        except (OSError, ValueError, urllib.error.URLError):
             return None
 
     with ThreadPoolExecutor(max_workers=len(KNOWN_APPS)) as pool:
-        return [a for a in pool.map(check, KNOWN_APPS.items()) if a]
+        apps = [a for a in pool.map(check, KNOWN_APPS.items()) if a]
+    _apps_cache[mac] = (time.monotonic(), apps)
+    return apps
+
+
+def app_in_front(mac: str) -> str | None:
+    ip = load_tvs()[mac]["ip"]
+
+    def visible(app):
+        try:
+            st = rest(ip, f"applications/{app['id']}", timeout=2)
+            return app["name"] if st.get("visible") else None
+        except (OSError, ValueError, urllib.error.URLError):
+            return None
+
+    apps = installed_apps(mac)
+    if not apps:
+        return None
+    with ThreadPoolExecutor(max_workers=len(apps)) as pool:
+        return next((n for n in pool.map(visible, apps) if n), None)
+
+
+# ------------------------------------------------------------- UPnP audio
+
+RC = "urn:schemas-upnp-org:service:RenderingControl:1"
+
+
+def upnp(ip: str, action: str, extra: str = "") -> str:
+    body = (
+        '<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" '
+        's:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body>'
+        f'<u:{action} xmlns:u="{RC}"><InstanceID>0</InstanceID><Channel>Master</Channel>{extra}'
+        f"</u:{action}></s:Body></s:Envelope>"
+    ).encode()
+    req = urllib.request.Request(
+        f"http://{ip}:9197/upnp/control/RenderingControl1", data=body, method="POST",
+        headers={"Content-Type": 'text/xml; charset="utf-8"', "SOAPACTION": f'"{RC}#{action}"'},
+    )
+    with urllib.request.urlopen(req, timeout=2) as r:
+        return r.read().decode("utf-8", "replace")
+
+
+def audio(ip: str) -> dict:
+    try:
+        mute = re.search(r"<CurrentMute>(\d)<", upnp(ip, "GetMute"))
+        vol = re.search(r"<CurrentVolume>(\d+)<", upnp(ip, "GetVolume"))
+        return {"mute": bool(mute and mute.group(1) == "1"), "volume": int(vol.group(1)) if vol else None}
+    except (OSError, urllib.error.URLError):
+        return {"mute": None, "volume": None}
+
+
+def set_mute(ip: str, mute: bool) -> None:
+    upnp(ip, "SetMute", f"<DesiredMute>{int(mute)}</DesiredMute>")
+
+
+# ------------------------------------------------------------------ power
+
+def status(mac: str) -> dict:
+    ip = load_tvs()[mac]["ip"]
+    dev = device_info(ip, timeout=1.5)
+    if not dev:
+        return {"power": "off"}
+    if dev["power"] != "on":
+        return {"power": "standby"}
+    return {"power": "on", **audio(ip), "app": app_in_front(mac)}
+
+
+def wait_for(mac: str, want, seconds: float) -> dict:
+    deadline = time.monotonic() + seconds
+    while True:
+        st = status(mac)
+        if want(st["power"]) or time.monotonic() > deadline:
+            return st
+        time.sleep(1)
+
+
+def power(mac: str) -> dict:
+    """Toggle, finishing the job: off sends POWER and waits for the screen to
+    go; on wakes the network (Wake-on-LAN), then sends POWER from standby."""
+    r = remote(mac)
+    st = status(mac)
+    if st["power"] == "on":
+        r.run(lambda tv: tv.send_key("KEY_POWER"))
+        return wait_for(mac, lambda p: p != "on", 12)
+    if st["power"] == "off":
+        wake(mac)
+        st = wait_for(mac, lambda p: p != "off", 15)
+        if st["power"] == "off":
+            raise ConnectionError("the TV did not wake; turn on Power On with Mobile in its settings")
+    if st["power"] == "standby":
+        r.run(lambda tv: tv.send_key("KEY_POWER"))
+        st = wait_for(mac, lambda p: p == "on", 12)
+    return st
+
+
+# ----------------------------------------------------------------- cursor
+
+def mouse(cmd: dict):
+    return lambda tv: tv.send_command(RemoteControlCommand({**cmd, "TypeOfRemote": "ProcessMouseDevice"}), key_press_delay=0)
 
 
 # ------------------------------------------------------------------- HTTP
@@ -279,6 +405,8 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path == "/healthz":
             return self._send(200, b"ok", "text/plain")
+        if path == "/api/info":
+            return self._json(200, {"version": VERSION})
         if path == "/api/tvs":
             return self._json(200, [{"mac": m, **t} for m, t in load_tvs().items()])
         m = re.fullmatch(r"/api/tv/([0-9a-f:]{17})/(status|apps)", path)
@@ -287,8 +415,7 @@ class Handler(BaseHTTPRequestHandler):
             if mac not in load_tvs():
                 return self._json(404, {"error": "unknown TV"})
             if what == "status":
-                dev = device_info(load_tvs()[mac]["ip"], timeout=1.5)
-                return self._json(200, {"online": bool(dev), "power": dev["power"] if dev else "off"})
+                return self._json(200, status(mac))
             return self._json(200, installed_apps(mac))
         name = "index.html" if path == "/" else path.lstrip("/")
         file = (WEB_DIR / name).resolve()
@@ -315,7 +442,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not MAC_RE.match(mac) or ipaddress.ip_address(ip) not in TV_SUBNET:
                     return self._json(400, {"error": "bad TV"})
                 return self._json(200, {"mac": mac, **pair(mac, ip)})
-            m = re.fullmatch(r"/api/tv/([0-9a-f:]{17})/(key|text|enter-text|app|wake|forget)", path)
+            m = re.fullmatch(r"/api/tv/([0-9a-f:]{17})/(key|text|enter-text|app|power|mute|cursor|click|forget)", path)
             if not m:
                 return self._json(404, {"error": "not found"})
             mac, action = m.groups()
@@ -334,9 +461,27 @@ class Handler(BaseHTTPRequestHandler):
                 app_id = str(body.get("id", ""))
                 if app_id not in KNOWN_APPS:
                     return self._json(400, {"error": "unknown app"})
-                r.run(lambda tv: tv.run_app(app_id))
-            elif action == "wake":
-                wake(mac)
+                try:
+                    rest(load_tvs()[mac]["ip"], f"applications/{app_id}", "POST", timeout=6)
+                except (OSError, urllib.error.URLError) as err:
+                    raise ConnectionError("the TV did not open the app") from err
+            elif action == "power":
+                return self._json(200, power(mac))
+            elif action == "mute":
+                ip = load_tvs()[mac]["ip"]
+                now = audio(ip)["mute"]
+                if now is None:
+                    r.run(lambda tv: tv.send_key("KEY_MUTE"))
+                else:
+                    set_mute(ip, not now)
+                return self._json(200, audio(ip))
+            elif action == "cursor":
+                dx, dy = int(body.get("dx", 0)), int(body.get("dy", 0))
+                dx, dy = max(-400, min(400, dx)), max(-400, min(400, dy))
+                if dx or dy:
+                    r.run(mouse({"Cmd": "Move", "Position": {"x": dx, "y": dy, "Time": "0"}}))
+            elif action == "click":
+                r.run(mouse({"Cmd": "LeftClick"}))
             elif action == "forget":
                 with store_lock:
                     tvs = load_tvs()
@@ -360,7 +505,7 @@ def main() -> None:
     os.chmod(TOKENS_DIR, 0o700)
     server = ThreadingHTTPServer((LISTEN_ADDR, PORT), Handler)
     server.daemon_threads = True
-    log.info("listening on %s:%d, scanning %s", LISTEN_ADDR, PORT, TV_SUBNET)
+    log.info("tv-remote %s listening on %s:%d, scanning %s", VERSION, LISTEN_ADDR, PORT, TV_SUBNET)
     server.serve_forever()
 
 

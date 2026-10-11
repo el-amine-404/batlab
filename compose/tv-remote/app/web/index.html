@@ -25,6 +25,9 @@
     <symbol id="i-up" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
     <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-volume" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></symbol>
+    <symbol id="i-pointer" viewBox="0 0 24 24"><path d="m4 4 7 17 2.5-7.5L21 11 4 4z"/></symbol>
+    <symbol id="i-pad" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2"/></symbol>
     <symbol id="i-mute" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="m22 9-6 6M16 9l6 6"/></symbol>
     <symbol id="i-play" viewBox="0 0 24 24"><path d="m7 4 12 8-12 8V4z"/></symbol>
     <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
@@ -57,6 +60,7 @@
           <div>
             <h1 id="tv-name">TV</h1>
             <p id="tv-model" class="muted small"></p>
+            <p id="tv-now" class="small now" hidden></p>
           </div>
         </div>
         <button id="switch" class="btn btn-ghost btn-icon" aria-label="Switch TV"><svg class="ic"><use href="#i-swap"/></svg></button>
@@ -68,7 +72,17 @@
         <button class="btn btn-key" data-key="KEY_MENU" aria-label="Settings menu"><svg class="ic"><use href="#i-menu"/></svg><span>Menu</span></button>
       </div>
 
-      <div class="dpad" role="group" aria-label="Navigation">
+      <div class="seg" role="tablist" aria-label="Control mode">
+        <button role="tab" data-mode="buttons" aria-selected="true"><svg class="ic"><use href="#i-pad"/></svg>Buttons</button>
+        <button role="tab" data-mode="pad" aria-selected="false"><svg class="ic"><use href="#i-pointer"/></svg>Touchpad</button>
+      </div>
+
+      <div id="pad" class="pad" hidden aria-label="Touchpad: drag to move the TV's cursor, tap to click">
+        <span class="muted small">Drag to move the cursor · tap to click</span>
+        <span class="muted small">For the TV's browser and apps with a pointer</span>
+      </div>
+
+      <div id="dpad" class="dpad" role="group" aria-label="Navigation">
         <button class="dpad-btn up" data-key="KEY_UP" aria-label="Up"><svg class="ic"><use href="#i-up"/></svg></button>
         <button class="dpad-btn right" data-key="KEY_RIGHT" aria-label="Right"><svg class="ic"><use href="#i-up"/></svg></button>
         <button class="dpad-btn down" data-key="KEY_DOWN" aria-label="Down"><svg class="ic"><use href="#i-up"/></svg></button>
@@ -94,7 +108,7 @@
       <div class="row two">
         <div class="rocker" role="group" aria-label="Volume">
           <button class="btn btn-key" data-key="KEY_VOLUP" data-repeat aria-label="Volume up"><svg class="ic"><use href="#i-plus"/></svg></button>
-          <span class="rocker-label">VOL</span>
+          <span class="rocker-label" id="vol-label">VOL</span>
           <button class="btn btn-key" data-key="KEY_VOLDOWN" data-repeat aria-label="Volume down"><svg class="ic"><use href="#i-minus"/></svg></button>
         </div>
         <div class="rocker" role="group" aria-label="Channel">
@@ -105,16 +119,18 @@
       </div>
 
       <div class="row three">
-        <button class="btn btn-key" data-key="KEY_MUTE" aria-label="Mute"><svg class="ic"><use href="#i-mute"/></svg><span>Mute</span></button>
+        <button class="btn btn-key" id="mute" aria-label="Mute" aria-pressed="false"><svg class="ic"><use href="#i-volume"/></svg><span>Mute</span></button>
         <button class="btn btn-key" data-key="KEY_PLAY" aria-label="Play"><svg class="ic"><use href="#i-play"/></svg><span>Play</span></button>
         <button class="btn btn-key" data-key="KEY_PAUSE" aria-label="Pause"><svg class="ic"><use href="#i-pause"/></svg><span>Pause</span></button>
       </div>
 
       <div id="apps" class="apps" hidden></div>
 
-      <p class="muted small center hint">On a computer: arrow keys, Enter, Backspace for back, H for home, + and − for volume.</p>
+      <p class="muted small center hint">On a computer: arrow keys, Enter, Backspace for back, H for home, M for mute, + and − for volume.</p>
     </section>
   </main>
+
+  <footer class="foot muted small center"><span id="version"></span></footer>
 
   <dialog id="pairing" class="card">
     <svg class="ic ic-lg"><use href="#i-tv"/></svg>
