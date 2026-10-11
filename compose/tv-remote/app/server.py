@@ -173,11 +173,23 @@ class Remote:
                 host=self._ip(), port=8002, token_file=str(token_file(self.mac)),
                 name=REMOTE_NAME, timeout=5, key_press_delay=0,
             )
-            # Opens the socket and reads what the TV sends on a thread of its
-            # own: left unread, the connection went stale within a minute.
-            tv.start_listening()
+            # The 5 s timeout bounds connecting to a TV that is off; on the
+            # open socket it would also end reads after 5 quiet seconds and
+            # break it, so reads wait without one, on a thread that drains
+            # what the TV sends.
+            tv.connection = tv.open()
+            tv.connection.settimeout(None)
+            threading.Thread(target=self._drain, args=(tv.connection,), daemon=True).start()
             self.tv = tv
         return self.tv
+
+    @staticmethod
+    def _drain(conn) -> None:
+        try:
+            while conn.recv():
+                pass
+        except Exception:  # noqa: BLE001 - closed: the keepalive notices
+            pass
 
     def _drop(self) -> None:
         if self.tv is not None:
