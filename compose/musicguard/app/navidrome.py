@@ -3,8 +3,9 @@
 Navidrome's own scanner is off (ND_SCANNER_ENABLED=false): with it on, a song
 Lidarr imported was playable before musicguard had checked it. musicguard asks
 for a scan after a library pass that left no file unchecked, so Navidrome only
-ever indexes checked files. startScan is admin-only in Navidrome, which is why
-musicguard has an admin account and Aurral has an account without admin.
+ever indexes checked files. startScan is admin-only in Navidrome, so
+musicguard has an admin account; everyone else reaches Navidrome through
+Caddy, which answers startScan itself (compose/caddy/conf/navidrome.caddy).
 """
 
 import hashlib

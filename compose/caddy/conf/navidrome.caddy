@@ -1,4 +1,30 @@
+# Navidrome scans only when musicguard asks (docs/music.md): musicguard calls
+# navidrome:4533 directly, and every other way in goes through here, where a
+# scan request is answered "ok" without reaching Navidrome. Without this, an
+# admin's rescan button or Aurral (which needs an admin account for its
+# playlists) would index songs musicguard had not checked yet.
+(navidromeNoScan) {
+	@startScan path /rest/startScan /rest/startScan.view
+	handle @startScan {
+		header Content-Type application/json
+		respond `{"subsonic-response":{"status":"ok","version":"1.16.1","type":"navidrome","openSubsonic":true,"scanStatus":{"scanning":false,"count":0}}}` 200
+	}
+}
+
 http://navidrome.homelab.lan {
-  import localSubnets
-	reverse_proxy @localSubnets http://navidrome:4533
+	import localSubnets
+	import navidromeNoScan
+	handle {
+		reverse_proxy @localSubnets http://navidrome:4533
+	}
+}
+
+# Aurral's way in (Aurral's Navidrome URL is http://caddy:4534). Not published
+# on the host: only containers on home_server reach it.
+http://:4534 {
+	import localSubnets
+	import navidromeNoScan
+	handle {
+		reverse_proxy @localSubnets http://navidrome:4533
+	}
 }

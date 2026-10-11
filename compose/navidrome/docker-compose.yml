@@ -10,8 +10,8 @@ services:
       - TZ=${TZ}
       # No scanning of its own: musicguard asks for a scan once every new
       # file has been checked (compose/musicguard/app/navidrome.py), so nothing
-      # unchecked is ever playable. Aurral's account is not an admin, so it
-      # cannot start scans either.
+      # unchecked is ever playable. Every other way in goes through Caddy,
+      # which drops scan requests (compose/caddy/conf/navidrome.caddy).
       - ND_SCANNER_ENABLED=false
       # Forget files that are gone (an upgrade replaced the MP3 with a FLAC,
       # Lidarr renamed it) instead of listing them greyed out. Moves are

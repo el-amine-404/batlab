@@ -175,9 +175,13 @@ checked it. musicguard asks for a scan (Subsonic `startScan`, account
 library pass that changed something, and only when no audio file in any
 library is unchecked; a held or failed file keeps new music out of Navidrome
 until it is resolved, rather than letting it in unchecked. New music shows up
-2 to 5 minutes after it lands. Aurral used to scan after its own downloads with
-the admin `potato`; it now has the non-admin account `NAVIDROME_AURRAL_USER`,
-which can read every library but not scan.
+2 to 5 minutes after it lands. Every other way to Navidrome goes through Caddy
+(`compose/caddy/conf/navidrome.caddy`), which answers `startScan` itself with
+"ok": an admin's rescan button and Aurral, which scans after its own downloads,
+cannot index unchecked files. Aurral needs an admin account (as a non-admin its
+playlist library setup fails with 403), so it has its own, `aurral`, and
+reaches Navidrome at `http://caddy:4534`, a Caddy listener that is not
+published on the host. musicguard alone calls `navidrome:4533` directly.
 
 A scan forgets files that are gone
 (`ND_SCANNER_PURGEMISSING=always`): an upgrade that replaces an MP3 with a FLAC
@@ -226,7 +230,7 @@ admin account, then:
 | Downloads Folder | `/data/media/music-aurral` |
 | slskd | `http://gluetun:5030`, `SLSKD_API_KEY` |
 | yt-dlp | on (built in), lowest priority |
-| Navidrome | `http://navidrome:4533`, user `aurral` (`NAVIDROME_AURRAL_PASSWORD`), not an admin |
+| Navidrome | `http://caddy:4534` (Caddy, which drops scan requests), user `aurral` (`NAVIDROME_AURRAL_PASSWORD`), an admin |
 | Remote path mappings | Navidrome `/music` → `/data/media/music` (Aurral's own folder has the same path in both, so it needs none) |
 
 ## Lidarr
