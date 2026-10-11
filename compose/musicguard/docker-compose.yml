@@ -1,0 +1,56 @@
+name: ${MUSICGUARD_PROJECT_NAME}
+# Checks every music file before anyone plays it (app/guard.py, docs/music.md):
+# files from pasted links (MeTube, spotDL) are rebuilt and filed into
+# music-extras; new files in the Lidarr, Aurral and extras libraries are
+# rebuilt where they are. Rejected files go to .quarantine/musicguard with a
+# note saying why. Nothing is deleted.
+#
+# It parses files chosen by strangers, so it runs unprivileged, read-only, with
+# no capabilities, on its own network (it needs the internet only for lyrics
+# and Discord), and sees only the music folders.
+services:
+  musicguard:
+    image: local/batlab-musicguard
+    build:
+      context: .
+      # Same reason as tv-remote: the builder's DNS on lab2 needs the host network.
+      network: host
+      args:
+        BASE_IMAGE: ${IMAGE_MUSICGUARD_BASE}:${TAG_MUSICGUARD_BASE}
+    # Rebuild on every `make up`, so code changes are always deployed.
+    pull_policy: build
+    container_name: musicguard
+    user: "${PUID}:${PGID}"
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - TZ=${TZ}
+      # Work files on the SSD rather than in memory: a FLAC can be 100 MB.
+      - TMPDIR=/state/tmp
+      - DISCORD_WEBHOOK=${DISCORD_WEBHOOK_DOWNLOAD_ISSUES:-}
+      # The host's clamd (installed for mediascan). Files are held in the
+      # inbox, not passed, while it is down.
+      - CLAMD_SOCKET=/run/clamav/clamd.ctl
+      - CLAMD_REQUIRED=1
+    volumes:
+      - ${VOLUMES_ROOT}/musicguard:/state
+      - ${DATA_ROOT}/inbox/music:/inbox
+      - ${DATA_ROOT}/media/music:/data/media/music
+      - ${DATA_ROOT}/media/music-aurral:/data/media/music-aurral
+      - ${DATA_ROOT}/media/music-extras:/data/media/music-extras
+      - ${DATA_ROOT}/.quarantine/musicguard:/quarantine
+      # The directory, not the socket: clamd recreates the socket on restart,
+      # and a bind-mounted socket file would keep pointing at the old one.
+      - /run/clamav:/run/clamav:ro
+    cpus: 1
+    mem_limit: 1g
+    pids_limit: 256
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

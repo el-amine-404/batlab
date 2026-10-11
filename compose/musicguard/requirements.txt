@@ -1,0 +1,3 @@
+# Wheels only, checked against these hashes (Dockerfile: --require-hashes).
+mutagen==1.48.1 \
+    --hash=sha256:4f077fe87d3fc7fba259aa63d8c026b18382ca6a42ef37c61e16f1b1b5b82fe7
