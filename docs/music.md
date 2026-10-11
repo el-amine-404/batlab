@@ -144,6 +144,14 @@ Navidrome refused (400) while the folder was mounted at `/music-aurral`, so the
 mount now uses Aurral's path.
 Give every user access to all three. Lyrics need no setting.
 
+It rescans hourly and on start, and forgets files that are gone
+(`ND_SCANNER_PURGEMISSING=always`): an upgrade that replaces an MP3 with a FLAC
+or a Lidarr rename would otherwise leave the old album greyed out next to the
+new one. Navidrome matches moved files before purging, so plays and stars
+follow a move. The purge has no guard against an empty mount of its own; the
+data guard (watchdog/README.md) is that guard, stopping Navidrome while the disk
+is unmounted.
+
 ## Pasted links
 
 - **MeTube** (`metube.homelab.lan`): any YouTube link (or one of the other sites

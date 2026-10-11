@@ -9,6 +9,13 @@ services:
       - PGID=${PGID}
       - TZ=${TZ}
       - ND_SCANSCHEDULE=1h
+      # Forget files that are gone (an upgrade replaced the MP3 with a FLAC,
+      # Lidarr renamed it) instead of listing them greyed out. Moves are
+      # matched before the purge, so a moved song keeps its plays and stars.
+      # Safe only because the data guard (watchdog/README.md) stops this
+      # container while the disk is unmounted: an empty mount would read as
+      # every song missing.
+      - ND_SCANNER_PURGEMISSING=always
       - ND_LOGLEVEL=info
       - ND_SESSIONTIMEOUT=24h
       # Last.fm Integration
