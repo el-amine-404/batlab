@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from unittest import mock
 
@@ -355,6 +356,24 @@ class Libraries(GuardTestCase):
         reasons = sorted(e["reason"] for e in self.guard.events if e["event"] == "suspect")
         self.assertEqual(reasons, ["APPENDED_DATA", "SUSPICIOUS_TAG"])
         self.assertEqual(self.quarantined_reasons(), [])
+
+    def test_lyrics_left_behind_by_a_rename_are_removed(self):
+        album = os.path.join(self.music, "Band", "Record (2023)")
+        os.makedirs(album)
+        tone(os.path.join(album, "1-01 - Song.mp3"))
+        kept = os.path.join(album, "1-01 - Song.lrc")
+        orphan = os.path.join(album, "01 - Song.lrc")
+        fresh = os.path.join(album, "02 - Other.txt")
+        for path in (kept, orphan, fresh):
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("[00:01.00] la\n")
+        old = time.time() - 2 * guard.ORPHAN_SECONDS
+        for path in (kept, orphan):
+            os.utime(path, (old, old))
+        self.guard.roots_pass()
+        self.assertTrue(os.path.exists(kept))
+        self.assertFalse(os.path.exists(orphan))
+        self.assertTrue(os.path.exists(fresh), "a track may still be on its way")
 
     def test_aurral_marker_survives(self):
         path = os.path.join(self.aurral, "Band", "Record", "Song.opus")

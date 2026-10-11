@@ -53,6 +53,7 @@ COVER_NAMES = {"cover", "folder", "front", "album"}
 MIN_SECONDS = 5
 MAX_DECODE_WARNINGS = 20
 LYRICS_RETRY_SECONDS = 30 * 86400
+ORPHAN_SECONDS = 3600
 STATE_VERSION = 1
 
 
@@ -587,6 +588,13 @@ class Guard:
                 known.pop(path)
                 self.state["lyrics"].pop(path, None)
 
+    def orphaned(self, path, stat):
+        """A lyrics sidecar whose track has been gone for an hour."""
+        stem = os.path.splitext(path)[0]
+        if any(os.path.exists(stem + e) for e in AUDIO_EXTENSIONS):
+            return False
+        return time.time() - stat.st_mtime > ORPHAN_SECONDS
+
     def remove_stale_temporary(self, path):
         """A half-written copy left by a crash; the original was never touched."""
         try:
@@ -608,6 +616,14 @@ class Guard:
             return
         if extension in LYRIC_EXTENSIONS and stat.st_size > lyrics.MAX_SIDECAR_BYTES:
             self.quarantine(path, "UNEXPECTED_FILE", "lyrics file too large", root)
+            return
+        if extension in LYRIC_EXTENSIONS and self.orphaned(path, stat):
+            # Lidarr renames tracks after import (a multi-disc release gets
+            # "1-01 - ..."), and leaves the lyrics it did not import behind;
+            # the renamed track gets its own lyrics on the next pass.
+            if not self.config.dry_run:
+                os.unlink(path)
+            self.event("removed", path, "ORPHANED_LYRICS", "no track of this name")
             return
         stem = os.path.splitext(os.path.basename(path))[0].lower()
         if extension in IMAGE_EXTENSIONS or extension in LYRIC_EXTENSIONS:
