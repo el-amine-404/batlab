@@ -1,9 +1,23 @@
 # NodeCast checks its login only in the browser: its API (sources with the
 # Dispatcharr password, settings, a proxy that fetches any URL) answers without
 # one. Basic auth here covers all of it; same user and password as the app.
+# Once logged in, the app sends its own token in Authorization, which replaces
+# the browser's basic credentials: those requests pass only if NodeCast accepts
+# the token (/api/auth/me checks it).
 http://nodecast.homelab.lan {
-  import localSubnets
-	basic_auth @localSubnets {
+	import localSubnets
+	@appToken {
+		remote_ip private_ranges
+		header Authorization "Bearer *"
+	}
+	@noAppToken {
+		remote_ip private_ranges
+		not header Authorization "Bearer *"
+	}
+	forward_auth @appToken http://nodecast:3000 {
+		uri /api/auth/me
+	}
+	basic_auth @noAppToken {
 		admin {$NODECAST_PASS_HASH}
 	}
 	reverse_proxy @localSubnets http://nodecast:3000 {
