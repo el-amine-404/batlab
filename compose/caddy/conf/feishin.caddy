@@ -1,0 +1,4 @@
+http://feishin.homelab.lan {
+	import localSubnets
+	reverse_proxy @localSubnets http://feishin:9180
+}

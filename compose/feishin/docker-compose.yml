@@ -1,0 +1,40 @@
+name: ${FEISHIN_PROJECT_NAME}
+# A better player for Navidrome (docs/music.md): Feishin's web build, served
+# here and run in the browser. It holds no music and no accounts; it logs in to
+# Navidrome with the user's own account, so favourites, playlists and plays are
+# the ones Navidrome keeps. Locked to this server's Navidrome, reached at its
+# Caddy address, where scan requests are dropped like everywhere else.
+services:
+  feishin:
+    image: ${IMAGE_FEISHIN}:${TAG_FEISHIN}
+    container_name: feishin
+    environment:
+      - TZ=${TZ}
+      - SERVER_NAME=Navidrome
+      - SERVER_TYPE=navidrome
+      # The browser talks to Navidrome directly, so this is the address it knows.
+      - SERVER_URL=http://navidrome.homelab.lan
+      - SERVER_LOCK=true
+      - ANALYTICS_DISABLED=true
+    networks:
+      - home_server
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    mem_limit: 256m
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  home_server:
+    external: true
+    name: home_server

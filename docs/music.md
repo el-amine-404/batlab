@@ -221,6 +221,17 @@ follow a move. The purge has no guard against an empty mount of its own; the
 data guard (watchdog/README.md) is that guard, stopping Navidrome while the disk
 is unmounted.
 
+## Feishin
+
+`feishin.homelab.lan` is a better player than Navidrome's own web page: synced
+lyrics, a real queue, playlists. It is Feishin's web build (`compose/feishin`),
+locked to `http://navidrome.homelab.lan`; it holds nothing itself and logs in
+with each user's own Navidrome account, so favourites, playlists and plays are
+shared with every other app. It reaches Navidrome through Caddy like the
+browser does, so it cannot start a scan either. Its analytics are off
+(`ANALYTICS_DISABLED=true`). On phones, a Subsonic app does the same job:
+Symfonium or Tempo (Android), Amperfy or play:Sub (iPhone).
+
 ## Pasted links
 
 - **MeTube** (`metube.homelab.lan`): any YouTube link (or one of the other sites

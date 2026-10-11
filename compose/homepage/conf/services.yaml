@@ -25,6 +25,12 @@
           url: http://seerr:5055
           key: "{{HOMEPAGE_VAR_SEERR_KEY}}"
           fields: ["pending", "approved", "completed"]
+    - Feishin:
+        icon: mdi-headphones
+        href: http://feishin.homelab.lan
+        description: Music Player for Navidrome
+        siteMonitor: http://feishin:9180
+        statusStyle: "dot"
     - Aurral:
         icon: mdi-music-circle
         href: http://aurral.homelab.lan
