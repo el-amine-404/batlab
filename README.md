@@ -30,6 +30,7 @@ other related skills that i keep forgetting:
 - [ass2srt, fansub subtitles to SRT](./ass2srt/README.md)
 - [subtitle extraction](./subextract/README.md)
 - [sonarr settings outside recyclarr](./docs/sonarr.md)
+- [live TV, Dispatcharr and Jellyfin](./docs/livetv.md)
 - [video recovery and local AI agent](./untrunc/README.md)
 
 official links and descriptions of each hosted service:

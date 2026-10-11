@@ -39,6 +39,12 @@
           version: 2
           enableBlocks: true
           enableNowPlaying: true
+    - Dispatcharr:
+        icon: dispatcharr
+        href: http://dispatcharr.homelab.lan
+        description: Live TV Channels
+        siteMonitor: http://gluetun:9191/hdhr/discover.json
+        statusStyle: "dot"
     - Navidrome:
         icon: navidrome
         href: http://navidrome.homelab.lan

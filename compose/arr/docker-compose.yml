@@ -69,6 +69,43 @@ services:
     mem_swappiness: 0
     memswap_limit: ${CLEANUPARR_MEM_LIMIT:?set in hosts/<profile>/compose.env}
 
+  # Live TV: pulls the iptv-org playlist through the VPN and hands it to
+  # Jellyfin as an HDHomeRun tuner at http://gluetun:9191. All-in-one image:
+  # its own Postgres (5432) and Redis (6379) listen inside gluetun's namespace.
+  dispatcharr:
+    image: ${IMAGE_DISPATCHARR}:${TAG_DISPATCHARR}
+    container_name: dispatcharr
+    depends_on:
+      gluetun:
+        condition: service_healthy
+        restart: true
+    volumes:
+      - ${VOLUMES_ROOT}/dispatcharr:/data
+    environment:
+      - TZ=${TZ}
+      - DISPATCHARR_ENV=aio
+      - REDIS_HOST=localhost
+      - CELERY_BROKER_URL=redis://localhost:6379/0
+      - DISPATCHARR_LOG_LEVEL=info
+    network_mode: service:gluetun
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    # Quick Sync for stream profiles that transcode.
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${RENDER_GID:?set in hosts/<profile>/compose.env}"
+    healthcheck:
+      test: [ "CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:9191/hdhr/discover.json" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    cpus: ${DISPATCHARR_CPUS:?set in hosts/<profile>/compose.env}
+    mem_limit: ${DISPATCHARR_MEM_LIMIT:?set in hosts/<profile>/compose.env}
+    mem_reservation: ${DISPATCHARR_MEM_RESERVATION:?set in hosts/<profile>/compose.env}
+
   gluetun:
     image: ${IMAGE_GLUETUN}:${TAG_GLUETUN}
     container_name: gluetun
