@@ -25,6 +25,7 @@ import sys
 import tempfile
 import time
 import traceback
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
@@ -36,6 +37,7 @@ import lyrics
 import media
 import musicbrainz
 import tags as tagging
+import upgrade
 
 AUDIO_EXTENSIONS = {".mp3", ".flac", ".m4a", ".mp4", ".aac", ".alac", ".opus", ".ogg", ".oga",
                     ".webm", ".mka", ".wav", ".aif", ".aiff"}
@@ -55,6 +57,8 @@ COVER_NAMES = {"cover", "folder", "front", "album"}
 MIN_SECONDS = 5
 MAX_DECODE_WARNINGS = 20
 LYRICS_RETRY_SECONDS = 30 * 86400
+# A song MusicBrainz does not know yet is looked up again after a week.
+UPGRADE_RETRY_SECONDS = 7 * 86400
 ORPHAN_SECONDS = 3600
 STATE_VERSION = 1
 
@@ -89,6 +93,10 @@ class Config:
         self.roots_interval = int(env("MUSICGUARD_ROOTS_INTERVAL", "600"))
         self.settle = int(env("MUSICGUARD_SETTLE_SECONDS", "120"))
         self.dry_run = env("MUSICGUARD_DRY_RUN", "0") == "1"
+        # Songs from links are handed to Lidarr for a proper copy (upgrade.py).
+        self.lidarr_url = env("MUSICGUARD_LIDARR_URL", "http://lidarr:8686")
+        self.lidarr_key = env("LIDARR_API_KEY")
+        self.upgrade = env("MUSICGUARD_UPGRADE", "1") == "1" and bool(self.lidarr_key)
 
 
 class Hold(Exception):
@@ -131,10 +139,12 @@ class Guard:
             if state.get("version") == STATE_VERSION:
                 state.setdefault("audited", {})
                 state.setdefault("releases", {})
+                state.setdefault("upgrades", {})
                 return state
         except (OSError, ValueError):
             pass
-        return {"version": STATE_VERSION, "files": {}, "lyrics": {}, "audited": {}, "releases": {}}
+        return {"version": STATE_VERSION, "files": {}, "lyrics": {}, "audited": {}, "releases": {},
+                "upgrades": {}}
 
     def save_state(self):
         if self.config.dry_run:
@@ -743,6 +753,96 @@ class Guard:
         self.save_state()
         return rows
 
+    # --- links upgraded by Lidarr -------------------------------------------------
+
+    def upgrade_pass(self):
+        """Hand every song in the extras library to Lidarr (upgrade.py) and
+        remove the YouTube copy once Lidarr's verified file is in the library."""
+        if not self.config.upgrade or not os.path.isdir(self.config.extras):
+            return
+        lidarr = upgrade.Lidarr(self.config.lidarr_url, self.config.lidarr_key)
+        entries = self.state["upgrades"]
+        present = set()
+        for directory, dirnames, filenames in os.walk(self.config.extras):
+            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+            for name in sorted(filenames):
+                path = os.path.join(directory, name)
+                if name.startswith(".") or os.path.splitext(name)[1].lower() not in AUDIO_EXTENSIONS:
+                    continue
+                present.add(path)
+                entry = entries.get(path, {})
+                if time.time() < entry.get("next", 0):
+                    continue
+                try:
+                    entries[path] = self.upgrade_one(path, entry, lidarr)
+                except Exception as error:  # Lidarr or MusicBrainz down: next pass
+                    log(f"upgrade failed for {path}: {error}")
+                    entry["next"] = time.time() + 3600
+                    entries[path] = entry
+                if entries.get(path) is None:
+                    entries.pop(path, None)
+                self.heartbeat()
+        for path in list(entries):
+            if path not in present:
+                entries.pop(path)
+
+    def upgrade_one(self, path, entry, lidarr):
+        """The entry to keep for this song, or None once it is replaced."""
+        if "album" not in entry:
+            items = tagging.read_mutagen(path)
+            found, _ = tagging.collect(items or [])
+            title, artist = layout.first(found, "title"), layout.first(found, "artist")
+            if not title or not artist or artist == "Unknown Artist":
+                return {"next": time.time() + UPGRADE_RETRY_SECONDS}
+            recordings = upgrade.recordings_for(title, artist, layout.first(found, "isrc"))
+            group = upgrade.best_release_group(recordings)
+            if not group:
+                if not entry:
+                    self.event("reported", path, "NOT_IN_MUSICBRAINZ",
+                               f"{artist} - {title}: Lidarr cannot fetch it; kept as it is")
+                return {"next": time.time() + UPGRADE_RETRY_SECONDS}
+            group_id, album_title, kind = group
+            if self.config.dry_run:
+                self.event("would-request", path, kind, f"{album_title} ({group_id})")
+                return None
+            album = lidarr.album(group_id)
+            if album:
+                lidarr.want(album)
+            else:
+                album = lidarr.add_album(group_id)
+                if not album:
+                    return {"next": time.time() + UPGRADE_RETRY_SECONDS}
+            self.event("requested", path, kind, f"Lidarr fetches {album_title}")
+            entry = {"album": album["id"], "title": title,
+                     "recordings": sorted({r["id"] for r in recordings if r.get("id")})}
+        try:
+            replacement = lidarr.track_file(entry["album"], set(entry["recordings"]), entry["title"])
+        except urllib.error.HTTPError as error:
+            if error.code == 404:  # the album was removed from Lidarr: start over
+                return {}
+            raise
+        known = self.state["files"].get(replacement) if replacement else None
+        if not known or not os.path.isfile(replacement):
+            return entry  # not downloaded yet, or not yet verified by the roots pass
+        if self.config.dry_run:
+            return entry
+        self.remove_with_sidecars(path)
+        directory = os.path.dirname(path)
+        if not any(os.path.splitext(n)[1].lower() in AUDIO_EXTENSIONS for n in os.listdir(directory)):
+            cover = os.path.join(directory, "cover.jpg")
+            if os.path.isfile(cover):
+                os.unlink(cover)
+        while directory != self.config.extras and directory.startswith(self.config.extras + os.sep):
+            try:
+                os.rmdir(directory)  # the album's folder, then the artist's, once empty
+            except OSError:
+                break
+            directory = os.path.dirname(directory)
+        self.state["files"].pop(path, None)
+        self.state["lyrics"].pop(path, None)
+        self.event("upgraded", path, detail=f"replaced by {replacement}")
+        return None
+
     def migrate(self, source, destination):
         """Copy an old library into the layout. The source is never changed."""
         files = []
@@ -774,6 +874,7 @@ def main(argv=None):
     check.add_argument("path")
     audit = commands.add_parser("audit", help="compare every track's tags with what Shazam hears")
     audit.add_argument("roots", nargs="*")
+    commands.add_parser("upgrade", help="one pass handing songs from links to Lidarr")
     ident = commands.add_parser("identify", help="ask Shazam what files are")
     ident.add_argument("paths", nargs="+")
     arguments = parser.parse_args(argv)
@@ -792,6 +893,10 @@ def main(argv=None):
         for path in arguments.paths:
             print(f"{path}: {guard.shazam(path)!r}", flush=True)
         return 0
+    if arguments.command == "upgrade":
+        guard.upgrade_pass()
+        guard.save_state()
+        return 0
     if arguments.command == "audit":
         guard.audit(arguments.roots or config.roots)
         return 0
@@ -808,6 +913,7 @@ def main(argv=None):
         guard.inbox_pass()
         if time.monotonic() - last_roots >= config.roots_interval or arguments.command == "once":
             guard.roots_pass()
+            guard.upgrade_pass()
             last_roots = time.monotonic()
         guard.save_state()
         guard.notify()

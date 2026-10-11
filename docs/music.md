@@ -94,6 +94,19 @@ It runs in three ways:
   cover's end marker, `NOT_AN_IMAGE`). A file that must go is still
   quarantined. A codec musicguard cannot rebuild (WMA, APE) is reported and
   left.
+- **Songs from links are upgraded** (`app/upgrade.py`), after each library
+  pass: musicguard looks the song up on MusicBrainz (by ISRC, else title and
+  artist), picks the release it belongs to (the full album, else the EP, else
+  the single; never a compilation, live or remix release), and has Lidarr
+  monitor and search that album, adding the artist with nothing else
+  monitored if it is new. Once Lidarr's file for that recording is in `music`
+  and musicguard has verified it, the YouTube copy, its lyrics and its cover
+  are removed from `music-extras`. A song MusicBrainz does not know (much
+  Moroccan music, e.g. Stormy's "PIRATE", is only on streaming services) is
+  reported once as `NOT_IN_MUSICBRAINZ`, keeps its YouTube copy, and is looked
+  up again weekly: Lidarr's catalogue is MusicBrainz, so it cannot fetch it.
+  `docker exec musicguard python /app/guard.py upgrade` runs one pass
+  (`MUSICGUARD_DRY_RUN=1` to only list what it would request).
 - **Programs and archives in a library** (`.exe`, `.zip`, `.lnk`, `.html`…, or
   anything that starts like one, a "cover.jpg" that is an ELF binary included)
   are quarantined; other odd files are reported once and left.

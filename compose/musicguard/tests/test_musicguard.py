@@ -32,6 +32,7 @@ import layout  # noqa: E402
 import lyrics  # noqa: E402
 import media  # noqa: E402
 import tags  # noqa: E402
+import upgrade  # noqa: E402
 
 EICAR_MARK = b"EICAR-STANDARD-ANTIVIRUS-TEST-FILE"
 MALWARE_MARK = b"PRETEND-MALWARE-SIGNATURE"
@@ -514,6 +515,103 @@ class Identification(GuardTestCase):
         self.assertEqual((done["artist"], done["albumartist"], done["artists"]),
                          (["Manal & Stormy"], ["Manal & Stormy"], ["Manal", "Stormy"]))
         self.assertEqual(os.stat(path).st_ino, os.stat(link).st_ino, "edited in place")
+
+
+class FakeLidarr:
+    """Lidarr's API as upgrade.Lidarr uses it."""
+
+    def __init__(self):
+        self.albums = {}  # release group id -> album
+        self.files = {}  # album id -> path of the song's file
+        self.searched = []
+
+    def album(self, group_id):
+        return self.albums.get(group_id)
+
+    def add_album(self, group_id):
+        self.albums[group_id] = {"id": len(self.albums) + 1, "monitored": True}
+        self.searched.append(group_id)
+        return self.albums[group_id]
+
+    def want(self, album):
+        album["monitored"] = True
+
+    def track_file(self, album_id, recording_ids, title):
+        return self.files.get(album_id)
+
+
+class Upgrades(GuardTestCase):
+    def setUp(self):
+        super().setUp()
+        self.guard.config.upgrade = True
+        self.lidarr = FakeLidarr()
+        self.client = mock.patch.object(guard.upgrade, "Lidarr", return_value=self.lidarr)
+        self.client.start()
+        self.lookup = mock.patch.object(guard.upgrade, "recordings_for", return_value=[{
+            "id": "rec-1", "releases": [{"status": "Official", "date": "2016-05-06",
+                                         "release-group": {"id": "views", "title": "Views",
+                                                           "primary-type": "Album"}}]}])
+        self.lookup.start()
+
+    def tearDown(self):
+        self.lookup.stop()
+        self.client.stop()
+        super().tearDown()
+
+    def extras_song(self):
+        path = os.path.join(self.extras, "Drake", "One Dance - Single (2016)", "One Dance.opus")
+        os.makedirs(os.path.dirname(path))
+        tone(path, extra=("-c:a", "libopus"))
+        audio = mutagen.File(path)
+        audio["title"], audio["artist"] = "One Dance", "Drake"
+        audio.save()
+        for name in ("One Dance.lrc", "cover.jpg"):
+            with open(os.path.join(os.path.dirname(path), name), "w") as out:
+                out.write("x")
+        return path
+
+    def test_link_song_is_replaced_once_lidarr_has_it_verified(self):
+        path = self.extras_song()
+        self.guard.upgrade_pass()
+        self.assertEqual(self.lidarr.searched, ["views"], "the full album is requested")
+        self.assertTrue(os.path.exists(path))
+
+        lidarr_file = os.path.join(self.music, "Drake", "Views (2016)", "12 - One Dance.flac")
+        os.makedirs(os.path.dirname(lidarr_file))
+        tone(lidarr_file, extra=("-c:a", "flac"))
+        self.lidarr.files[1] = lidarr_file
+        self.guard.upgrade_pass()
+        self.assertTrue(os.path.exists(path), "kept until musicguard has verified Lidarr's file")
+
+        self.guard.roots_pass()
+        self.guard.upgrade_pass()
+        self.assertFalse(os.path.exists(os.path.join(self.extras, "Drake")), "copy, lyrics, cover, folders gone")
+        self.assertTrue(os.path.exists(lidarr_file))
+
+    def test_song_musicbrainz_does_not_know_is_kept_and_asked_weekly(self):
+        path = self.extras_song()
+        guard.upgrade.recordings_for.return_value = []
+        self.guard.upgrade_pass()
+        self.guard.upgrade_pass()
+        self.assertTrue(os.path.exists(path))
+        self.assertEqual(guard.upgrade.recordings_for.call_count, 1)
+        self.assertEqual([e["reason"] for e in self.guard.events], ["NOT_IN_MUSICBRAINZ"])
+
+
+class UpgradeRules(unittest.TestCase):
+    def test_the_full_album_wins_over_single_compilation_and_bootleg(self):
+        def release(group, kind, date, secondary=None, status="Official"):
+            return {"status": status, "date": date,
+                    "release-group": {"id": group, "title": group, "primary-type": kind,
+                                      "secondary-types": secondary or []}}
+        recordings = [{"releases": [release("single", "Single", "2016-04-05"),
+                                    release("hits", "Album", "2016-01-01", ["Compilation"]),
+                                    release("bootleg", "Album", "2015-01-01", status="Bootleg"),
+                                    release("views", "Album", "2016-05-06")]}]
+        self.assertEqual(upgrade.best_release_group(recordings), ("views", "views", "Album"))
+        self.assertEqual(upgrade.best_release_group([{"releases": [release("single", "Single", "2016")]}]),
+                         ("single", "single", "Single"))
+        self.assertIsNone(upgrade.best_release_group([{"releases": [release("mix", "Album", "2016", ["DJ-mix"])]}]))
 
 
 class IdentifyRules(unittest.TestCase):

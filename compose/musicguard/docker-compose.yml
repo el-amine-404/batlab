@@ -7,9 +7,9 @@ name: ${MUSICGUARD_PROJECT_NAME}
 # saying why. Nothing is deleted.
 #
 # It parses files chosen by strangers, so it runs unprivileged, read-only, with
-# no capabilities, on its own network (it needs the internet only for lyrics,
-# MusicBrainz, Shazam fingerprints and Discord), and sees only the music
-# folders.
+# no capabilities, and sees only the music folders. It needs the internet for
+# lyrics, MusicBrainz, Shazam fingerprints and Discord, and Lidarr's API to
+# hand it the songs from links (app/upgrade.py), so it joins home_server.
 services:
   musicguard:
     image: local/batlab-musicguard
@@ -42,6 +42,9 @@ services:
       # inbox, not passed, while it is down.
       - CLAMD_SOCKET=/run/clamav/clamd.ctl
       - CLAMD_REQUIRED=1
+      # Songs from links are handed to Lidarr, which fetches their album.
+      - MUSICGUARD_LIDARR_URL=http://lidarr:8686
+      - LIDARR_API_KEY=${LIDARR_API_KEY:-}
     volumes:
       - ${VOLUMES_ROOT}/musicguard:/state
       - ${DATA_ROOT}/inbox/music:/inbox
@@ -52,6 +55,8 @@ services:
       # The directory, not the socket: clamd recreates the socket on restart,
       # and a bind-mounted socket file would keep pointing at the old one.
       - /run/clamav:/run/clamav:ro
+    networks:
+      - home_server
     cpus: 1
     mem_limit: 1g
     pids_limit: 256
@@ -60,3 +65,8 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+networks:
+  home_server:
+    external: true
+    name: home_server
