@@ -36,6 +36,10 @@ Set once through the API, held in its database under
 - Every group has **auto channel sync** on, in its own number block sized for
   the group plus 30% (General 1-3480, Undefined 3481-5440, News 5441-6670, ...,
   up to 17670). New and removed iptv-org channels follow on each refresh.
+- Proxy settings: **channel shutdown delay 10 s** (was 0). NodeCast probes a
+  stream, closes it and opens it again to play; with no delay the second
+  request found the channel tearing down and got 503 or a 188-byte
+  `Error: Channel is stopping` packet.
 - Default stream profile **Streamlink** (`best`). The stock FFmpeg profile
   passes `-map 0`, which pulls every HLS variant of a channel at once: five
   renditions of one channel through the VPN for one picture.
@@ -72,6 +76,21 @@ http://nodecast.homelab.lan, stack `compose/nodecast`. Login `admin` and
   encoder auto (VAAPI on lab2, `h264_vaapi`). Dispatcharr sends MPEG-TS, which
   browsers cannot play: NodeCast probes each stream and remuxes it to MP4
   (H.264/AAC, the usual case) or transcodes on the GPU.
+- The settings live on the server, but the player falls back to its defaults
+  (`m3u8`, no proxy) when it cannot read them, and saves the whole set on the
+  next change, the volume included: that happened during a login loop. If
+  channels stop starting, check Settings first.
+- The image is built locally (`compose/nodecast/Dockerfile`) with two fixes to
+  2.1.1; each `grep` fails the build if a new version changes the line:
+  - Guide channels were saved under the same key as live channels. Dispatcharr's
+    guide ids are channel numbers and its stream ids channel ids, so every
+    channel name in the list pointed at another stream ("2M Monde +1", number
+    13, played stream 13, a dead channel). After the fix, the old rows went
+    with `DELETE FROM playlist_items WHERE type='epg_channel'` and a sync.
+  - The remux, used for H.264/AAC in MPEG-TS (most channels), lacked
+    `aac_adtstoasc`; ffmpeg stopped at the first audio packet.
+- A channel dead at the source fails the probe; the player then shows
+  "Transcoding (Video)" and spins forever. Try another channel.
 - `JWT_SECRET` must be set: without it the image signs logins with a key
   published in its source.
 - **Basic auth at Caddy is not optional.** NodeCast checks its login only in
