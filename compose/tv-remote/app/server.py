@@ -548,15 +548,60 @@ def youtube_link(mac: str) -> YouTubeLink:
         return links[mac]
 
 
-def youtube_search(ip: str, text: str) -> None:
-    """Open YouTube's search on the TV over DIAL; checked to work on the Q8F."""
-    req = urllib.request.Request(
-        f"http://{ip}:8080/ws/apps/YouTube",
-        data=("search_query=" + urllib.parse.quote(text.strip())).encode(), method="POST",
-        headers={"Content-Type": "text/plain; charset=utf-8"},
-    )
-    with urllib.request.urlopen(req, timeout=8):
-        pass
+# Search runs on lab2, not on the TV: the TV refuses every DIAL launch (403,
+# checked 2026-10-11), and the Lounge API that plays links has no search.
+# The endpoint is the one YouTube's website uses: no API key, but not a
+# documented API either, so it may change.
+SEARCH_URL = "https://www.youtube.com/youtubei/v1/search?prettyPrint=false"
+SEARCH_CLIENT = {"clientName": "WEB", "clientVersion": "2.20260901.00.00", "hl": "en"}
+VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
+_thumbs: dict[str, bytes] = {}
+
+
+def _runs(o: dict) -> str:
+    return "".join(r.get("text", "") for r in (o or {}).get("runs", [])) or (o or {}).get("simpleText", "")
+
+
+def youtube_search(query: str, limit: int = 20) -> list[dict]:
+    body = {"context": {"client": SEARCH_CLIENT}, "query": query, "params": "EgIQAQ%3D%3D"}  # videos only
+    req = urllib.request.Request(SEARCH_URL, data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        data = json.load(r)
+
+    def walk(o):
+        if isinstance(o, dict):
+            if "videoRenderer" in o:
+                yield o["videoRenderer"]
+            for v in o.values():
+                yield from walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                yield from walk(v)
+
+    out = []
+    for v in walk(data):
+        if not VIDEO_ID.match(v.get("videoId", "")):
+            continue
+        out.append({
+            "id": v["videoId"], "title": _runs(v.get("title")), "channel": _runs(v.get("ownerText")),
+            "length": (v.get("lengthText") or {}).get("simpleText", ""),
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
+def youtube_thumb(video_id: str) -> bytes:
+    """Fetched by lab2, so phones never contact Google and the page keeps
+    img-src 'self'. A few hundred small JPEGs at most, kept in memory."""
+    if video_id not in _thumbs:
+        with urllib.request.urlopen(f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg", timeout=8) as r:
+            data = r.read(200_000)
+        if len(_thumbs) > 300:
+            _thumbs.clear()
+        _thumbs[video_id] = data
+    return _thumbs[video_id]
 
 
 # --------------------------------------------------------------- Jellyfin
@@ -877,6 +922,21 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(401, {"error": "log in"})
         if path == "/api/tvs":
             return self._json(200, [{"mac": m, **t} for m, t in load_tvs().items()])
+        if path == "/api/youtube/search":
+            q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("q", [""])[0].strip()[:200]
+            if not q:
+                return self._json(400, {"error": "type a search"})
+            try:
+                return self._json(200, youtube_search(q))
+            except (OSError, ValueError, urllib.error.URLError):
+                log.exception("YouTube search failed")
+                return self._json(502, {"error": "YouTube search did not answer"})
+        m = re.fullmatch(r"/api/youtube/thumb/([A-Za-z0-9_-]{11})", path)
+        if m:
+            try:
+                return self._send(200, youtube_thumb(m.group(1)), "image/jpeg", "private, max-age=86400")
+            except (OSError, urllib.error.URLError):
+                return self._json(404, {"error": "no thumbnail"})
         m = re.fullmatch(r"/api/tv/([0-9a-f:]{17})/(status|apps|media)", path)
         if m:
             mac, what = m.groups()
@@ -990,12 +1050,11 @@ class Handler(BaseHTTPRequestHandler):
                 t = text.strip()
                 m = YOUTUBE_URL_ID.search(t)
                 vid = m.group(1) if m else (t if YOUTUBE_BARE_ID.match(t) else None)
+                if not vid:
+                    return self._json(400, {"error": "not a video link; search instead"})
                 try:
-                    if vid:
-                        youtube_link(mac).play_video(vid)
-                        return self._json(200, {"ok": True, "did": "video"})
-                    youtube_search(load_tvs()[mac]["ip"], t)
-                    return self._json(200, {"ok": True, "did": "search"})
+                    youtube_link(mac).play_video(vid)
+                    return self._json(200, {"ok": True, "did": "video"})
                 except (OSError, urllib.error.URLError, TimeoutError) as err:
                     raise ConnectionError("YouTube on the TV did not answer") from err
             elif action == "cursor":

@@ -179,7 +179,7 @@
 
       <form id="yt" class="card kb" hidden autocomplete="off">
         <div class="card-title"><svg class="ic"><use href="#i-youtube"/></svg><label for="yt-text">YouTube</label></div>
-        <p class="small muted">Paste a video link to play it, or type to search.</p>
+        <p class="small muted">Paste a video link to play it, or type to search and pick a result.</p>
         <div class="kb-row">
           <div class="field">
             <input id="yt-text" type="text" placeholder="Paste a link or type a search" enterkeyhint="go" autocapitalize="off" spellcheck="false">
@@ -187,6 +187,7 @@
           </div>
           <button class="btn btn-primary btn-icon" type="submit" aria-label="Send to YouTube"><svg class="ic"><use href="#i-send"/></svg></button>
         </div>
+        <div id="yt-results" class="results" hidden></div>
         <div id="yt-history" class="history" hidden>
           <div class="history-head"><span class="small muted">Recent</span><button type="button" id="yt-history-clear" class="btn btn-ghost small">Clear history</button></div>
           <div id="yt-history-list" class="history-list"></div>

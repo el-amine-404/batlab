@@ -256,6 +256,18 @@ dialog.sheet { text-align: left; align-items: stretch; max-width: 380px; gap: 10
 }
 .field-clear:active { background: var(--key); }
 
+/* YouTube search results */
+.results { display: flex; flex-direction: column; gap: 4px; max-height: 420px; overflow-y: auto; }
+.result {
+  appearance: none; border: 0; background: transparent; color: var(--fg); font: inherit; cursor: pointer;
+  display: flex; gap: 10px; align-items: flex-start; text-align: left; padding: 6px; border-radius: 10px;
+}
+.result:active, .result:hover { background: var(--key); }
+.result img { width: 120px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; background: var(--key); flex: none; }
+.result .meta { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.result .meta b { font-size: 14px; font-weight: 500; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.result .meta span { font-size: 12px; color: var(--muted); }
+
 /* YouTube history */
 .history { display: flex; flex-direction: column; gap: 6px; }
 .history-head { display: flex; align-items: center; justify-content: space-between; }
