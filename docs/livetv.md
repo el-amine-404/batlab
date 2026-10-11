@@ -41,6 +41,18 @@ Set once through the API, held in its database under
   the same country code; the others have no guide. Auto-match runs only when
   started by hand (Channels, Auto-Match), so the cleanup holds; running it
   again brings the wrong matches back.
+- Changing guide assignments queues one parse task per channel, and each one
+  reads the whole extracted guide (1.9 GB): 8 channels in 10 minutes, 4134
+  queued after the cleanup, about 90 hours at two full cores. The source
+  refresh parses every mapped channel in one pass instead (2 minutes for
+  2731). After a bulk change, drop the queued tasks and refresh the source:
+
+  ```bash
+  docker exec dispatcharr redis-cli EVAL "local n=0 for _,v in ipairs(redis.call('lrange',KEYS[1],0,-1)) do if string.find(v,'parse_programs_for_tvg_id',1,true) then n=n+redis.call('lrem',KEYS[1],1,v) end end return n" 1 celery
+  docker restart dispatcharr   # stops the ones already running
+  ```
+
+  then EPG, `epgshare01 all`, Refresh.
 
 ## How Jellyfin is set up
 
@@ -48,10 +60,17 @@ Dashboard, Live TV:
 
 - Tuner: HDHomeRun, `http://gluetun:9191/hdhr`, 10 tuners, hardware
   transcoding allowed, stream sharing on.
-- Guide: XMLTV, `http://gluetun:9191/output/epg`. Dispatcharr builds it on
-  request in about a minute (33 MB).
+- Guide: XMLTV, `http://gluetun:9191/output/epg?days=1`. Jellyfin reads the
+  whole file once per channel, and the full guide is 179 MB; one day is 62 MB.
+  With 11k channels Jellyfin's automatic guide length is one day anyway.
 
 Use `gluetun`, not its IP: the address in `home_server` is not pinned.
+
+Jellyfin's Refresh Guide task goes through all 11k channels, reads the guide
+file for each and fetches each logo through Dispatcharr, many from hosts that
+no longer answer: with the full guide it ran at 20% an hour. Cancelling it
+waits for the logo downloads in flight, several minutes. Jellyfin keeps the XMLTV file in `/cache/xmltv`; after changing the
+guide in Dispatcharr, delete it before refreshing or Jellyfin reuses the old one.
 
 ## What to expect
 
