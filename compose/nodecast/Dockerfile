@@ -12,3 +12,12 @@ FROM ${BASE_IMAGE}
 RUN f=/app/server/services/syncService.js && \
     sed -i 's/const id = `${sourceId}:${ch.id}`;/const id = `${sourceId}:epg:${ch.id}`;/' "$f" && \
     grep -q 'const id = `${sourceId}:epg:${ch.id}`;' "$f"
+
+# The remux (MPEG-TS to MP4, the player's choice for H.264 with AAC, the usual
+# Dispatcharr stream) copies ADTS AAC into MP4 without aac_adtstoasc: ffmpeg
+# stops at the first audio packet ("Malformed AAC bitstream") and the player
+# waits forever. The filter refuses other audio codecs, so a raw-TS channel with
+# MP3, Opus or Vorbis audio would now fail here instead; AAC is the norm.
+RUN f=/app/server/routes/remux.js && \
+    sed -i "s/'-bsf:v', 'dump_extra',/'-bsf:v', 'dump_extra', '-bsf:a', 'aac_adtstoasc',/" "$f" && \
+    grep -q "'-bsf:a', 'aac_adtstoasc'," "$f"
