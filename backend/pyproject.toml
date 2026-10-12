@@ -6,7 +6,6 @@ build-backend = "setuptools.build_meta"
 name = "stanzarr"
 dynamic = ["version"]
 description = "Lyrics for your music library, the *arr way: tracks every song's lyrics, fetches them from LRCLIB, syncs them with AI and lets you fix them in an editor."
-readme = "../README.md"
 license = { text = "GPL-3.0-or-later" }
 requires-python = ">=3.12"
 dependencies = [
