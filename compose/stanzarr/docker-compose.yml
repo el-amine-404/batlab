@@ -1,0 +1,54 @@
+name: ${STANZARR_PROJECT_NAME}
+# Stanzarr: lyrics for the music libraries (docs/music.md). It tracks every
+# song's lyrics, fetches them from LRCLIB, writes synced .lrc files beside the
+# songs, and takes AI-sync jobs to a GPU worker (the laptop). musicguard no
+# longer fetches lyrics; it still checks every file and starts Navidrome's
+# scans, now also when Stanzarr writes lyrics.
+#
+# Built from the release tag on GitHub (github.com/el-amine-404/stanzarr).
+services:
+  stanzarr:
+    image: local/stanzarr:${TAG_STANZARR}
+    build:
+      context: https://github.com/el-amine-404/stanzarr.git#${TAG_STANZARR}
+      # Same reason as musicguard: the builder's DNS on lab2 needs the host network.
+      network: host
+    pull_policy: build
+    container_name: stanzarr
+    # The owner of the music files: lyrics are written beside the songs as them.
+    user: "${PUID}:${PGID}"
+    environment:
+      - TZ=${TZ}
+      # The same paths as musicguard, Lidarr and Aurral see.
+      - STANZARR_LIBRARY=/data/media/music:/data/media/music-aurral:/data/media/music-extras
+      - STANZARR_USERNAME=${STANZARR_USERNAME:-admin}
+      - STANZARR_PASSWORD=${STANZARR_PASSWORD:?set STANZARR_PASSWORD in compose/.env}
+      - STANZARR_WORKER_KEY=${STANZARR_WORKER_KEY:?set STANZARR_WORKER_KEY in compose/.env}
+      # Reached only through Caddy on home_server: any address there may forward.
+      - STANZARR_TRUSTED_PROXIES=*
+    volumes:
+      - ${VOLUMES_ROOT}/stanzarr:/config
+      - ${DATA_ROOT}/media/music:/data/media/music
+      - ${DATA_ROOT}/media/music-aurral:/data/media/music-aurral
+      - ${DATA_ROOT}/media/music-extras:/data/media/music-extras
+    networks:
+      - home_server
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 512m
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  home_server:
+    external: true
+    name: home_server

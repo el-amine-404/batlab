@@ -1,0 +1,8 @@
+http://stanzarr.homelab.lan {
+	import localSubnets
+	# AI-sync workers upload the separated voice (up to 80 MB).
+	request_body {
+		max_size 100MB
+	}
+	reverse_proxy @localSubnets http://stanzarr:6868
+}

@@ -8,6 +8,7 @@ caddy
 diun
 dozzle
 feishin
+stanzarr
 filebrowser
 gotenberg
 homepage

@@ -166,11 +166,12 @@ class Guard:
                 state.setdefault("releases", {})
                 state.setdefault("upgrades", {})
                 state.setdefault("singles", {})
+                state.setdefault("sidecars", {})
                 return state
         except (OSError, ValueError):
             pass
         return {"version": STATE_VERSION, "files": {}, "lyrics": {}, "audited": {}, "releases": {},
-                "upgrades": {}, "singles": {}}
+                "upgrades": {}, "singles": {}, "sidecars": {}}
 
     def save_state(self):
         if self.config.dry_run:
@@ -825,6 +826,10 @@ class Guard:
                 known.pop(path)
                 self.state["lyrics"].pop(path, None)
                 self.library_changed = True
+        for path in list(self.state["sidecars"]):
+            if path not in present:
+                self.state["sidecars"].pop(path)
+                self.library_changed = True
 
     def unchecked(self):
         """Audio files in the libraries musicguard has not passed (new, held,
@@ -935,7 +940,14 @@ class Guard:
             self.event("removed", path, "ORPHANED_LYRICS", "no track of this name")
             return
         stem = os.path.splitext(os.path.basename(path))[0].lower()
-        if extension in IMAGE_EXTENSIONS or extension in LYRIC_EXTENSIONS:
+        if extension in LYRIC_EXTENSIONS:
+            # Lyrics written by another tool (Stanzarr): Navidrome reads them
+            # on its next scan, which musicguard starts once audio is checked.
+            if self.state["sidecars"].get(path) != [stat.st_size, stat.st_mtime_ns]:
+                self.state["sidecars"][path] = [stat.st_size, stat.st_mtime_ns]
+                self.library_changed = True
+            return
+        if extension in IMAGE_EXTENSIONS:
             return
         if self.state["files"].get(path) != [stat.st_size, stat.st_mtime_ns]:
             self.event("reported", path, "UNEXPECTED_FILE", f"{extension or stem}: left in place")

@@ -654,6 +654,22 @@ class NavidromeScans(GuardTestCase):
         self.guard.scan_navidrome()
         guard.navidrome.start_scan.assert_called_once()
 
+    def test_lyrics_written_by_another_tool_bring_a_scan(self):
+        path = os.path.join(self.music, "A", "B (2020)", "01 - C.mp3")
+        os.makedirs(os.path.dirname(path))
+        tone(path)
+        self.guard.roots_pass()
+        self.guard.scan_navidrome()
+        guard.navidrome.start_scan.reset_mock()
+        with open(path[:-4] + ".lrc", "w") as out:  # Stanzarr writes lyrics
+            out.write("[00:01.00] la\n")
+        self.guard.roots_pass()
+        self.guard.scan_navidrome()
+        guard.navidrome.start_scan.assert_called_once()
+        self.guard.roots_pass()  # nothing new: no scan
+        self.guard.scan_navidrome()
+        guard.navidrome.start_scan.assert_called_once()
+
     def test_new_albums_are_announced_once_playable(self):
         self.guard.config.ready_webhook = "http://discord.invalid/hook"
         path = os.path.join(self.music, "Billie Eilish", "HIT ME HARD AND SOFT (2024)", "01 - SKINNY.mp3")

@@ -46,6 +46,9 @@ services:
       # inbox, not passed, while it is down.
       - CLAMD_SOCKET=/run/clamav/clamd.ctl
       - CLAMD_REQUIRED=1
+      # Lyrics are Stanzarr's job (compose/stanzarr); musicguard still checks
+      # lyrics files and starts Navidrome's scan when they change.
+      - MUSICGUARD_LYRICS=0
       # Songs from links are handed to Lidarr, which fetches their album.
       - MUSICGUARD_LIDARR_URL=http://lidarr:8686
       - LIDARR_API_KEY=${LIDARR_API_KEY:-}

@@ -25,6 +25,12 @@
           url: http://seerr:5055
           key: "{{HOMEPAGE_VAR_SEERR_KEY}}"
           fields: ["pending", "approved", "completed"]
+    - Stanzarr:
+        icon: mdi-script-text
+        href: http://stanzarr.homelab.lan
+        description: Lyrics for the Library
+        siteMonitor: http://stanzarr:6868/health
+        statusStyle: "dot"
     - Feishin:
         icon: mdi-headphones
         href: http://feishin.homelab.lan

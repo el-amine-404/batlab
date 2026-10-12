@@ -221,6 +221,25 @@ follow a move. The purge has no guard against an empty mount of its own; the
 data guard (watchdog/README.md) is that guard, stopping Navidrome while the disk
 is unmounted.
 
+## Stanzarr (lyrics)
+
+Since 2026-10-12 lyrics are managed by **Stanzarr** (`stanzarr.homelab.lan`,
+`compose/stanzarr`, its own project: github.com/el-amine-404/stanzarr). It
+tracks every song's lyrics files (format, language, origin), fetches missing
+ones from LRCLIB (synced first, again every 30 days for songs without lyrics
+synced by a person), writes `.lrc` / `.txt` beside the songs, and hosts the
+lyrics editor. AI sync runs on a GPU worker: the laptop, with
+`~/ai-lyrics/dvenv/bin/stanzarr-worker --server http://stanzarr.homelab.lan
+--key <STANZARR_WORKER_KEY>`; without a worker online, AI sync is disabled in
+the interface. The account and the worker key are in `compose/.env`
+(`STANZARR_USERNAME`, `STANZARR_PASSWORD`, `STANZARR_WORKER_KEY`).
+
+musicguard no longer fetches lyrics (`MUSICGUARD_LYRICS=0`). It still checks
+lyrics files (size, orphans), and a new or changed one makes it start
+Navidrome's scan once all audio is checked, so Stanzarr's lyrics show up
+without ever letting an unchecked song in. Stanzarr follows the same flags as
+below: `[by:AI-generated…]` files stay replaceable by a person-synced version.
+
 ## AI-synced lyrics
 
 Songs whose lyrics exist only as plain text (most often Moroccan ones nobody
