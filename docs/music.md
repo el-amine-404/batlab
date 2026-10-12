@@ -224,7 +224,7 @@ is unmounted.
 ## Stanzarr (lyrics)
 
 Since 2026-10-12 lyrics are managed by **Stanzarr** (`stanzarr.homelab.lan`,
-`compose/stanzarr`, its own project: github.com/el-amine-404/stanzarr). It
+`compose/stanzarr`, its own project, kept private for now: built from the source copy in `STANZARR_SOURCE`, `~/stanzarr` on lab2). It
 tracks every song's lyrics files (format, language, origin), fetches missing
 ones from LRCLIB (synced first, again every 30 days for songs without lyrics
 synced by a person), writes `.lrc` / `.txt` beside the songs, and hosts the

@@ -17,7 +17,7 @@ This document provides a summary of the self-hosted services configured in this 
 | **Lidarr**       | A music collection manager that automates downloading and organizing Usenet and BitTorrent files.        | [lidarr.audio](https://lidarr.audio)                                     |
 | **Aurral**       | Music requests and discovery, the Seerr of the music stack; also imports Spotify and YouTube Music playlists. | [docs.aurral.org](https://docs.aurral.org)                               |
 | **Feishin**      | A better player for Navidrome in the browser (synced lyrics, queue, playlists); logs in with each user's Navidrome account. | [github.com/jeffvli/feishin](https://github.com/jeffvli/feishin)          |
-| **Stanzarr**     | Lyrics for the music libraries: tracks every song's lyrics, fetches them from LRCLIB, AI sync on a GPU worker, lyrics editor. | [github.com/el-amine-404/stanzarr](https://github.com/el-amine-404/stanzarr) |
+| **Stanzarr**     | Lyrics for the music libraries: tracks every song's lyrics, fetches them from LRCLIB, AI sync on a GPU worker, lyrics editor. | private project (`~/stanzarr`) |
 | **slskd**        | A Soulseek client with a web UI, run inside the VPN, for albums torrent sites do not carry.                | [github.com/slskd/slskd](https://github.com/slskd/slskd)                 |
 | **Soularr**      | Hands Lidarr's missing albums to slskd and has Lidarr import what it finds.                                | [github.com/mrusse/soularr](https://github.com/mrusse/soularr)           |
 | **MeTube**       | A web UI for yt-dlp: paste a YouTube link, the song lands in the music inbox.                              | [github.com/alexta69/metube](https://github.com/alexta69/metube)         |
