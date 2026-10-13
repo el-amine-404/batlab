@@ -121,7 +121,7 @@ cameras:
       # zone when the bottom of their box (their feet) is inside it.
       roof:
         friendly_name: Roof
-        coordinates: "0.000,0.240,0.270,0.260,0.460,0.270,0.470,0.160,0.930,0.350,0.930,1.0,0.000,1.0"
+        coordinates: "0.000,0.240,0.270,0.260,0.460,0.270,0.470,0.160,0.948,0.333,0.941,0.857,0.914,1.0,0.000,1.0"
         objects:
           - person
     review:
