@@ -1,0 +1,35 @@
+# frigate-notify: posts Frigate's alerts (a person in the roof zone, see
+# config.yml) to Discord as they happen. The webhook comes from
+# DISCORD_WEBHOOK_CAMERAS in compose/.env, through the compose file.
+app:
+  # Frigate's review items: one message per alert, never for detections.
+  mode: reviews
+
+frigate:
+  # The API port without login; only reachable inside the stack.
+  server: http://frigate:5000
+  # The links in each message, for opening the clip on a home device.
+  public_url: http://frigate.homelab.lan
+  startup_check:
+    attempts: 10
+    interval: 15
+  webapi:
+    enabled: false
+  mqtt:
+    enabled: true
+    server: mosquitto
+    port: 1883
+
+alerts:
+  general:
+    title: Person on the roof
+    snap_bbox: true
+    snap_timestamp: true
+    # One message when the alert starts, not one per update.
+    notify_once: true
+    # Send the alert even if the picture is not ready: a late message beats
+    # none.
+    nosnap: allow
+
+  discord:
+    enabled: true

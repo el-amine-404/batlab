@@ -10,8 +10,11 @@
 # old one and "migrates" it, which breaks masks given as fractions.
 version: 0.18-0
 
+# Alerts go out through the stack's broker to frigate-notify (Discord).
 mqtt:
-  enabled: false
+  enabled: true
+  host: mosquitto
+  port: 1883
 
 # Caddy terminates the connection and proxies plain HTTP to 8971.
 tls:

@@ -37,8 +37,10 @@ services:
       - /etc/localtime:/etc/localtime:ro
     # The UI and API (8971, with login) are reached through Caddy only; 5000
     # (no login) stays on the home_server network for the Homepage widget.
+    # mqtt is the stack's own network, for alerts to frigate-notify.
     networks:
       - home_server
+      - mqtt
     # VAAPI decoding on the Intel iGPU. The whole /dev/dri: the card and
     # render node names differ between hosts.
     devices:
@@ -57,7 +59,59 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  # Carries Frigate's events to frigate-notify, nothing else (conf/mosquitto.conf).
+  mosquitto:
+    image: ${IMAGE_MOSQUITTO}:${TAG_MOSQUITTO}
+    container_name: mosquitto
+    restart: unless-stopped
+    volumes:
+      - ${CONFIGS_ROOT}/frigate/conf/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    networks:
+      - mqtt
+    mem_limit: 64m
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Posts each alert (a person in the roof zone) to Discord with its snapshot
+  # (conf/notify.yml).
+  frigate-notify:
+    image: ${IMAGE_FRIGATE_NOTIFY}:${TAG_FRIGATE_NOTIFY}
+    container_name: frigate-notify
+    restart: unless-stopped
+    depends_on:
+      - frigate
+      - mosquitto
+    volumes:
+      - ${CONFIGS_ROOT}/frigate/conf/notify.yml:/app/config.yml:ro
+    environment:
+      - TZ=${TZ}
+      - FN_ALERTS__DISCORD__WEBHOOK=${DISCORD_WEBHOOK_CAMERAS:?set in compose/.env}
+    # mqtt for the broker and Frigate's API; home_server to reach Discord.
+    networks:
+      - home_server
+      - mqtt
+    mem_limit: 64m
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 networks:
   home_server:
     external: true
     name: home_server
+  # No route out and no other containers: the broker is reachable only by
+  # Frigate and frigate-notify.
+  mqtt:
+    internal: true
