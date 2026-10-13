@@ -98,6 +98,9 @@ services:
       - mqtt
     mem_limit: 64m
     read_only: true
+    # It also writes its log to a file here; the container log has the same.
+    tmpfs:
+      - /app/log
     cap_drop:
       - ALL
     security_opt:
