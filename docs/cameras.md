@@ -27,10 +27,10 @@ tells the new address.
 
 ## Frigate
 
-- **Login**: Frigate's own users. The first start prints an `admin` password
-  in the log (`docker logs frigate 2>&1 | grep -A3 -i password`); change it
-  under Settings > Users. Lost it: set `auth.reset_admin_password: true` and
-  restart, the log prints a new one.
+- **Login**: Frigate's own users; `admin`'s password is kept in
+  `compose/.env` as `FRIGATE_ADMIN_PASS` (Frigate does not read it). Change
+  it under Settings > Users. Lost it: set `auth.reset_admin_password: true`
+  and restart, the log prints a new one.
 - **Config**: the live file is `$VOLUMES_ROOT/frigate/config/config.yml`,
   edited from Frigate's Settings UI, which also migrates it on upgrades.
   `compose/frigate/config.yml` is only the seed `compose/frigate/setup.sh`
@@ -46,31 +46,70 @@ tells the new address.
   `home_server` network, for the Homepage widget. Nothing is published on
   the host.
 
+### What it does
+
+| Camera | Detection | Kept by Frigate |
+| --- | --- | --- |
+| `camera_1`, Rooftop | people, 5 fps on the sub stream, YOLOv9 on the iGPU | person on the roof (alert): 10 s before to 10 s after, 30 days, with a snapshot; person seen elsewhere (detection): 7 days; any motion: 3 days |
+| `camera_2`, Street | none | nothing, live view only |
+
+Clips are copied from the main stream, never re-encoded. The DVR still keeps
+everything; Frigate is the alarm and the index.
+
+- **Roof zone**: the floor and the wall tops. A person counts when the bottom
+  of their box is inside it, so people on the neighbours' roofs are only
+  detections. Edit it in Settings > Masks / Zones on the real picture.
+- **Motion masks**: the DVR's clock and camera-name overlays (they change
+  every second), the sky and buildings beyond the walls, the neighbour's
+  plants on the right. Motion under a mask never starts detection.
+- **A child playing** is a person like any other: it makes an alert and a
+  clip. Frigate cannot tell them apart without training (Settings >
+  Classification can learn `child` / `adult` from the snapshots this camera
+  collects; it adds a tag, it does not silence the alert).
+
+### Storage: a 20 GB cap
+
+Frigate has no size limit of its own: it deletes its oldest recordings, of
+any kind, when the filesystem under `/media/frigate` runs low. That
+filesystem is a 20 GB ext4 image, `$VOLUMES_ROOT/frigate/media.img`,
+loop-mounted at `$VOLUMES_ROOT/frigate/media` from `/etc/fstab`
+(`setup-storage.sh`). The container mounts `media/frigate`, which exists only
+inside the image: if the image is not mounted, Frigate fails to start instead
+of filling the root SSD.
+
+Motion is kept 3 days because a windy week could fill the 20 GB and take the
+oldest alert clips with it. Check System > Storage after a few days; raise
+`record.motion.days`, or the image (`resize2fs` after growing the file), if
+there is room. restic skips the image and the recordings but backs up the
+snapshots (`frigate/clips`).
+
+### Model
+
+YOLOv9 (`yolov9-s-320.onnx`), built once on the server by
+`compose/frigate/build-model.sh`, which runs the build from Frigate's docs
+and writes `$VOLUMES_ROOT/frigate/config/models`. A rebuild is only needed for
+another size. The build runs on the host network: lab2 resolves through
+AdGuard on `127.0.0.1`, which containers on Docker's default bridge cannot
+reach.
+
 ### Install
 
 ```bash
 # compose/.env: FRIGATE_DVR_HOST, FRIGATE_RTSP_USER, FRIGATE_RTSP_PASSWORD
 compose/frigate/setup.sh
+compose/frigate/build-model.sh s 320
+sudo compose/frigate/setup-storage.sh 20G
 make up STACK=frigate
 docker exec caddy caddy reload --config /etc/caddy/Caddyfile
 make restart STACK=homepage
 ```
 
-### Step 1 (now): live view
+### Later
 
-Detection, recording and snapshots are off, so Frigate only decodes the two
-sub streams at 5 fps on the iGPU (VAAPI).
-
-### Step 2 (later): detection and alerts
-
-Turn on person and car detection (the OpenVINO detector on the UHD 620 is
-already configured, idle), record only
-events from the main stream, and push alerts. Before that:
-
-- **Disk**: recordings must not land on the 256 GB root SSD. Point
-  `/media/frigate` at the data disk once it is reliable again
-  (`hosts/lab2/README.md`) and set retention in days.
-- **`record.enabled`** must be `true` in the config: with it `false`, turning
-  recording on from the UI does nothing.
-- Raise `FRIGATE_CPUS` / `FRIGATE_MEM_LIMIT` in `hosts/lab2/compose.env` and
-  check Netdata for a week.
+- **Notifications**: Frigate's own web push needs HTTPS; ntfy is the simpler
+  route.
+- **`record.enabled`** must stay `true` on `camera_1`: with it `false` in the
+  config, turning recording on from the UI does nothing. `camera_2` cannot
+  record until its config says so.
+- The data disk, once reliable (`hosts/lab2/README.md`), could hold a bigger
+  image.

@@ -2,8 +2,13 @@
 # Frigate edits the live copy from its Settings UI (and migrates it on
 # upgrades), so later changes made here are not picked up by themselves.
 #
-# Step 1 (docs/cameras.md): live view only. No detection, recording or
-# snapshots; the DVR keeps recording around the clock on its own.
+# The DVR records both cameras around the clock. Frigate watches the rooftop
+# (camera_1) for people and keeps only those clips, plus a week of its motion;
+# the street (camera_2) is live view only. See docs/cameras.md.
+
+# The config format this file is written in. Without it Frigate assumes an
+# old one and "migrates" it, which breaks masks given as fractions.
+version: 0.18-0
 
 mqtt:
   enabled: false
@@ -22,21 +27,24 @@ auth:
 ffmpeg:
   hwaccel_args: preset-vaapi
 
-# Object detection on the UHD 620 with the SSDLite model bundled in the image.
-# Idle while detect is off; without it Frigate loads a CPU detector anyway.
+# Object detection on the UHD 620 with YOLOv9, built by build-model.sh into
+# /config/models. It sees people from above and at night far better than the
+# SSDLite model bundled in the image.
 detectors:
   ov:
     type: openvino
     device: GPU
 
 model:
-  width: 300
-  height: 300
-  input_tensor: nhwc
-  input_pixel_format: bgr
-  path: /openvino-model/ssdlite_mobilenet_v2.xml
-  labelmap_path: /openvino-model/coco_91cl_bkgr.txt
+  model_type: yolo-generic
+  width: 320
+  height: 320
+  input_tensor: nchw
+  input_dtype: float
+  path: /config/models/yolov9-s-320.onnx
+  labelmap_path: /labelmap/coco-80.txt
 
+# Off unless a camera turns them on.
 detect:
   enabled: false
 
@@ -66,17 +74,92 @@ go2rtc:
 # Channels 3 and 4 of the DVR have no camera plugged in ("NO VIDEO").
 cameras:
   camera_1:
-    friendly_name: Camera 1
+    friendly_name: Rooftop
     ffmpeg:
       inputs:
+        # Clips are copied from the main stream, never re-encoded.
+        - path: rtsp://127.0.0.1:8554/camera_1
+          input_args: preset-rtsp-restream
+          roles:
+            - record
         - path: rtsp://127.0.0.1:8554/camera_1_sub
           input_args: preset-rtsp-restream
           roles:
             - detect
     detect:
+      enabled: true
       width: 960
       height: 576
       fps: 5
+    objects:
+      track:
+        - person
+    # Coordinates are fractions of the frame (x,y pairs), drawn on a 960x576
+    # frame from the sub stream; adjust them in Settings > Masks / Zones.
+    # Write the frame edge as 1.0, never 1.000: Frigate compares the values
+    # as text, takes "1.000" > "1.0" for pixels and rejects the config.
+    motion:
+      mask:
+        timestamp:
+          friendly_name: DVR clock overlay
+          enabled: true
+          coordinates: "0.000,0.020,0.300,0.020,0.300,0.110,0.000,0.110"
+        neighbour_plants:
+          friendly_name: Neighbour's balcony and plants
+          enabled: true
+          coordinates: "0.945,0.550,1.0,0.550,1.0,1.0,0.945,1.0"
+        camera_label:
+          friendly_name: DVR camera name overlay
+          enabled: true
+          coordinates: "0.700,0.860,0.850,0.860,0.850,0.940,0.700,0.940"
+        beyond_walls:
+          friendly_name: Sky and neighbouring buildings
+          enabled: true
+          coordinates: "0.000,0.000,1.0,0.000,1.0,0.550,0.955,0.550,0.955,0.300,0.700,0.180,0.470,0.120,0.460,0.260,0.280,0.260,0.180,0.240,0.000,0.235"
+    zones:
+      # The roof floor and the tops of its walls. A person counts as in the
+      # zone when the bottom of their box (their feet) is inside it.
+      roof:
+        friendly_name: Roof
+        coordinates: "0.000,0.240,0.270,0.260,0.460,0.270,0.470,0.160,0.930,0.350,0.930,1.0,0.000,1.0"
+        objects:
+          - person
+    review:
+      # A person on the roof is an alert; one seen elsewhere (a neighbour's
+      # roof or balcony) is only a detection.
+      alerts:
+        labels:
+          - person
+        required_zones:
+          - roof
+      detections:
+        labels:
+          - person
+    record:
+      enabled: true
+      continuous:
+        days: 0
+      # Any motion on the roof, person or not (a hand over the wall). Kept
+      # short: when the 20 GB fill up Frigate deletes the oldest recordings of
+      # any kind, alerts included. Raise once System > Storage shows room.
+      motion:
+        days: 3
+      alerts:
+        pre_capture: 10
+        post_capture: 10
+        retain:
+          days: 30
+          mode: all
+      detections:
+        retain:
+          days: 7
+          mode: motion
+    snapshots:
+      enabled: true
+      required_zones:
+        - roof
+      retain:
+        default: 30
     # The first entry is what the All Cameras grid plays. The sub stream is
     # H.264 and plays in every browser; the main one is 3K H.265, which
     # Firefox cannot play.
@@ -86,7 +169,7 @@ cameras:
         Main stream: camera_1
 
   camera_2:
-    friendly_name: Camera 2
+    friendly_name: Street
     ffmpeg:
       inputs:
         - path: rtsp://127.0.0.1:8554/camera_2_sub

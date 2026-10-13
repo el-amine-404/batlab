@@ -21,7 +21,14 @@ services:
       - FRIGATE_RTSP_PASSWORD=${FRIGATE_RTSP_PASSWORD:?set in compose/.env}
     volumes:
       - ${VOLUMES_ROOT}/frigate/config:/config
-      - ${VOLUMES_ROOT}/frigate/media:/media/frigate
+      # A 20 GB filesystem of its own (setup-storage.sh). media/frigate exists
+      # only inside it: without the mount the container fails to start instead
+      # of filling the root SSD.
+      - type: bind
+        source: ${VOLUMES_ROOT}/frigate/media/frigate
+        target: /media/frigate
+        bind:
+          create_host_path: false
       # Recording segments are cached here before they are moved to media.
       - type: tmpfs
         target: /tmp/cache

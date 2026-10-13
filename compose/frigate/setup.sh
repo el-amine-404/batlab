@@ -11,6 +11,7 @@ for v in FRIGATE_DVR_HOST FRIGATE_RTSP_USER FRIGATE_RTSP_PASSWORD; do
   [ -n "${!v:-}" ] || { echo "$v is empty in compose/.env (see .env.example)" >&2; exit 1; }
 done
 # Frigate runs as root in its container; the directories only need to exist.
+# Media gets its own filesystem from setup-storage.sh.
 mkdir -p "$dir/config" "$dir/media"
 if [ -e "$dir/config/config.yml" ]; then
   echo "kept $dir/config/config.yml (already there; edit it in Frigate's Settings)"
