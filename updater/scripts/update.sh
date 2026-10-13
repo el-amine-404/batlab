@@ -97,17 +97,19 @@ wait_until_healthy() {
 
 update_service() {
   local stack="$1" service="$2" container="$3" old_image="$4" new_image="$5" built="$6"
-  local compose_file="compose/$stack/docker-compose.yml" reason override fetch=pull
+  local compose_file="compose/$stack/docker-compose.yml" reason override
+  local fetch=(pull --quiet)
   # A locally built image (music-links' spotdl) is rebuilt from the new pins;
-  # there is nothing to pull.
-  [[ "$built" == "yes" ]] && fetch=build
+  # there is nothing to pull. Not --quiet: with it, Compose refuses the
+  # build's network.host entitlement ("additional privileges requested").
+  [[ "$built" == "yes" ]] && fetch=(build)
 
   echo "Updating $service: $old_image -> $new_image"
   if [[ "$DRY_RUN" == "1" ]]; then
     return 0
   fi
 
-  if docker compose "${ENV_ARGS[@]}" -f "$compose_file" "$fetch" --quiet "$service" &&
+  if docker compose "${ENV_ARGS[@]}" -f "$compose_file" "${fetch[@]}" "$service" &&
     docker compose "${ENV_ARGS[@]}" -f "$compose_file" up -d --no-deps "$service" &&
     reason="$(wait_until_healthy "$container")"; then
     notify "$WEBHOOK_OK" "🟢 Updated $service" "$GREEN" \
