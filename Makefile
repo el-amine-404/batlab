@@ -182,6 +182,8 @@ setup: check-env
 		$(VOLUMES_ROOT)/diun/data \
 		$(VOLUMES_ROOT)/dozzle \
 		$(VOLUMES_ROOT)/filebrowser \
+		$(VOLUMES_ROOT)/frigate/config \
+		$(VOLUMES_ROOT)/frigate/media \
 		$(VOLUMES_ROOT)/homepage/icons \
 		$(VOLUMES_ROOT)/homepage/images \
 		$(VOLUMES_ROOT)/homepage/logs \

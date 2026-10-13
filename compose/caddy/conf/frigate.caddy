@@ -1,0 +1,4 @@
+http://frigate.homelab.lan {
+	import localSubnets
+	reverse_proxy @localSubnets http://frigate:8971
+}

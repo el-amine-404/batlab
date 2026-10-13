@@ -10,6 +10,7 @@ dozzle
 feishin
 stanzarr
 filebrowser
+frigate
 gotenberg
 homepage
 immich

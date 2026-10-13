@@ -27,6 +27,7 @@ This document provides a summary of the self-hosted services configured in this 
 | **Prowlarr**     | An indexer manager and proxy that syncs torrent track and Usenet indexers with the Arr stack.            | [prowlarr.com](https://prowlarr.com)                                     |
 | **Bazarr**       | A companion application that automatically searches, downloads, and manages subtitles for Sonarr/Radarr. | [bazarr.media](https://www.bazarr.media)                                 |
 | **Recyclarr**    | A command-line tool that syncs custom quality profiles and formats from TRaSH Guides to Sonarr/Radarr.   | [recyclarr.dev](https://recyclarr.dev)                                   |
+| **Frigate**      | A camera NVR in front of the Hikvision DVR: live view of the home cameras in the browser ([cameras](cameras.md)). | [frigate.video](https://frigate.video)                                   |
 | **Uptime Kuma**  | A self-hosted status page and uptime monitoring tool with multi-channel alerting.                        | [uptime.kuma.pet](https://uptime.kuma.pet)                               |
 | **Portainer**    | A lightweight management console for creating, updating, and viewing Docker containers.                  | [portainer.io](https://www.portainer.io)                                 |
 | **Netdata**      | A real-time system monitoring agent for tracking CPU, memory, and container health metrics.              | [netdata.cloud](https://www.netdata.cloud)                               |

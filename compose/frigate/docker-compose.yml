@@ -1,0 +1,56 @@
+name: ${FRIGATE_PROJECT_NAME}
+# Frigate NVR in front of the Hikvision DVR (docs/cameras.md). The live config
+# is $VOLUMES_ROOT/frigate/config/config.yml, edited from Frigate's Settings
+# UI; compose/frigate/setup.sh seeds it once from config.yml in this directory.
+services:
+  frigate:
+    image: ${IMAGE_FRIGATE}:${TAG_FRIGATE}
+    container_name: frigate
+    restart: unless-stopped
+    # Lets ffmpeg, go2rtc and the database close cleanly on stop.
+    stop_grace_period: 30s
+    # Decoded frames and logs. Frigate asks for 154 MB with 2 cameras at
+    # 960x576 and warns at startup when it is short; raise with more cameras
+    # or a bigger detect size.
+    shm_size: 256mb
+    environment:
+      - TZ=${TZ}
+      # Substituted into config.yml's {FRIGATE_*} placeholders at startup.
+      - FRIGATE_DVR_HOST=${FRIGATE_DVR_HOST:?set in compose/.env}
+      - FRIGATE_RTSP_USER=${FRIGATE_RTSP_USER:?set in compose/.env}
+      - FRIGATE_RTSP_PASSWORD=${FRIGATE_RTSP_PASSWORD:?set in compose/.env}
+    volumes:
+      - ${VOLUMES_ROOT}/frigate/config:/config
+      - ${VOLUMES_ROOT}/frigate/media:/media/frigate
+      # Recording segments are cached here before they are moved to media.
+      - type: tmpfs
+        target: /tmp/cache
+        tmpfs:
+          size: 1000000000
+      - /etc/localtime:/etc/localtime:ro
+    # The UI and API (8971, with login) are reached through Caddy only; 5000
+    # (no login) stays on the home_server network for the Homepage widget.
+    networks:
+      - home_server
+    # VAAPI decoding on the Intel iGPU. The whole /dev/dri: the card and
+    # render node names differ between hosts.
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${RENDER_GID:?set in hosts/<profile>/compose.env}"
+      - "44"
+    mem_limit: ${FRIGATE_MEM_LIMIT:?set in hosts/<profile>/compose.env}
+    mem_reservation: ${FRIGATE_MEM_RESERVATION:?set in hosts/<profile>/compose.env}
+    memswap_limit: ${FRIGATE_MEM_LIMIT:?set in hosts/<profile>/compose.env}
+    cpus: ${FRIGATE_CPUS:?set in hosts/<profile>/compose.env}
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+networks:
+  home_server:
+    external: true
+    name: home_server

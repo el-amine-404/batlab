@@ -1,0 +1,104 @@
+# Seed for $VOLUMES_ROOT/frigate/config/config.yml, copied once by setup.sh.
+# Frigate edits the live copy from its Settings UI (and migrates it on
+# upgrades), so later changes made here are not picked up by themselves.
+#
+# Step 1 (docs/cameras.md): live view only. No detection, recording or
+# snapshots; the DVR keeps recording around the clock on its own.
+
+mqtt:
+  enabled: false
+
+# Caddy terminates the connection and proxies plain HTTP to 8971.
+tls:
+  enabled: false
+
+auth:
+  # Caddy's address on the home_server network: login rate limits then apply
+  # to the real client from X-Forwarded-For, not to Caddy.
+  trusted_proxies:
+    - 172.19.0.0/16
+
+# i5-8350U, UHD 620 (gen 8): VAAPI decodes both H.264 and H.265.
+ffmpeg:
+  hwaccel_args: preset-vaapi
+
+# Object detection on the UHD 620 with the SSDLite model bundled in the image.
+# Idle while detect is off; without it Frigate loads a CPU detector anyway.
+detectors:
+  ov:
+    type: openvino
+    device: GPU
+
+model:
+  width: 300
+  height: 300
+  input_tensor: nhwc
+  input_pixel_format: bgr
+  path: /openvino-model/ssdlite_mobilenet_v2.xml
+  labelmap_path: /openvino-model/coco_91cl_bkgr.txt
+
+detect:
+  enabled: false
+
+record:
+  enabled: false
+
+snapshots:
+  enabled: false
+
+# Two cameras fit the Live grid; Birdseye would only add an encoder.
+birdseye:
+  enabled: false
+
+# One DVR connection per stream, shared by the Live view and Frigate itself.
+# Hikvision paths: Streaming/Channels/<channel><01 main | 02 sub>.
+go2rtc:
+  streams:
+    camera_1:
+      - "rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@{FRIGATE_DVR_HOST}:554/Streaming/Channels/101"
+    camera_1_sub:
+      - "rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@{FRIGATE_DVR_HOST}:554/Streaming/Channels/102"
+    camera_2:
+      - "rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@{FRIGATE_DVR_HOST}:554/Streaming/Channels/201"
+    camera_2_sub:
+      - "rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@{FRIGATE_DVR_HOST}:554/Streaming/Channels/202"
+
+# Channels 3 and 4 of the DVR have no camera plugged in ("NO VIDEO").
+cameras:
+  camera_1:
+    friendly_name: Camera 1
+    ffmpeg:
+      inputs:
+        - path: rtsp://127.0.0.1:8554/camera_1_sub
+          input_args: preset-rtsp-restream
+          roles:
+            - detect
+    detect:
+      width: 960
+      height: 576
+      fps: 5
+    # The first entry is what the All Cameras grid plays. The sub stream is
+    # H.264 and plays in every browser; the main one is 3K H.265, which
+    # Firefox cannot play.
+    live:
+      streams:
+        Sub stream: camera_1_sub
+        Main stream: camera_1
+
+  camera_2:
+    friendly_name: Camera 2
+    ffmpeg:
+      inputs:
+        - path: rtsp://127.0.0.1:8554/camera_2_sub
+          input_args: preset-rtsp-restream
+          roles:
+            - detect
+    detect:
+      width: 960
+      height: 576
+      fps: 5
+    live:
+      streams:
+        Sub stream: camera_2_sub
+        # 4K H.265.
+        Main stream: camera_2

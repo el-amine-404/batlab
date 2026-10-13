@@ -297,6 +297,16 @@
         statusStyle: "dot"
 
 - Utilities:
+    - Frigate:
+        icon: frigate
+        href: http://frigate.homelab.lan
+        description: Home cameras, live view
+        siteMonitor: http://frigate:5000
+        statusStyle: "dot"
+        widget:
+          type: frigate
+          # Port 5000 has no login and is only reachable on home_server.
+          url: http://frigate:5000
     - FileBrowser:
         icon: filebrowser
         href: http://filebrowser.homelab.lan
