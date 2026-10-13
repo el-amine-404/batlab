@@ -114,7 +114,10 @@
         "!louislam/uptime-kuma",
         "!amir20/dozzle",
         "!ghcr.io/netalertx/netalertx",
-        "!ghcr.io/dmunozv04/isponsorblocktv"
+        "!ghcr.io/dmunozv04/isponsorblocktv",
+        "!alexta69/metube",
+        "!spotdl/spotify-downloader",
+        "!yt-dlp"
       ],
       "groupName": "weekly minor and patch updates",
       "schedule": [
@@ -141,7 +144,10 @@
         "louislam/uptime-kuma",
         "amir20/dozzle",
         "ghcr.io/netalertx/netalertx",
-        "ghcr.io/dmunozv04/isponsorblocktv"
+        "ghcr.io/dmunozv04/isponsorblocktv",
+        "alexta69/metube",
+        "spotdl/spotify-downloader",
+        "yt-dlp"
       ],
       "matchUpdateTypes": [
         "minor",
@@ -161,6 +167,31 @@
         "dependencies",
         "major"
       ]
+    },
+    {
+      "description": "MeTube and yt-dlp number releases by date (2026.10.09), so January's first release looks like a major; merge those too",
+      "matchPackageNames": [
+        "alexta69/metube",
+        "yt-dlp"
+      ],
+      "matchUpdateTypes": [
+        "major",
+        "minor",
+        "patch"
+      ],
+      "automerge": true,
+      "automergeType": "branch",
+      "ignoreTests": true,
+      "labels": [
+        "dependencies"
+      ]
+    },
+    {
+      "description": "yt-dlp: a day is enough to catch a broken release, and waiting longer leaves spotDL failing with 403",
+      "matchPackageNames": [
+        "yt-dlp"
+      ],
+      "minimumReleaseAge": "1 day"
     }
   ]
 }

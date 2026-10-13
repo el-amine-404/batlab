@@ -46,7 +46,9 @@ services:
     mem_limit: 1g
 
   spotdl:
-    image: local/batlab-spotdl
+    # The tag names both pins, so a bump of either changes the image the
+    # nightly updater compares against the running one, and it rebuilds.
+    image: local/batlab-spotdl:${TAG_SPOTDL}-yt-dlp-${VERSION_YTDLP}
     build:
       context: ./spotdl
       network: host

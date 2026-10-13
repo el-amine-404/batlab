@@ -12,7 +12,9 @@ Two pieces keep those pins current without hand-editing:
   checkout, compares each running container's image with what the checkout now
   says, and recreates the services listed in `conf/auto-services.txt`. It waits
   for the healthcheck, rolls back to the previous image if the new one does not
-  come up, and removes the old image once the new one is healthy.
+  come up, and removes the old image once the new one is healthy. A service
+  built locally (spotdl) is rebuilt instead of pulled; its image tag names the
+  pins it is built from, so a bumped pin shows up as a different image.
 
 ```
 Renovate ─── automerge? ──▶ main ── nightly git pull ──▶ running image differs?

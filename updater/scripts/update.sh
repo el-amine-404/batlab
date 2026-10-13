@@ -96,15 +96,18 @@ wait_until_healthy() {
 }
 
 update_service() {
-  local stack="$1" service="$2" container="$3" old_image="$4" new_image="$5"
-  local compose_file="compose/$stack/docker-compose.yml" reason override
+  local stack="$1" service="$2" container="$3" old_image="$4" new_image="$5" built="$6"
+  local compose_file="compose/$stack/docker-compose.yml" reason override fetch=pull
+  # A locally built image (music-links' spotdl) is rebuilt from the new pins;
+  # there is nothing to pull.
+  [[ "$built" == "yes" ]] && fetch=build
 
   echo "Updating $service: $old_image -> $new_image"
   if [[ "$DRY_RUN" == "1" ]]; then
     return 0
   fi
 
-  if docker compose "${ENV_ARGS[@]}" -f "$compose_file" pull --quiet "$service" &&
+  if docker compose "${ENV_ARGS[@]}" -f "$compose_file" "$fetch" --quiet "$service" &&
     docker compose "${ENV_ARGS[@]}" -f "$compose_file" up -d --no-deps "$service" &&
     reason="$(wait_until_healthy "$container")"; then
     notify "$WEBHOOK_OK" "🟢 Updated $service" "$GREEN" \
@@ -116,7 +119,9 @@ update_service() {
   reason="${reason:-pull or recreate failed}"
   echo "Update of $service failed ($reason); rolling back to $old_image" >&2
   override="$(mktemp --suffix=.yml)"
-  printf 'services:\n  %s:\n    image: %s\n' "$service" "$old_image" >"$override"
+  # pull_policy: the old image is still here; a built service would otherwise
+  # be rebuilt from the new pins under the old name.
+  printf 'services:\n  %s:\n    image: %s\n    pull_policy: missing\n' "$service" "$old_image" >"$override"
   local rollback="rolled back"
   docker compose "${ENV_ARGS[@]}" -f "$compose_file" -f "$override" up -d --no-deps "$service" &&
     wait_until_healthy "$container" >/dev/null || rollback="ROLLBACK FAILED, check it now"
@@ -151,7 +156,7 @@ main() {
     if [[ -f "$host_stacks" ]] && ! grep -vE '^\s*(#|$)' "$host_stacks" | grep -qxF "$stack"; then
       continue
     fi
-    while IFS=$'\t' read -r service container desired; do
+    while IFS=$'\t' read -r service container desired built; do
       local running_image state
       state="$(docker inspect -f '{{.State.Status}}' "$container" 2>/dev/null || echo missing)"
       [[ "$state" == "running" ]] || continue
@@ -165,7 +170,7 @@ main() {
           echo "Skipping $service: $desired already failed once"
           continue
         fi
-        update_service "$stack" "$service" "$container" "$running_image" "$desired" || failures=$((failures + 1))
+        update_service "$stack" "$service" "$container" "$running_image" "$desired" "$built" || failures=$((failures + 1))
       elif ! seen "$service $desired" pending; then
         echo "Manual update pending for $service: $running_image -> $desired"
         remember "$service $desired" pending
@@ -177,7 +182,8 @@ main() {
       python3 -c '
 import json, sys
 for name, svc in json.load(sys.stdin)["services"].items():
-    print(name, svc.get("container_name", name), svc.get("image", ""), sep="\t")
+    print(name, svc.get("container_name", name), svc.get("image", ""),
+          "yes" if "build" in svc else "no", sep="\t")
 ')
   done
 

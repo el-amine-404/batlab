@@ -289,9 +289,15 @@ spotDL's image carries the yt-dlp it was released with, and YouTube answers an
 old yt-dlp with 403 Forbidden: v4.5.2 (yt-dlp 2026.07.04) failed every download
 on 2026-10-11 while MeTube's 2026.8.19 worked on the same link. So spotDL is
 built locally (`compose/music-links/spotdl`) on the pinned release with the
-yt-dlp from `VERSION_YTDLP` in `compose/versions.env`, which Renovate bumps
-(the `PYPI_`/`VERSION_` manager in `renovate.json`). When spotDL starts failing
-with 403, that pin is the first thing to raise.
+yt-dlp from `VERSION_YTDLP` in `compose/versions.env`. Both stay current on
+their own: Renovate merges new yt-dlp (a day after release), MeTube and spotDL
+minor releases straight into `main`, and the nightly updater redeploys them,
+rebuilding spotDL because its image tag names both pins. A spotDL major (v5)
+still arrives as a pull request. When spotDL starts failing with 403, check
+`#updates` and `#alerts` for a yt-dlp bump that did not land.
+
+spotDL's web page takes track links only: an album or playlist link leaves it
+on "LOADING" (the container log says `Invalid URL`). Request albums in Aurral.
 
 Both are LAN-only (Caddy `localSubnets`) and have no login, like Seerr's
 request page. YouTube audio is lossy (about 130-160 kbps Opus); for an album
