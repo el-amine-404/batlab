@@ -92,10 +92,28 @@ another size. The build runs on the host network: lab2 resolves through
 AdGuard on `127.0.0.1`, which containers on Docker's default bridge cannot
 reach.
 
+### Discord alerts
+
+Each alert (a person in the `roof` zone) is posted to `DISCORD_WEBHOOK_CAMERAS`
+with its snapshot and a link to the clip, which opens only at home. Frigate
+publishes to `mosquitto`, a broker on the stack's internal `mqtt` network that
+no other container joins; `frigate-notify` (`compose/frigate/conf/notify.yml`)
+subscribes and posts. One message per alert, when it starts; an alert that
+starts while `frigate-notify` is restarting is not sent.
+
+To test the whole chain, create a manual alert (it says "person: test"):
+
+```bash
+docker exec frigate curl -s -X POST -H 'Content-Type: application/json' \
+  -d '{"sub_label":"test","duration":10}' \
+  http://127.0.0.1:5000/api/events/camera_1/person/create
+```
+
 ### Install
 
 ```bash
-# compose/.env: FRIGATE_DVR_HOST, FRIGATE_RTSP_USER, FRIGATE_RTSP_PASSWORD
+# compose/.env: FRIGATE_DVR_HOST, FRIGATE_RTSP_USER, FRIGATE_RTSP_PASSWORD,
+# DISCORD_WEBHOOK_CAMERAS
 compose/frigate/setup.sh
 compose/frigate/build-model.sh s 320
 sudo compose/frigate/setup-storage.sh 20G
@@ -106,8 +124,6 @@ make restart STACK=homepage
 
 ### Later
 
-- **Notifications**: Frigate's own web push needs HTTPS; ntfy is the simpler
-  route.
 - **`record.enabled`** must stay `true` on `camera_1`: with it `false` in the
   config, turning recording on from the UI does nothing. `camera_2` cannot
   record until its config says so.
