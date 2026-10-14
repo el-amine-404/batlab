@@ -311,7 +311,11 @@ services:
     user: ${PUID}:${PGID}
     environment:
       - TZ=${TZ}
-      - SCRIPT_INTERVAL=600
+      # Every 6 h, not 10 min: each run searches Soulseek for every wanted
+      # album, and on 2026-10-14 slskd ran 985 searches a day, mostly for
+      # Moroccan albums nobody shares: busy all day, and the account at risk
+      # of a search ban. A new request still goes to the torrent indexers at once.
+      - SCRIPT_INTERVAL=21600
       - WEBUI_ENABLED=true
       - WEBUI_PORT=${SOULARR_WEBUI_PORT}
     volumes:

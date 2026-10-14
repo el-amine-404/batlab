@@ -40,7 +40,9 @@ services:
       - SETGID
       - DAC_OVERRIDE
       - FOWNER
-    mem_limit: 1g
+    # It used 909 MiB of 1 GiB on 2026-10-14 after three days up (no restart
+    # yet): room before Docker kills it mid-download.
+    mem_limit: 1536m
 
 networks:
   home_server:

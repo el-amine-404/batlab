@@ -99,7 +99,7 @@ update_service() {
   local stack="$1" service="$2" container="$3" old_image="$4" new_image="$5" built="$6"
   local compose_file="compose/$stack/docker-compose.yml" reason override
   local fetch=(pull --quiet)
-  # A locally built image (music-links' spotdl) is rebuilt from the new pins;
+  # A locally built image (music-links' songdrop) is rebuilt from the new pins;
   # there is nothing to pull. Not --quiet: with it, Compose refuses the
   # build's network.host entitlement ("additional privileges requested").
   [[ "$built" == "yes" ]] && fetch=(build)

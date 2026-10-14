@@ -1,7 +1,8 @@
 name: ${MUSIC_LINKS_PROJECT_NAME}
-# Paste a link, get the song (docs/music.md). MeTube takes YouTube and the other
-# sites yt-dlp knows; spotDL takes Spotify links and finds the same song on
-# YouTube Music; songdrop does both on one page. All only write into the inbox: musicguard checks each file,
+# Paste a link, get the song (docs/music.md). songdrop takes Spotify links
+# (through spotDL, which finds the same song on YouTube Music) and any site
+# yt-dlp knows; MeTube stays for what songdrop lacks (chapters, clips, channel
+# subscriptions, cookies). Both only write into the inbox: musicguard checks each file,
 # keeps the audio and clean tags, adds lyrics, and files it under music-extras.
 # Nothing they download is ever played straight from where they wrote it.
 #
@@ -45,53 +46,14 @@ services:
       - FOWNER
     mem_limit: 1g
 
-  spotdl:
-    # The tag names both pins, so a bump of either changes the image the
-    # nightly updater compares against the running one, and it rebuilds.
-    image: local/batlab-spotdl:${TAG_SPOTDL}-yt-dlp-${VERSION_YTDLP}
-    build:
-      context: ./spotdl
-      network: host
-      args:
-        BASE_IMAGE: ${IMAGE_SPOTDL}:${TAG_SPOTDL}
-        YTDLP_VERSION: ${VERSION_YTDLP}
-    # Rebuild on every `make up`, so a bumped VERSION_YTDLP is always deployed.
-    pull_policy: build
-    container_name: spotdl
-    # The image's own user is 1000:1000 and keeps Deno (yt-dlp's JavaScript
-    # runtime) in its home, so nothing is mounted over that home.
-    user: "${PUID}:${PGID}"
-    command:
-      - web
-      - --host=0.0.0.0
-      - --port=${SPOTDL_HTTP_PORT}
-      - --keep-alive
-      - --web-use-output-dir
-      - --output=/music/{artists} - {title}.{output-ext}
-      # YouTube Music's own Opus stream, copied without converting: converting
-      # to MP3 would only lose quality.
-      - --format=opus
-      - --bitrate=disable
-    environment:
-      - TZ=${TZ}
-    volumes:
-      - ${DATA_ROOT}/inbox/music/spotdl:/music
-    networks:
-      - home_server
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    mem_limit: 1g
-
   # Paste a link, get the song (compose/music-links/songdrop, docs/music.md):
   # Spotify links through spotDL, any other site yt-dlp knows through yt-dlp,
-  # into the inbox like the two above, and downloadable for a day. Meant to
-  # replace MeTube's and spotDL's own pages.
+  # into the inbox like MeTube, and downloadable for a day. It replaced
+  # spotDL's own page on 2026-10-14; MeTube stays for what songdrop lacks
+  # (chapters, clips, channel subscriptions, cookies).
   songdrop:
-    # Same tag scheme as spotdl: a bumped pin is a different image, which the
-    # nightly updater rebuilds.
+    # The tag names both pins (spotDL and yt-dlp): a bumped pin is a different
+    # image, which the nightly updater rebuilds.
     image: local/batlab-songdrop:${TAG_SPOTDL}-yt-dlp-${VERSION_YTDLP}
     build:
       context: ./songdrop

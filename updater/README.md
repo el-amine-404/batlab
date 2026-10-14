@@ -13,7 +13,7 @@ Two pieces keep those pins current without hand-editing:
   says, and recreates the services listed in `conf/auto-services.txt`. It waits
   for the healthcheck, rolls back to the previous image if the new one does not
   come up, and removes the old image once the new one is healthy. A service
-  built locally (spotdl) is rebuilt instead of pulled; its image tag names the
+  built locally (songdrop) is rebuilt instead of pulled; its image tag names the
   pins it is built from, so a bumped pin shows up as a different image.
 
 ```

@@ -102,12 +102,6 @@
             - field: done
               label: Done
               format: size
-    - spotDL:
-        icon: mdi-spotify
-        href: http://spotdl.homelab.lan
-        description: Paste a Spotify link, get the song
-        siteMonitor: http://spotdl:8800
-        statusStyle: "dot"
     - songdrop:
         icon: mdi-music-circle
         href: http://songdrop.homelab.lan

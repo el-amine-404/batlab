@@ -1,4 +1,5 @@
+# spotDL's own page was replaced by songdrop on 2026-10-14; old bookmarks land there.
 http://spotdl.homelab.lan {
   import localSubnets
-	reverse_proxy @localSubnets http://spotdl:8800
+	redir @localSubnets http://songdrop.homelab.lan{uri} permanent
 }

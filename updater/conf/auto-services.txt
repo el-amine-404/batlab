@@ -22,5 +22,4 @@ dozzle
 netalertx
 isponsorblocktv
 metube
-spotdl
 songdrop

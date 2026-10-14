@@ -22,7 +22,6 @@ This document provides a summary of the self-hosted services configured in this 
 | **Soularr**      | Hands Lidarr's missing albums to slskd and has Lidarr import what it finds.                                | [github.com/mrusse/soularr](https://github.com/mrusse/soularr)           |
 | **songdrop**     | One page for pasted links: Spotify through spotDL, anything else yt-dlp knows; songs go to the music inbox.  | `compose/music-links/songdrop` (built here)                                |
 | **MeTube**       | A web UI for yt-dlp: paste a YouTube link, the song lands in the music inbox.                              | [github.com/alexta69/metube](https://github.com/alexta69/metube)         |
-| **spotDL**       | Paste a Spotify link, the same song is fetched from YouTube Music into the music inbox.                     | [spotdl.rtfd.io](https://spotdl.readthedocs.io)                          |
 | **musicguard**   | (custom) Checks every music file, keeps only audio and clean tags, adds lyrics, quarantines the rest.     | [docs/music.md](music.md)                                                |
 | **Readarr**      | An ebook and audiobook manager that automates downloading and organizing Usenet and BitTorrent files.    | [readarr.com](https://readarr.com)                                       |
 | **Prowlarr**     | An indexer manager and proxy that syncs torrent track and Usenet indexers with the Arr stack.            | [prowlarr.com](https://prowlarr.com)                                     |
