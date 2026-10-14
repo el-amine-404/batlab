@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import type { Field, OptionValues } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 type Props = {
   title: string;
@@ -13,20 +14,22 @@ type Props = {
   values: OptionValues;
   onChange: (values: OptionValues) => void;
   onReset: () => void;
+  /** Inside another card: no frame of its own. */
+  plain?: boolean;
 };
 
 function Flag({ children }: { children: string }) {
   return <code className="rounded bg-white/6 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">{children}</code>;
 }
 
-export function OptionsPanel({ title, fields, values, onChange, onReset }: Props) {
+export function OptionsPanel({ title, fields, values, onChange, onReset, plain = false }: Props) {
   const selects = fields.filter((field) => field.type === "select");
   const switches = fields.filter((field) => field.type === "switch");
   const times = fields.filter((field) => field.type === "time");
   const set = (key: string, value: string | boolean) => onChange({ ...values, [key]: value });
 
   return (
-    <div className="mt-4 rounded-lg border border-border bg-black/15 p-4">
+    <div className={cn(plain ? "pt-4" : "mt-4 rounded-lg border border-border bg-black/15 p-4")}>
       <div className="mb-4 flex items-center justify-between">
         <p className="text-sm font-medium">{title} options</p>
         <Button type="button" variant="ghost" size="sm" onClick={onReset}>

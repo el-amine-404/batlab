@@ -21,7 +21,9 @@ export type Field = {
   label: string;
   help: string;
   choices?: Choice[];
+  /** Where this option starts: the saved default (Settings), else builtin. */
   default: string | boolean;
+  builtin: string | boolean;
   kinds?: string[];
   /** has_playlist: a video inside a playlist; list: a playlist, or a video inside one. */
   needs?: "has_playlist" | "list";
@@ -85,6 +87,28 @@ export type CookieStatus =
   | { present: false }
   | { present: true; saved_at: number; expires_at: number | null; expired: boolean };
 
+export type Settings = {
+  deliver: boolean;
+  output_root: string;
+  output_folder: string;
+  output_folder_exists: boolean;
+  retention_hours: number;
+  max_items: number;
+  concurrent_jobs: number;
+  spotdl_parallel: number;
+  job_timeout_minutes: number;
+  retry_minutes: number[];
+  discord_webhook_set: boolean;
+  public_url: string;
+  defaults: Record<Engine, OptionValues>;
+  limits: Record<string, number[] | number>;
+};
+
+/** What PATCH /api/v1/settings takes: any subset; discord_webhook "" removes it. */
+export type SettingsPatch = Partial<
+  Omit<Settings, "output_root" | "output_folder_exists" | "discord_webhook_set" | "limits">
+> & { discord_webhook?: string };
+
 export const RETRYING: RetryState[] = ["queued", "retrying"];
 
 export const ACTIVE: JobStatus[] = ["queued", "running"];
@@ -123,16 +147,19 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  options: () => request<OptionsSpec>("/api/options"),
+  options: () => request<OptionsSpec>("/api/v1/options"),
   detect: (url: string, signal?: AbortSignal) =>
-    request<Detection>("/api/detect", { method: "POST", body: JSON.stringify({ url }), signal }),
-  jobs: () => request<{ jobs: Job[]; retention_hours: number }>("/api/jobs"),
+    request<Detection>("/api/v1/detect", { method: "POST", body: JSON.stringify({ url }), signal }),
+  jobs: () => request<{ jobs: Job[]; retention_hours: number }>("/api/v1/jobs"),
   create: (url: string, options: OptionValues) =>
-    request<Job>("/api/jobs", { method: "POST", body: JSON.stringify({ url, options }) }),
-  cancel: (id: string) => request<Job>(`/api/jobs/${id}/cancel`, { method: "POST" }),
-  remove: (id: string) => request<void>(`/api/jobs/${id}`, { method: "DELETE" }),
-  retry: (id: string, index: number) => request<Job>(`/api/jobs/${id}/errors/${index}/retry`, { method: "POST" }),
-  cookies: () => request<CookieStatus>("/api/cookies"),
-  saveCookies: (file: File) => request<CookieStatus>("/api/cookies", { method: "PUT", body: file }),
-  removeCookies: () => request<void>("/api/cookies", { method: "DELETE" }),
+    request<Job>("/api/v1/jobs", { method: "POST", body: JSON.stringify({ url, options }) }),
+  cancel: (id: string) => request<Job>(`/api/v1/jobs/${id}/cancel`, { method: "POST" }),
+  remove: (id: string) => request<void>(`/api/v1/jobs/${id}`, { method: "DELETE" }),
+  retry: (id: string, index: number) => request<Job>(`/api/v1/jobs/${id}/errors/${index}/retry`, { method: "POST" }),
+  settings: () => request<Settings>("/api/v1/settings"),
+  saveSettings: (patch: SettingsPatch) =>
+    request<Settings>("/api/v1/settings", { method: "PATCH", body: JSON.stringify(patch) }),
+  cookies: () => request<CookieStatus>("/api/v1/cookies"),
+  saveCookies: (file: File) => request<CookieStatus>("/api/v1/cookies", { method: "PUT", body: file }),
+  removeCookies: () => request<void>("/api/v1/cookies", { method: "DELETE" }),
 };

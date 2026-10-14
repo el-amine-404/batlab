@@ -13,9 +13,11 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import cookies, detect, messages, notify, options  # noqa: E402
+from app import cookies, detect, messages, notify, options, preferences  # noqa: E402
 from app.config import Settings  # noqa: E402
-from app.jobs import MAX_TRIES, JobError, JobManager  # noqa: E402
+from app.jobs import JobError, JobManager  # noqa: E402
+
+MAX_TRIES = 4  # the default schedule: the first try, then 10 min, 1 h and 6 h
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app" / "runners"))
 import verify  # noqa: E402
@@ -311,7 +313,7 @@ class JobsTest(unittest.TestCase):
         runner = root / "fake_runner.py"
         runner.write_text(FAKE_RUNNER)
         self.settings = Settings(
-            port=0, state_dir=root / "state", inbox_dir=root / "inbox", static_dir=root / "static",
+            port=0, state_dir=root / "state", output_root=root, output_folder="inbox", static_dir=root / "static",
             retention_hours=24, max_items=200, concurrent_jobs=1, spotdl_parallel=3,
             job_timeout_seconds=60, spotdl_python=sys.executable, app_python=sys.executable, deno=None,
         )
@@ -350,7 +352,7 @@ class JobsTest(unittest.TestCase):
         job = self._wait(self._submit("ok")["id"])
         self.assertEqual(job["status"], "done")
         self.assertEqual((job["title"], job["total"], job["completed"], job["progress"]), ("Album", 3, 3, 1.0))
-        self.assertEqual(sorted(os.listdir(self.settings.inbox_dir)),
+        self.assertEqual(sorted(os.listdir(self.settings.output_dir)),
                          ["Artist - Song 0.opus", "Artist - Song 1.opus", "Artist - Song 2.opus"])
         self.assertTrue(all(item["delivered"] for item in job["files"]))
         job_dir = self.settings.jobs_dir / job["id"]
@@ -363,7 +365,7 @@ class JobsTest(unittest.TestCase):
         # The same songs again land beside the first copies, never over them.
         second = self._wait(self._submit("ok")["id"])
         self.assertEqual(second["status"], "done")
-        self.assertIn("Artist - Song 0 (2).opus", os.listdir(self.settings.inbox_dir))
+        self.assertIn("Artist - Song 0 (2).opus", os.listdir(self.settings.output_dir))
 
         archive, archive_name = self.manager.archive(job["id"])
         self.assertEqual(archive_name, "Album.zip")
@@ -409,7 +411,7 @@ class JobsTest(unittest.TestCase):
         self.assertEqual(self.manager.expire(now=time.time() + 25 * 3600), 1)
         self.assertFalse((self.settings.jobs_dir / job["id"]).exists())
         # The library keeps its copies; only the download links expire.
-        self.assertEqual(len(os.listdir(self.settings.inbox_dir)), 3)
+        self.assertEqual(len(os.listdir(self.settings.output_dir)), 3)
         other = self._wait(self._submit("ok")["id"])
         self.manager.delete(other["id"])
         with self.assertRaises(JobError):
@@ -463,7 +465,7 @@ class JobsTest(unittest.TestCase):
         job = self._wait(self._spotify("flaky")["id"])
         job = self._try_again(job["id"])
         self.assertEqual((job["status"], job["errors"], job["completed"]), ("done", [], 2))
-        self.assertIn("Artist - Song 1.opus", os.listdir(self.settings.inbox_dir))
+        self.assertIn("Artist - Song 1.opus", os.listdir(self.settings.output_dir))
         path, _ = self.manager.file(job["id"], next(f["id"] for f in job["files"] if f["title"] == "Song 1"))
         self.assertTrue(path.is_file())
         self.assertIn("got Artist - Song 1 on try 2", self.sent[-1][0])
@@ -481,6 +483,89 @@ class JobsTest(unittest.TestCase):
         job = self._wait(self._submit("partial")["id"])
         with self.assertRaises(JobError):
             self.manager.retry(job["id"], 1)  # no link of its own
+
+    def test_settings_apply_while_running(self):
+        changed = preferences.update(self.settings, self.settings.state_dir,
+                                     {"deliver": False, "retry_minutes": [], "retention_hours": 2})
+        self.manager.settings = changed
+        job = self._wait(self._spotify("lost")["id"])
+        self.assertEqual(os.listdir(self.settings.output_dir), [], "not delivered")
+        self.assertFalse(job["files"][0]["delivered"])
+        [error] = job["errors"]
+        self.assertEqual((error["state"], error["max_tries"]), ("gave_up", 1), "no later tries")
+        self.assertEqual(self.manager.expire(now=time.time() + 3 * 3600), 1)
+
+    def test_output_folder_is_made_when_needed(self):
+        self.manager.settings = preferences.update(self.settings, self.settings.state_dir,
+                                                   {"output_folder": "music/new place"})
+        self._wait(self._submit("ok")["id"])
+        self.assertEqual(len(os.listdir(self.settings.output_root / "music" / "new place")), 3)
+
+    def test_the_caller_is_told_when_its_job_ends(self):
+        calls = []
+        with mock.patch.object(notify, "post_json", side_effect=lambda url, payload: calls.append((url, payload))):
+            found = detect.Detection("ytdlp", "YouTube", "playlist", "https://youtube.com/ok")
+            job = self.manager.submit(found, options.parse("ytdlp", {}), "http://browser.lan/hook")
+            self._wait(job["id"])
+            time.sleep(0.2)
+        [(url, payload)] = calls
+        self.assertEqual((url, payload["event"], payload["job"]["status"]), ("http://browser.lan/hook", "job.updated", "done"))
+
+    def test_only_the_set_number_of_jobs_runs_at_once(self):
+        first = self._submit("slow")
+        second = self._submit("ok")
+        time.sleep(1)
+        self.assertEqual(self.manager.get(second["id"])["status"], "queued")
+        self.manager.settings = preferences.update(self.settings, self.settings.state_dir, {"concurrent_jobs": 2})
+        self._wait(second["id"])
+        self.manager.cancel(first["id"])
+
+
+class PreferencesTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.state = Path(self.tmp.name)
+        self.base = Settings(port=0, state_dir=self.state, output_root=Path("/output"), output_folder="music/songdrop",
+                             static_dir=self.state, retention_hours=24, max_items=200, concurrent_jobs=1,
+                             spotdl_parallel=3, job_timeout_seconds=10800, spotdl_python="", app_python="", deno=None,
+                             discord_webhook="https://discord.com/api/webhooks/1/env-secret")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_saved_settings_win_and_survive_a_restart(self):
+        preferences.update(self.base, self.state, {"retention_hours": 48, "output_folder": "/music/elsewhere/"})
+        again = preferences.apply(self.base, preferences.stored(self.state))
+        self.assertEqual((again.retention_hours, again.output_folder), (48, "music/elsewhere"))
+        self.assertEqual(again.max_items, 200, "untouched: the environment's")
+        self.assertEqual(os.stat(self.state / preferences.FILE).st_mode & 0o777, 0o600)
+
+    def test_the_webhook_is_never_shown(self):
+        shown = json.dumps(preferences.public(self.base))
+        self.assertNotIn("env-secret", shown)
+        self.assertTrue(preferences.public(self.base)["discord_webhook_set"])
+        cleared = preferences.update(self.base, self.state, {"discord_webhook": ""})
+        self.assertFalse(preferences.public(cleared)["discord_webhook_set"])
+
+    def test_bad_settings_refused_with_a_reason(self):
+        for bad, words in (({"output_folder": "../etc"}, "inside the output folder"),
+                           ({"output_folder": "/"}, "inside the output folder"),
+                           ({"retry_minutes": [0]}, "between 1 minute"),
+                           ({"discord_webhook": "https://evil.example/hook"}, "Discord webhook"),
+                           ({"concurrent_jobs": 9}, "Concurrent jobs"),
+                           ({"defaults": {"ytdlp": {"format": "wav"}}}, "default download options"),
+                           ({"port": 80}, "Port")):
+            with self.assertRaises(preferences.Invalid, msg=bad) as caught:
+                preferences.update(self.base, self.state, bad)
+            self.assertIn(words, str(caught.exception))
+        self.assertFalse((self.state / preferences.FILE).exists())
+
+    def test_saved_defaults_are_used_by_jobs_and_shown(self):
+        changed = preferences.update(self.base, self.state, {"defaults": {"ytdlp": {"format": "mp3"}}})
+        self.assertEqual(options.with_defaults("ytdlp", changed.defaults).format, "mp3")
+        self.assertEqual(options.with_defaults("ytdlp", changed.defaults, {"format": "m4a"}).format, "m4a")
+        described = {f["key"]: f["default"] for f in options.describe(changed.defaults)["engines"]["ytdlp"]["fields"]}
+        self.assertEqual(described["format"], "mp3")
 
 
 if __name__ == "__main__":

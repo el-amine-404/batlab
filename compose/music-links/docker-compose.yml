@@ -75,12 +75,16 @@ services:
       # to #download-issues beside musicguard's findings.
       - SONGDROP_DISCORD_WEBHOOK=${DISCORD_WEBHOOK_DOWNLOAD_ISSUES:-}
       - SONGDROP_PUBLIC_URL=http://songdrop.homelab.lan
+      # First values; the Settings page can change these and more.
+      - SONGDROP_OUTPUT_FOLDER=music/songdrop
     volumes:
       # Each download's folder; its songs stay downloadable for a day.
       - ${VOLUMES_ROOT}/songdrop/jobs:/state
       # spotDL's work folder, on the SSD rather than in memory.
       - ${VOLUMES_ROOT}/songdrop/spotdl-temp:/home/spotdl/.config/spotdl/temp
-      - ${DATA_ROOT}/inbox/music/songdrop:/inbox
+      # The output folder's parent: the folder itself (music/songdrop, musicguard's
+      # inbox) is a setting, changed from the page (Settings) or the API.
+      - ${DATA_ROOT}/inbox:/output
     tmpfs:
       - /tmp
       - /home/spotdl/.cache

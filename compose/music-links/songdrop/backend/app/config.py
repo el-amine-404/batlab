@@ -1,8 +1,10 @@
-"""Settings, all from the environment (compose/music-links/docker-compose.yml)."""
+"""Settings: the environment gives the first values (compose/music-links/
+docker-compose.yml); what the Settings page or API changes is kept in
+state_dir/settings.json and wins over them (preferences.py)."""
 
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -24,8 +26,11 @@ class Settings:
     port: int
     # Each job's folder: its job.json and the files offered for download.
     state_dir: Path
-    # musicguard's inbox folder for songdrop: every finished song is copied here.
-    inbox_dir: Path
+    # Finished songs are copied to output_root/output_folder when deliver is on:
+    # musicguard's inbox in this stack. Only output_root is mounted, so the
+    # folder can change without touching the container.
+    output_root: Path
+    output_folder: str
     static_dir: Path
     retention_hours: int
     max_items: int
@@ -41,10 +46,19 @@ class Settings:
     discord_webhook: str | None = None
     # The page's address, for links in those messages.
     public_url: str = ""
+    deliver: bool = True
+    # Minutes before each later try of a failed song; empty: none on its own.
+    retry_minutes: tuple[int, ...] = (10, 60, 360)
+    # Download options a job gets unless it says otherwise, per engine.
+    defaults: dict = field(default_factory=dict)
 
     @property
     def jobs_dir(self) -> Path:
         return self.state_dir / "jobs"
+
+    @property
+    def output_dir(self) -> Path:
+        return self.output_root / self.output_folder
 
 
 def load() -> Settings:
@@ -52,7 +66,8 @@ def load() -> Settings:
     return Settings(
         port=_int("SONGDROP_PORT", 8810),
         state_dir=Path(os.environ.get("SONGDROP_STATE", "/state")),
-        inbox_dir=Path(os.environ.get("SONGDROP_INBOX", "/inbox")),
+        output_root=Path(os.environ.get("SONGDROP_OUTPUT", "/output")),
+        output_folder=os.environ.get("SONGDROP_OUTPUT_FOLDER", "music/songdrop").strip("/"),
         static_dir=Path(os.environ.get("SONGDROP_STATIC", "/opt/songdrop/static")),
         retention_hours=_int("SONGDROP_RETENTION_HOURS", 24),
         max_items=_int("SONGDROP_MAX_ITEMS", 200),

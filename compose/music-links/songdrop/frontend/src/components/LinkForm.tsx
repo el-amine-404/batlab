@@ -7,13 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { api, ApiError, type Detection, type Engine, type Field, type OptionValues } from "@/lib/api";
-import { stored, useDetect, useOptionsSpec } from "@/lib/hooks";
+import { useDetect, useOptionsSpec } from "@/lib/hooks";
 import { cn } from "@/lib/utils";
 
 import { engineVariant, kindLabel } from "./labels";
 import { OptionsPanel } from "./OptionsPanel";
-
-const STORAGE_KEY = "songdrop.options.v1";
 
 function defaults(fields: Field[]): OptionValues {
   return Object.fromEntries(fields.map((field) => [field.key, field.default]));
@@ -62,9 +60,8 @@ export function LinkForm({ onCreated }: { onCreated: () => void }) {
   const [showOptions, setShowOptions] = useState(false);
   const spec = useOptionsSpec();
   const { detection, checking } = useDetect(url);
-  const [chosen, setChosen] = useState<Partial<Record<Engine, OptionValues>>>(
-    () => stored.get<Partial<Record<Engine, OptionValues>>>(STORAGE_KEY) ?? {},
-  );
+  // Changes for this download only; they start from the defaults in Settings.
+  const [chosen, setChosen] = useState<Partial<Record<Engine, OptionValues>>>({});
 
   const ready = detection?.supported ? detection : null;
   const engine = ready?.engine;
@@ -74,16 +71,13 @@ export function LinkForm({ onCreated }: { onCreated: () => void }) {
   );
   const values: OptionValues = useMemo(() => {
     if (!engine || !spec) return {};
-    // Saved choices over the defaults, ignoring keys the server no longer has.
+    // This download's choices over the defaults, ignoring keys the server no longer has.
     const base = defaults(spec.engines[engine].fields);
     const saved = chosen[engine] ?? {};
     return { ...base, ...Object.fromEntries(Object.entries(saved).filter(([key]) => key in base)) };
   }, [engine, spec, chosen]);
 
-  const save = (next: Partial<Record<Engine, OptionValues>>) => {
-    setChosen(next);
-    stored.set(STORAGE_KEY, next);
-  };
+  const save = (next: Partial<Record<Engine, OptionValues>>) => setChosen(next);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -96,6 +90,7 @@ export function LinkForm({ onCreated }: { onCreated: () => void }) {
       toast.success("Added", { description: `${job.site} ${kindLabel(job.kind)} queued for download.` });
       setUrl("");
       setShowOptions(false);
+      setChosen({});
       onCreated();
     } catch (caught) {
       toast.error("Couldn't start the download", {

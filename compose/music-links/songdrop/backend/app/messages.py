@@ -9,7 +9,7 @@ _CLASS_PREFIX = re.compile(r"^(?:[A-Z][A-Za-z]+(?:Error|Exception)):\s*")
 
 _KNOWN = [
     (re.compile(r"sign in to confirm you.?re not a bot", re.I),
-     "YouTube asked to confirm this isn't a bot. Try again in a while."),
+     "YouTube asked to confirm this isn't a bot. Try again in a while, or add YouTube cookies in Settings."),
     (re.compile(r"HTTP Error 403|403: Forbidden", re.I),
      "The site refused the download (403). yt-dlp may need an update; the nightly updater installs new ones."),
     (re.compile(r"HTTP Error 429|Too Many Requests", re.I),
@@ -20,7 +20,7 @@ _KNOWN = [
      "No matching song was found to download."),
     (re.compile(r"Private video", re.I), "This video is private."),
     (re.compile(r"members[- ]only", re.I), "This video is for channel members only."),
-    (re.compile(r"age[- ]restricted|confirm your age", re.I), "This video is age-restricted and needs a signed-in account."),
+    (re.compile(r"age[- ]restricted|confirm your age", re.I), "This video is age-restricted: add YouTube cookies in Settings, then retry."),
     (re.compile(r"not available in your country|geo.?restrict", re.I), "This isn't available from this country."),
     (re.compile(r"Video unavailable", re.I), "This video is unavailable."),
     (re.compile(r"Unsupported URL", re.I), "yt-dlp doesn't support this link."),

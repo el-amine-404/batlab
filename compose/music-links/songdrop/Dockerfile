@@ -10,6 +10,8 @@ WORKDIR /src
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund --loglevel=error
 COPY frontend/ ./
+# The docs (/docs) are built from docs/*.md with the page.
+COPY docs/ /docs/
 RUN npm run build
 
 FROM ${BASE_IMAGE}

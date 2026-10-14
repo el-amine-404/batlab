@@ -222,20 +222,29 @@ FIELDS = {
 }
 
 
-def describe() -> dict:
-    """The option fields with their defaults, for GET /api/options."""
+def describe(saved: dict | None = None) -> dict:
+    """The option fields with their defaults (the saved ones over the
+    built-in ones), for GET /api/v1/options."""
     engines = {}
     for engine, model in MODELS.items():
-        defaults = model().model_dump()
+        defaults = with_defaults(engine, saved).model_dump()
+        builtin = model().model_dump()
         engines[engine] = {
             "label": "spotDL" if engine == "spotdl" else "yt-dlp",
-            "fields": [dict(field, default=defaults[field["key"]]) for field in FIELDS[engine]],
+            "fields": [dict(field, default=defaults[field["key"]], builtin=builtin[field["key"]])
+                       for field in FIELDS[engine]],
         }
     return {"engines": engines}
 
 
 def parse(engine: str, raw: dict | None):
     return MODELS[engine].model_validate(raw or {})
+
+
+def with_defaults(engine: str, defaults: dict | None, raw: dict | None = None):
+    """A job's options: the saved defaults (Settings page), then what the job
+    asked for."""
+    return parse(engine, {**((defaults or {}).get(engine) or {}), **(raw or {})})
 
 
 def spotdl_settings(options: SpotdlOptions, job_dir: str, parallel: int, cookies: str | None = None) -> dict:

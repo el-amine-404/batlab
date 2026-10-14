@@ -33,3 +33,20 @@ def minutes(seconds: float) -> str:
         return f"{max(1, round(seconds / 60))} min"
     hours = seconds / 3600
     return f"{hours:.0f} h" if hours >= 2 else f"{hours:.1f} h"
+
+
+def post_json(url: str, payload: dict) -> None:
+    """A job to the callback_url its caller gave; in the background, and a
+    caller that does not answer is only logged."""
+    body = json.dumps(payload, ensure_ascii=False, default=str).encode()
+
+    def post() -> None:
+        request = urllib.request.Request(url, data=body, method="POST",
+                                         headers={"Content-Type": "application/json", "User-Agent": "songdrop"})
+        try:
+            urllib.request.urlopen(request, timeout=15).close()
+        except Exception as exc:
+            log.warning("callback to %s failed: %s", url, exc)
+
+    threading.Thread(target=post, name="callback", daemon=True).start()
+

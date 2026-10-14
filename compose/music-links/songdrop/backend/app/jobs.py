@@ -41,11 +41,12 @@ SCRATCH = (".tmp", ".cache")
 ARCHIVE_DIR = ".archive"
 KILL_GRACE_SECONDS = 10
 JANITOR_INTERVAL_SECONDS = 300
-# A song that failed is tried again on its own, later: YouTube's 403s come in
-# bursts (an album's songs fetched three at a time), and pass. After the last
-# delay, songdrop gives up until someone presses "Retry now".
-RETRY_DELAYS = (600, 3600, 6 * 3600)
-MAX_TRIES = 1 + len(RETRY_DELAYS)
+# A song that failed is tried again on its own, later (settings.retry_minutes,
+# 10 min, 1 h and 6 h unless changed): YouTube's 403s come in bursts (an
+# album's songs fetched three at a time), and pass. After the last delay,
+# songdrop gives up until someone presses "Retry now".
+# Worker threads always running; settings.concurrent_jobs of them may work.
+WORKERS = 4
 RETRY_CHECK_SECONDS = 20
 # Waiting for a later try, queued for one, or in one.
 PENDING = ("waiting", "queued", "retrying")
@@ -77,6 +78,9 @@ class Job:
     errors: list = field(default_factory=list)
     # What is worth knowing besides: a wrong YouTube upload replaced.
     notes: list = field(default_factory=list)
+    # Told the job (as GET /api/v1/jobs/{id} gives it) when it ends, and when
+    # a later try ends.
+    callback_url: str | None = None
     # Songs in progress, index -> {"name", "percent"}; not saved.
     current: dict = field(default_factory=dict, repr=False)
 
@@ -103,15 +107,16 @@ class JobManager:
         self._cancelled: set[str] = set()
         self._stopping = threading.Event()
         self._threads: list[threading.Thread] = []
+        self._busy = 0  # workers on a job or a retry now
 
     # ---- lifecycle -------------------------------------------------------
 
     def start(self) -> None:
         self.settings.jobs_dir.mkdir(parents=True, exist_ok=True)
-        if not self.settings.inbox_dir.is_dir():
-            log.warning("inbox %s is missing; songs will only be downloadable", self.settings.inbox_dir)
+        if self.settings.deliver and not self.settings.output_dir.is_dir():
+            log.warning("output folder %s is missing; it is made with the first song", self.settings.output_dir)
         self._load()
-        for number in range(self.settings.concurrent_jobs):
+        for number in range(WORKERS):
             self._spawn(self._work, f"worker-{number}")
         self._spawn(self._janitor, "janitor")
         self._spawn(self._retrier, "retrier")
@@ -156,7 +161,11 @@ class JobManager:
 
     # ---- public API ------------------------------------------------------
 
-    def submit(self, detection: Detection, options) -> dict:
+    @property
+    def max_tries(self) -> int:
+        return 1 + len(self.settings.retry_minutes)
+
+    def submit(self, detection: Detection, options, callback_url: str | None = None) -> dict:
         job = Job(
             id=uuid.uuid4().hex,
             url=detection.url,
@@ -165,6 +174,7 @@ class JobManager:
             kind=detection.kind,
             options=options.model_dump(),
             created_at=time.time(),
+            callback_url=callback_url,
         )
         self._dir(job.id).mkdir(parents=True)
         with self._lock:
@@ -271,26 +281,43 @@ class JobManager:
 
     def _work(self) -> None:
         while not self._stopping.is_set():
-            try:
-                job_id = self._queue.get(timeout=1)
-            except queue.Empty:
-                continue
-            if ":" in job_id:
-                self._retry(*job_id.split(":", 1))
-                continue
+            # Only settings.concurrent_jobs workers take work at once; the
+            # setting can change while songdrop runs.
             with self._lock:
-                job = self._jobs.get(job_id)
-                if job is None or job.status != "queued":
-                    continue
-                job.status = "running"
-                job.started_at = time.time()
-                self._save(job)
+                free = self._busy < self.settings.concurrent_jobs
+                if free:
+                    self._busy += 1
+            if not free:
+                self._stopping.wait(0.5)
+                continue
             try:
-                self._run(job)
-            except Exception:
-                log.exception("job %s crashed", job.id)
+                self._take_one()
+            finally:
                 with self._lock:
-                    self._finish(job, forced="failed", message="songdrop hit an internal error; see the container log.")
+                    self._busy -= 1
+
+    def _take_one(self) -> None:
+        try:
+            job_id = self._queue.get(timeout=1)
+        except queue.Empty:
+            return
+        if ":" in job_id:
+            self._retry(*job_id.split(":", 1))
+            return
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.status != "queued":
+                return
+            job.status = "running"
+            job.started_at = time.time()
+            self._save(job)
+        try:
+            self._run(job)
+        except Exception:
+            log.exception("job %s crashed", job.id)
+            with self._lock:
+                self._finish(job, forced="failed", message="songdrop hit an internal error; see the container log.")
+                self._call_back(job)
 
     def _runner_command(self, job: Job, job_dir: Path, url: str | None = None) -> tuple[list[str], dict]:
         settings = self.settings
@@ -342,6 +369,7 @@ class JobManager:
                 self._finish(job)
             self._schedule_retries(job)
             self._announce(job)
+            self._call_back(job)
 
     def _execute(self, job: Job, job_dir: Path, command: list[str], config: dict, on_event):
         """Runs a runner; on_event(event) is called under the lock for each
@@ -446,7 +474,11 @@ class JobManager:
             return
         for entry in job.errors:
             if entry.get("url") and "state" not in entry and "explicit" not in entry["message"].lower():
-                entry.update(state="waiting", tries=1, next_retry_at=time.time() + RETRY_DELAYS[0])
+                delays = self.settings.retry_minutes
+                if delays:
+                    entry.update(state="waiting", tries=1, next_retry_at=time.time() + delays[0] * 60)
+                else:  # no later tries: "Retry now" only
+                    entry.update(state="gave_up", tries=1, next_retry_at=None)
         self._save(job)
 
     def _retry(self, job_id: str, index_text: str) -> None:
@@ -493,19 +525,22 @@ class JobManager:
                 job.finished_at = time.time()  # its link lasts from now
                 self._save(job)
                 self._announce_retry(job, entry, got=True)
+                self._call_back(job)
                 return
             shutil.rmtree(retry_dir, ignore_errors=True)
             reason = failures[-1] if failures else (fatal or "The download stopped unexpectedly.")
             log.info("job %s: try %d of %s failed: %s\n%s", job.id, entry["tries"], entry["name"], reason,
                      "\n".join(output))
             entry["message"] = messages.friendly(reason)
-            if entry["tries"] < MAX_TRIES:
+            delays = self.settings.retry_minutes
+            if entry["tries"] - 1 < len(delays):
                 entry["state"] = "waiting"
-                entry["next_retry_at"] = time.time() + RETRY_DELAYS[entry["tries"] - 1]
+                entry["next_retry_at"] = time.time() + delays[entry["tries"] - 1] * 60
             else:
                 entry["state"] = "gave_up"
                 entry["next_retry_at"] = None
                 self._announce_retry(job, entry, got=False)
+                self._call_back(job)
             self._save(job)
 
     # ---- Discord ---------------------------------------------------------------
@@ -540,6 +575,11 @@ class JobManager:
             line = (f"**songdrop** · gave up on {entry['name']} after {entry['tries']} tries ({name}): "
                     f"{entry['message']} Press \"Retry now\" on the page to try once more{self._page()}")
         notify.send(self.settings.discord_webhook, [line])
+
+    def _call_back(self, job: Job) -> None:
+        """The caller that asked to be told (callback_url) gets the job."""
+        if job.callback_url:
+            notify.post_json(job.callback_url, {"event": "job.updated", "job": self._public(job)})
 
     def _drain(self, job_id: str, process: subprocess.Popen, output: deque) -> None:
         for raw in process.stdout:
@@ -601,24 +641,26 @@ class JobManager:
             "artist": (str(event["artist"])[:300] if event.get("artist") else None),
             "delivered": False,
         }
-        try:
-            self._deliver(path)
-            entry["delivered"] = True
-        except OSError as exc:
-            log.error("job %s: could not copy %s to the inbox: %s", job.id, path.name, exc)
-            job.errors.append({
-                "index": event.get("index"),
-                "name": path.name,
-                "message": "Downloaded, but it couldn't be added to the library. Download it from here instead.",
-            })
+        if self.settings.deliver:
+            try:
+                self._deliver(path)
+                entry["delivered"] = True
+            except OSError as exc:
+                log.error("job %s: could not copy %s to %s: %s", job.id, path.name, self.settings.output_dir, exc)
+                job.errors.append({
+                    "index": event.get("index"),
+                    "name": path.name,
+                    "message": "Downloaded, but it couldn't be copied to the output folder. Download it from here instead.",
+                })
         job.files.append(entry)
 
     def _deliver(self, path: Path) -> None:
-        """Copies a song into the inbox under a name nothing else has. It is
-        written as a dot file and renamed when complete: musicguard skips dot
-        files, so it never sees half a song."""
-        inbox = self.settings.inbox_dir
+        """Copies a song into the output folder under a name nothing else has.
+        It is written as a dot file and renamed when complete: musicguard
+        skips dot files, so it never sees half a song."""
+        inbox = self.settings.output_dir
         with self._deliver_lock:
+            inbox.mkdir(parents=True, exist_ok=True)
             stem, ext = os.path.splitext(path.name)
             target = inbox / path.name
             number = 2
@@ -780,7 +822,7 @@ class JobManager:
                     "title": item["title"],
                     "artist": item["artist"],
                     "delivered": item["delivered"],
-                    "url": f"/api/jobs/{job.id}/files/{item['id']}",
+                    "url": f"/api/v1/jobs/{job.id}/files/{item['id']}",
                 }
                 for item in sorted(job.files, key=lambda entry: (entry["index"] is None, entry["index"] or 0))
             ],
@@ -792,11 +834,11 @@ class JobManager:
                     "url": item.get("url"),
                     "state": item.get("state", "failed"),
                     "tries": item.get("tries", 1),
-                    "max_tries": MAX_TRIES,
+                    "max_tries": self.max_tries,
                     "next_retry_at": item.get("next_retry_at"),
                 }
                 for item in job.errors
             ],
             "notes": [dict(item) for item in job.notes],
-            "archive_url": f"/api/jobs/{job.id}/archive" if len(job.files) > 1 and job.status not in ACTIVE else None,
+            "archive_url": f"/api/v1/jobs/{job.id}/archive" if len(job.files) > 1 and job.status not in ACTIVE else None,
         }

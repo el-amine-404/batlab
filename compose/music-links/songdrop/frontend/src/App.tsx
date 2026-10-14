@@ -1,63 +1,57 @@
-import { CloudOff, Inbox } from "lucide-react";
+import { BookOpen, Download, Settings as SettingsIcon } from "lucide-react";
 import { Toaster } from "sonner";
 
-import { CookiesCard } from "@/components/CookiesCard";
-import { JobCard } from "@/components/JobCard";
-import { LinkForm } from "@/components/LinkForm";
 import { Logo } from "@/components/Logo";
-import { Card } from "@/components/ui/card";
-import { useJobs } from "@/lib/hooks";
+import { hrefFor, type Route, useRoute } from "@/lib/route";
+import { cn } from "@/lib/utils";
+import { DownloadsPage } from "@/pages/DownloadsPage";
+import { SettingsPage } from "@/pages/SettingsPage";
+
+const TABS: { route: Route; label: string; icon: typeof Download }[] = [
+  { route: "downloads", label: "Downloads", icon: Download },
+  { route: "settings", label: "Settings", icon: SettingsIcon },
+];
 
 export function App() {
-  const { jobs, error, refresh } = useJobs();
+  const route = useRoute();
 
   return (
     <>
       <div className="backdrop" aria-hidden />
-      <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-[max(2rem,env(safe-area-inset-top))] pb-[max(3rem,env(safe-area-inset-bottom))] sm:pt-16">
-        <header className="flex items-center gap-3.5">
-          <Logo className="size-12" />
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">songdrop</h1>
-            <p className="text-sm text-muted-foreground">Paste a link. Get the song in your library.</p>
-          </div>
-        </header>
+      <header className="sticky top-0 z-20 border-b border-border bg-background/75 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
+        <div className="mx-auto flex h-14 w-full max-w-3xl items-center gap-2 px-4">
+          <a href={hrefFor("downloads")} className="mr-2 flex items-center gap-2.5 font-semibold tracking-tight">
+            <Logo className="size-7" />
+            <span className="hidden sm:inline">songdrop</span>
+          </a>
+          <nav className="flex items-center gap-1" aria-label="Main">
+            {TABS.map(({ route: target, label, icon: Icon }) => (
+              <a
+                key={target}
+                href={hrefFor(target)}
+                aria-current={route === target ? "page" : undefined}
+                className={cn(
+                  "flex h-9 items-center gap-2 rounded-lg px-3 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                  route === target && "bg-accent text-foreground",
+                )}
+              >
+                <Icon className="size-4" /> {label}
+              </a>
+            ))}
+          </nav>
+          <a
+            href="/docs/"
+            target="_blank"
+            rel="noopener"
+            className="ml-auto flex h-9 items-center gap-2 rounded-lg px-3 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <BookOpen className="size-4" /> <span className="hidden sm:inline">Docs</span>
+          </a>
+        </div>
+      </header>
 
-        <LinkForm onCreated={refresh} />
-
-        <section aria-labelledby="downloads" className="flex flex-col gap-3">
-          <div className="flex items-center justify-between px-1">
-            <h2 id="downloads" className="text-sm font-medium text-muted-foreground">
-              Downloads
-            </h2>
-            {jobs && jobs.length > 0 && <span className="text-xs text-muted-foreground tabular-nums">{jobs.length}</span>}
-          </div>
-
-          {error && (
-            <Card className="flex items-center gap-3 border-destructive/30 p-4 text-sm text-destructive">
-              <CloudOff className="size-4 shrink-0" /> {error}
-            </Card>
-          )}
-
-          {jobs && jobs.length === 0 && (
-            <Card className="flex flex-col items-center gap-2 px-6 py-10 text-center">
-              <Inbox className="size-8 text-muted-foreground/60" />
-              <p className="text-sm font-medium">Nothing here yet</p>
-              <p className="max-w-xs text-xs text-muted-foreground">
-                Paste a song, album or playlist link above. Each song is checked and added to Navidrome.
-              </p>
-            </Card>
-          )}
-
-          {jobs?.map((job) => <JobCard key={job.id} job={job} onChange={refresh} />)}
-        </section>
-
-        <CookiesCard />
-
-        <footer className="px-1 text-center text-xs leading-relaxed text-muted-foreground/70">
-          Spotify links go through spotDL, everything else through yt-dlp. Songs are checked by musicguard, then
-          appear in Navidrome; download links last a day.
-        </footer>
+      <main className="mx-auto w-full max-w-3xl px-4 pt-6 pb-[max(3rem,env(safe-area-inset-bottom))] sm:pt-8">
+        {route === "settings" ? <SettingsPage /> : <DownloadsPage />}
       </main>
       <Toaster theme="dark" position="top-center" richColors closeButton />
     </>

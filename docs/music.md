@@ -354,6 +354,15 @@ still arrives as a pull request. When spotDL starts failing with 403, check
 
 ### songdrop
 
+songdrop's own docs, for using it and for its API (`/api/v1`), are on the
+service: http://songdrop.homelab.lan/docs (sources in
+`compose/music-links/songdrop/docs/*.md`, built to HTML with the page). Its
+Settings screen changes the output folder (inside the inbox, mounted at
+`/output`), how long downloads stay, how much runs at once, the later tries,
+Discord, the default options and the YouTube cookies; they are kept in
+`$VOLUMES_ROOT/songdrop/jobs/settings.json` over the environment's values.
+What it does and does not do is in [services.md](services.md).
+
 FastAPI with a React page (shadcn/ui, Tailwind), in one container on spotDL's
 image. Each link is a job; one runs at a time (`SONGDROP_CONCURRENT_JOBS`),
 and spotDL fetches three of its songs at once. The engines run as child
