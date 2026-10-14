@@ -499,6 +499,29 @@ class Identification(GuardTestCase):
         self.inbox_twice()
         self.assertEqual(self.all_files(self.extras), ["Stormy/OMEGA - EP (2025)/PIRATE.mp3"])
 
+    def spotdl_la_paille(self):
+        path = os.path.join(self.inbox, "songdrop", "ElGrandeToto - La Paille.mp3")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tone(path)
+        audio = mutagen.File(path, easy=True)
+        audio["title"], audio["artist"], audio["isrc"] = "La Paille", "ElGrandeToto", "BEIY42000009"
+        audio.save()
+        self.guard.config.identify = True
+        guard.identify.recognise.return_value = identify.Match("Pala Lagat Rahe Ho Lahnga", "Chhote Raja")
+
+    def test_a_catalogue_named_download_of_other_audio_is_quarantined(self):
+        self.spotdl_la_paille()
+        guard.reference.compare.return_value = None  # no Apple preview to compare with
+        self.inbox_twice()
+        self.assertEqual(self.all_files(self.extras), [])
+        self.assertEqual(self.quarantined_reasons(), ["WRONG_SONG"])
+
+    def test_a_catalogue_named_download_like_the_real_song_keeps_its_name(self):
+        self.spotdl_la_paille()
+        guard.reference.compare.return_value = 0.95
+        self.inbox_twice()
+        self.assertEqual(self.all_files(self.extras), ["ElGrandeToto/La Paille/01 - La Paille.mp3"])
+
     def test_a_wrong_song_in_a_library_is_quarantined_once_new(self):
         path = os.path.join(self.music, "Georgie Fame", "Hits (2004)", "26 - Stormy.mp3")
         os.makedirs(os.path.dirname(path))

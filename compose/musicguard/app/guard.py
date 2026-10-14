@@ -384,6 +384,20 @@ class Guard:
         if not match:
             return found, None
         title, artist = layout.first(found, "title"), layout.first(found, "artist")
+        if "isrc" in found and identify.contradicts(match, title, artist):
+            # An ISRC means a catalogue (spotDL's Spotify) named the song, not a
+            # video title: other audio under it is a wrong download, never a
+            # song to file under whatever Shazam calls it.
+            detail = f"tagged {artist} - {title}, Shazam hears {match!r}"
+            try:
+                score = reference.compare(path, title, artist)
+            except Exception as error:
+                log(f"reference comparison failed for {path}: {error}")
+                score = None
+            if score is None or score < reference.SAME:
+                raise Reject("WRONG_SONG", detail)
+            notes.append(f"{detail}; kept: it is Apple Music's {artist} - {title} ({score:.2f} alike)")
+            return found, None
         if not identify.agrees(match, title, artist):
             notes.append(f"identified by Shazam as {match!r} (file said {artist} - {title})")
             found, _ = tagging.collect([("title", match.title), ("artist", match.artist),
