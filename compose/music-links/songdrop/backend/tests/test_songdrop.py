@@ -13,9 +13,9 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import detect, messages, options  # noqa: E402
+from app import detect, messages, notify, options  # noqa: E402
 from app.config import Settings  # noqa: E402
-from app.jobs import JobError, JobManager  # noqa: E402
+from app.jobs import MAX_TRIES, JobError, JobManager  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app" / "runners"))
 import verify  # noqa: E402
@@ -150,6 +150,28 @@ FAKE_RUNNER = textwrap.dedent('''
     if mode == "crash":
         print("Traceback: something broke", flush=True)
         sys.exit(3)
+    if mode == "comesback":
+        emit("meta", title="Artist - Song 1", total=1)
+        path = os.path.join(here, "Artist - Song 1.opus")
+        with open(path, "wb") as handle:
+            handle.write(b"OggS" + bytes(50))
+        emit("file", index=0, path=path, title="Song 1", artist="Artist")
+        sys.exit(0)
+    if mode == "staysgone":
+        emit("meta", title="Artist - Song 1", total=1)
+        emit("item_error", index=0, name="Artist - Song 1", message="HTTP Error 403: Forbidden",
+             url="https://open.spotify.com/track/staysgone")
+        sys.exit(0)
+    if mode in ("flaky", "lost"):
+        emit("meta", title="Album", total=2)
+        path = os.path.join(here, "Artist - Song 0.opus")
+        with open(path, "wb") as handle:
+            handle.write(b"OggS" + bytes(10))
+        emit("file", index=0, path=path, title="Song 0", artist="Artist")
+        emit("note", index=0, name="Artist - Song 0", message="YouTube's first pick was another song; replaced.")
+        url = "https://open.spotify.com/track/" + ("comesback" if mode == "flaky" else "staysgone")
+        emit("item_error", index=1, name="Artist - Song 1", message="HTTP Error 403: Forbidden", url=url)
+        sys.exit(0)
     if mode == "slow":
         emit("meta", title="Slow", total=1)
         emit("item_start", index=0, name="slow")
@@ -183,16 +205,21 @@ class JobsTest(unittest.TestCase):
             job_timeout_seconds=60, spotdl_python=sys.executable, app_python=sys.executable, deno=None,
         )
         self.runner = runner
+        self.sent = []
+        self.notify = mock.patch.object(notify, "send", side_effect=lambda hook, lines: self.sent.append(lines))
+        self.notify.start()
         self.manager = self._manager()
 
     def _manager(self):
         manager = JobManager(self.settings)
-        manager._runner_command = lambda job, job_dir: ([sys.executable, str(self.runner)], {"url": job.url})
+        manager._runner_command = lambda job, job_dir, url=None: ([sys.executable, str(self.runner)],
+                                                                  {"url": url or job.url})
         manager.start()
         return manager
 
     def tearDown(self):
         self.manager.stop()
+        self.notify.stop()
         self.tmp.cleanup()
 
     def _submit(self, mode):
@@ -236,7 +263,8 @@ class JobsTest(unittest.TestCase):
         job = self._wait(self._submit("partial")["id"])
         self.assertEqual(job["status"], "partial")
         self.assertEqual(job["completed"], 2)
-        self.assertEqual(job["errors"], [{"name": "song 1", "message": "No matching song was found to download."}])
+        self.assertEqual([(e["name"], e["message"], e["state"]) for e in job["errors"]],
+                         [("song 1", "No matching song was found to download.", "failed")])
 
     def test_fatal_and_crash(self):
         job = self._wait(self._submit("fatal")["id"])
@@ -287,6 +315,61 @@ class JobsTest(unittest.TestCase):
         reloaded = self.manager.get(job["id"])
         self.assertEqual(reloaded["status"], "partial")
         self.assertIn("restarted", reloaded["message"])
+
+
+    def _spotify(self, mode):
+        found = detect.Detection("spotdl", "Spotify", "album", f"https://open.spotify.com/album/{mode}")
+        return self.manager.submit(found, options.parse("spotdl", {}))
+
+    def _try_again(self, job_id, timeout=20):
+        """Presses "Retry now" and waits for that try to end."""
+        self.manager.retry(job_id, 1)
+        self.manager._queue_due_retries()
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            job = self.manager.get(job_id)
+            if not any(e["state"] in ("queued", "retrying") for e in job["errors"]):
+                return job
+            time.sleep(0.05)
+        self.fail("retry did not end")
+
+    def test_a_missing_song_waits_for_a_later_try_and_discord_hears(self):
+        job = self._wait(self._spotify("flaky")["id"])
+        self.assertEqual(job["status"], "partial")
+        [error] = job["errors"]
+        self.assertEqual((error["state"], error["tries"], error["max_tries"]), ("waiting", 1, MAX_TRIES))
+        self.assertAlmostEqual(error["next_retry_at"], time.time() + 600, delta=30)
+        self.assertEqual(error["url"], "https://open.spotify.com/track/comesback")
+        self.assertEqual(job["notes"][0]["name"], "Artist - Song 0")
+        [message] = self.sent
+        self.assertIn("1 of 2 songs", message[0])
+        self.assertTrue(any("Artist - Song 1" in line and "Trying again in 10 min" in line for line in message))
+        self.assertTrue(any("another song" in line for line in message))
+        # Not removed while a try is pending, whatever its age.
+        self.assertEqual(self.manager.expire(now=time.time() + 25 * 3600), 0)
+
+    def test_a_later_try_offers_the_song(self):
+        job = self._wait(self._spotify("flaky")["id"])
+        job = self._try_again(job["id"])
+        self.assertEqual((job["status"], job["errors"], job["completed"]), ("done", [], 2))
+        self.assertIn("Artist - Song 1.opus", os.listdir(self.settings.inbox_dir))
+        path, _ = self.manager.file(job["id"], next(f["id"] for f in job["files"] if f["title"] == "Song 1"))
+        self.assertTrue(path.is_file())
+        self.assertIn("got Artist - Song 1 on try 2", self.sent[-1][0])
+
+    def test_gives_up_after_the_last_try_and_says_so(self):
+        job = self._wait(self._spotify("lost")["id"])
+        for _ in range(MAX_TRIES - 1):
+            job = self._try_again(job["id"])
+        [error] = job["errors"]
+        self.assertEqual((error["state"], error["tries"], error["next_retry_at"]), ("gave_up", MAX_TRIES, None))
+        self.assertIn("gave up on Artist - Song 1", self.sent[-1][0])
+        self.assertEqual(self.manager.expire(now=time.time() + 25 * 3600), 1)
+
+    def test_no_retry_while_running_or_for_unknown_songs(self):
+        job = self._wait(self._submit("partial")["id"])
+        with self.assertRaises(JobError):
+            self.manager.retry(job["id"], 1)  # no link of its own
 
 
 if __name__ == "__main__":

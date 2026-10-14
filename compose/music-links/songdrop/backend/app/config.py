@@ -37,6 +37,10 @@ class Settings:
     app_python: str
     # spotDL's Deno, which yt-dlp needs for YouTube's challenge scripts.
     deno: str | None
+    # Discord: songs still missing after a job, and what later tries bring back.
+    discord_webhook: str | None = None
+    # The page's address, for links in those messages.
+    public_url: str = ""
 
     @property
     def jobs_dir(self) -> Path:
@@ -58,4 +62,6 @@ def load() -> Settings:
         spotdl_python=os.environ.get("SONGDROP_SPOTDL_PYTHON", "/app/.venv/bin/python"),
         app_python=os.environ.get("SONGDROP_APP_PYTHON", sys.executable),
         deno=deno if os.access(deno, os.X_OK) else None,
+        discord_webhook=os.environ.get("SONGDROP_DISCORD_WEBHOOK", "").strip() or None,
+        public_url=os.environ.get("SONGDROP_PUBLIC_URL", "").strip().rstrip("/"),
     )

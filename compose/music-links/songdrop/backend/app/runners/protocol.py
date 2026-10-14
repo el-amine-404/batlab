@@ -8,7 +8,9 @@ Events, all with a "type":
   item_start  index, name             a song started
   progress    index, percent          download progress of a song (0-100)
   file        index, path, title, artist
-  item_error  index, name, message    one song failed; the job goes on
+  item_error  index, name, message, url?   one song failed; the job goes on
+                                      (url: the song's own link, to retry it alone)
+  note        index, name, message    worth knowing: a wrong upload replaced
   fatal       message                 the whole job failed
 """
 

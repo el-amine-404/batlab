@@ -109,6 +109,10 @@ services:
       - TZ=${TZ}
       - SONGDROP_PORT=${SONGDROP_HTTP_PORT:?set in compose/.env}
       - SONGDROP_RETENTION_HOURS=24
+      # Songs still missing after a download, and what later tries bring back,
+      # to #download-issues beside musicguard's findings.
+      - SONGDROP_DISCORD_WEBHOOK=${DISCORD_WEBHOOK_DOWNLOAD_ISSUES:-}
+      - SONGDROP_PUBLIC_URL=http://songdrop.homelab.lan
     volumes:
       # Each download's folder; its songs stay downloadable for a day.
       - ${VOLUMES_ROOT}/songdrop/jobs:/state

@@ -59,9 +59,27 @@ export type Job = {
   finished_at: number | null;
   expires_at: number | null;
   files: JobFile[];
-  errors: { name: string; message: string }[];
+  errors: JobError[];
+  notes: { name: string; message: string }[];
   archive_url: string | null;
 };
+
+/** A song that failed: "waiting" for a later try, "queued" or "retrying" for
+ * one now, "gave_up" after the last, "failed" when it can't be tried alone. */
+export type RetryState = "waiting" | "queued" | "retrying" | "gave_up" | "failed";
+
+export type JobError = {
+  index: number | null;
+  name: string;
+  message: string;
+  url: string | null;
+  state: RetryState;
+  tries: number;
+  max_tries: number;
+  next_retry_at: number | null;
+};
+
+export const RETRYING: RetryState[] = ["queued", "retrying"];
 
 export const ACTIVE: JobStatus[] = ["queued", "running"];
 
@@ -107,4 +125,5 @@ export const api = {
     request<Job>("/api/jobs", { method: "POST", body: JSON.stringify({ url, options }) }),
   cancel: (id: string) => request<Job>(`/api/jobs/${id}/cancel`, { method: "POST" }),
   remove: (id: string) => request<void>(`/api/jobs/${id}`, { method: "DELETE" }),
+  retry: (id: string, index: number) => request<Job>(`/api/jobs/${id}/errors/${index}/retry`, { method: "POST" }),
 };

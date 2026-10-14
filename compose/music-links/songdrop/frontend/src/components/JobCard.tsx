@@ -5,10 +5,13 @@ import {
   Clock,
   Disc3,
   Download,
+  ExternalLink,
   FolderDown,
+  Info,
   ListMusic,
   Loader2,
   Music2,
+  RotateCw,
   Trash2,
   User,
   X,
@@ -20,7 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { ACTIVE, api, ApiError, type Job } from "@/lib/api";
+import { ACTIVE, api, ApiError, RETRYING, type Job, type JobError } from "@/lib/api";
 import { cn, formatBytes, timeAgo, timeLeft } from "@/lib/utils";
 
 import { engineVariant, kindLabel } from "./labels";
@@ -154,20 +157,37 @@ export function JobCard({ job, onChange }: { job: Job; onChange: () => void }) {
       )}
 
       {job.errors.length > 0 && (
-        <details className="group mt-3">
-          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-sm text-warning marker:hidden">
-            <AlertTriangle className="size-4" />
-            {job.errors.length} {job.errors.length === 1 ? "song" : "songs"} couldn't be downloaded
-          </summary>
-          <ul className="mt-2 space-y-2 border-l border-warning/30 pl-3">
-            {job.errors.map((error, index) => (
-              <li key={index} className="text-xs">
-                <p className="font-medium text-foreground/90">{error.name}</p>
-                <p className="text-muted-foreground">{error.message}</p>
-              </li>
+        <section className="mt-4 rounded-lg border border-warning/30 bg-warning/5 p-3">
+          <p className="flex items-center gap-1.5 text-sm font-medium text-warning">
+            <AlertTriangle className="size-4 shrink-0" />
+            {missingHeadline(job.errors)}
+          </p>
+          <ul className="mt-2 divide-y divide-warning/15">
+            {job.errors.map((error, position) => (
+              <MissingSong
+                key={error.index ?? `at-${position}`}
+                error={error}
+                canRetry={!active && !acting}
+                onRetry={() =>
+                  error.index !== null && act(() => api.retry(job.id, error.index as number), "Couldn't try again")
+                }
+              />
             ))}
           </ul>
-        </details>
+        </section>
+      )}
+
+      {job.notes.length > 0 && (
+        <ul className="mt-3 space-y-1">
+          {job.notes.map((note, position) => (
+            <li key={position} className="flex gap-1.5 text-xs text-muted-foreground">
+              <Info className="mt-0.5 size-3.5 shrink-0" />
+              <span>
+                <span className="text-foreground/80">{note.name}</span>: {note.message}
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
 
       {!active && job.files.length > 0 && (
@@ -186,5 +206,52 @@ export function JobCard({ job, onChange }: { job: Job; onChange: () => void }) {
         </div>
       )}
     </Card>
+  );
+}
+
+function missingHeadline(errors: JobError[]): string {
+  const count = errors.length === 1 ? "1 song is" : `${errors.length} songs are`;
+  const later = errors.some((error) => error.state === "waiting" || RETRYING.includes(error.state));
+  return later ? `${count} still missing. songdrop keeps trying on its own.` : `${count} missing.`;
+}
+
+function MissingSong({ error, canRetry, onRetry }: { error: JobError; canRetry: boolean; onRetry: () => void }) {
+  const busy = RETRYING.includes(error.state);
+  const spotify = error.url?.startsWith("https://open.spotify.com/") ? error.url : null;
+  return (
+    <li className="flex flex-col gap-2 py-2.5 first:pt-1 last:pb-0 sm:flex-row sm:items-center sm:gap-3">
+      <div className="min-w-0 flex-1 text-xs">
+        <p className="truncate text-sm font-medium text-foreground/90">{error.name}</p>
+        <p className="text-muted-foreground">{error.message}</p>
+        <p className="mt-1 flex items-center gap-1.5 text-foreground/70">
+          {busy && (
+            <>
+              <Loader2 className="size-3.5 animate-spin" /> Trying again now…
+            </>
+          )}
+          {error.state === "waiting" && error.next_retry_at && (
+            <>
+              <Clock className="size-3.5" /> Next try in {timeLeft(error.next_retry_at)} (try {error.tries + 1} of{" "}
+              {error.max_tries})
+            </>
+          )}
+          {error.state === "gave_up" && <>Gave up after {error.tries} tries.</>}
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        {spotify && (
+          <Button asChild variant="ghost" size="sm">
+            <a href={spotify} target="_blank" rel="noreferrer noopener" title="Open this song on Spotify">
+              <ExternalLink /> Spotify
+            </a>
+          </Button>
+        )}
+        {error.url && (error.state === "waiting" || error.state === "gave_up") && (
+          <Button variant="secondary" size="sm" disabled={!canRetry} onClick={onRetry}>
+            <RotateCw /> Retry now
+          </Button>
+        )}
+      </div>
+    </li>
   );
 }

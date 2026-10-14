@@ -93,46 +93,58 @@ def main() -> None:
             return done, path, None
         return done, None, _error_for(downloader, done, settings)
 
-    async def sounds_right(song, path) -> bool:
-        """False only when Spotify's preview says it is another recording."""
+    async def check(song, path) -> float | None:
+        """How much the file sounds like Spotify's preview (None: no preview)."""
         score = await loop.run_in_executor(None, verify.score, str(path), song.song_id)
         print(f"verify: {_song_name(song)}: {song.download_url} scores "
               f"{'no preview' if score is None else f'{score:.2f}'} against Spotify's preview", flush=True)
-        if score is None or score >= verify.OTHER:
-            return True
-        path.unlink(missing_ok=True)
-        return False
+        return score
 
     async def attempt(index: int, song) -> str | None:
-        """Downloads one song; returns why it failed, or None. An upload that
-        does not sound like Spotify's preview is replaced by the next one of
-        the same length that does."""
+        """Downloads one song; returns why it failed, or None. When spotDL's
+        upload fails, or does not sound like Spotify's preview, other uploads
+        of the same length are tried, and one is kept only if it does."""
         done, path, error = await download(song)
-        if error:
-            return error
-        if not await sounds_right(done, path):
-            tried = {done.download_url}
-            try:
-                others = await loop.run_in_executor(None, verify.candidates, done, tried)
-            except Exception as exc:
-                traceback.print_exc()
-                others = []
-            path = None
-            for url in others:
-                done.download_url = url
-                done, path, error = await download(done)
-                if path is not None and await sounds_right(done, path):
-                    break
-                path = None
+        wrong = None
+        if path is not None:
+            score = await check(done, path)
+            if score is None or score >= verify.OTHER:
+                emit_file(index, done, path)
+                return None
+            wrong = done.download_url
+            path.unlink(missing_ok=True)
+        tried = {done.download_url} if done.download_url else set()
+        try:
+            others = await loop.run_in_executor(None, verify.candidates, done, tried)
+        except Exception:
+            traceback.print_exc()
+            others = []
+        for url in others:
+            done.download_url = url
+            done, path, _ = await download(done)
             if path is None:
-                wrong_audio.add(index)
-                return (f"Every YouTube upload tried ({1 + len(others)}) sounds like another "
-                        f"song than Spotify's preview.")
+                continue
+            score = await check(done, path)
+            if score is not None and score >= verify.OTHER:
+                why = f"YouTube's first pick ({wrong}) was another song" if wrong else f"spotDL failed: {error}"
+                events.emit("note", index=index, name=_song_name(done),
+                            message=f"{why}; got it from {url} instead ({score:.2f} like Spotify's preview).")
+                emit_file(index, done, path)
+                return None
+            path.unlink(missing_ok=True)
+            if score is None:
+                break  # no preview: no other upload can be trusted
+        if wrong:
+            wrong_audio.add(index)
+            return (f"Every YouTube upload tried ({1 + len(others)}) sounds like another "
+                    f"song than Spotify's preview.")
+        return error
+
+    def emit_file(index, song, path) -> None:
         events.emit(
-            "file", index=index, path=str(path), title=done.name,
-            artist=", ".join(done.artists or []) or done.artist,
+            "file", index=index, path=str(path), title=song.name,
+            artist=", ".join(song.artists or []) or song.artist,
         )
-        return None
 
     async def first_pass(index: int, song):
         async with semaphore:
@@ -156,7 +168,7 @@ def main() -> None:
                     if error is None:
                         break
             if error is not None:
-                events.emit("item_error", index=index, name=_song_name(song), message=error)
+                events.emit("item_error", index=index, name=_song_name(song), message=error, url=song.url)
 
     loop.run_until_complete(run_all())
 

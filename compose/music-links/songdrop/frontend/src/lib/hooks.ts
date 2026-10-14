@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { ACTIVE, api, ApiError, type Detection, type Job, type OptionsSpec } from "./api";
+import { ACTIVE, api, ApiError, RETRYING, type Detection, type Job, type OptionsSpec } from "./api";
 
 /** The job list, polled quickly while something is running. */
 export function useJobs() {
@@ -18,7 +18,10 @@ export function useJobs() {
       const data = await api.jobs();
       setJobs(data.jobs);
       setError(null);
-      active = data.jobs.some((job) => ACTIVE.includes(job.status));
+      // A song being tried again counts as running: its file appears soon.
+      active = data.jobs.some(
+        (job) => ACTIVE.includes(job.status) || job.errors.some((error) => RETRYING.includes(error.state)),
+      );
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "Can't load the downloads.");
     } finally {

@@ -108,6 +108,11 @@ def cancel_job(job_id: str):
     return manager.cancel(job_id)
 
 
+@app.post("/api/jobs/{job_id}/errors/{index}/retry")
+def retry_song(job_id: str, index: int):
+    return manager.retry(job_id, index)
+
+
 @app.delete("/api/jobs/{job_id}", status_code=204)
 def delete_job(job_id: str):
     manager.delete(job_id)

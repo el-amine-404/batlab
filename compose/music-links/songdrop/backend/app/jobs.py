@@ -24,7 +24,7 @@ from collections import deque
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from . import messages
+from . import messages, notify
 from . import options as opts
 from .config import Settings
 from .detect import Detection
@@ -41,6 +41,14 @@ SCRATCH = (".tmp", ".cache")
 ARCHIVE_DIR = ".archive"
 KILL_GRACE_SECONDS = 10
 JANITOR_INTERVAL_SECONDS = 300
+# A song that failed is tried again on its own, later: YouTube's 403s come in
+# bursts (an album's songs fetched three at a time), and pass. After the last
+# delay, songdrop gives up until someone presses "Retry now".
+RETRY_DELAYS = (600, 3600, 6 * 3600)
+MAX_TRIES = 1 + len(RETRY_DELAYS)
+RETRY_CHECK_SECONDS = 20
+# Waiting for a later try, queued for one, or in one.
+PENDING = ("waiting", "queued", "retrying")
 
 
 class JobError(Exception):
@@ -67,6 +75,8 @@ class Job:
     message: str | None = None
     files: list = field(default_factory=list)
     errors: list = field(default_factory=list)
+    # What is worth knowing besides: a wrong YouTube upload replaced.
+    notes: list = field(default_factory=list)
     # Songs in progress, index -> {"name", "percent"}; not saved.
     current: dict = field(default_factory=dict, repr=False)
 
@@ -104,6 +114,7 @@ class JobManager:
         for number in range(self.settings.concurrent_jobs):
             self._spawn(self._work, f"worker-{number}")
         self._spawn(self._janitor, "janitor")
+        self._spawn(self._retrier, "retrier")
 
     def stop(self) -> None:
         self._stopping.set()
@@ -134,6 +145,10 @@ class JobManager:
                 self._save(job)
             elif job.status == "queued":
                 requeue.append(job)
+            for entry in job.errors:
+                if entry.get("state") in ("queued", "retrying"):
+                    entry["state"] = "waiting"
+                    entry["next_retry_at"] = time.time() + 60
             self._jobs[job.id] = job
         for job in sorted(requeue, key=lambda item: item.created_at):
             self._queue.put(job.id)
@@ -180,6 +195,22 @@ class JobManager:
                 process = self._processes.get(job.id)
                 if process is not None:
                     self._stop_process(process)
+            return self._public(job)
+
+    def retry(self, job_id: str, index: int) -> dict:
+        """Try a missing song again now, even one songdrop gave up on."""
+        with self._lock:
+            job = self._find(job_id)
+            entry = next((item for item in job.errors if item.get("index") == index), None)
+            if entry is None or not entry.get("url"):
+                raise JobError(404, "This song can't be tried again.")
+            if job.status in ACTIVE:
+                raise JobError(409, "Wait until the download has finished.")
+            if entry.get("state") in ("queued", "retrying"):
+                return self._public(job)
+            entry["state"] = "waiting"
+            entry["next_retry_at"] = time.time()
+            self._save(job)
             return self._public(job)
 
     def delete(self, job_id: str) -> None:
@@ -244,6 +275,9 @@ class JobManager:
                 job_id = self._queue.get(timeout=1)
             except queue.Empty:
                 continue
+            if ":" in job_id:
+                self._retry(*job_id.split(":", 1))
+                continue
             with self._lock:
                 job = self._jobs.get(job_id)
                 if job is None or job.status != "queued":
@@ -258,19 +292,20 @@ class JobManager:
                 with self._lock:
                     self._finish(job, forced="failed", message="songdrop hit an internal error; see the container log.")
 
-    def _runner_command(self, job: Job, job_dir: Path) -> tuple[list[str], dict]:
+    def _runner_command(self, job: Job, job_dir: Path, url: str | None = None) -> tuple[list[str], dict]:
         settings = self.settings
         model = opts.parse(job.engine, job.options)
+        url = url or job.url
         if job.engine == "spotdl":
             config = {
-                "url": job.url,
+                "url": url,
                 "settings": opts.spotdl_settings(model, str(job_dir), settings.spotdl_parallel),
                 "max_items": settings.max_items,
                 "parallel": settings.spotdl_parallel,
             }
             return [settings.spotdl_python, str(RUNNERS / "spotdl_runner.py")], config
         config = {
-            "url": job.url,
+            "url": url,
             "job_dir": str(job_dir),
             "settings": opts.ytdlp_settings(model),
             "max_items": settings.max_items,
@@ -282,6 +317,32 @@ class JobManager:
         job_dir = self._dir(job.id)
         job_dir.mkdir(parents=True, exist_ok=True)
         command, config = self._runner_command(job, job_dir)
+        fatal, returncode, output, timed_out = self._execute(
+            job, job_dir, command, config, lambda event: self._apply(job, job_dir, event))
+        with self._lock:
+            if job.id in self._cancelled:
+                self._cancelled.discard(job.id)
+                self._finish(job, forced="cancelled", message="Cancelled.")
+            elif timed_out:
+                hours = self.settings.job_timeout_seconds / 3600
+                self._finish(job, forced="failed", message=f"Stopped after {hours:g} hours.")
+            elif fatal is not None:
+                self._finish(job, forced="failed", message=messages.friendly(fatal))
+            elif returncode != 0 and not job.files:
+                last = next((line for line in reversed(output) if line.strip()), "")
+                log.warning("job %s: runner exited %s; last output:\n%s", job.id, returncode, "\n".join(output))
+                self._finish(job, forced="failed", message=messages.friendly(last) if last else "The download stopped unexpectedly.")
+            else:
+                if job.errors:
+                    log.info("job %s: %d song(s) failed; engine output:\n%s", job.id, len(job.errors), "\n".join(output))
+                self._finish(job)
+            self._schedule_retries(job)
+            self._announce(job)
+
+    def _execute(self, job: Job, job_dir: Path, command: list[str], config: dict, on_event):
+        """Runs a runner; on_event(event) is called under the lock for each
+        event but "fatal". Returns (fatal message, exit code, last output lines,
+        timed out)."""
         read_fd, write_fd = os.pipe()
         environment = {
             "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
@@ -344,31 +405,137 @@ class JobManager:
                         fatal = str(event.get("message") or "")
                         continue
                     with self._lock:
-                        self._apply(job, job_dir, event)
+                        on_event(event)
             process.wait()
         finally:
             timer.cancel()
             drain.join(timeout=5)
             with self._lock:
                 self._processes.pop(job.id, None)
+        return fatal, process.returncode, output, timed_out.is_set()
 
+    # ---- songs tried again later ---------------------------------------------
+
+    def _retrier(self) -> None:
+        while not self._stopping.wait(RETRY_CHECK_SECONDS):
+            try:
+                self._queue_due_retries()
+            except Exception:
+                log.exception("retry scheduling failed")
+
+    def _queue_due_retries(self, now: float | None = None) -> None:
+        now = time.time() if now is None else now
         with self._lock:
-            if job.id in self._cancelled:
-                self._cancelled.discard(job.id)
-                self._finish(job, forced="cancelled", message="Cancelled.")
-            elif timed_out.is_set():
-                hours = self.settings.job_timeout_seconds / 3600
-                self._finish(job, forced="failed", message=f"Stopped after {hours:g} hours.")
-            elif fatal is not None:
-                self._finish(job, forced="failed", message=messages.friendly(fatal))
-            elif process.returncode != 0 and not job.files:
-                last = next((line for line in reversed(output) if line.strip()), "")
-                log.warning("job %s: runner exited %s; last output:\n%s", job.id, process.returncode, "\n".join(output))
-                self._finish(job, forced="failed", message=messages.friendly(last) if last else "The download stopped unexpectedly.")
+            for job in self._jobs.values():
+                if job.status in ACTIVE:
+                    continue
+                for entry in job.errors:
+                    if entry.get("state") == "waiting" and (entry.get("next_retry_at") or 0) <= now:
+                        entry["state"] = "queued"
+                        self._save(job)
+                        self._queue.put(f"{job.id}:{entry['index']}")
+
+    def _schedule_retries(self, job: Job) -> None:
+        """After a job: every song that failed with a link of its own waits
+        for its first later try. Songs skipped on purpose (explicit) do not."""
+        if job.status == "cancelled":
+            return
+        for entry in job.errors:
+            if entry.get("url") and "state" not in entry and "explicit" not in entry["message"].lower():
+                entry.update(state="waiting", tries=1, next_retry_at=time.time() + RETRY_DELAYS[0])
+        self._save(job)
+
+    def _retry(self, job_id: str, index_text: str) -> None:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            entry = None
+            if job is not None and job.status not in ACTIVE:
+                entry = next((item for item in job.errors if str(item.get("index")) == index_text), None)
+            if entry is None or entry.get("state") != "queued":
+                return
+            entry["state"] = "retrying"
+            self._save(job)
+            url, index = entry["url"], entry["index"]
+        job_dir = self._dir(job.id)
+        retry_dir = job_dir / f"retry-{index}-{entry.get('tries', 1)}"
+        retry_dir.mkdir(parents=True, exist_ok=True)
+        got = []
+        failures = []
+
+        def on_event(event: dict) -> None:
+            kind = event.get("type")
+            event = {**event, "index": index}
+            if kind == "file":
+                self._add_file(job, job_dir, event)
+                got.append(event)
+            elif kind == "item_error":
+                failures.append(str(event.get("message") or ""))
+            elif kind == "note":
+                self._apply(job, job_dir, event)
+
+        try:
+            command, config = self._runner_command(job, retry_dir, url)
+            fatal, _, output, _ = self._execute(job, retry_dir, command, config, on_event)
+        except Exception as exc:
+            log.exception("job %s: retry of song %s crashed", job.id, index)
+            fatal, output = str(exc), []
+        with self._lock:
+            entry["tries"] = entry.get("tries", 1) + 1
+            if got:
+                shutil.rmtree(job_dir / ARCHIVE_DIR, ignore_errors=True)  # "Download all" is rebuilt with it
+                job.errors.remove(entry)
+                job.status = "partial" if job.errors else "done"
+                job.message = None if job.status == "done" else job.message
+                job.finished_at = time.time()  # its link lasts from now
+                self._save(job)
+                self._announce_retry(job, entry, got=True)
+                return
+            shutil.rmtree(retry_dir, ignore_errors=True)
+            reason = failures[-1] if failures else (fatal or "The download stopped unexpectedly.")
+            log.info("job %s: try %d of %s failed: %s\n%s", job.id, entry["tries"], entry["name"], reason,
+                     "\n".join(output))
+            entry["message"] = messages.friendly(reason)
+            if entry["tries"] < MAX_TRIES:
+                entry["state"] = "waiting"
+                entry["next_retry_at"] = time.time() + RETRY_DELAYS[entry["tries"] - 1]
             else:
-                if job.errors:
-                    log.info("job %s: %d song(s) failed; engine output:\n%s", job.id, len(job.errors), "\n".join(output))
-                self._finish(job)
+                entry["state"] = "gave_up"
+                entry["next_retry_at"] = None
+                self._announce_retry(job, entry, got=False)
+            self._save(job)
+
+    # ---- Discord ---------------------------------------------------------------
+
+    def _page(self) -> str:
+        return f" · {self.settings.public_url}" if self.settings.public_url else ""
+
+    def _announce(self, job: Job) -> None:
+        """After a job: the songs still missing, and replaced uploads."""
+        if job.status == "cancelled" or not (job.errors or job.notes):
+            return
+        name = job.title or job.url
+        got = f"{len(job.files)} of {job.total} songs" if job.total > 1 else ("downloaded" if job.files else "not downloaded")
+        lines = [f"**songdrop** · {name} ({got}){self._page()}"]
+        for entry in job.errors[:10]:
+            later = ""
+            if entry.get("state") == "waiting":
+                later = f" Trying again in {notify.minutes(entry['next_retry_at'] - time.time())}."
+            lines.append(f"- missing: {entry['name']}: {entry['message']}{later}")
+        if len(job.errors) > 10:
+            lines.append(f"... and {len(job.errors) - 10} more")
+        for note in job.notes[:5]:
+            lines.append(f"- {note['name']}: {note['message']}")
+        notify.send(self.settings.discord_webhook, lines)
+
+    def _announce_retry(self, job: Job, entry: dict, got: bool) -> None:
+        name = job.title or job.url
+        if got:
+            line = (f"**songdrop** · got {entry['name']} on try {entry['tries']} ({name}); "
+                    f"it's on its way to the library{self._page()}")
+        else:
+            line = (f"**songdrop** · gave up on {entry['name']} after {entry['tries']} tries ({name}): "
+                    f"{entry['message']} Press \"Retry now\" on the page to try once more{self._page()}")
+        notify.send(self.settings.discord_webhook, [line])
 
     def _drain(self, job_id: str, process: subprocess.Popen, output: deque) -> None:
         for raw in process.stdout:
@@ -397,11 +564,19 @@ class JobManager:
             self._save(job)
         elif kind == "item_error":
             job.current.pop(index, None)
+            url = event.get("url") if str(event.get("url") or "").startswith("https://") else None
+            if url is None and job.total <= 1:
+                url = job.url  # a single song: its link is the job's
             job.errors.append({
                 "index": index,
                 "name": str(event.get("name") or "")[:300],
                 "message": messages.friendly(event.get("message")),
+                "url": url,
             })
+            self._save(job)
+        elif kind == "note":
+            job.notes.append({"name": str(event.get("name") or "")[:300],
+                              "message": str(event.get("message") or "")[:500]})
             self._save(job)
 
     def _add_file(self, job: Job, job_dir: Path, event: dict) -> None:
@@ -528,7 +703,8 @@ class JobManager:
         removed = []
         with self._lock:
             for job in list(self._jobs.values()):
-                if job.status not in ACTIVE and job.finished_at and now - job.finished_at > limit:
+                waiting = any(entry.get("state") in PENDING for entry in job.errors)
+                if job.status not in ACTIVE and not waiting and job.finished_at and now - job.finished_at > limit:
                     del self._jobs[job.id]
                     removed.append(job.id)
             known = set(self._jobs)
@@ -604,6 +780,19 @@ class JobManager:
                 }
                 for item in sorted(job.files, key=lambda entry: (entry["index"] is None, entry["index"] or 0))
             ],
-            "errors": [{"name": item["name"], "message": item["message"]} for item in job.errors],
+            "errors": [
+                {
+                    "index": item.get("index"),
+                    "name": item["name"],
+                    "message": item["message"],
+                    "url": item.get("url"),
+                    "state": item.get("state", "failed"),
+                    "tries": item.get("tries", 1),
+                    "max_tries": MAX_TRIES,
+                    "next_retry_at": item.get("next_retry_at"),
+                }
+                for item in job.errors
+            ],
+            "notes": [dict(item) for item in job.notes],
             "archive_url": f"/api/jobs/{job.id}/archive" if len(job.files) > 1 and job.status not in ACTIVE else None,
         }
