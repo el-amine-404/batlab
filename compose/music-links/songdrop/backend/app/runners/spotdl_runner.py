@@ -9,6 +9,7 @@ import logging
 import sys
 import traceback
 
+import verify
 from protocol import Events, read_config
 
 RETRY_PAUSES = (3, 10)
@@ -78,20 +79,60 @@ def main() -> None:
     downloader = client.downloader
     semaphore = asyncio.Semaphore(max(1, int(config["parallel"])))
 
-    async def attempt(index: int, song) -> str | None:
-        """Downloads one song; returns why it failed, or None."""
+    loop = downloader.loop
+    wrong_audio: set[int] = set()  # no retry: it was downloaded, as another song
+
+    async def download(song):
+        """(song, path) or (song, None, why it failed)."""
         try:
             done, path = await downloader.async_search_and_download(song)
         except Exception as exc:
             traceback.print_exc()
-            return f"{type(exc).__name__}: {exc}"
+            return song, None, f"{type(exc).__name__}: {exc}"
         if path is not None and path.is_file():
-            events.emit(
-                "file", index=index, path=str(path), title=done.name,
-                artist=", ".join(done.artists or []) or done.artist,
-            )
-            return None
-        return _error_for(downloader, done, settings)
+            return done, path, None
+        return done, None, _error_for(downloader, done, settings)
+
+    async def sounds_right(song, path) -> bool:
+        """False only when Spotify's preview says it is another recording."""
+        score = await loop.run_in_executor(None, verify.score, str(path), song.song_id)
+        print(f"{_song_name(song)}: {song.download_url} scores "
+              f"{'no preview' if score is None else f'{score:.2f}'} against Spotify's preview", flush=True)
+        if score is None or score >= verify.OTHER:
+            return True
+        path.unlink(missing_ok=True)
+        return False
+
+    async def attempt(index: int, song) -> str | None:
+        """Downloads one song; returns why it failed, or None. An upload that
+        does not sound like Spotify's preview is replaced by the next one of
+        the same length that does."""
+        done, path, error = await download(song)
+        if error:
+            return error
+        if not await sounds_right(done, path):
+            tried = {done.download_url}
+            try:
+                others = await loop.run_in_executor(None, verify.candidates, done, tried)
+            except Exception as exc:
+                traceback.print_exc()
+                others = []
+            path = None
+            for url in others:
+                done.download_url = url
+                done, path, error = await download(done)
+                if path is not None and await sounds_right(done, path):
+                    break
+                path = None
+            if path is None:
+                wrong_audio.add(index)
+                return (f"Every YouTube upload tried ({1 + len(others)}) sounds like another "
+                        f"song than Spotify's preview.")
+        events.emit(
+            "file", index=index, path=str(path), title=done.name,
+            artist=", ".join(done.artists or []) or done.artist,
+        )
+        return None
 
     async def first_pass(index: int, song):
         async with semaphore:
@@ -106,7 +147,7 @@ def main() -> None:
         for index, song, error in results:
             if error is None:
                 continue
-            if not (song.explicit and settings.get("skip_explicit")):
+            if not (song.explicit and settings.get("skip_explicit")) and index not in wrong_audio:
                 for pause in RETRY_PAUSES:
                     print(f"retrying {_song_name(song)} in {pause}s after: {error}", flush=True)
                     await asyncio.sleep(pause)
@@ -117,7 +158,7 @@ def main() -> None:
             if error is not None:
                 events.emit("item_error", index=index, name=_song_name(song), message=error)
 
-    downloader.loop.run_until_complete(run_all())
+    loop.run_until_complete(run_all())
 
 
 if __name__ == "__main__":

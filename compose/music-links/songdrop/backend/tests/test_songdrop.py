@@ -17,6 +17,45 @@ from app import detect, messages, options  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.jobs import JobError, JobManager  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app" / "runners"))
+import verify  # noqa: E402
+
+
+def _tone(path, *filters):
+    import subprocess
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-nostdin", "-f", "lavfi", "-i", "anoisesrc=d=40:c=pink:seed=7",
+                    *filters, "-ac", "2", path], check=True)
+
+
+class VerifyTest(unittest.TestCase):
+    """A file is compared with Spotify's preview: 30 s cut from it, or other audio."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.song = os.path.join(self.dir.name, "song.opus")
+        _tone(self.song)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def test_a_cut_of_the_same_recording_scores_high(self):
+        preview = os.path.join(self.dir.name, "preview.mp3")
+        import subprocess
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-nostdin", "-ss", "8", "-t", "30", "-i", self.song,
+                        "-b:a", "96k", preview], check=True)
+        self.assertGreater(verify.similarity(verify.fingerprint(preview), verify.fingerprint(self.song)), 0.85)
+
+    def test_other_audio_scores_low(self):
+        other = os.path.join(self.dir.name, "other.mp3")
+        _tone(other, "-af", "aeval=sin(2*PI*330*t)*0.5|sin(2*PI*330*t)*0.5")
+        self.assertLess(verify.similarity(verify.fingerprint(other), verify.fingerprint(self.song)), verify.OTHER)
+
+    def test_no_preview_is_no_verdict(self):
+        with mock.patch.object(verify, "preview_url", return_value=None):
+            self.assertIsNone(verify.score(self.song, "4MjhDzeuvIU3f4E8SqGH4q"))
+        with mock.patch.object(verify, "preview_url", side_effect=OSError("offline")):
+            self.assertIsNone(verify.score(self.song, "4MjhDzeuvIU3f4E8SqGH4q"))
+
 
 class DetectTest(unittest.TestCase):
     def test_spotify_links(self):
