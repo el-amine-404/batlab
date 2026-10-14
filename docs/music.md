@@ -158,7 +158,11 @@ and streaming-only music than MusicBrainz's AcoustID.
   Not a Spotify download (spotDL leaves the track's URL in `WOAS`; its ISRC
   is empty): Spotify named that song, so when Shazam hears something with
   neither title nor artist in common, and Apple's preview does not vouch for
-  the file, it is a wrong download, quarantined as `WRONG_SONG`. On 2026-10-14
+  the file, it is a wrong download, quarantined as `WRONG_SONG`. Its album,
+  date and track numbers are Spotify's: Apple only fills what it lacks (Apple
+  dates Caméléon 2020, Spotify 2021, and "Halla halla" was filed apart in
+  "Caméléon (2020)"), and a Shazam answer sharing a title or an artist leaves
+  Spotify's name (it heard Caméléon's "Intro" as "Haj Bellaïd - Intro"). On 2026-10-14
   spotDL's YouTube pick for ElGrandeToto's "La Paille" was a Bhojpuri song,
   and was filed as "Chhote Raja - Pala Lagat Rahe Ho Lahnga".
 - A file new to a library that Shazam hears as a different song, with neither
@@ -357,10 +361,23 @@ its download copies are removed, never the library's.
   sounds right; none does, and the song fails with that reason. No preview:
   kept, and musicguard still checks it. `docker logs songdrop` shows each
   score.
-- **Retries.** YouTube answers some audio requests with 403 at random (4 of an
-  album's 15 on 2026-10-14). A failed song is tried twice more, one at a time;
-  what still fails is listed on the job with the reason, and the engine's
-  output goes to `docker logs songdrop`.
+- **Retries.** YouTube answers some audio requests with 403 at random, in
+  bursts (4 of an album's 15 on 2026-10-14; EL MEJOR failed three times in
+  13 s, and downloaded fine an hour later). A failed song is first tried
+  twice more within seconds, then with other YouTube uploads of its length
+  that sound like Spotify's preview (spotDL found nothing for Caméléon's
+  "Intro"; the next upload scored 0.93). What still fails waits for later
+  tries on its own: after 10 min, 1 h and 6 h, one song at a time through the
+  same queue, then songdrop gives up. The page lists missing songs openly
+  with the next try, a "Retry now" button (also after giving up) and a link to
+  the song on Spotify; a song a later try brings back gets its download
+  button and goes to the library. A job is not removed while a try is
+  pending.
+- **Discord** (`#download-issues`, `SONGDROP_DISCORD_WEBHOOK`): what is
+  missing after a job and when it is tried next, uploads replaced because
+  they were another song, songs a later try brought back, and songs songdrop
+  gave up on. musicguard's quarantines (`WRONG_SONG`, `DUPLICATE`) go to the
+  same channel.
 - **Links it refuses**: sites yt-dlp only knows through its generic page
   scraper, Spotify podcasts, and `spotify.link` short links. A link with more
   than 200 songs (`SONGDROP_MAX_ITEMS`) is refused rather than half done.
