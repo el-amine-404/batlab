@@ -104,7 +104,24 @@ It runs in three ways:
   genre included.
 - **A song already in a library is not filed twice**: same title, an artist
   in common and the same length within 5 s (so a remix or live take still
-  files) and the new download is dropped (`duplicate ALREADY_IN_LIBRARY`).
+  files) and the new download is dropped (`duplicate ALREADY_IN_LIBRARY`),
+  unless it is better audio than a copy musicguard filed itself (FLAC over
+  MP3, say): then it is filed and the next pass retires the old one.
+- **The same song filed twice keeps its best copy** (`app/dedup.py`), after
+  each library pass. One song: the same ISRC or MusicBrainz recording ID, or
+  the title and an artist in common with lengths within 5 s, or within 30 s
+  when their fingerprints agree (`reference.SAME`): a video's copy carries an
+  intro or an outro, a remix sounds different. On 2026-10-14 a YouTube
+  "Mghayer (Prod. By Ysos) #CAMÉLÉON" (220 s) and Spotify's "Mghayer" (214 s)
+  were both filed. The best audio stays: Lidarr's or Aurral's copy always (they
+  own theirs; nothing of theirs is moved), then lossless, then the copy
+  without extra seconds, then the bitrate (Opus and AAC worth 1.5 and 1.3 times
+  MP3's). It gets the best tags: a MusicBrainz ID, then a clean title (no
+  hashtag, brackets, "Official Video"), then the most complete set, completed
+  from the other copies (a genre only one had), and is moved to the path those
+  tags give. The other `music-extras` copies go to quarantine as `DUPLICATE`,
+  their lyrics removed. `docker exec musicguard python /app/guard.py dedup`
+  runs one pass; `MUSICGUARD_DEDUP=0` turns it off.
 - **Songs from links are upgraded** (`app/upgrade.py`), after each library
   pass: musicguard looks the song up on MusicBrainz (by ISRC, else title and
   artist), picks the release it belongs to (the full album, else the EP, else
@@ -138,6 +155,12 @@ and streaming-only music than MusicBrainz's AcoustID.
 
 - A pasted link takes Shazam's artist, title and album over the video's title
   whenever they disagree, and loses the IDs it came with.
+  Not a Spotify download (spotDL leaves the track's URL in `WOAS`; its ISRC
+  is empty): Spotify named that song, so when Shazam hears something with
+  neither title nor artist in common, and Apple's preview does not vouch for
+  the file, it is a wrong download, quarantined as `WRONG_SONG`. On 2026-10-14
+  spotDL's YouTube pick for ElGrandeToto's "La Paille" was a Bhojpuri song,
+  and was filed as "Chhote Raja - Pala Lagat Rahe Ho Lahnga".
 - A file new to a library that Shazam hears as a different song, with neither
   title nor artist in common, is quarantined as `WRONG_SONG`; a monitored album
   then makes Lidarr fetch another copy. A remix, a feature or a translated title
@@ -325,6 +348,15 @@ its download copies are removed, never the library's.
   yt-dlp download carries what the site gives (YouTube Music: title, artist,
   album, date) and its thumbnail; musicguard adds the rest from Shazam and
   Apple Music.
+- **Right song.** spotDL picks a YouTube upload by title and length; a
+  re-upload can carry both over other audio. Each download is fingerprinted
+  against Spotify's own 30 s preview (from the track's embed page, ffmpeg's
+  chromaprint muxer, `runners/verify.py`): the same song scores about 0.9,
+  another about 0.55. Below 0.70 the file is deleted and the next YouTube
+  uploads of the same length (within 7 s) are tried, up to four, until one
+  sounds right; none does, and the song fails with that reason. No preview:
+  kept, and musicguard still checks it. `docker logs songdrop` shows each
+  score.
 - **Retries.** YouTube answers some audio requests with 403 at random (4 of an
   album's 15 on 2026-10-14). A failed song is tried twice more, one at a time;
   what still fails is listed on the job with the reason, and the engine's
