@@ -106,7 +106,7 @@
         icon: mdi-music-circle
         href: http://songdrop.homelab.lan
         description: Paste a Spotify or YouTube link, get the song
-        siteMonitor: http://songdrop:8810/api/health
+        siteMonitor: http://songdrop:8810/api/v1/health
         statusStyle: "dot"
 
 - Library:
