@@ -26,17 +26,49 @@ _ID_IN_MESSAGE = re.compile(r"\[[^\]]+\]\s*([\w-]+):")
 _CHAPTER_PREFIX = re.compile(r"^\s*(?:\[?\d{1,2}:\d{2}(?::\d{2})?\]?\s*[-–|]?\s*|\d{1,3}\s*[.)\-–:]\s+)")
 
 
+# "[Full BeatTape]", "(Full Album)", "| Full EP" after an album's name.
+_FULL = re.compile(r"\s*(?:[\[(][^\])]*\b(?:full|album|tape|ep|mix|tracklist)\b[^\])]*[\])]|\|.*$)", re.I)
+
+
 def chapter_tags(chapter_title: str, number: int, total: int, info: dict) -> dict:
     """The tags of one chapter's file."""
     title = _CHAPTER_PREFIX.sub("", chapter_title or "").strip() or f"Part {number}"
-    artist = info.get("artist") or info.get("creator") or (info.get("uploader") or "").removesuffix(" - Topic")
+    video = info.get("title") or ""
+    album = info.get("album") or ""
+    artist = info.get("artist") or info.get("creator") or ""
+    if not artist and " - " in video:
+        # "97SPECIAL - Escape [Full BeatTape]": the uploader is often a channel
+        # that collects other people's music.
+        artist, named = (part.strip() for part in video.split(" - ", 1))
+        album = album or named
+    artist = artist or (info.get("uploader") or "").removesuffix(" - Topic")
+    album = _FULL.sub("", album or video).strip()
     if " - " in title:
         artist, title = (part.strip() for part in title.split(" - ", 1))
-    tags = {"title": title, "tracknumber": f"{number}/{total}",
-            "album": info.get("album") or info.get("title") or ""}
+    tags = {"title": title, "tracknumber": f"{number}/{total}", "album": album}
     if artist:
         tags["artist"] = artist
     return {key: value for key, value in tags.items() if value}
+
+
+def copy_cover(source: str, target: str) -> None:
+    """The whole video's embedded cover onto one chapter's file. ffmpeg
+    cannot copy it while splitting (an Ogg file's picture is not a stream it
+    can write back), so the split runs before the cover is embedded."""
+    try:
+        whole, part = mutagen.File(source), mutagen.File(target)
+        if whole is None or part is None or whole.tags is None:
+            return
+        if part.tags is None:
+            part.add_tags()
+        for key in ("metadata_block_picture", "covr"):  # Ogg (Opus, Vorbis), MP4
+            if key in whole.tags:
+                part.tags[key] = whole.tags[key]
+        for frame in whole.tags.getall("APIC") if hasattr(whole.tags, "getall") else []:  # MP3
+            part.tags.add(frame)
+        part.save()
+    except Exception as exc:
+        print(f"WARNING: no cover for {target}: {exc}", flush=True)
 
 
 def retag(path: str, tags: dict) -> None:
@@ -94,6 +126,8 @@ class _Collect(PostProcessor):
         if self.split and parts:
             for number, chapter in enumerate(parts, 1):
                 tags = chapter_tags(chapter.get("title") or "", number, len(parts), info)
+                if path and os.path.isfile(path):
+                    copy_cover(path, chapter["filepath"])
                 retag(chapter["filepath"], tags)
                 self.events.emit("file", index=self.parts, path=chapter["filepath"],
                                  title=tags["title"], artist=tags.get("artist"))
@@ -127,12 +161,13 @@ def _postprocessors(settings: dict) -> list:
     if settings["sponsor_block"]:
         processors.append({"key": "ModifyChapters", "remove_sponsor_segments": ["music_offtopic"]})
     processors.append({"key": "FFmpegMetadata", "add_metadata": True, "add_chapters": False})
+    if settings.get("split_chapters"):
+        # After the tags, before the cover: ffmpeg cannot copy an embedded
+        # cover into the parts; _Collect copies it from the whole file.
+        processors.append({"key": "FFmpegSplitChapters", "force_keyframes": False})
     if settings["embed_cover"]:
         processors.append({"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"})
         processors.append({"key": "EmbedThumbnail", "already_have_thumbnail": False})
-    if settings.get("split_chapters"):
-        # Last, so every part keeps the tags and the cover.
-        processors.append({"key": "FFmpegSplitChapters", "force_keyframes": False})
     return processors
 
 

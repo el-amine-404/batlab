@@ -155,8 +155,12 @@ class CutTest(unittest.TestCase):
     def test_chapter_tags(self):
         info = {"title": "Stormy - DESPERADO (Full Album)", "uploader": "Stormy - Topic"}
         self.assertEqual(ytdlp_runner.chapter_tags("01. EL MEJOR", 4, 12, info),
-                         {"title": "EL MEJOR", "tracknumber": "4/12", "album": "Stormy - DESPERADO (Full Album)",
-                          "artist": "Stormy"})
+                         {"title": "EL MEJOR", "tracknumber": "4/12", "album": "DESPERADO", "artist": "Stormy"})
+        beat_tape = {"title": "97SPECIAL - Escape [Full BeatTape]", "uploader": "STEEZYASFUCK"}
+        self.assertEqual(ytdlp_runner.chapter_tags("Chasing A Dream", 1, 13, beat_tape),
+                         {"title": "Chasing A Dream", "tracknumber": "1/13", "album": "Escape", "artist": "97SPECIAL"})
+        self.assertEqual(ytdlp_runner.chapter_tags("One", 1, 2, {"title": "Summer mix", "uploader": "DJ"})["album"],
+                         "Summer mix")
         self.assertEqual(ytdlp_runner.chapter_tags("[03:15] Manal - KATANA", 2, 3, info)["artist"], "Manal")
         self.assertEqual(ytdlp_runner.chapter_tags("", 5, 9, info)["title"], "Part 5")
 
