@@ -465,6 +465,9 @@ class JobManager:
             message = message or ("Nothing could be downloaded." if job.errors else "Nothing was downloaded.")
         if forced == "cancelled":
             status = "cancelled"
+        if status == "failed" and message:
+            # A single link that fails says why once, not again as a song.
+            job.errors = [item for item in job.errors if item["message"] != message]
         job.status = status
         job.message = message
         job.finished_at = time.time()

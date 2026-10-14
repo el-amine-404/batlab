@@ -105,6 +105,7 @@ FAKE_RUNNER = textwrap.dedent('''
     mode = config["url"].rsplit("/", 1)[-1]
     here = os.getcwd()
     if mode == "fatal":
+        emit("item_error", index=0, name="abc123", message="ERROR: [youtube] abc123: HTTP Error 403: Forbidden")
         emit("fatal", message="ERROR: [youtube] abc123: HTTP Error 403: Forbidden")
         sys.exit(1)
     if mode == "crash":
@@ -202,6 +203,7 @@ class JobsTest(unittest.TestCase):
         job = self._wait(self._submit("fatal")["id"])
         self.assertEqual(job["status"], "failed")
         self.assertIn("403", job["message"])
+        self.assertEqual(job["errors"], [])
         job = self._wait(self._submit("crash")["id"])
         self.assertEqual(job["status"], "failed")
         self.assertIn("something broke", job["message"])
