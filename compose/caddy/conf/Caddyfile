@@ -18,3 +18,10 @@
 }
 
 import *.caddy
+
+# A name no service answers to (a removed service, a typo): DNS sends every
+# *.homelab.lan here, and without this Caddy answered an empty page with 200.
+# Caddy tries exact names before a wildcard, so the sites above are unaffected.
+http://*.homelab.lan {
+	respond "No service at this address." 404
+}
