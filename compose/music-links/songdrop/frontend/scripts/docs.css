@@ -63,6 +63,8 @@ a:hover { text-decoration: underline; }
 .doc th, .doc td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
 .doc tr:last-child td { border-bottom: 0; }
 .doc th { background: var(--panel); font-weight: 600; }
+/* "| | |" tables (key and value) have no header row worth showing. */
+.doc thead:not(:has(th:not(:empty))) { display: none; }
 .doc td:first-child code { white-space: nowrap; }
 
 @media (max-width: 800px) {
