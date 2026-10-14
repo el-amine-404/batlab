@@ -189,6 +189,25 @@ def collect(raw_items):
     return tags, findings
 
 
+SPOTIFY_TRACK = re.compile(r"open\.spotify\.com/track/[A-Za-z0-9]{22}")
+
+
+def from_catalogue(path):
+    """True when a catalogue named the song: spotDL leaves the Spotify track's
+    URL in a tag (WOAS), whatever the format; its ISRC is often empty."""
+    try:
+        audio = mutagen.File(path)
+    except Exception:
+        return False
+    if audio is None or audio.tags is None:
+        return False
+    try:
+        values = audio.tags.values() if hasattr(audio.tags, "values") else []
+        return any(SPOTIFY_TRACK.search(str(value)) for value in values)
+    except Exception:
+        return False
+
+
 def read_mutagen(path):
     """(key, value) pairs through mutagen's normalising readers, or None."""
     try:

@@ -22,7 +22,7 @@ from unittest import mock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 
 import mutagen  # noqa: E402
-from mutagen.id3 import APIC, COMM, ID3, TIT2, TPE1, TXXX, WXXX  # noqa: E402
+from mutagen.id3 import APIC, COMM, ID3, TIT2, TPE1, TXXX, WOAS, WXXX  # noqa: E402
 
 import clamd  # noqa: E402
 import credits  # noqa: E402
@@ -504,8 +504,11 @@ class Identification(GuardTestCase):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         tone(path)
         audio = mutagen.File(path, easy=True)
-        audio["title"], audio["artist"], audio["isrc"] = "La Paille", "ElGrandeToto", "BEIY42000009"
+        audio["title"], audio["artist"] = "La Paille", "ElGrandeToto"
         audio.save()
+        id3 = ID3(path)  # what spotDL leaves: the Spotify URL, an empty ISRC
+        id3.add(WOAS(url="https://open.spotify.com/track/4MjhDzeuvIU3f4E8SqGH4q"))
+        id3.save()
         self.guard.config.identify = True
         guard.identify.recognise.return_value = identify.Match("Pala Lagat Rahe Ho Lahnga", "Chhote Raja")
 
@@ -521,6 +524,14 @@ class Identification(GuardTestCase):
         guard.reference.compare.return_value = 0.95
         self.inbox_twice()
         self.assertEqual(self.all_files(self.extras), ["ElGrandeToto/La Paille/01 - La Paille.mp3"])
+
+    def test_a_video_title_still_gives_way_to_shazam(self):
+        self.spotdl_la_paille()
+        ID3(os.path.join(self.inbox, "songdrop", "ElGrandeToto - La Paille.mp3")).delete()
+        self.inbox_twice()
+        self.assertEqual(self.quarantined_reasons(), [])
+        self.assertEqual(self.all_files(self.extras),
+                         ["Chhote Raja/Pala Lagat Rahe Ho Lahnga/01 - Pala Lagat Rahe Ho Lahnga.mp3"])
 
     def test_a_wrong_song_in_a_library_is_quarantined_once_new(self):
         path = os.path.join(self.music, "Georgie Fame", "Hits (2004)", "26 - Stormy.mp3")

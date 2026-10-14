@@ -384,10 +384,10 @@ class Guard:
         if not match:
             return found, None
         title, artist = layout.first(found, "title"), layout.first(found, "artist")
-        if "isrc" in found and identify.contradicts(match, title, artist):
-            # An ISRC means a catalogue (spotDL's Spotify) named the song, not a
-            # video title: other audio under it is a wrong download, never a
-            # song to file under whatever Shazam calls it.
+        if tagging.from_catalogue(path) and identify.contradicts(match, title, artist):
+            # Spotify named the song (spotDL), not a video title: other audio
+            # under it is a wrong download, never a song to file under
+            # whatever Shazam calls it.
             detail = f"tagged {artist} - {title}, Shazam hears {match!r}"
             try:
                 score = reference.compare(path, title, artist)
