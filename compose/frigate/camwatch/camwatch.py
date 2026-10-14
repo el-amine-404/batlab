@@ -118,7 +118,8 @@ def main():
                 log(f"{key} back after {duration(now - since[key])}")
             since.pop(key)
             announced.pop(key, None)
-        due = [k for k in since if now - since[k] >= AFTER and now - announced.get(k, 0) >= REMIND]
+        due = [k for k in since if now - since[k] >= AFTER
+               and (k not in announced or now - announced[k] >= REMIND)]
         if due:
             friendly = names() or friendly
             labels = ["Frigate (its API does not answer)" if k == "frigate" else friendly.get(k, k) for k in due]
