@@ -18,12 +18,28 @@ the sub streams, `cam-home --find` prints the DVR's address.
 ## The DVR's address
 
 It used to be `.2`, a static lease on lab1's AdGuard. Since lab1 went off
-(2026-10-10) lab2's AdGuard serves DHCP, has no such lease, and gave the DVR
-`192.168.1.101` from its `.101`-`.200` range. Until a lease pins it again, the
-address can move: Frigate then shows the cameras as offline. Fix it in one
-place, `FRIGATE_DVR_HOST` in `compose/.env`, then
-`make restart STACK=frigate`. `cam-home --find` (or an RTSP scan of port 554)
-tells the new address.
+(2026-10-10) lab2's AdGuard serves DHCP and gave the DVR `192.168.1.101` from
+its `.101`-`.200` range. On 2026-10-14 lab2's AdGuard got a static lease again
+(MAC `24:28:fd:12:90:11`, hostname `dvr`, `192.168.1.2`); the DVR took it at
+16:44 while Frigate still dialed `.101`, and both cameras were dark for three
+and a half hours without a word.
+
+Two things keep that from happening again:
+
+- **Frigate dials a name, not an address**: `FRIGATE_DVR_HOST=dvr.lan` in
+  `compose/.env`. AdGuard answers `dvr.lan` from the lease, so if the lease
+  moves, Frigate follows on its next reconnect. The name depends on that
+  static lease (AdGuard > Settings > DHCP settings > Static leases): keep it.
+  After changing `FRIGATE_DVR_HOST`, `make up STACK=frigate` (a restart keeps
+  the old value).
+- **camwatch** (`compose/frigate/camwatch`) reads Frigate's stats every
+  minute. A camera without frames for 5 minutes, or a Frigate that does not
+  answer, goes to the cameras Discord channel with the reason (the name does
+  not resolve; the DVR does not answer at its address; or it answers but
+  Frigate gets no frames), again every 6 hours while it lasts, and a green
+  message when it is back. `docker logs camwatch` shows the same.
+
+`cam-home --find` (or an RTSP scan of port 554) tells the DVR's address.
 
 ## Frigate
 

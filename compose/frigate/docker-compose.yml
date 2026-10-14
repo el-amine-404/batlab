@@ -110,6 +110,45 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+  # Tells Discord when the cameras give no frames, why, and when they are
+  # back (camwatch/camwatch.py). On 2026-10-14 they were dark for hours unseen.
+  camwatch:
+    image: ${IMAGE_CAMWATCH}:${TAG_CAMWATCH}
+    container_name: camwatch
+    restart: unless-stopped
+    command: ["python", "/app/camwatch.py"]
+    user: "10001:10001"
+    volumes:
+      - ${CONFIGS_ROOT}/frigate/camwatch/camwatch.py:/app/camwatch.py:ro
+    environment:
+      - TZ=${TZ}
+      - PYTHONDONTWRITEBYTECODE=1
+      - FRIGATE_DVR_HOST=${FRIGATE_DVR_HOST:?set in compose/.env}
+      - CAMWATCH_WEBHOOK=${DISCORD_WEBHOOK_CAMERAS:?set in compose/.env}
+    # Frigate's API (5000, no login) and Discord; the DVR is reached from here
+    # through the host, as Frigate reaches it.
+    networks:
+      - home_server
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/heartbeat') > 300)"]
+      interval: 60s
+      timeout: 5s
+      start_period: 120s
+      retries: 3
+    mem_limit: 64m
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 networks:
   home_server:
     external: true
