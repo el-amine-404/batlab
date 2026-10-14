@@ -662,6 +662,30 @@ class Identification(GuardTestCase):
         self.assertEqual(self.all_files(self.extras),
                          ["Chhote Raja/Pala Lagat Rahe Ho Lahnga/01 - Pala Lagat Rahe Ho Lahnga.mp3"])
 
+    def test_spotifys_album_stays_whatever_apple_dates_it(self):
+        path = os.path.join(self.inbox, "songdrop", "ElGrandeToto - Halla halla.mp3")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tone(path)
+        audio = mutagen.File(path, easy=True)
+        audio["title"], audio["artist"], audio["album"] = "Halla halla", "ElGrandeToto", "Caméléon"
+        audio["albumartist"], audio["date"], audio["tracknumber"] = "ElGrandeToto", "2021-01-08", "6/17"
+        audio.save()
+        id3 = ID3(path)
+        id3.add(WOAS(url="https://open.spotify.com/track/3mEdyuPV0yvg8F5op87n25"))
+        id3.save()
+        self.guard.config.identify = True
+        guard.identify.recognise.return_value = identify.Match("Halla halla", "ElGrandeToto", apple_id="1")
+        apple = guard.apple.Release({"collectionName": "Caméléon", "trackName": "Halla halla",
+                                     "artistName": "ElGrandeToto", "trackNumber": 6, "trackCount": 17,
+                                     "releaseDate": "2020-12-25T08:00:00Z", "primaryGenreName": "Rap"},
+                                    {"artistName": "ElGrandeToto"})
+        with mock.patch.object(guard.apple, "release", return_value=apple):
+            self.inbox_twice()
+        self.assertEqual(self.all_files(self.extras), ["ElGrandeToto/Caméléon (2021)/06 - Halla halla.mp3"])
+        filed = mutagen.File(os.path.join(self.extras, "ElGrandeToto", "Caméléon (2021)", "06 - Halla halla.mp3"),
+                             easy=True)
+        self.assertEqual(filed["genre"], ["Rap"])  # a gap Apple filled
+
     def test_a_wrong_song_in_a_library_is_quarantined_once_new(self):
         path = os.path.join(self.music, "Georgie Fame", "Hits (2004)", "26 - Stormy.mp3")
         os.makedirs(os.path.dirname(path))

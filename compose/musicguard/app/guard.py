@@ -388,7 +388,8 @@ class Guard:
         if not match:
             return found, None
         title, artist = layout.first(found, "title"), layout.first(found, "artist")
-        if tagging.from_catalogue(path) and identify.contradicts(match, title, artist):
+        catalogue = tagging.from_catalogue(path)
+        if catalogue and identify.contradicts(match, title, artist):
             # Spotify named the song (spotDL), not a video title: other audio
             # under it is a wrong download, never a song to file under
             # whatever Shazam calls it.
@@ -401,6 +402,11 @@ class Guard:
             if score is None or score < reference.SAME:
                 raise Reject("WRONG_SONG", detail)
             notes.append(f"{detail}; kept: it is Apple Music's {artist} - {title} ({score:.2f} alike)")
+            return found, None
+        if catalogue and not identify.agrees(match, title, artist):
+            # Spotify named it and Shazam shares a title or an artist: a remix,
+            # a feature or a translated title. Spotify's name stays.
+            notes.append(f"Shazam hears {match!r}; Spotify's {artist} - {title} kept")
             return found, None
         if not identify.agrees(match, title, artist):
             notes.append(f"identified by Shazam as {match!r} (file said {artist} - {title})")
@@ -418,8 +424,18 @@ class Guard:
                 log(f"apple lookup failed for {path}: {error}")
         if not release:
             return found, None
-        notes.append(f"album from Apple Music: {release!r}")
         album, _ = tagging.collect(release.tags())
+        if catalogue:
+            # Spotify's album, date and numbers stay: Apple can date the same
+            # album otherwise (Caméléon: 2020, Spotify 2021), and the album
+            # would be split across two folders. Apple only fills gaps.
+            filled = [key for key in album if key not in found]
+            for key in filled:
+                found[key] = album[key]
+            if filled:
+                notes.append(f"from Apple Music: {', '.join(filled)}")
+            return found, None
+        notes.append(f"album from Apple Music: {release!r}")
         for key in ("album", "albumartist", "date", "genre", "tracknumber", "discnumber",
                     "musicbrainz_albumtype"):
             found.pop(key, None)
