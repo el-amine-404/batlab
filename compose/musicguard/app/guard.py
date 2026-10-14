@@ -33,6 +33,7 @@ import apple
 import clamd
 import mutagen
 import credits as credit_fix
+import dedup
 import identify
 import layout
 import lyrics
@@ -69,7 +70,7 @@ ORPHAN_SECONDS = 3600
 STATE_VERSION = 1
 # Events after which Navidrome has something new to index.
 LIBRARY_CHANGES = {"filed", "cleaned", "verified", "credited", "quarantined", "reported", "lyrics",
-                   "removed", "upgraded"}
+                   "removed", "upgraded", "deduplicated"}
 
 
 def env(name, default=None):
@@ -111,6 +112,8 @@ class Config:
         self.lidarr_key = env("LIDARR_API_KEY")
         self.lidarr_root = env("MUSICGUARD_LIDARR_ROOT", "/data/media/music")
         self.upgrade = env("MUSICGUARD_UPGRADE", "1") == "1" and bool(self.lidarr_key)
+        # The same song filed twice: the best copy stays (dedup.py).
+        self.dedup = env("MUSICGUARD_DEDUP", "1") == "1"
         # Navidrome scans only when asked (navidrome.py).
         self.navidrome_url = env("NAVIDROME_URL", "http://navidrome:4533")
         self.navidrome_user = env("NAVIDROME_USER")
@@ -149,6 +152,7 @@ class Guard:
         self.credits = credit_fix.Credits(self.state["releases"])
         # path -> (size, mtime, title, artist, seconds), for finding duplicates.
         self.songs = {}
+        self.tracks = {}  # path -> (size, mtime_ns, dedup.Track), for dedup_pass
         # Navidrome is told to scan once a library pass leaves nothing unchecked.
         self.library_changed = True
         self.scan_reported = False
@@ -578,6 +582,13 @@ class Guard:
                 return path
             if mode == "import":
                 existing = self.already_in_library(found, seconds)
+                if existing and existing.startswith(self.config.extras + os.sep):
+                    old = self.track(existing, owned=True)
+                    new_copy = dedup.Track(clean, found, seconds, stream.get("codec_name", ""),
+                                           int(os.path.getsize(clean) * 8 / max(seconds, 1)))
+                    if old and dedup.best_audio([old, new_copy]) is new_copy:
+                        notes.append(f"better than {existing}, which dedup will retire")
+                        existing = None
                 if existing:
                     self.event("duplicate", path, "ALREADY_IN_LIBRARY", existing)
                     if not self.config.dry_run:
@@ -1140,7 +1151,17 @@ class Guard:
                 return None
             return entry
         self.remove_with_sidecars(path)
-        directory = os.path.dirname(path)
+        self.prune(os.path.dirname(path))
+        self.state["files"].pop(path, None)
+        self.state["lyrics"].pop(path, None)
+        self.event("upgraded", path, detail=f"replaced by {replacement}")
+        return None
+
+    def prune(self, directory):
+        """An extras folder left without audio loses its cover, then itself
+        and its artist's folder once empty."""
+        if not os.path.isdir(directory):
+            return
         if not any(os.path.splitext(n)[1].lower() in AUDIO_EXTENSIONS for n in os.listdir(directory)):
             cover = os.path.join(directory, "cover.jpg")
             if os.path.isfile(cover):
@@ -1151,10 +1172,120 @@ class Guard:
             except OSError:
                 break
             directory = os.path.dirname(directory)
-        self.state["files"].pop(path, None)
-        self.state["lyrics"].pop(path, None)
-        self.event("upgraded", path, detail=f"replaced by {replacement}")
-        return None
+
+    # --- duplicates -----------------------------------------------------------------
+
+    def track(self, path, owned):
+        """dedup.Track for a library file, cached by size and mtime; None if unreadable."""
+        try:
+            stat = os.stat(path)
+        except FileNotFoundError:
+            return None
+        cached = self.tracks.get(path)
+        if cached and cached[:2] == (stat.st_size, stat.st_mtime_ns):
+            cached[2].owned = owned
+            return cached[2]
+        try:
+            audio = mutagen.File(path)
+        except Exception:
+            audio = None
+        if audio is None or not getattr(audio, "info", None):
+            return None
+        items = tagging.read_mutagen(path) or []
+        found, _ = tagging.collect(items)
+        seconds = getattr(audio.info, "length", 0) or 0
+        kind = type(audio).__name__.lower()
+        codec = {"mp3": "mp3", "easymp3": "mp3", "flac": "flac", "oggopus": "opus",
+                 "oggvorbis": "vorbis"}.get(kind, "")
+        if not codec and kind in ("mp4", "easymp4"):
+            codec = "alac" if "alac" in str(getattr(audio.info, "codec", "")) else "aac"
+        bitrate = int(stat.st_size * 8 / max(seconds, 1))
+        track = dedup.Track(path, found, seconds, codec, bitrate, owned)
+        self.tracks[path] = (stat.st_size, stat.st_mtime_ns, track)
+        return track
+
+    def alike(self, a, b):
+        try:
+            return reference.similarity(reference.fingerprint(a.path),
+                                        reference.fingerprint(b.path)) >= reference.SAME
+        except Exception as error:  # fpcalc failed: not shown to be one song
+            log(f"fingerprint comparison failed for {a.path}, {b.path}: {error}")
+            return False
+
+    def dedup_pass(self):
+        """The same song filed twice (dedup.py): the best audio stays, under the
+        best tags, and the other copies in music-extras go to quarantine. Only
+        files the guard has passed are weighed; Lidarr's and Aurral's are
+        never moved."""
+        if not self.config.dedup or not os.path.isdir(self.config.extras):
+            return
+        tracks = []
+        for path in list(self.state["files"]):
+            if os.path.splitext(path)[1].lower() not in AUDIO_EXTENSIONS:
+                continue
+            if not any(path.startswith(root + os.sep) for root in self.config.roots):
+                continue
+            track = self.track(path, owned=path.startswith(self.config.extras + os.sep))
+            if track:
+                tracks.append(track)
+        live = {t.path for t in tracks}
+        for path in list(self.tracks):
+            if path not in live:
+                self.tracks.pop(path)
+        for group in dedup.groups(tracks, self.alike):
+            try:
+                self.resolve(group)
+            except Exception as error:  # one group never stops the others
+                log(f"dedup failed for {[t.path for t in group]}: {error}")
+
+    def resolve(self, group):
+        keep = dedup.best_audio(group)
+        others = [t for t in group if t is not keep and t.owned]
+        if not others:
+            return
+        if self.config.dry_run:
+            self.event("would-deduplicate", keep.path, detail=f"over {[t.path for t in others]}")
+            return
+        merged = dedup.best_tags(group) if keep.owned else None
+        emptied = set()
+        # The others go first: the kept copy may take one's name.
+        for track in others:
+            stem = os.path.splitext(track.path)[0]
+            for extension in LYRIC_EXTENSIONS:
+                if os.path.isfile(stem + extension) and not os.path.islink(stem + extension):
+                    os.unlink(stem + extension)
+            self.quarantine(track.path, "DUPLICATE", f"the same song as {keep.path}, which is better",
+                            self.config.extras)
+            self.state["lyrics"].pop(track.path, None)
+            emptied.add(os.path.dirname(track.path))
+        kept = keep.path
+        if keep.owned:
+            if merged != keep.tags:
+                tagging.write(kept, merged)
+            target = os.path.join(self.config.extras, layout.relative(merged, os.path.splitext(kept)[1]))
+            if target != kept:
+                target = layout.free_path(target)
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                old_dir = os.path.dirname(kept)
+                cover = os.path.join(old_dir, "cover.jpg")
+                if os.path.isfile(cover) and not os.path.exists(os.path.join(os.path.dirname(target), "cover.jpg")):
+                    shutil.copy2(cover, os.path.join(os.path.dirname(target), "cover.jpg"))
+                os.rename(kept, target)
+                for extension in SIDECAR_EXTENSIONS - IMAGE_EXTENSIONS:
+                    sidecar = os.path.splitext(kept)[0] + extension
+                    if os.path.isfile(sidecar) and not os.path.islink(sidecar):
+                        os.rename(sidecar, os.path.splitext(target)[0] + extension)
+                self.state["files"].pop(kept, None)
+                if kept in self.state["lyrics"]:
+                    self.state["lyrics"][target] = self.state["lyrics"].pop(kept)
+                emptied.add(old_dir)
+                kept = target
+            self.remember(kept)
+        for directory in sorted(emptied, key=len, reverse=True):
+            self.prune(directory)
+        self.event("deduplicated", kept, detail=f"kept over {len(others)} other cop"
+                                                f"{'y' if len(others) == 1 else 'ies'}: "
+                                                + ", ".join(os.path.basename(t.path) for t in others))
 
     def migrate(self, source, destination):
         """Copy an old library into the layout. The source is never changed."""
@@ -1188,6 +1319,7 @@ def main(argv=None):
     audit = commands.add_parser("audit", help="compare every track's tags with what Shazam hears")
     audit.add_argument("roots", nargs="*")
     commands.add_parser("upgrade", help="one pass handing songs from links to Lidarr")
+    commands.add_parser("dedup", help="one pass retiring worse copies of songs filed twice")
     commands.add_parser("lyrics", help="ask LRCLIB now for every track without synced lyrics")
     ident = commands.add_parser("identify", help="ask Shazam what files are")
     ident.add_argument("paths", nargs="+")
@@ -1218,6 +1350,10 @@ def main(argv=None):
                     guard.state["lyrics"].pop(path, None)  # ignore the 30-day wait
                     guard.lyrics_for_existing(path)
         return 0
+    if arguments.command == "dedup":
+        guard.dedup_pass()
+        guard.save_state()
+        return 0
     if arguments.command == "upgrade":
         guard.upgrade_pass()
         guard.save_state()
@@ -1238,6 +1374,7 @@ def main(argv=None):
         guard.inbox_pass()
         if time.monotonic() - last_roots >= config.roots_interval or arguments.command == "once":
             guard.roots_pass()
+            guard.dedup_pass()
             guard.upgrade_pass()
             guard.scan_navidrome()
             last_roots = time.monotonic()

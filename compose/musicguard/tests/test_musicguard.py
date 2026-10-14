@@ -26,6 +26,7 @@ from mutagen.id3 import APIC, COMM, ID3, TIT2, TPE1, TXXX, WOAS, WXXX  # noqa: E
 
 import clamd  # noqa: E402
 import credits  # noqa: E402
+import dedup  # noqa: E402
 import guard  # noqa: E402
 import identify  # noqa: E402
 import layout  # noqa: E402
@@ -487,6 +488,134 @@ class Migration(GuardTestCase):
                                           "02 - Circles.mp3"), easy=True)
         self.assertEqual(moved["musicbrainz_trackid"], ["6511d5dc-f8ee-4454-844f-e87246a8931c"])
         self.assertEqual(moved["tracknumber"], ["2/17"])
+
+
+class Duplicates(GuardTestCase):
+    """The same song filed twice: the best audio stays, under the best tags."""
+
+    def filed(self, root, relative, seconds=8, **tags_):
+        path = os.path.join(root, relative)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tone(path, seconds)
+        audio = mutagen.File(path, easy=True)
+        for key, value in tags_.items():
+            audio[key] = value
+        audio.save()
+        return path
+
+    def test_a_video_copy_with_an_intro_gives_way_and_its_extra_tags_stay(self):
+        video = self.filed(self.extras, "ElGrandeToto/Caméléon (2021)/15 - Mghayer (Prod. By Ysos) #CAMÉLÉON.mp3",
+                           seconds=14, title="Mghayer (Prod. By Ysos) #CAMÉLÉON", artist="ElGrandeToto",
+                           album="Caméléon", date="2021", tracknumber="15", isrc="BEIY42000017", genre="Rap")
+        self.filed(self.extras, "ElGrandeToto/Caméléon (2021)/15 - Mghayer.mp3", seconds=10, title="Mghayer",
+                   artist="ElGrandeToto", album="Caméléon", date="2021", tracknumber="15", isrc="BEIY42000017")
+        with open(os.path.splitext(video)[0] + ".lrc", "w") as out:
+            out.write("[00:01.00]la\n")
+        self.guard.roots_pass()
+        self.guard.dedup_pass()
+        self.assertEqual(self.all_files(self.extras), ["ElGrandeToto/Caméléon (2021)/15 - Mghayer.mp3"])
+        self.assertEqual(self.quarantined_reasons(), ["DUPLICATE"])
+        kept = mutagen.File(os.path.join(self.extras, "ElGrandeToto", "Caméléon (2021)", "15 - Mghayer.mp3"),
+                            easy=True)
+        self.assertEqual(kept["title"], ["Mghayer"])
+        self.assertEqual(kept["genre"], ["Rap"])  # taken from the copy that went
+        self.assertIn("deduplicated", [e["event"] for e in self.guard.events])
+
+    def test_better_audio_under_worse_tags_keeps_the_audio_and_takes_the_tags(self):
+        self.filed(self.extras, "Stormy/PIRATE.mp3", title="PIRATE (Official Video)", artist="Stormy")
+        self.filed(self.extras, "Stormy/OMEGA (2025)/05 - PIRATE.flac", title="PIRATE",
+                          artist="Stormy", album="OMEGA", date="2025", tracknumber="5")
+        self.guard.roots_pass()
+        self.guard.dedup_pass()
+        self.assertEqual(self.all_files(self.extras), ["Stormy/OMEGA (2025)/05 - PIRATE.flac"])
+
+    def test_lidarrs_copy_wins_and_is_never_touched(self):
+        lidarr = self.filed(self.music, "Stormy/OMEGA (2025)/05 - PIRATE.mp3", title="PIRATE", artist="Stormy",
+                            album="OMEGA", date="2025", tracknumber="5")
+        self.filed(self.extras, "Stormy/OMEGA (2025)/05 - PIRATE.flac", title="PIRATE", artist="Stormy")
+        before = os.stat(lidarr).st_mtime_ns
+        self.guard.roots_pass()
+        self.guard.dedup_pass()
+        self.assertEqual(self.all_files(self.extras), [])
+        self.assertEqual(os.stat(lidarr).st_mtime_ns, before)
+
+    def test_a_remix_of_another_length_is_another_song(self):
+        self.filed(self.extras, "Stormy/A/01 - PIRATE.mp3", seconds=8, title="PIRATE", artist="Stormy")
+        self.filed(self.extras, "Stormy/B/01 - PIRATE.mp3", seconds=30, title="PIRATE", artist="Stormy")
+        self.guard.roots_pass()
+        self.guard.dedup_pass()
+        self.assertEqual(len(self.all_files(self.extras)), 2)
+
+    def test_lengths_apart_are_one_song_only_when_they_sound_alike(self):
+        self.filed(self.extras, "Stormy/A/01 - PIRATE.mp3", seconds=8, title="PIRATE", artist="Stormy")
+        self.filed(self.extras, "Stormy/B/01 - PIRATE.mp3", seconds=20, title="PIRATE", artist="Stormy")
+        self.guard.roots_pass()
+        with mock.patch.object(self.guard, "alike", return_value=False):
+            self.guard.dedup_pass()
+        self.assertEqual(len(self.all_files(self.extras)), 2)
+        with mock.patch.object(self.guard, "alike", return_value=True):
+            self.guard.dedup_pass()
+        self.assertEqual(len(self.all_files(self.extras)), 1)
+        self.assertEqual(self.quarantined_reasons(), ["DUPLICATE"])
+
+    def test_a_better_download_of_a_filed_song_replaces_it(self):
+        self.filed(self.extras, "Stormy/OMEGA (2025)/05 - PIRATE.mp3", title="PIRATE", artist="Stormy",
+                   album="OMEGA", date="2025", tracknumber="5")
+        self.guard.roots_pass()
+        source = os.path.join(self.inbox, "songdrop", "Stormy - PIRATE.flac")
+        os.makedirs(os.path.dirname(source))
+        tone(source)
+        audio = mutagen.File(source, easy=True)
+        audio["title"], audio["artist"] = "PIRATE", "Stormy"
+        audio.save()
+        self.inbox_twice()
+        self.guard.roots_pass()
+        self.guard.dedup_pass()
+        self.assertEqual(self.all_files(self.extras), ["Stormy/OMEGA (2025)/05 - PIRATE.flac"])
+
+    def test_a_worse_download_of_a_filed_song_is_dropped(self):
+        self.filed(self.extras, "Stormy/PIRATE.flac", title="PIRATE", artist="Stormy")
+        self.guard.roots_pass()
+        source = os.path.join(self.inbox, "songdrop", "Stormy - PIRATE.mp3")
+        os.makedirs(os.path.dirname(source))
+        tone(source)
+        audio = mutagen.File(source, easy=True)
+        audio["title"], audio["artist"] = "PIRATE", "Stormy"
+        audio.save()
+        self.inbox_twice()
+        self.assertEqual(self.all_files(self.extras), ["Stormy/PIRATE.flac"])
+
+
+class DedupRules(unittest.TestCase):
+    def track(self, title="PIRATE", artist="Stormy", seconds=200, codec="mp3", bitrate=160000, owned=True, **more):
+        values = {"title": [title], "artist": [artist], **{k: [v] for k, v in more.items()}}
+        return dedup.Track(f"/x/{title}-{seconds}-{codec}", values, seconds, codec, bitrate, owned)
+
+    def test_one_song(self):
+        never = lambda a, b: self.fail("no fingerprint needed")  # noqa: E731
+        self.assertTrue(dedup.same_song(self.track(isrc="X1"), self.track("Other", "Else", isrc="X1"), never))
+        self.assertTrue(dedup.same_song(self.track(), self.track("PIRATE (Official Video)", seconds=203), never))
+        self.assertFalse(dedup.same_song(self.track(), self.track(seconds=260), never))
+        self.assertFalse(dedup.same_song(self.track(), self.track("KATANA"), never))
+
+    def test_best_audio(self):
+        padded = self.track(seconds=220, codec="opus", bitrate=160000)
+        exact = self.track(seconds=214, codec="opus", bitrate=150000)
+        self.assertIs(dedup.best_audio([padded, exact]), exact)
+        mp3 = self.track(codec="mp3", bitrate=320000)
+        flac = self.track(codec="flac", bitrate=900000)
+        self.assertIs(dedup.best_audio([mp3, flac]), flac)
+        opus = self.track(codec="opus", bitrate=160000)
+        self.assertIs(dedup.best_audio([self.track(codec="mp3", bitrate=192000), opus]), opus)
+        lidarr = self.track(codec="mp3", bitrate=128000, owned=False)
+        self.assertIs(dedup.best_audio([flac, lidarr]), lidarr)
+
+    def test_best_tags(self):
+        dirty = self.track("Mghayer (Prod. By Ysos) #CAMÉLÉON", album="Caméléon", genre="Rap")
+        clean = self.track("Mghayer", album="Caméléon")
+        merged = dedup.best_tags([dirty, clean])
+        self.assertEqual(merged["title"], ["Mghayer"])
+        self.assertEqual(merged["genre"], ["Rap"])
 
 
 class Identification(GuardTestCase):
