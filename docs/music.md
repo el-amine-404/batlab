@@ -153,6 +153,13 @@ It runs in three ways:
   no album.
   `docker exec musicguard python /app/guard.py upgrade` runs one pass
   (`MUSICGUARD_DRY_RUN=1` to only list what it would request).
+- **Lyrics left behind by a rename** (Lidarr renames a track after import,
+  "01 - " to "1-01 - ", or an album folder): after an hour without a track
+  of their name they follow the one track of their title in the folder, else
+  in the artist's other album folders, and replace that track's own lyrics
+  only when better (a person's or LRCLIB's over AI or unknown ones). Lyrics
+  with no such track, or not better, go to quarantine (`ORPHANED_LYRICS`,
+  not announced); none are deleted outright.
 - **Programs and archives in a library** (`.exe`, `.zip`, `.lnk`, `.html`…, or
   anything that starts like one, a "cover.jpg" that is an ELF binary included)
   are quarantined; other odd files are reported once and left.
@@ -325,25 +332,26 @@ Symfonium or Tempo (Android), Amperfy or play:Sub (iPhone).
 - **MeTube** (`metube.homelab.lan`): any YouTube link (or one of the other sites
   yt-dlp supports). Choose **Audio**; the default format and "with cover" are
   right. A video download works too: musicguard keeps only its audio.
-- **spotDL** (`spotdl.homelab.lan`): a Spotify track link. spotDL reads the
-  song's details from Spotify without an account (its default SpotipyFree
-  client since v4.5.0) and downloads the matching YouTube Music audio as Opus,
-  without re-encoding. Its web UI takes single songs; for a whole Spotify
-  playlist, import it in Aurral.
+  MeTube stays because it does what songdrop does not: one file per chapter
+  of a long video (a whole album uploaded as one), a clip of part of a video,
+  a cap on a playlist's length, following a channel for new uploads, and
+  cookies for age-restricted videos.
+- **spotDL's own page** (`spotdl.homelab.lan`, single track links only) was
+  removed on 2026-10-14: songdrop takes the same links and albums, playlists
+  and artists too, with the same options, and checks each song against
+  Spotify's preview. The old address redirects to songdrop. spotDL itself
+  still runs inside songdrop; Spotify playlists can also be imported in Aurral.
 
 spotDL's image carries the yt-dlp it was released with, and YouTube answers an
 old yt-dlp with 403 Forbidden: v4.5.2 (yt-dlp 2026.07.04) failed every download
-on 2026-10-11 while MeTube's 2026.8.19 worked on the same link. So spotDL is
-built locally (`compose/music-links/spotdl`) on the pinned release with the
-yt-dlp from `VERSION_YTDLP` in `compose/versions.env`. Both stay current on
-their own: Renovate merges new yt-dlp (a day after release), MeTube and spotDL
-minor releases straight into `main`, and the nightly updater redeploys them,
-rebuilding spotDL because its image tag names both pins. A spotDL major (v5)
+on 2026-10-11 while MeTube's 2026.8.19 worked on the same link. So songdrop is
+built locally on the pinned spotDL release with the yt-dlp from
+`VERSION_YTDLP` in `compose/versions.env`. Both stay current on their own:
+Renovate merges new yt-dlp (a day after release), MeTube and spotDL minor
+releases straight into `main`, and the nightly updater redeploys them,
+rebuilding songdrop because its image tag names both pins. A spotDL major (v5)
 still arrives as a pull request. When spotDL starts failing with 403, check
 `#updates` and `#alerts` for a yt-dlp bump that did not land.
-
-spotDL's web page takes track links only: an album or playlist link leaves it
-on "LOADING" (the container log says `Invalid URL`). songdrop takes them.
 
 ### songdrop
 
@@ -406,7 +414,7 @@ The server's own packages (FastAPI, uvicorn) and the page's npm packages are
 pinned in `requirements.txt` and `package-lock.json` and are not followed by
 Renovate; yt-dlp, spotDL and Node are, through `compose/versions.env`.
 
-All three are LAN-only (Caddy `localSubnets`) and have no login, like Seerr's
+Both are LAN-only (Caddy `localSubnets`) and have no login, like Seerr's
 request page. YouTube audio is lossy (about 130-160 kbps Opus); for an album
 you care about, request it in Aurral instead, which goes through Lidarr.
 
@@ -509,6 +517,11 @@ So the key is also bound to Homepage's fixed address, 172.19.10.30.
 The account is `SLSKD_SLSK_USERNAME`/`SLSKD_SLSK_PASSWORD` in `compose/.env`
 (Soulseek has no sign-up: the first login creates it). The web UI login is
 `SLSKD_WEB_USER`/`SLSKD_WEB_PASS`.
+
+Soularr runs every 6 hours (`SCRIPT_INTERVAL`): each run searches Soulseek
+for every wanted album, and every 10 minutes meant 985 searches a day on
+2026-10-14, mostly for Moroccan albums nobody shares. A newly requested album
+goes to the torrent indexers at once and to Soulseek within 6 hours.
 
 Soularr reads `${VOLUMES_ROOT}/soularr/config.ini`, made from
 `compose/arr/conf/soularr/config.ini.example`. Departures from its defaults: no

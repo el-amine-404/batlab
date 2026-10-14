@@ -112,3 +112,48 @@ def cover(old_audio, new_audio, old_tags, new_tags):
     if not source:
         return None
     return source, os.path.join(new_dir, "cover" + os.path.splitext(source)[1].lower())
+
+
+# "01 - ", "1-01 - ", "2-05 - ": Lidarr's track and disc numbers before a title.
+TRACK_PREFIX = re.compile(r"^(?:\d+-)?\d+\s*-\s*")
+
+
+def title_of(stem):
+    return TRACK_PREFIX.sub("", os.path.basename(stem)).casefold().strip()
+
+
+def renamed_track(lyrics_path, audio_extensions):
+    """The track a lyrics file was left behind by, after a rename: the one
+    audio file of its title in its folder, else in its artist's other album
+    folders (an album folder renamed). None when there is none or several."""
+    title = title_of(os.path.splitext(lyrics_path)[0])
+    if not title:
+        return None
+    folder = os.path.dirname(lyrics_path)
+    artist = os.path.dirname(folder)
+    places = [folder] + sorted(os.path.join(artist, d) for d in _listdir(artist)
+                               if os.path.join(artist, d) != folder)
+    for place in places:
+        found = [os.path.join(place, n) for n in _listdir(place)
+                 if os.path.splitext(n)[1].lower() in audio_extensions
+                 and not n.startswith(".") and title_of(os.path.splitext(n)[0]) == title]
+        if len(found) == 1:
+            return found[0]
+        if found:
+            return None  # several of that title: not a guess to make
+    return None
+
+
+def better_lyrics(new_text, old_text):
+    """Whether new_text should replace old_text: a person's or LRCLIB's
+    synced lyrics over AI or unknown ones, a person's over LRCLIB's."""
+    rank = {"unknown": 0, **RANK}
+    return rank[origin(new_text)] > rank[origin(old_text)] and origin(new_text) in ("person", "lrclib")
+
+
+def _listdir(path):
+    try:
+        return os.listdir(path) if os.path.isdir(path) else []
+    except OSError:
+        return []
+

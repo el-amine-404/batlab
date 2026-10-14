@@ -404,7 +404,58 @@ class Libraries(GuardTestCase):
         self.guard.roots_pass()
         self.assertTrue(os.path.exists(kept))
         self.assertFalse(os.path.exists(orphan))
+        self.assertEqual(self.quarantined_reasons(), ["ORPHANED_LYRICS"], "kept a while, never deleted")
         self.assertTrue(os.path.exists(fresh), "a track may still be on its way")
+
+    def orphan(self, folder, name, text):
+        path = os.path.join(folder, name)
+        os.makedirs(folder, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        old = time.time() - 2 * guard.ORPHAN_SECONDS
+        os.utime(path, (old, old))
+        return path
+
+    def test_lyrics_follow_a_renamed_track(self):
+        album = os.path.join(self.music, "Band", "Record (2023)")
+        os.makedirs(album)
+        tone(os.path.join(album, "1-01 - Song.mp3"))
+        mine = "[by:a person]\n[00:01.00] la\n"
+        self.orphan(album, "01 - Song.lrc", mine)
+        self.guard.roots_pass()
+        with open(os.path.join(album, "1-01 - Song.lrc"), encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), mine)
+        self.assertEqual(self.quarantined_reasons(), [])
+
+    def test_lyrics_follow_a_renamed_album_folder(self):
+        renamed = os.path.join(self.music, "Band", "Record (Deluxe) (2023)")
+        os.makedirs(renamed)
+        tone(os.path.join(renamed, "03 - Song.mp3"))
+        self.orphan(os.path.join(self.music, "Band", "Record (2023)"), "03 - Song.lrc", "[by:a person]\n[00:01.00] la\n")
+        self.guard.roots_pass()
+        self.assertTrue(os.path.exists(os.path.join(renamed, "03 - Song.lrc")))
+
+    def test_a_persons_lyrics_replace_lrclibs_on_the_renamed_track(self):
+        album = os.path.join(self.music, "Band", "Record (2023)")
+        os.makedirs(album)
+        tone(os.path.join(album, "1-01 - Song.mp3"))
+        with open(os.path.join(album, "1-01 - Song.lrc"), "w", encoding="utf-8") as handle:
+            handle.write("[re:LRCLIB via Stanzarr]\n[00:02.00] la\n")
+        mine = "[by:a person]\n[00:01.00] la\n"
+        self.orphan(album, "01 - Song.lrc", mine)
+        self.guard.roots_pass()
+        with open(os.path.join(album, "1-01 - Song.lrc"), encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), mine)
+        self.assertEqual(self.quarantined_reasons(), ["REPLACED_LYRICS"])
+
+    def test_lyrics_of_a_title_twice_nearby_are_not_guessed(self):
+        album = os.path.join(self.music, "Band", "Record (2023)")
+        os.makedirs(album)
+        tone(os.path.join(album, "1-01 - Song.mp3"))
+        tone(os.path.join(album, "2-01 - Song.mp3"))
+        self.orphan(album, "01 - Song.lrc", "[by:a person]\n[00:01.00] la\n")
+        self.guard.roots_pass()
+        self.assertEqual(self.quarantined_reasons(), ["ORPHANED_LYRICS"])
 
     def test_aurral_marker_survives(self):
         path = os.path.join(self.aurral, "Band", "Record", "Song.opus")

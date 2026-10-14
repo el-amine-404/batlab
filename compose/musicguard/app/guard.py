@@ -983,6 +983,34 @@ class Guard:
             return False
         return time.time() - stat.st_mtime > ORPHAN_SECONDS
 
+    def follow_lyrics(self, path, extension, root):
+        """Lyrics whose track has gone. Lidarr renames tracks after import (a
+        multi-disc release gets "1-01 - ...", an album folder a new name) and
+        leaves the lyrics it did not import behind: they follow their track
+        when it is the one of their title nearby (carry.renamed_track), and
+        replace that track's own lyrics only when better (a person's or
+        LRCLIB's over AI or unknown ones). Otherwise, or when the track is
+        really gone, they go to quarantine: hand-synced lyrics are never
+        deleted outright."""
+        track = carry.renamed_track(path, AUDIO_EXTENSIONS)
+        target = os.path.splitext(track)[0] + extension if track else None
+        if target and os.path.exists(target):
+            mine, theirs = carry.read(path) or "", carry.read(target) or ""
+            if extension == ".lrc" and carry.better_lyrics(mine, theirs):
+                self.quarantine(target, "REPLACED_LYRICS", f"better lyrics followed the track from {path}",
+                                root, announce=False)
+            else:
+                target = None
+        if target and not os.path.exists(target):
+            self.event("handed-over", target, "LYRICS", f"followed its renamed track, from {path}")
+            if not self.config.dry_run:
+                os.rename(path, target)
+                self.state["sidecars"].pop(path, None)
+            return
+        self.quarantine(path, "ORPHANED_LYRICS", "no track of this name or title nearby" if not track
+                        else f"{track} has lyrics as good", root, announce=False)
+        self.state["sidecars"].pop(path, None)
+
     def remove_stale_temporary(self, path):
         """A half-written copy left by a crash; the original was never touched."""
         try:
@@ -1006,12 +1034,7 @@ class Guard:
             self.quarantine(path, "UNEXPECTED_FILE", "lyrics file too large", root)
             return
         if extension in LYRIC_EXTENSIONS and self.orphaned(path, stat):
-            # Lidarr renames tracks after import (a multi-disc release gets
-            # "1-01 - ..."), and leaves the lyrics it did not import behind;
-            # the renamed track gets its own lyrics on the next pass.
-            if not self.config.dry_run:
-                os.unlink(path)
-            self.event("removed", path, "ORPHANED_LYRICS", "no track of this name")
+            self.follow_lyrics(path, extension, root)
             return
         stem = os.path.splitext(os.path.basename(path))[0].lower()
         if extension in LYRIC_EXTENSIONS:
