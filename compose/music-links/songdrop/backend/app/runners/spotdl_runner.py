@@ -96,7 +96,7 @@ def main() -> None:
     async def sounds_right(song, path) -> bool:
         """False only when Spotify's preview says it is another recording."""
         score = await loop.run_in_executor(None, verify.score, str(path), song.song_id)
-        print(f"{_song_name(song)}: {song.download_url} scores "
+        print(f"verify: {_song_name(song)}: {song.download_url} scores "
               f"{'no preview' if score is None else f'{score:.2f}'} against Spotify's preview", flush=True)
         if score is None or score >= verify.OTHER:
             return True

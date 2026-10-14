@@ -375,6 +375,8 @@ class JobManager:
             line = raw.decode("utf-8", errors="replace").rstrip()
             if line:
                 output.append(line)
+                if line.startswith("verify: "):  # which upload was kept, and why
+                    log.info("job %s: %s", job_id, line[8:])
         process.stdout.close()
 
     def _apply(self, job: Job, job_dir: Path, event: dict) -> None:
