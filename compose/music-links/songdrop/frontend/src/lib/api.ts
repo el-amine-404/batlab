@@ -16,14 +16,15 @@ export type Choice = { value: string; label: string };
 
 export type Field = {
   key: string;
-  type: "select" | "switch";
+  type: "select" | "switch" | "time";
   flag: string;
   label: string;
   help: string;
   choices?: Choice[];
   default: string | boolean;
   kinds?: string[];
-  needs?: "has_playlist";
+  /** has_playlist: a video inside a playlist; list: a playlist, or a video inside one. */
+  needs?: "has_playlist" | "list";
 };
 
 export type OptionsSpec = { engines: Record<Engine, { label: string; fields: Field[] }> };
@@ -79,6 +80,11 @@ export type JobError = {
   next_retry_at: number | null;
 };
 
+/** The page's YouTube cookies; never the cookies themselves. */
+export type CookieStatus =
+  | { present: false }
+  | { present: true; saved_at: number; expires_at: number | null; expired: boolean };
+
 export const RETRYING: RetryState[] = ["queued", "retrying"];
 
 export const ACTIVE: JobStatus[] = ["queued", "running"];
@@ -126,4 +132,7 @@ export const api = {
   cancel: (id: string) => request<Job>(`/api/jobs/${id}/cancel`, { method: "POST" }),
   remove: (id: string) => request<void>(`/api/jobs/${id}`, { method: "DELETE" }),
   retry: (id: string, index: number) => request<Job>(`/api/jobs/${id}/errors/${index}/retry`, { method: "POST" }),
+  cookies: () => request<CookieStatus>("/api/cookies"),
+  saveCookies: (file: File) => request<CookieStatus>("/api/cookies", { method: "PUT", body: file }),
+  removeCookies: () => request<void>("/api/cookies", { method: "DELETE" }),
 };

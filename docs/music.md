@@ -332,14 +332,13 @@ Symfonium or Tempo (Android), Amperfy or play:Sub (iPhone).
 - **MeTube** (`metube.homelab.lan`): any YouTube link (or one of the other sites
   yt-dlp supports). Choose **Audio**; the default format and "with cover" are
   right. A video download works too: musicguard keeps only its audio.
-  MeTube stays because it does what songdrop does not: one file per chapter
-  of a long video (a whole album uploaded as one), a clip of part of a video,
-  a cap on a playlist's length, following a channel for new uploads, and
-  cookies for age-restricted videos.
+  What MeTube can do beyond songdrop is following a channel for new uploads;
+  songdrop has the rest since 2026-10-14 (below). A feed of a channel's new
+  uploads may do that job better later.
 - **spotDL's own page** (`spotdl.homelab.lan`, single track links only) was
   removed on 2026-10-14: songdrop takes the same links and albums, playlists
   and artists too, with the same options, and checks each song against
-  Spotify's preview. The old address redirects to songdrop. spotDL itself
+  Spotify's preview. Its address no longer exists. spotDL itself
   still runs inside songdrop; Spotify playlists can also be imported in Aurral.
 
 spotDL's image carries the yt-dlp it was released with, and YouTube answers an
@@ -395,6 +394,20 @@ its download copies are removed, never the library's.
   they were another song, songs a later try brought back, and songs songdrop
   gave up on. musicguard's quarantines (`WRONG_SONG`, `DUPLICATE`) go to the
   same channel.
+- **Long videos, playlists and sign-in** (yt-dlp links, in Options):
+  *One song per chapter* splits a video at its chapters (a whole album or a
+  mix uploaded as one); each part is tagged with the chapter's title, without
+  its "01." or "[03:15]", with its artist when the chapter reads "Artist -
+  Song", the video as its album and the chapter's number, and the whole video
+  is dropped; a video without chapters stays one song and the page says so.
+  *Clip from / to* (1:23 or 1:02:03) keeps only part of a video, one song of
+  a live set say; not together with chapters. *How much of the playlist*
+  keeps the first 10 to 100 items. **YouTube cookies**, on the page under the
+  downloads: a cookies.txt exported from a signed-in browser lets every
+  download (spotDL's too) fetch videos YouTube shows only to a signed-in
+  viewer. It is kept in `$VOLUMES_ROOT/songdrop/jobs/cookies.txt` (mode 600),
+  never sent back to the page, which shows only when it was saved and when the
+  YouTube cookies run out; each job gets its own copy, removed when it ends.
 - **Links it refuses**: sites yt-dlp only knows through its generic page
   scraper, Spotify podcasts, and `spotify.link` short links. A link with more
   than 200 songs (`SONGDROP_MAX_ITEMS`) is refused rather than half done.

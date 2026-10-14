@@ -1,6 +1,7 @@
 import { CloudOff, Inbox } from "lucide-react";
 import { Toaster } from "sonner";
 
+import { CookiesCard } from "@/components/CookiesCard";
 import { JobCard } from "@/components/JobCard";
 import { LinkForm } from "@/components/LinkForm";
 import { Logo } from "@/components/Logo";
@@ -50,6 +51,8 @@ export function App() {
 
           {jobs?.map((job) => <JobCard key={job.id} job={job} onChange={refresh} />)}
         </section>
+
+        <CookiesCard />
 
         <footer className="px-1 text-center text-xs leading-relaxed text-muted-foreground/70">
           Spotify links go through spotDL, everything else through yt-dlp. Songs are checked by musicguard, then

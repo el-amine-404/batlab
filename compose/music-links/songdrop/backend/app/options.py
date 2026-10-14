@@ -3,13 +3,33 @@
 Each field is validated here (a fixed set of choices, never free text, so
 nothing a user types reaches a command line), described for the page in
 FIELDS with the engine flag it stands for, and turned into engine settings by
-spotdl_settings() / ytdlp_settings(). Lyrics, file names and folders are not
-options: musicguard and Stanzarr own those.
+spotdl_settings() / ytdlp_settings(). The clip times are the only typed
+values, and must read as a time (1:23, 1:02:03 or seconds). Lyrics, file names
+and folders are not options: musicguard and Stanzarr own those.
 """
 
+import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+
+TIME = re.compile(r"^(?:(\d{1,2}):)?(?:(\d{1,2}):)?(\d{1,5})$")
+
+
+def seconds(text: str) -> int | None:
+    """"1:02:03", "2:30" or "150" in seconds; None for empty."""
+    if not text:
+        return None
+    match = TIME.match(text)
+    if not match:
+        raise ValueError("not a time")
+    parts = [int(p) for p in match.groups() if p is not None]
+    if len(parts) > 1 and parts[-1] >= 60 or len(parts) == 3 and parts[1] >= 60:
+        raise ValueError("not a time")
+    total = 0
+    for part in parts:
+        total = total * 60 + part
+    return total
 
 Bitrate = Literal["auto", "128k", "192k", "256k", "320k"]
 
@@ -34,8 +54,28 @@ class YtdlpOptions(BaseModel):
     format: Literal["original", "opus", "m4a", "mp3"] = "original"
     bitrate: Bitrate = "auto"
     playlist: bool = False
+    playlist_limit: Literal["all", "10", "25", "50", "100"] = "all"
     sponsor_block: bool = True
     embed_cover: bool = True
+    split_chapters: bool = False
+    clip_start: str = ""
+    clip_end: str = ""
+
+    @field_validator("clip_start", "clip_end")
+    @classmethod
+    def _a_time(cls, value: str) -> str:
+        value = value.strip()
+        seconds(value)
+        return value
+
+    @model_validator(mode="after")
+    def _one_way_to_cut(self):
+        start, end = seconds(self.clip_start), seconds(self.clip_end)
+        if start is not None and end is not None and end <= start:
+            raise ValueError("the clip ends before it starts")
+        if self.split_chapters and (start is not None or end is not None):
+            raise ValueError("split by chapters or clip, not both")
+        return self
 
 
 MODELS = {"spotdl": SpotdlOptions, "ytdlp": YtdlpOptions}
@@ -49,7 +89,8 @@ _BITRATES = [
 ]
 
 # What the page renders. "kinds" limits a field to some link kinds; "needs"
-# to a detection flag (has_playlist).
+# to a detection flag (has_playlist), or "list" to a playlist link or a video
+# inside one. "time" fields are typed: a time in the video.
 FIELDS = {
     "spotdl": [
         {
@@ -140,6 +181,34 @@ FIELDS = {
             "help": "This link points to a video inside a playlist. On: download the whole playlist. Off: just this one.",
         },
         {
+            "key": "playlist_limit", "type": "select", "flag": "--playlist-end", "needs": "list",
+            "label": "How much of the playlist",
+            "help": "Only the first songs of a long playlist or channel.",
+            "choices": [
+                {"value": "all", "label": "All of it (up to 200)"},
+                {"value": "10", "label": "First 10"},
+                {"value": "25", "label": "First 25"},
+                {"value": "50", "label": "First 50"},
+                {"value": "100", "label": "First 100"},
+            ],
+        },
+        {
+            "key": "clip_start", "type": "time", "flag": "--download-sections", "kinds": ["media"],
+            "label": "Clip from",
+            "help": "Only part of the video, e.g. one song of a live set: 1:23 or 1:02:03. Empty: from the start.",
+        },
+        {
+            "key": "clip_end", "type": "time", "flag": "--download-sections", "kinds": ["media"],
+            "label": "Clip to",
+            "help": "Empty: to the end.",
+        },
+        {
+            "key": "split_chapters", "type": "switch", "flag": "--split-chapters",
+            "label": "One song per chapter",
+            "help": "For a whole album or a mix uploaded as one video: each chapter becomes its own song, named after "
+                    "the chapter. A video without chapters stays whole. Not with a clip.",
+        },
+        {
             "key": "sponsor_block", "type": "switch", "flag": "--sponsorblock-remove music_offtopic",
             "label": "Cut non-music parts",
             "help": "Remove intros, skits and talking that SponsorBlock users marked in music videos.",
@@ -169,7 +238,7 @@ def parse(engine: str, raw: dict | None):
     return MODELS[engine].model_validate(raw or {})
 
 
-def spotdl_settings(options: SpotdlOptions, job_dir: str, parallel: int) -> dict:
+def spotdl_settings(options: SpotdlOptions, job_dir: str, parallel: int, cookies: str | None = None) -> dict:
     """spotDL's downloader settings (spotdl.utils.config.DOWNLOADER_OPTIONS keys)."""
     if options.bitrate != "auto":
         bitrate = options.bitrate
@@ -195,6 +264,8 @@ def spotdl_settings(options: SpotdlOptions, job_dir: str, parallel: int) -> dict
         "playlist_retain_track_cover": False,
         "fetch_albums": False,
         "overwrite": "skip",
+        # The page's YouTube cookies (cookies.py), a copy in the job's folder.
+        "cookie_file": cookies,
         "threads": parallel,
         "print_errors": False,
         "simple_tui": True,
@@ -219,4 +290,8 @@ def ytdlp_settings(options: YtdlpOptions) -> dict:
         "playlist": options.playlist,
         "sponsor_block": options.sponsor_block,
         "embed_cover": options.embed_cover,
+        "playlist_limit": None if options.playlist_limit == "all" else int(options.playlist_limit),
+        "split_chapters": options.split_chapters,
+        "clip": ([seconds(options.clip_start) or 0, seconds(options.clip_end)]
+                 if options.clip_start or options.clip_end else None),
     }

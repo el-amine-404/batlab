@@ -1,6 +1,7 @@
 import { RotateCcw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -21,6 +22,7 @@ function Flag({ children }: { children: string }) {
 export function OptionsPanel({ title, fields, values, onChange, onReset }: Props) {
   const selects = fields.filter((field) => field.type === "select");
   const switches = fields.filter((field) => field.type === "switch");
+  const times = fields.filter((field) => field.type === "time");
   const set = (key: string, value: string | boolean) => onChange({ ...values, [key]: value });
 
   return (
@@ -55,6 +57,30 @@ export function OptionsPanel({ title, fields, values, onChange, onReset }: Props
           </div>
         ))}
       </div>
+
+      {times.length > 0 && (
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          {times.map((field) => (
+            <div key={field.key} className="flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor={`option-${field.key}`}>{field.label}</Label>
+                <Flag>{field.flag}</Flag>
+              </div>
+              <Input
+                id={`option-${field.key}`}
+                value={String(values[field.key] ?? "")}
+                onChange={(event) => set(field.key, event.target.value)}
+                placeholder="m:ss"
+                inputMode="numeric"
+                autoComplete="off"
+                pattern="[0-9:]*"
+                maxLength={8}
+              />
+              <p className="text-xs leading-relaxed text-muted-foreground">{field.help}</p>
+            </div>
+          ))}
+        </div>
+      )}
 
       {switches.length > 0 && (
         <div className="mt-5 divide-y divide-border border-t border-border">

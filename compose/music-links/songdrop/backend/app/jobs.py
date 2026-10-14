@@ -24,7 +24,7 @@ from collections import deque
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from . import messages, notify
+from . import cookies, messages, notify
 from . import options as opts
 from .config import Settings
 from .detect import Detection
@@ -296,10 +296,13 @@ class JobManager:
         settings = self.settings
         model = opts.parse(job.engine, job.options)
         url = url or job.url
+        job_dir.mkdir(parents=True, exist_ok=True)
+        # A private copy, removed with the job's other leftovers (_tidy).
+        cookie_file = cookies.copy_for(settings.state_dir, job_dir)
         if job.engine == "spotdl":
             config = {
                 "url": url,
-                "settings": opts.spotdl_settings(model, str(job_dir), settings.spotdl_parallel),
+                "settings": opts.spotdl_settings(model, str(job_dir), settings.spotdl_parallel, cookie_file),
                 "max_items": settings.max_items,
                 "parallel": settings.spotdl_parallel,
             }
@@ -310,6 +313,7 @@ class JobManager:
             "settings": opts.ytdlp_settings(model),
             "max_items": settings.max_items,
             "deno": settings.deno,
+            "cookies": cookie_file,
         }
         return [settings.app_python, str(RUNNERS / "ytdlp_runner.py")], config
 

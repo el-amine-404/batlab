@@ -1,6 +1,6 @@
 """songdrop's HTTP API and the page (docs/music.md).
 
-LAN-only behind Caddy, without a login, like MeTube and spotDL's page.
+LAN-only behind Caddy, without a login, like MeTube.
 """
 
 import logging
@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 
-from . import config, detect, options
+from . import config, cookies, detect, options
 from .jobs import JobError, JobManager
 
 log = logging.getLogger("songdrop")
@@ -93,7 +93,13 @@ def create_job(body: JobIn):
         return _error(400, str(exc))
     try:
         chosen = options.parse(detection.engine, body.options)
-    except ValidationError:
+    except ValidationError as exc:
+        text = " ".join(str(error.get("msg")) for error in exc.errors())
+        for clue, message in (("not a time", "Write clip times like 1:23 or 1:02:03."),
+                              ("ends before", "The clip ends before it starts."),
+                              ("not both", "Choose one song per chapter or a clip, not both.")):
+            if clue in text:
+                return _error(422, message)
         return _error(422, "One of the options isn't valid.")
     return manager.submit(detection, chosen)
 
@@ -111,6 +117,31 @@ def cancel_job(job_id: str):
 @app.post("/api/jobs/{job_id}/errors/{index}/retry")
 def retry_song(job_id: str, index: int):
     return manager.retry(job_id, index)
+
+
+@app.get("/api/cookies")
+def cookie_status():
+    return cookies.status(settings.state_dir)
+
+
+@app.put("/api/cookies")
+async def put_cookies(request: Request):
+    """The body is the cookies.txt file itself."""
+    data = b""
+    async for chunk in request.stream():
+        data += chunk
+        if len(data) > cookies.MAX_BYTES:
+            return _error(413, "That file is too big for a cookies.txt.")
+    try:
+        return cookies.save(settings.state_dir, data)
+    except cookies.BadCookies as exc:
+        return _error(400, str(exc))
+
+
+@app.delete("/api/cookies", status_code=204)
+def delete_cookies():
+    cookies.delete(settings.state_dir)
+    return Response(status_code=204)
 
 
 @app.delete("/api/jobs/{job_id}", status_code=204)

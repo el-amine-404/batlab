@@ -23,7 +23,8 @@ function visible(fields: Field[], detection: Extract<Detection, { supported: tru
   return fields.filter(
     (field) =>
       (!field.kinds || field.kinds.includes(detection.kind)) &&
-      (field.needs !== "has_playlist" || detection.has_playlist),
+      (field.needs !== "has_playlist" || detection.has_playlist) &&
+      (field.needs !== "list" || detection.kind === "playlist" || detection.has_playlist),
   );
 }
 

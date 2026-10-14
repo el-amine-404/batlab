@@ -13,12 +13,13 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import detect, messages, notify, options  # noqa: E402
+from app import cookies, detect, messages, notify, options  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.jobs import MAX_TRIES, JobError, JobManager  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app" / "runners"))
 import verify  # noqa: E402
+import ytdlp_runner  # noqa: E402
 
 
 def _tone(path, *filters):
@@ -123,6 +124,112 @@ class OptionsTest(unittest.TestCase):
         self.assertEqual(options.ytdlp_settings(options.parse("ytdlp", {}))["codec"], "best")
         settings = options.ytdlp_settings(options.parse("ytdlp", {"format": "mp3", "bitrate": "320k"}))
         self.assertEqual((settings["codec"], settings["quality"]), ("mp3", "320K"))
+
+
+class CutTest(unittest.TestCase):
+    """Clips, chapters and playlist limits (yt-dlp options)."""
+
+    def test_times(self):
+        self.assertEqual([options.seconds(t) for t in ("", "90", "1:30", "1:02:03")], [None, 90, 90, 3723])
+        for bad in ("1:75", "1:60:00", "abc", "1:2:3:4", "-5", "1;30"):
+            with self.assertRaises(ValueError, msg=bad):
+                options.seconds(bad)
+
+    def test_clip_settings(self):
+        settings = options.ytdlp_settings(options.parse("ytdlp", {"clip_start": "1:00", "clip_end": "4:30"}))
+        self.assertEqual(settings["clip"], [60, 270])
+        self.assertEqual(options.ytdlp_settings(options.parse("ytdlp", {"clip_end": "30"}))["clip"], [0, 30])
+        self.assertEqual(options.ytdlp_settings(options.parse("ytdlp", {"clip_start": "2:00"}))["clip"], [120, None])
+        self.assertIsNone(options.ytdlp_settings(options.parse("ytdlp", {}))["clip"])
+
+    def test_bad_cuts_refused(self):
+        for bad in ({"clip_start": "4:00", "clip_end": "1:00"}, {"clip_start": "x"},
+                    {"split_chapters": True, "clip_start": "1:00"}, {"playlist_limit": "7"}):
+            with self.assertRaises(Exception, msg=bad):
+                options.parse("ytdlp", bad)
+
+    def test_playlist_limit(self):
+        self.assertEqual(options.ytdlp_settings(options.parse("ytdlp", {"playlist_limit": "25"}))["playlist_limit"], 25)
+        self.assertIsNone(options.ytdlp_settings(options.parse("ytdlp", {}))["playlist_limit"])
+
+    def test_chapter_tags(self):
+        info = {"title": "Stormy - DESPERADO (Full Album)", "uploader": "Stormy - Topic"}
+        self.assertEqual(ytdlp_runner.chapter_tags("01. EL MEJOR", 4, 12, info),
+                         {"title": "EL MEJOR", "tracknumber": "4/12", "album": "Stormy - DESPERADO (Full Album)",
+                          "artist": "Stormy"})
+        self.assertEqual(ytdlp_runner.chapter_tags("[03:15] Manal - KATANA", 2, 3, info)["artist"], "Manal")
+        self.assertEqual(ytdlp_runner.chapter_tags("", 5, 9, info)["title"], "Part 5")
+
+    def test_chapters_become_songs_and_the_whole_video_goes(self):
+        import mutagen
+        events = []
+        collect = ytdlp_runner._Collect(mock.Mock(emit=lambda kind, **fields: events.append((kind, fields))), True)
+        with tempfile.TemporaryDirectory() as folder:
+            whole = os.path.join(folder, "mix.opus")
+            parts = [os.path.join(folder, f"mix - 00{i}.opus") for i in (1, 2)]
+            for path in [whole, *parts]:
+                _tone(path)
+            info = {"filepath": whole, "title": "Summer mix", "uploader": "DJ",
+                    "chapters": [{"title": "1. Artist A - One", "filepath": parts[0]},
+                                 {"title": "2. Two", "filepath": parts[1]}]}
+            collect.run(info)
+            self.assertFalse(os.path.exists(whole))
+            self.assertEqual([(k, f["index"], f["title"], f["artist"]) for k, f in events],
+                             [("file", 0, "One", "Artist A"), ("file", 1, "Two", "DJ")])
+            tags = mutagen.File(parts[1], easy=True)
+            self.assertEqual((tags["title"], tags["album"], tags["tracknumber"]), (["Two"], ["Summer mix"], ["2/2"]))
+
+    def test_a_video_without_chapters_stays_whole_and_says_so(self):
+        events = []
+        collect = ytdlp_runner._Collect(mock.Mock(emit=lambda kind, **fields: events.append(kind)), True)
+        with tempfile.TemporaryDirectory() as folder:
+            whole = os.path.join(folder, "song.opus")
+            _tone(whole)
+            collect.run({"filepath": whole, "title": "Song"})
+            self.assertTrue(os.path.exists(whole))
+        self.assertEqual(events, ["note", "file"])
+
+
+COOKIES = "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t{exp}\tSID\tsecret-value\n"
+
+
+class CookiesTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.state = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_saved_privately_and_never_shown(self):
+        later = int(time.time()) + 86400 * 30
+        status = cookies.save(self.state, COOKIES.format(exp=later).encode())
+        self.assertEqual((status["present"], status["expires_at"], status["expired"]), (True, later, False))
+        self.assertNotIn("secret-value", json.dumps(status))
+        self.assertEqual(os.stat(cookies.path(self.state)).st_mode & 0o777, 0o600)
+        job = self.state / "job"
+        job.mkdir()
+        copy = cookies.copy_for(self.state, job)
+        self.assertIn("secret-value", Path(copy).read_text())
+        cookies.delete(self.state)
+        self.assertEqual(cookies.status(self.state), {"present": False})
+        self.assertIsNone(cookies.copy_for(self.state, job))
+
+    def test_expired_cookies_say_so(self):
+        cookies.save(self.state, COOKIES.format(exp=int(time.time()) - 60).encode())
+        self.assertTrue(cookies.status(self.state)["expired"])
+
+    def test_other_files_refused(self):
+        for bad in (b"\xff\xfe", b"hello", b"# Netscape HTTP Cookie File\nbroken line\n",
+                    COOKIES.format(exp=1).replace(".youtube.com", ".example.com").encode(),
+                    b"#" * (cookies.MAX_BYTES + 1)):
+            with self.assertRaises(cookies.BadCookies):
+                cookies.save(self.state, bad)
+        self.assertFalse(cookies.path(self.state).exists())
+
+    def test_spotdl_gets_the_copy(self):
+        settings = options.spotdl_settings(options.parse("spotdl", {}), "/j", 3, "/j/.cookies.txt")
+        self.assertEqual(settings["cookie_file"], "/j/.cookies.txt")
 
 
 class MessagesTest(unittest.TestCase):

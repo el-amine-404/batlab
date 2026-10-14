@@ -1,8 +1,8 @@
 name: ${MUSIC_LINKS_PROJECT_NAME}
 # Paste a link, get the song (docs/music.md). songdrop takes Spotify links
 # (through spotDL, which finds the same song on YouTube Music) and any site
-# yt-dlp knows; MeTube stays for what songdrop lacks (chapters, clips, channel
-# subscriptions, cookies). Both only write into the inbox: musicguard checks each file,
+# yt-dlp knows; MeTube stays for the one thing songdrop lacks: following a
+# channel for new uploads. Both only write into the inbox: musicguard checks each file,
 # keeps the audio and clean tags, adds lyrics, and files it under music-extras.
 # Nothing they download is ever played straight from where they wrote it.
 #
@@ -50,7 +50,7 @@ services:
   # Spotify links through spotDL, any other site yt-dlp knows through yt-dlp,
   # into the inbox like MeTube, and downloadable for a day. It replaced
   # spotDL's own page on 2026-10-14; MeTube stays for what songdrop lacks
-  # (chapters, clips, channel subscriptions, cookies).
+  # (following a channel for new uploads).
   songdrop:
     # The tag names both pins (spotDL and yt-dlp): a bumped pin is a different
     # image, which the nightly updater rebuilds.

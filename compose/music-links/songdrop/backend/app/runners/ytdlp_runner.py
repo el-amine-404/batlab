@@ -1,20 +1,55 @@
 """Downloads any link yt-dlp supports, audio only, with its tags and cover
 (run with songdrop's interpreter, which carries the pinned yt-dlp).
 
-stdin: {"url", "job_dir", "settings", "max_items", "deno"}; events: see protocol.py.
+stdin: {"url", "job_dir", "settings", "max_items", "deno", "cookies"}; events:
+see protocol.py.
+
+"One song per chapter" splits a video (a whole album or a mix uploaded as one)
+at its chapters; each part is reported as its own song, tagged with the
+chapter's title (and its artist, when the chapter reads "Artist - Song"), the
+video as its album and the chapter's number, and the whole video is dropped.
 """
 
 import os
 import re
 import time
 
+import mutagen
 import yt_dlp
 from yt_dlp.postprocessor.common import PostProcessor
-from yt_dlp.utils import DownloadError
+from yt_dlp.utils import DownloadError, download_range_func
 
 from protocol import Events, read_config
 
 _ID_IN_MESSAGE = re.compile(r"\[[^\]]+\]\s*([\w-]+):")
+# "01. ", "1 - ", "[03:15] ", "12) " before a chapter's title.
+_CHAPTER_PREFIX = re.compile(r"^\s*(?:\[?\d{1,2}:\d{2}(?::\d{2})?\]?\s*[-–|]?\s*|\d{1,3}\s*[.)\-–:]\s+)")
+
+
+def chapter_tags(chapter_title: str, number: int, total: int, info: dict) -> dict:
+    """The tags of one chapter's file."""
+    title = _CHAPTER_PREFIX.sub("", chapter_title or "").strip() or f"Part {number}"
+    artist = info.get("artist") or info.get("creator") or (info.get("uploader") or "").removesuffix(" - Topic")
+    if " - " in title:
+        artist, title = (part.strip() for part in title.split(" - ", 1))
+    tags = {"title": title, "tracknumber": f"{number}/{total}",
+            "album": info.get("album") or info.get("title") or ""}
+    if artist:
+        tags["artist"] = artist
+    return {key: value for key, value in tags.items() if value}
+
+
+def retag(path: str, tags: dict) -> None:
+    """Best effort: musicguard names the song anyway (Shazam)."""
+    try:
+        audio = mutagen.File(path, easy=True)
+        if audio is None:
+            return
+        for key, value in tags.items():
+            audio[key] = value
+        audio.save()
+    except Exception as exc:
+        print(f"WARNING: could not tag {path}: {exc}", flush=True)
 
 
 class _Logger:
@@ -45,14 +80,30 @@ class _Logger:
 
 
 class _Collect(PostProcessor):
-    """Last step for each item: report the finished file."""
+    """Last step for each item: report the finished file, or its chapters."""
 
-    def __init__(self, events: Events):
+    def __init__(self, events: Events, split: bool):
         super().__init__(None)
         self.events = events
+        self.split = split
+        self.parts = 0  # chapter files reported so far, across a playlist
 
     def run(self, info):
         path = info.get("filepath")
+        parts = [c for c in (info.get("chapters") or []) if c.get("filepath") and os.path.isfile(c["filepath"])]
+        if self.split and parts:
+            for number, chapter in enumerate(parts, 1):
+                tags = chapter_tags(chapter.get("title") or "", number, len(parts), info)
+                retag(chapter["filepath"], tags)
+                self.events.emit("file", index=self.parts, path=chapter["filepath"],
+                                 title=tags["title"], artist=tags.get("artist"))
+                self.parts += 1
+            if path and os.path.isfile(path):
+                os.unlink(path)  # the whole video: its chapters are the songs
+            return [], info
+        if self.split and path and os.path.isfile(path):
+            self.events.emit("note", index=self.parts, name=info.get("title") or "",
+                             message="This video has no chapters, so it was kept as one song.")
         if path and os.path.isfile(path):
             self.events.emit(
                 "file",
@@ -79,6 +130,9 @@ def _postprocessors(settings: dict) -> list:
     if settings["embed_cover"]:
         processors.append({"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"})
         processors.append({"key": "EmbedThumbnail", "already_have_thumbnail": False})
+    if settings.get("split_chapters"):
+        # Last, so every part keeps the tags and the cover.
+        processors.append({"key": "FFmpegSplitChapters", "force_keyframes": False})
     return processors
 
 
@@ -96,7 +150,7 @@ def main() -> None:
         "no_warnings": False,
         "noprogress": True,
         "noplaylist": not settings["playlist"],
-        "playlistend": config["max_items"],
+        "playlistend": min(config["max_items"], settings.get("playlist_limit") or config["max_items"]),
         "socket_timeout": 30,
         "retries": 5,
         "fragment_retries": 5,
@@ -104,6 +158,8 @@ def main() -> None:
     }
     if config.get("deno"):
         base["js_runtimes"] = {"deno": {"path": config["deno"]}}
+    if config.get("cookies"):
+        base["cookiefile"] = config["cookies"]
 
     try:
         with yt_dlp.YoutubeDL({**base, "extract_flat": "in_playlist"}) as ydl:
@@ -124,7 +180,8 @@ def main() -> None:
         title = info.get("track") or info.get("title") or config["url"]
         artist = info.get("artist") or info.get("creator")
         names[info.get("id")] = (0, title)
-        events.emit("meta", title=f"{artist} - {title}" if artist else title, total=1)
+        chapters = len(info.get("chapters") or []) if settings.get("split_chapters") else 0
+        events.emit("meta", title=f"{artist} - {title}" if artist else title, total=max(1, chapters))
 
     last_report = {}
 
@@ -147,16 +204,21 @@ def main() -> None:
         **base,
         "format": "bestaudio/best",
         "paths": {"home": job_dir, "temp": os.path.join(job_dir, ".tmp")},
-        "outtmpl": {"default": "%(title).150B [%(id)s].%(ext)s"},
+        "outtmpl": {"default": "%(title).150B [%(id)s].%(ext)s",
+                    "chapter": "%(title).80B - %(section_number)03d %(section_title).80B [%(id)s].%(ext)s"},
         "windowsfilenames": True,
         "writethumbnail": settings["embed_cover"],
         "ignoreerrors": "only_download",
         "postprocessors": _postprocessors(settings),
         "progress_hooks": [progress],
     }
+    if settings.get("clip"):
+        start, end = settings["clip"]
+        options["download_ranges"] = download_range_func(None, [(start, end if end is not None else float("inf"))])
+        options["force_keyframes_at_cuts"] = True
     try:
         with yt_dlp.YoutubeDL(options) as ydl:
-            ydl.add_post_processor(_Collect(events), when="after_move")
+            ydl.add_post_processor(_Collect(events, bool(settings.get("split_chapters"))), when="after_move")
             ydl.download([config["url"]])
     except DownloadError as exc:
         events.fatal(str(exc))
