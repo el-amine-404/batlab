@@ -7,7 +7,7 @@ it on the way. Set up on 2026-10-11.
  request (Aurral) ─┬─ album ──▶ Lidarr ──▶ Prowlarr ──▶ qBittorrent ─┐
                    │                  └─▶ Soularr ──▶ slskd ────────┤ (both through gluetun)
                    └─ track, playlist ──▶ Aurral: slskd, else yt-dlp ─┤
- pasted link ──▶ MeTube (YouTube) / spotDL (Spotify) ──▶ inbox ───────┤
+ pasted link ──▶ songdrop / MeTube / spotDL ─────────▶ inbox ───────┤
                                                                       ▼
                                      musicguard: check, strip, tag, lyrics, file
                                                                       ▼
@@ -21,7 +21,7 @@ it on the way. Set up on 2026-10-11.
 | `media/music` | albums Lidarr manages, and the music that was here before | Lidarr | `/music` |
 | `media/music-aurral` | single tracks, playlists and flows requested in Aurral | Aurral | `/data/media/music-aurral` |
 | `media/music-extras` | songs from pasted links | musicguard | `/music-extras` |
-| `inbox/music/{metube,spotdl}` | link downloads waiting to be checked | MeTube, spotDL | never |
+| `inbox/music/{songdrop,metube,spotdl}` | link downloads waiting to be checked | songdrop, MeTube, spotDL | never |
 | `soulseek/{incomplete,complete}` | slskd downloads before Lidarr or Aurral import them | slskd | never |
 | `.quarantine/musicguard/<date>/` | everything musicguard refused, with a `.why.json` beside it | musicguard | never |
 
@@ -276,6 +276,16 @@ Symfonium or Tempo (Android), Amperfy or play:Sub (iPhone).
 
 ## Pasted links
 
+- **songdrop** (`songdrop.homelab.lan`): one page for every link, built here
+  (`compose/music-links/songdrop`) to replace the two below. A Spotify track,
+  album, playlist or artist link goes through spotDL; any other link yt-dlp
+  supports (YouTube, YouTube Music, SoundCloud, Bandcamp…) through yt-dlp, as
+  audio. Each finished song is copied into `inbox/music/songdrop`, where
+  musicguard takes it like the others, and stays downloadable from the page
+  for a day (a zip for several). The options panel offers the engine flags
+  that make sense here (format, bitrate, audio source, SponsorBlock…), each
+  shown with its flag; lyrics, file names and folders are left to musicguard
+  and Stanzarr.
 - **MeTube** (`metube.homelab.lan`): any YouTube link (or one of the other sites
   yt-dlp supports). Choose **Audio**; the default format and "with cover" are
   right. A video download works too: musicguard keeps only its audio.
@@ -297,9 +307,48 @@ still arrives as a pull request. When spotDL starts failing with 403, check
 `#updates` and `#alerts` for a yt-dlp bump that did not land.
 
 spotDL's web page takes track links only: an album or playlist link leaves it
-on "LOADING" (the container log says `Invalid URL`). Request albums in Aurral.
+on "LOADING" (the container log says `Invalid URL`). songdrop takes them.
 
-Both are LAN-only (Caddy `localSubnets`) and have no login, like Seerr's
+### songdrop
+
+FastAPI with a React page (shadcn/ui, Tailwind), in one container on spotDL's
+image. Each link is a job; one runs at a time (`SONGDROP_CONCURRENT_JOBS`),
+and spotDL fetches three of its songs at once. The engines run as child
+processes (`backend/app/runners`) that report progress as JSON on their own
+pipe, so a crash or a cancel never takes the server down. Jobs survive a
+restart (`$VOLUMES_ROOT/songdrop/jobs/<id>/job.json`); after 24 h the job and
+its download copies are removed, never the library's.
+
+- **Metadata.** spotDL writes Spotify's title, artists, album, album artist,
+  track and disc numbers, date and cover. Its account-free Spotify client gets
+  no ISRC, so musicguard's upgrade looks those songs up by title and artist. A
+  yt-dlp download carries what the site gives (YouTube Music: title, artist,
+  album, date) and its thumbnail; musicguard adds the rest from Shazam and
+  Apple Music.
+- **Retries.** YouTube answers some audio requests with 403 at random (4 of an
+  album's 15 on 2026-10-14). A failed song is tried twice more, one at a time;
+  what still fails is listed on the job with the reason, and the engine's
+  output goes to `docker logs songdrop`.
+- **Links it refuses**: sites yt-dlp only knows through its generic page
+  scraper, Spotify podcasts, and `spotify.link` short links. A link with more
+  than 200 songs (`SONGDROP_MAX_ITEMS`) is refused rather than half done.
+
+```bash
+# tests, in the image
+docker run --rm --entrypoint /opt/songdrop/.venv/bin/python \
+  -v "$PWD/compose/music-links/songdrop/backend/tests:/opt/songdrop/tests:ro" \
+  -w /opt/songdrop local/batlab-songdrop:<tag> -m unittest discover -s tests
+# after changing requirements.in
+docker run --rm -v "$PWD/compose/music-links/songdrop/backend:/w" -w /w \
+  ghcr.io/astral-sh/uv:0.13.0-python3.14-trixie-slim \
+  uv pip compile requirements.in --generate-hashes --python-version 3.14 --no-header -o requirements.txt
+```
+
+The server's own packages (FastAPI, uvicorn) and the page's npm packages are
+pinned in `requirements.txt` and `package-lock.json` and are not followed by
+Renovate; yt-dlp, spotDL and Node are, through `compose/versions.env`.
+
+All three are LAN-only (Caddy `localSubnets`) and have no login, like Seerr's
 request page. YouTube audio is lossy (about 130-160 kbps Opus); for an album
 you care about, request it in Aurral instead, which goes through Lidarr.
 

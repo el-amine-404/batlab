@@ -1,7 +1,7 @@
 name: ${MUSIC_LINKS_PROJECT_NAME}
 # Paste a link, get the song (docs/music.md). MeTube takes YouTube and the other
 # sites yt-dlp knows; spotDL takes Spotify links and finds the same song on
-# YouTube Music. Both only write into the inbox: musicguard checks each file,
+# YouTube Music; songdrop does both on one page. All only write into the inbox: musicguard checks each file,
 # keeps the audio and clean tags, adds lyrics, and files it under music-extras.
 # Nothing they download is ever played straight from where they wrote it.
 #
@@ -84,6 +84,61 @@ services:
     cap_drop:
       - ALL
     mem_limit: 1g
+
+  # Paste a link, get the song (compose/music-links/songdrop, docs/music.md):
+  # Spotify links through spotDL, any other site yt-dlp knows through yt-dlp,
+  # into the inbox like the two above, and downloadable for a day. Meant to
+  # replace MeTube's and spotDL's own pages.
+  songdrop:
+    # Same tag scheme as spotdl: a bumped pin is a different image, which the
+    # nightly updater rebuilds.
+    image: local/batlab-songdrop:${TAG_SPOTDL}-yt-dlp-${VERSION_YTDLP}
+    build:
+      context: ./songdrop
+      network: host
+      args:
+        BASE_IMAGE: ${IMAGE_SPOTDL}:${TAG_SPOTDL}
+        NODE_IMAGE: ${IMAGE_SONGDROP_NODE}:${TAG_SONGDROP_NODE}
+        YTDLP_VERSION: ${VERSION_YTDLP}
+    # Rebuild on every `make up`, so code changes are always deployed.
+    pull_policy: build
+    container_name: songdrop
+    # The image's user (spotdl, 1000:1000) owns the home that holds Deno.
+    user: "${PUID}:${PGID}"
+    environment:
+      - TZ=${TZ}
+      - SONGDROP_PORT=${SONGDROP_HTTP_PORT:?set in compose/.env}
+      - SONGDROP_RETENTION_HOURS=24
+    volumes:
+      # Each download's folder; its songs stay downloadable for a day.
+      - ${VOLUMES_ROOT}/songdrop/jobs:/state
+      # spotDL's work folder, on the SSD rather than in memory.
+      - ${VOLUMES_ROOT}/songdrop/spotdl-temp:/home/spotdl/.config/spotdl/temp
+      - ${DATA_ROOT}/inbox/music/songdrop:/inbox
+    tmpfs:
+      - /tmp
+      - /home/spotdl/.cache
+    read_only: true
+    healthcheck:
+      test: ["CMD", "/opt/songdrop/.venv/bin/python", "-c", "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ[\"SONGDROP_PORT\"]}/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - home_server
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 1g
+    pids_limit: 256
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 networks:
   home_server:

@@ -108,6 +108,12 @@
         description: Paste a Spotify link, get the song
         siteMonitor: http://spotdl:8800
         statusStyle: "dot"
+    - songdrop:
+        icon: mdi-music-circle
+        href: http://songdrop.homelab.lan
+        description: Paste a Spotify or YouTube link, get the song
+        siteMonitor: http://songdrop:8810/api/health
+        statusStyle: "dot"
 
 - Library:
     - Sonarr:

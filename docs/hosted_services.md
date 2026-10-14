@@ -20,6 +20,7 @@ This document provides a summary of the self-hosted services configured in this 
 | **Stanzarr**     | Lyrics for the music libraries: tracks every song's lyrics, fetches them from LRCLIB, AI sync on a GPU worker, lyrics editor. | private project (`~/stanzarr`) |
 | **slskd**        | A Soulseek client with a web UI, run inside the VPN, for albums torrent sites do not carry.                | [github.com/slskd/slskd](https://github.com/slskd/slskd)                 |
 | **Soularr**      | Hands Lidarr's missing albums to slskd and has Lidarr import what it finds.                                | [github.com/mrusse/soularr](https://github.com/mrusse/soularr)           |
+| **songdrop**     | One page for pasted links: Spotify through spotDL, anything else yt-dlp knows; songs go to the music inbox.  | `compose/music-links/songdrop` (built here)                                |
 | **MeTube**       | A web UI for yt-dlp: paste a YouTube link, the song lands in the music inbox.                              | [github.com/alexta69/metube](https://github.com/alexta69/metube)         |
 | **spotDL**       | Paste a Spotify link, the same song is fetched from YouTube Music into the music inbox.                     | [spotdl.rtfd.io](https://spotdl.readthedocs.io)                          |
 | **musicguard**   | (custom) Checks every music file, keeps only audio and clean tags, adds lyrics, quarantines the rest.     | [docs/music.md](music.md)                                                |

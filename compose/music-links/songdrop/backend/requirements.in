@@ -1,0 +1,4 @@
+# The server only; yt-dlp is installed from VERSION_YTDLP (compose/versions.env).
+# Regenerate requirements.txt after a change (docs/music.md).
+fastapi==0.143.0
+uvicorn==0.54.0

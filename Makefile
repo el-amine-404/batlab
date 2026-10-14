@@ -184,6 +184,8 @@ setup: check-env
 		$(VOLUMES_ROOT)/filebrowser \
 		$(VOLUMES_ROOT)/frigate/config \
 		$(VOLUMES_ROOT)/frigate/media \
+		$(VOLUMES_ROOT)/songdrop/jobs \
+		$(VOLUMES_ROOT)/songdrop/spotdl-temp \
 		$(VOLUMES_ROOT)/homepage/icons \
 		$(VOLUMES_ROOT)/homepage/images \
 		$(VOLUMES_ROOT)/homepage/logs \
@@ -239,6 +241,7 @@ setup: check-env
 		$(DATA_ROOT)/media/music-extras \
 		$(DATA_ROOT)/inbox/music/metube \
 		$(DATA_ROOT)/inbox/music/spotdl \
+		$(DATA_ROOT)/inbox/music/songdrop \
 		$(DATA_ROOT)/soulseek/complete \
 		$(DATA_ROOT)/soulseek/incomplete \
 		$(DATA_ROOT)/.quarantine/musicguard

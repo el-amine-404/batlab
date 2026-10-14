@@ -1,0 +1,4 @@
+http://songdrop.homelab.lan {
+  import localSubnets
+	reverse_proxy @localSubnets http://songdrop:8810
+}

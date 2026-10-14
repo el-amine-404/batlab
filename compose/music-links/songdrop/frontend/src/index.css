@@ -1,0 +1,103 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+
+/* shadcn/ui tokens, dark only: songdrop has no light theme. */
+:root {
+  color-scheme: dark;
+  --radius: 0.875rem;
+  --background: oklch(0.13 0.008 285);
+  --foreground: oklch(0.97 0.004 285);
+  --card: oklch(0.18 0.01 285 / 0.62);
+  --card-foreground: var(--foreground);
+  --popover: oklch(0.19 0.012 285);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.68 0.2 300);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.25 0.012 285);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(0.24 0.01 285);
+  --muted-foreground: oklch(0.7 0.015 285);
+  --accent: oklch(0.27 0.016 285);
+  --accent-foreground: var(--foreground);
+  --destructive: oklch(0.66 0.2 22);
+  --success: oklch(0.74 0.16 155);
+  --warning: oklch(0.8 0.15 80);
+  --border: oklch(1 0 0 / 0.09);
+  --input: oklch(1 0 0 / 0.12);
+  --ring: oklch(0.68 0.2 300 / 0.6);
+  --spotify: oklch(0.72 0.19 150);
+  --youtube: oklch(0.63 0.23 27);
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-spotify: var(--spotify);
+  --color-youtube: var(--youtube);
+  --radius-sm: calc(var(--radius) - 6px);
+  --radius-md: calc(var(--radius) - 3px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply min-h-dvh bg-background font-sans text-foreground antialiased;
+  }
+}
+
+/* Two soft glows and a faint dotted grid; nothing moves. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(60rem 40rem at 15% -10%, oklch(0.55 0.22 295 / 0.28), transparent 60%),
+    radial-gradient(50rem 36rem at 100% 10%, oklch(0.6 0.2 340 / 0.16), transparent 60%),
+    radial-gradient(40rem 30rem at 50% 110%, oklch(0.55 0.15 250 / 0.14), transparent 60%),
+    var(--background);
+}
+.backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(oklch(1 0 0 / 0.07) 1px, transparent 1px);
+  background-size: 22px 22px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, black, transparent 75%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
