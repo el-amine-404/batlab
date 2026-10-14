@@ -23,7 +23,7 @@ it on the way. Set up on 2026-10-11.
 | `media/music-extras` | songs from pasted links | musicguard | `/music-extras` |
 | `inbox/music/{songdrop,metube,spotdl}` | link downloads waiting to be checked | songdrop, MeTube, spotDL | never |
 | `soulseek/{incomplete,complete}` | slskd downloads before Lidarr or Aurral import them | slskd | never |
-| `.quarantine/musicguard/<date>/` | everything musicguard refused, with a `.why.json` beside it | musicguard | never |
+| `.quarantine/musicguard/<date>/` | everything musicguard refused or retired, with a `.why.json` beside it; deleted 30 days after that date (`MUSICGUARD_QUARANTINE_DAYS`, 0 keeps it) | musicguard | never |
 
 All three libraries use the same layout, Lidarr's:
 
@@ -120,7 +120,7 @@ It runs in three ways:
   hashtag, brackets, "Official Video"), then the most complete set, completed
   from the other copies (a genre only one had), and is moved to the path those
   tags give. The other `music-extras` copies go to quarantine as `DUPLICATE`,
-  their lyrics removed. `docker exec musicguard python /app/guard.py dedup`
+  with their lyrics, after handing over what the kept copy lacks (below). `docker exec musicguard python /app/guard.py dedup`
   runs one pass; `MUSICGUARD_DEDUP=0` turns it off.
 - **Songs from links are upgraded** (`app/upgrade.py`), after each library
   pass: musicguard looks the song up on MusicBrainz (by ISRC, else title and
@@ -128,8 +128,17 @@ It runs in three ways:
   the single; never a compilation, live or remix release), and has Lidarr
   monitor and search that album, adding the artist with nothing else
   monitored if it is new. Once Lidarr's file for that recording is in `music`
-  and musicguard has verified it, the YouTube copy, its lyrics and its cover
-  are removed from `music-extras`. A song MusicBrainz does not know (much
+  and musicguard has verified it, the YouTube copy and its lyrics go to
+  quarantine as `UPGRADED` (not announced on Discord), and its folder and
+  cover leave `music-extras`. First it hands over what Lidarr's copy lacks
+  (`app/carry.py`): synced lyrics from LRCLIB, a person or the AI sync, when
+  both copies last the same (±1.5 s), and a person's over LRCLIB's or AI ones
+  Lidarr's copy already got; synced lyrics of unknown origin, or timed for a
+  copy of another length, go over as plain text, since Stanzarr stops asking
+  LRCLIB once a song has a synced file not flagged AI. The cover goes over
+  only into a folder without one, between copies of the same album. Lidarr
+  writes its own `cover.jpg` into each album folder too (Settings → Metadata →
+  Kodi/Emby, only "Album Images" on, since 2026-10-14). A song MusicBrainz does not know (much
   Moroccan music, e.g. Stormy's "PIRATE", is only on streaming services) is
   reported once as `NOT_IN_MUSICBRAINZ`, keeps its YouTube copy, and is looked
   up again weekly: Lidarr's catalogue is MusicBrainz, so it cannot fetch it.

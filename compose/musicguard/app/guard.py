@@ -30,6 +30,7 @@ import urllib.request
 from datetime import datetime, timezone
 
 import apple
+import carry
 import clamd
 import mutagen
 import credits as credit_fix
@@ -70,7 +71,7 @@ ORPHAN_SECONDS = 3600
 STATE_VERSION = 1
 # Events after which Navidrome has something new to index.
 LIBRARY_CHANGES = {"filed", "cleaned", "verified", "credited", "quarantined", "reported", "lyrics",
-                   "removed", "upgraded", "deduplicated"}
+                   "removed", "upgraded", "deduplicated", "handed-over"}
 
 
 def env(name, default=None):
@@ -93,6 +94,8 @@ class Config:
         fix = env("MUSICGUARD_CREDITS", "/data/media/music")
         self.credit_roots = {r for r in fix.split(":") if r}
         self.quarantine = env("MUSICGUARD_QUARANTINE", "/quarantine")
+        # Quarantine is a recycle bin: a day's folder goes after this many days (0: never).
+        self.quarantine_days = int(env("MUSICGUARD_QUARANTINE_DAYS", "30"))
         self.state_dir = env("MUSICGUARD_STATE", "/state")
         self.clamd_socket = env("CLAMD_SOCKET", "/run/clamav/clamd.ctl")
         self.clamd_required = env("CLAMD_REQUIRED", "1") == "1"
@@ -236,11 +239,18 @@ class Guard:
 
     # --- quarantine ---------------------------------------------------------------
 
-    def quarantine(self, path, reason, detail, base):
-        """Move a file out of reach, with a note saying why. Nothing is deleted."""
-        self.event("quarantined", path, reason, detail)
+    def quarantine(self, path, reason, detail, base, announce=True, lyrics_too=False):
+        """Move a file out of reach, with a note saying why; purge_quarantine
+        deletes it after quarantine_days. announce=False: a routine retirement
+        (an upgrade), not sent to Discord. lyrics_too: its lyrics go with it,
+        unless another track of its name stays."""
+        self.event("quarantined" if announce else "set-aside", path, reason, detail)
         if self.config.dry_run:
             return
+        stem = os.path.splitext(path)[0]
+        shared = any(os.path.exists(stem + e) for e in AUDIO_EXTENSIONS if stem + e != path)
+        sidecars = [stem + e for e in sorted(LYRIC_EXTENSIONS) if lyrics_too and not shared
+                    and os.path.isfile(stem + e) and not os.path.islink(stem + e)]
         relative = os.path.relpath(path, base) if base else os.path.basename(path)
         if relative.startswith(".."):
             relative = os.path.basename(path)
@@ -249,10 +259,33 @@ class Guard:
         os.makedirs(os.path.dirname(target), exist_ok=True)
         shutil.move(path, target)
         os.chmod(target, 0)
+        for sidecar in sidecars:
+            shutil.move(sidecar, os.path.splitext(target)[0] + os.path.splitext(sidecar)[1])
         with open(target + ".why.json", "w", encoding="utf-8") as out:
             json.dump({"time": now_iso(), "from": path, "reason": reason, "detail": detail}, out,
                       ensure_ascii=False, indent=1)
         self.state["files"].pop(path, None)
+
+    def purge_quarantine(self):
+        """A day's quarantine folder is deleted quarantine_days after that day."""
+        days = self.config.quarantine_days
+        if days <= 0 or not os.path.isdir(self.config.quarantine):
+            return
+        today = datetime.now().date()
+        for name in sorted(os.listdir(self.config.quarantine)):
+            try:
+                day = datetime.strptime(name, "%Y-%m-%d").date()
+            except ValueError:
+                continue  # not one of musicguard's day folders
+            if (today - day).days < days:
+                continue
+            folder = os.path.join(self.config.quarantine, name)
+            count = sum(1 for _, _, files in os.walk(folder) for n in files if not n.endswith(".why.json"))
+            if self.config.dry_run:
+                self.event("would-purge", folder, detail=f"{count} files")
+                continue
+            shutil.rmtree(folder)
+            self.event("purged", folder, detail=f"{count} files quarantined {(today - day).days} days ago")
 
     # --- checks -------------------------------------------------------------------
 
@@ -1159,6 +1192,7 @@ class Guard:
             return entry  # not downloaded yet, or not yet verified by the roots pass
         if self.config.dry_run or replacement == path:
             return entry
+        self.hand_over(path, replacement)
         if single:
             # Through Lidarr, which owns the file: to its recycle bin, and the
             # single unmonitored so it is not fetched again.
@@ -1166,12 +1200,37 @@ class Guard:
                 self.event("upgraded", path, detail=f"single replaced by {replacement}")
                 return None
             return entry
-        self.remove_with_sidecars(path)
+        self.quarantine(path, "UPGRADED", f"replaced by {replacement}", self.config.extras,
+                        announce=False, lyrics_too=True)
         self.prune(os.path.dirname(path))
-        self.state["files"].pop(path, None)
         self.state["lyrics"].pop(path, None)
         self.event("upgraded", path, detail=f"replaced by {replacement}")
         return None
+
+    def hand_over(self, old, new, old_track=None, new_track=None):
+        """The going copy's lyrics and album cover, to the staying copy when it
+        lacks them (carry.py). Never stops the retirement."""
+        try:
+            extras = self.config.extras + os.sep
+            old_track = old_track or self.track(old, owned=old.startswith(extras))
+            new_track = new_track or self.track(new, owned=new.startswith(extras))
+            if not old_track or not new_track:
+                return
+            plan = carry.lyrics(old, new, old_track.seconds, new_track.seconds)
+            cover = carry.cover(old, new, old_track.tags, new_track.tags)
+            for target, text, what in plan:
+                self.event("handed-over", target, "LYRICS", f"{what}, from {old}")
+                if not self.config.dry_run:
+                    lyrics_file = os.path.join(os.path.dirname(target), "." + os.path.basename(target) + ".tmp")
+                    with open(lyrics_file, "w", encoding="utf-8") as out:
+                        out.write(text)
+                    os.replace(lyrics_file, target)
+            if cover:
+                self.event("handed-over", cover[1], "COVER", f"from {cover[0]}")
+                if not self.config.dry_run:
+                    shutil.copyfile(*cover)
+        except Exception as error:
+            log(f"hand-over from {old} to {new} failed: {error}")
 
     def prune(self, directory):
         """An extras folder left without audio loses its cover, then itself
@@ -1266,12 +1325,9 @@ class Guard:
         emptied = set()
         # The others go first: the kept copy may take one's name.
         for track in others:
-            stem = os.path.splitext(track.path)[0]
-            for extension in LYRIC_EXTENSIONS:
-                if os.path.isfile(stem + extension) and not os.path.islink(stem + extension):
-                    os.unlink(stem + extension)
+            self.hand_over(track.path, keep.path, track, keep)
             self.quarantine(track.path, "DUPLICATE", f"the same song as {keep.path}, which is better",
-                            self.config.extras)
+                            self.config.extras, lyrics_too=True)
             self.state["lyrics"].pop(track.path, None)
             emptied.add(os.path.dirname(track.path))
         kept = keep.path
@@ -1392,6 +1448,7 @@ def main(argv=None):
             guard.roots_pass()
             guard.dedup_pass()
             guard.upgrade_pass()
+            guard.purge_quarantine()
             guard.scan_navidrome()
             last_roots = time.monotonic()
         guard.save_state()

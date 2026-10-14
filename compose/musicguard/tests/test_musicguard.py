@@ -16,6 +16,7 @@ import sys
 import tempfile
 import threading
 import time
+from datetime import datetime
 import unittest
 from unittest import mock
 
@@ -24,6 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 import mutagen  # noqa: E402
 from mutagen.id3 import APIC, COMM, ID3, TIT2, TPE1, TXXX, WOAS, WXXX  # noqa: E402
 
+import carry  # noqa: E402
 import clamd  # noqa: E402
 import credits  # noqa: E402
 import dedup  # noqa: E402
@@ -513,8 +515,14 @@ class Duplicates(GuardTestCase):
             out.write("[00:01.00]la\n")
         self.guard.roots_pass()
         self.guard.dedup_pass()
-        self.assertEqual(self.all_files(self.extras), ["ElGrandeToto/Caméléon (2021)/15 - Mghayer.mp3"])
+        # The video's lyrics are of unknown origin and timed 4 s off: kept as plain text.
+        self.assertEqual(self.all_files(self.extras), ["ElGrandeToto/Caméléon (2021)/15 - Mghayer.mp3",
+                                                       "ElGrandeToto/Caméléon (2021)/15 - Mghayer.txt"])
+        with open(os.path.join(self.extras, "ElGrandeToto", "Caméléon (2021)", "15 - Mghayer.txt")) as handle:
+            self.assertEqual(handle.read(), "la\n")
         self.assertEqual(self.quarantined_reasons(), ["DUPLICATE"])
+        self.assertIn("15 - Mghayer (Prod. By Ysos) #CAMÉLÉON.lrc",
+                      [os.path.basename(f) for f in self.all_files(self.quarantine)])
         kept = mutagen.File(os.path.join(self.extras, "ElGrandeToto", "Caméléon (2021)", "15 - Mghayer.mp3"),
                             easy=True)
         self.assertEqual(kept["title"], ["Mghayer"])
@@ -949,6 +957,81 @@ class Upgrades(GuardTestCase):
         self.guard.upgrade_pass()
         self.assertFalse(os.path.exists(os.path.join(self.extras, "Drake")), "copy, lyrics, cover, folders gone")
         self.assertTrue(os.path.exists(lidarr_file))
+        self.assertEqual(self.quarantined_reasons(), ["UPGRADED"], "kept a while, in case")
+        self.assertNotIn("quarantined", [e["event"] for e in self.guard.events], "an upgrade is not news")
+
+    def upgraded(self, lyrics_text, lidarr_seconds=8, album="Views", lidarr_lyrics=None):
+        """An extras song with these lyrics and a cover, replaced by Lidarr's copy."""
+        path = os.path.join(self.extras, "Drake", "Views (2016)", "12 - One Dance.opus")
+        os.makedirs(os.path.dirname(path))
+        tone(path, extra=("-c:a", "libopus"))
+        audio = mutagen.File(path)
+        audio["title"], audio["artist"], audio["album"] = "One Dance", "Drake", album
+        audio.save()
+        jpeg(os.path.join(os.path.dirname(path), "cover.jpg"))
+        with open(os.path.splitext(path)[0] + ".lrc", "w") as out:
+            out.write(lyrics_text)
+        self.guard.upgrade_pass()
+        lidarr_file = os.path.join(self.music, "Drake", "Views (2016)", "12 - One Dance.flac")
+        os.makedirs(os.path.dirname(lidarr_file))
+        tone(lidarr_file, seconds=lidarr_seconds, extra=("-c:a", "flac"))
+        audio = mutagen.File(lidarr_file)
+        audio["title"], audio["artist"], audio["album"] = "One Dance", "Drake", "Views"
+        audio.save()
+        if lidarr_lyrics:
+            with open(os.path.splitext(lidarr_file)[0] + ".lrc", "w") as out:
+                out.write(lidarr_lyrics)
+        self.lidarr.files[1] = lidarr_file
+        self.guard.roots_pass()
+        self.guard.upgrade_pass()
+        self.assertFalse(os.path.exists(path))
+        return os.path.dirname(lidarr_file)
+
+    def read(self, path):
+        with open(path, encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_a_persons_lyrics_and_the_albums_cover_go_to_lidarrs_copy(self):
+        mine = "[by:a person]\n[re:Stanzarr editor 2026-10-14]\n[00:01.00]ana\n"
+        folder = self.upgraded(mine)
+        self.assertEqual(self.read(os.path.join(folder, "12 - One Dance.lrc")), mine)
+        self.assertTrue(os.path.exists(os.path.join(folder, "cover.jpg")))
+        self.assertIn("12 - One Dance.lrc", [os.path.basename(f) for f in self.all_files(self.quarantine)],
+                      "the original goes to quarantine with its song")
+
+    def test_synced_lyrics_of_unknown_origin_go_over_as_plain_text(self):
+        # A synced .lrc not flagged AI would stop Stanzarr asking LRCLIB for good.
+        folder = self.upgraded("[ar:Drake]\n[00:01.00]ana\n[00:02.50]<00:02.60>nta\n")
+        self.assertFalse(os.path.exists(os.path.join(folder, "12 - One Dance.lrc")))
+        self.assertEqual(self.read(os.path.join(folder, "12 - One Dance.txt")), "ana\nnta\n")
+
+    def test_synced_lyrics_timed_for_another_length_go_over_as_plain_text(self):
+        folder = self.upgraded("[re:LRCLIB via Stanzarr]\n[00:01.00]ana\n", lidarr_seconds=12)
+        self.assertFalse(os.path.exists(os.path.join(folder, "12 - One Dance.lrc")))
+        self.assertEqual(self.read(os.path.join(folder, "12 - One Dance.txt")), "ana\n")
+
+    def test_lidarrs_own_better_lyrics_and_other_albums_covers_are_left_alone(self):
+        theirs = "[by:a person]\n[00:03.00]theirs\n"
+        folder = self.upgraded("[re:LRCLIB via Stanzarr]\n[00:01.00]ana\n", album="One Dance - Single",
+                               lidarr_lyrics=theirs)
+        self.assertEqual(self.read(os.path.join(folder, "12 - One Dance.lrc")), theirs)
+        self.assertFalse(os.path.exists(os.path.join(folder, "cover.jpg")), "a single's cover is not the album's")
+
+    def test_quarantine_is_emptied_after_its_days(self):
+        old = os.path.join(self.quarantine, "2026-01-02", "Drake")
+        recent = os.path.join(self.quarantine, datetime.now().strftime("%Y-%m-%d"))
+        other = os.path.join(self.quarantine, "notes")
+        for folder in (old, recent, other):
+            os.makedirs(folder)
+            with open(os.path.join(folder, "song.mp3"), "w") as out:
+                out.write("x")
+        os.chmod(os.path.join(old, "song.mp3"), 0)
+        self.guard.purge_quarantine()
+        self.assertEqual(sorted(os.listdir(self.quarantine)), sorted([os.path.basename(recent), "notes"]))
+        self.guard.config.quarantine_days = 0
+        os.makedirs(old)
+        self.guard.purge_quarantine()
+        self.assertTrue(os.path.isdir(old), "0 keeps everything")
 
     def test_a_lidarr_single_gets_its_album_then_goes(self):
         self.guard.config.lidarr_root = self.music
@@ -1024,6 +1107,18 @@ class ReferenceRules(unittest.TestCase):
             self.assertLess(different, reference.OTHER)
         finally:
             shutil.rmtree(workdir)
+
+
+class CarryRules(unittest.TestCase):
+    def test_origins_as_stanzarr_reads_them(self):
+        self.assertEqual(carry.origin("[by:AI-generated, corrected by a person]\n[00:01.00]a"), "ai")
+        self.assertEqual(carry.origin("[re:LRCLIB via Stanzarr]\n[00:01.00]a"), "lrclib")
+        self.assertEqual(carry.origin("[by:a person]\n[00:01.00]a"), "person")
+        self.assertEqual(carry.origin("[re:Stanzarr editor 2026-10-14]\n[00:01.00]a"), "person")
+        self.assertEqual(carry.origin("[ar:Drake]\n[00:01.00]a"), "unknown")
+
+    def test_album_names_compare_without_editions(self):
+        self.assertEqual(carry.album_key({"album": ["Caméléon (Deluxe)"]}), carry.album_key({"album": ["caméléon"]}))
 
 
 class UpgradeRules(unittest.TestCase):
