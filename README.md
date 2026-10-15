@@ -26,6 +26,7 @@ other related skills that i keep forgetting:
 - [samba shares](./docs/samba.md)
 - [import audit](./import-audit/README.md)
 - [dub keeper](./dubkeeper/README.md)
+- [subtitle translator, AI until a human one turns up](./subtranslate/README.md)
 - [vpn port guard](./vpnguard/README.md)
 - [ass2srt, fansub subtitles to SRT](./ass2srt/README.md)
 - [subtitle extraction](./subextract/README.md)

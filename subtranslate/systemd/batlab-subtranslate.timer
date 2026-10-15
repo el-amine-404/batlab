@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Batlab subtitle translator every 6 hours
+
+[Timer]
+OnCalendar=00/6:20
+Persistent=true
+RandomizedDelaySec=10m
+Unit=batlab-subtranslate.service
+
+[Install]
+WantedBy=timers.target

@@ -61,7 +61,7 @@ end up. The senders, and the name and avatar each shows on Discord, are in
 
 | Channel (tag) | Who sends through Apprise | What |
 | --- | --- | --- |
-| `downloads` | musicguard | "Ready to play: Artist – Album", once Navidrome has it |
+| `downloads` | musicguard, subtranslate | "Ready to play: Artist – Album", once Navidrome has it; subtitles translated by AI, or replaced by human ones |
 | `download-issues` | musicguard, songdrop, vpnguard, dubkeeper | files quarantined, suspect, flagged or held; songs missing after a download, back, or given up; VPN reconnects; upgrades that lost audio |
 | `cameras` | camwatch | a camera dark, and back |
 | `alerts` | Netdata, NetAlertX, watchdog (data disk, self-test, SMART), mediascan, updater (failures) | something is wrong with the machine or the network |
@@ -116,7 +116,7 @@ previews (`previews`), and Apprise (`notify`). Standard library only, so it
 also runs in spotDL's environment. Images get it through compose's build
 context `common` (`additional_contexts`) on `PYTHONPATH`; a mounted script
 (camwatch) mounts it; the host's scripts (updater, watchdog, vpnguard,
-dubkeeper, mediascan) load it from the checkout. Its tests: `python3 -m unittest discover -s
+dubkeeper, subtranslate, mediascan) load it from the checkout. Its tests: `python3 -m unittest discover -s
 lib/batlab-common/tests`.
 
 ## The services

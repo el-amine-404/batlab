@@ -1,0 +1,14 @@
+[Unit]
+Description=Fill missing subtitle languages with AI translations until human ones turn up
+Wants=network-online.target
+After=network-online.target docker.service
+RequiresMountsFor=/mnt/storage/data
+
+[Service]
+Type=oneshot
+User=potato
+Group=potato
+WorkingDirectory=/home/potato/batlab
+ExecStart=/usr/bin/python3 /home/potato/batlab/subtranslate/scripts/subtranslate.py
+Nice=19
+TimeoutStartSec=1h

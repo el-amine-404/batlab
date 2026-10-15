@@ -8,6 +8,7 @@
   "netalertx": {"name": "netalertx"},
   "mediascan": {"name": "mediascan on {host}"},
   "vpnguard": {"name": "vpn guard"},
+  "subtranslate": {"name": "subtitle translator", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/bazarr.png"},
   "dubkeeper": {"name": "dub keeper", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/sonarr.png"},
   "updater": {"name": "updater on {host}", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/renovate.png"},
   "watchdog": {"name": "watchdog on {host}", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/debian-linux.png"},
