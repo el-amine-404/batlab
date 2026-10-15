@@ -389,7 +389,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dry-run", action="store_true", help="print findings; no Discord post, no state change")
     parser.add_argument("--auto-import", action="store_true",
-                        help="import blocked Sonarr downloads whose file names state their episodes")
+                        help="import unambiguous blocked downloads and reviewed completed extras")
     parser.add_argument("--env-file", default=str(repo / "compose/.env"))
     parser.add_argument("--data-root", default="/mnt/storage/data")
     parser.add_argument("--sonarr-url", default="http://172.19.10.11:8989")
@@ -407,6 +407,17 @@ def main(argv: list[str] | None = None) -> int:
     if not (data_root / "torrents").is_dir():
         print(f"{data_root}/torrents is not there; is the data disk mounted?", file=sys.stderr)
         return 1
+
+    extras_errors = 0
+    if args.auto_import:
+        # Extras have their own lock/retry state. A refresh failure must not
+        # prevent the ordinary download audit from running.
+        import extras
+        try:
+            extras_errors = extras.run(sonarr, data_root, env_file, Path(args.state_dir), apply=not args.dry_run)
+        except (OSError, ValueError) as error:
+            print(f"extras: could not run: {error}", file=sys.stderr)
+            extras_errors = 1
 
     try:
         imports, imported = (auto_import(sonarr, min_age, now, apply=not args.dry_run) if args.auto_import
@@ -426,7 +437,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{problem.kind}: {problem.text}")
     print(f"{len(problems)} problem(s)")
     if args.dry_run:
-        return 0
+        return bool(extras_errors)
 
     state_path = Path(args.state_dir) / "reported.json"
     reported = set(json.loads(state_path.read_text())) if state_path.exists() else set()
@@ -442,7 +453,7 @@ def main(argv: list[str] | None = None) -> int:
     temporary = state_path.with_suffix(".tmp")
     temporary.write_text(json.dumps(sorted(problem.key for problem in problems)))
     temporary.replace(state_path)
-    return 0
+    return bool(extras_errors)
 
 
 if __name__ == "__main__":

@@ -60,6 +60,46 @@ any download it names will replace library files if Sonarr counts it as an
 upgrade. The [dub keeper](../dubkeeper/README.md) then carries over audio and
 subtitles the upgrade lost.
 
+## Reviewed extras
+
+`--auto-import` also runs `scripts/extras.py` hourly using
+[`config/extras.json`](config/extras.json). The initial mapping covers Attack on
+Titan's SEV Season 3 and 4 packs: nine Chibi shorts become Sonarr specials
+S00E24–30 and S00E36–37; two commentaries, four interviews, two production
+features and two orchestra concerts appear in Jellyfin's show-level `extras`,
+`interviews`, and `behind the scenes` folders. Menus and unknown files are not
+imported. New releases need explicit reviewed entries; this does not guess
+special numbers from filenames.
+
+Each eligible file must have progress exactly 1 in qBittorrent and the expected
+size on disk. An unfinished pack can therefore supply its completed extras.
+Rechecking, moving, errored, missing and untracked torrents wait. Hardlinks keep
+the original download intact without copying video data; a different existing
+file is never replaced. Cross-filesystem links fail instead of copying. Sonarr
+specials are checked against their individual TVDB IDs before writing. Their
+local NFO files pin the title and numbering for Jellyfin. Existing specials and
+their monitoring settings are preserved.
+
+The importer requests a Sonarr rescan and a Jellyfin refresh of the affected
+show. Failed refreshes are retried using `extras.json` in the audit state
+directory. Jellyfin requires a valid `JELLYFIN_API_KEY`; qBittorrent uses
+`QBIT_USER` and `QBIT_PASS` from `compose/.env`. Optional `JELLYFIN_URL` and
+`QBIT_URL` override the default homelab hostnames. A lock prevents concurrent
+extras imports. The hourly service logs every mapping/refusal to its journal;
+the extras importer sends no Discord messages.
+
+```bash
+# Preview only, without running other audit/import tasks:
+python3 import-audit/scripts/extras.py
+# Apply immediately (otherwise the existing hourly service does it):
+python3 import-audit/scripts/extras.py --apply
+journalctl -u batlab-import-audit.service --since today
+```
+
+These short bonus videos retain their embedded subtitles. Creating new SRTs is
+handled separately by subextract; its dialogue/timing checks can reject very
+short clips. Extras importing does not transcode or run OCR.
+
 ## Fixing what it reports
 
 Sonarr or Radarr → Wanted → Manual Import, pick the torrent folder, set each
