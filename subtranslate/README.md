@@ -33,16 +33,22 @@ lost. Now:
 1. **Translate.** For each language on Bazarr's wanted list, at most 6 per
    run, once:
    - the video is 7 days old, so Bazarr's own searches go first;
-   - [subextract](../subextract/README.md) has handled that very file
-     completely (its state says so), so a language the release carries inside
-     the video is already a sidecar and is never translated; a video with a
-     track subextract refused or skipped is left alone;
-   - no subtitle in that language is next to the video;
-   - the English sidecar is one subextract checked against the audio and that
-     hasn't changed since; a plain one rather than hearing-impaired (sound
-     descriptions translate badly), and never a translation. Where a release
-     has several English tracks, subextract already chose one (the release's
-     default, then the least cluttered, then the most complete).
+   - no subtitle in that language is next to the video, nor inside it: a
+     track tagged with that language, text or picture, is subextract's to
+     extract (or yours to pick in the player), never translated;
+   - an English sidecar, not itself a translation, fits the video's audio. A
+     plain one is preferred to hearing-impaired (sound descriptions translate
+     badly). Fits means subextract checked that very file, or it passes
+     subextract's own check (both halves need the same shift, within 0.3 s)
+     run by this job under the shared lock: about 2 minutes each, at most 6
+     per run, the verdict kept until the file or the video changes. Where a
+     release has several English tracks, subextract already chose one (the
+     release's default, then the least cluttered, then the most complete).
+
+   A first rule waited for subextract to record the video as complete. It
+   records one only when no track was refused, and on many *Attack on Titan*
+   episodes it had refused an unrelated Spanish track, so 62 subtitles would
+   never have been translated.
 
    Gemini gets the show's title, year and summary, the episode's title, the
    names that recur in the dialogue, and the dialogue itself, 400 lines per
