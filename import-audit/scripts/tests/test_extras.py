@@ -1,10 +1,12 @@
 import contextlib
+import http.server
 import io
 import json
 import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import unittest
 import urllib.error
 import xml.etree.ElementTree as ET
@@ -145,6 +147,38 @@ class ExtrasTests(unittest.TestCase):
         self.config.write_text(json.dumps([{"source": "Pack", "files": [self.entry]}]))
         with self.assertRaisesRegex(ValueError, "incomplete entry"):
             extras.load_config(self.config)
+
+    def test_jellyfin_refresh_finds_the_show_by_tvdb_id(self):
+        calls = []
+
+        class Jellyfin(http.server.BaseHTTPRequestHandler):
+            def answer(self, body=b""):
+                calls.append((self.command, self.path, self.headers["Authorization"]))
+                self.send_response(200 if body else 204)
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):
+                # Every show, as Jellyfin 10.11 answers whatever the filter.
+                self.answer(json.dumps({"Items": [{"Id": "a", "ProviderIds": {"Tvdb": "1"}},
+                                                  {"Id": "b", "ProviderIds": {"Tvdb": "267440"}}]}).encode())
+
+            def do_POST(self):
+                self.answer()
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Jellyfin)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        extras.refresh_jellyfin(f"http://127.0.0.1:{server.server_port}", "k", [267440])
+        self.assertEqual(calls[1][0], "POST")
+        self.assertTrue(calls[1][1].startswith("/Items/b/Refresh"))
+        self.assertEqual(calls[0][2], 'MediaBrowser Token="k"')
+        with self.assertRaisesRegex(ValueError, "exactly one show"):
+            extras.refresh_jellyfin(f"http://127.0.0.1:{server.server_port}", "k", [999])
 
     def test_reviewed_config_has_nine_unique_specials(self):
         entries = [entry for pack in extras.load_config(extras.CONFIG) for entry in pack["files"]]

@@ -167,14 +167,16 @@ def save_state(path: Path, value: dict):
 def refresh_jellyfin(base: str, key: str, tvdb_ids: list[int]):
     def request(endpoint, method="GET"):
         req = urllib.request.Request(base.rstrip("/") + endpoint, method=method,
-                                     headers={"X-Emby-Token": key})
+                                     # Jellyfin 10.11 refuses the old X-Emby-Token header.
+                                     headers={"Authorization": f'MediaBrowser Token="{key}"'})
         with urllib.request.urlopen(req, timeout=30) as response:
             payload = response.read()
         return json.loads(payload) if payload else None
+    # Jellyfin 10.11 ignores AnyProviderIdEquals, so match the TVDB ID here.
+    query = urllib.parse.urlencode({"Recursive": "true", "IncludeItemTypes": "Series", "Fields": "ProviderIds"})
+    shows = request("/Items?" + query).get("Items", [])
     for tvdb_id in tvdb_ids:
-        query = urllib.parse.urlencode({"Recursive": "true", "IncludeItemTypes": "Series",
-                                       "AnyProviderIdEquals": f"tvdb.{tvdb_id}"})
-        items = request("/Items?" + query).get("Items", [])
+        items = [show for show in shows if (show.get("ProviderIds") or {}).get("Tvdb") == str(tvdb_id)]
         if len(items) != 1:
             raise ValueError(f"Jellyfin did not identify exactly one show for TVDB {tvdb_id}")
         request(f"/Items/{items[0]['Id']}/Refresh?Recursive=true&MetadataRefreshMode=Default"
