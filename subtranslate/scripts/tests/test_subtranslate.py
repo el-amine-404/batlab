@@ -1,3 +1,4 @@
+import fcntl
 import sys
 import tempfile
 import unittest
@@ -7,17 +8,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import subtranslate  # noqa: E402
 
 DAY = 24 * 3600
-EPISODE = subtranslate.KINDS[0]
-CUE = "1\n00:00:01,000 --> 00:00:05,000\n# Subtitles translated with gemini-2.5-flash # \n\n"
+EPISODE = subtranslate.KINDS["episode"]
+ENGLISH = ("﻿1\r\n00:00:02,000 --> 00:00:03,500\r\nHello, Thorfinn.\r\n\r\n"
+           "2\r\n00:00:04,000 --> 00:00:05,000\r\n<i>Where is Thorfinn?</i>\r\n\r\n"
+           "3\r\n00:00:06,000 --> 00:00:07,000\r\n\r\n")  # an empty cue is dropped
 
 
 class Bazarr:
     """Bazarr's API as far as this job uses it."""
 
     def __init__(self):
-        self.wanted = []
-        self.items = {}
-        self.history = []
+        self.wanted = [{"seriesTitle": "Show", "episode_number": "1x1", "episodeTitle": "Somewhere",
+                        "sonarrSeriesId": 3, "sonarrEpisodeId": 7, "missing_subtitles": [
+                            {"code2": "fr", "forced": False, "hi": False},
+                            {"code2": "en", "forced": False, "hi": False}]}]
         self.results = []
         self.calls = []
         self.on_download = None
@@ -26,9 +30,9 @@ class Bazarr:
         if endpoint == "episodes/wanted":
             return {"data": self.wanted}
         if endpoint == "episodes":
-            return {"data": [self.items[query["episodeid[]"][0]]]}
-        if endpoint == "episodes/history":
-            return {"data": self.history}
+            return {"data": [{"path": "/data/media/tv/Show/S01E01.mkv"}]}
+        if endpoint == "series":
+            return {"data": [{"title": "Show", "year": 2019, "overview": "A boy wants revenge."}]}
         if endpoint == "providers/episodes":
             return {"data": self.results}
         raise AssertionError(endpoint)
@@ -37,6 +41,23 @@ class Bazarr:
         self.calls.append((method, endpoint, query))
         if method == "POST" and self.on_download:
             self.on_download()
+
+
+class Translator:
+    """Gemini: answers each line with a French one unless told otherwise."""
+
+    def __init__(self):
+        self.requests = []
+        self.answer = None
+        self.before_answer = None
+
+    def __call__(self, system, lines):
+        self.requests.append((system, lines))
+        if self.before_answer:
+            self.before_answer()
+        if self.answer:
+            return self.answer(lines)
+        return [{"i": line["i"], "t": "FR " + line["t"]} for line in lines]
 
 
 class Subtranslate(unittest.TestCase):
@@ -49,17 +70,10 @@ class Subtranslate(unittest.TestCase):
         self.video = self.show / "S01E01.mkv"
         self.video.write_bytes(b"v")
         self.english = self.show / "S01E01.en.srt"
-        self.english.write_text("1\n00:00:02,000 --> 00:00:03,000\nHello\n")
+        self.english.write_text(ENGLISH, encoding="utf-8", newline="")
+        self.french = self.show / "S01E01.fr.srt"
         self.checked()
-        self.bazarr = Bazarr()
-        self.bazarr.wanted = [{"seriesTitle": "Show", "episode_number": "1x1", "sonarrSeriesId": 3,
-                               "sonarrEpisodeId": 7, "missing_subtitles": [
-                                   {"code2": "fr", "forced": False, "hi": False},
-                                   {"code2": "en", "forced": False, "hi": False}]}]
-        self.bazarr.items[7] = {"path": "/data/media/tv/Show/S01E01.mkv", "subtitles": [
-            {"code2": "en", "path": None, "forced": False, "hi": False, "embedded_track_id": 3},
-            {"code2": "en", "path": "/data/media/tv/Show/S01E01.en.srt", "forced": False, "hi": False}]}
-        self.state = {}
+        self.bazarr, self.translator, self.state = Bazarr(), Translator(), {}
         self.now = self.video.stat().st_mtime + 30 * DAY
 
     def checked(self):
@@ -68,112 +82,143 @@ class Subtranslate(unittest.TestCase):
             str(path): subtranslate.file_stamp(path) for path in self.show.glob("*.srt")}}}
 
     def translate(self, now=None, limit=5, apply=True):
-        return subtranslate.translate_missing(self.bazarr, EPISODE, self.root, self.state, self.handled,
-                                              now or self.now, limit, apply, log=lambda *a: None)
+        return subtranslate.translate_missing(self.bazarr, EPISODE, self.root, self.handled, self.state,
+                                              now or self.now, self.translator, "gemini-x", limit, apply,
+                                              log=lambda *a: None)
 
-    def test_translates_the_missing_language_from_the_english_sidecar(self):
-        asked, gave_up = self.translate()
-        self.assertEqual(asked, ["Show 1x1 → fr"])
-        self.assertEqual(gave_up, [])
-        method, endpoint, query = self.bazarr.calls[0]
-        self.assertEqual((method, endpoint, query["action"], query["language"], query["path"], query["id"]),
-                         ("PATCH", "subtitles", "translate", "fr", "/data/media/tv/Show/S01E01.en.srt", 7))
+    def test_writes_the_translation_with_the_english_timing_and_the_tag(self):
+        self.assertEqual(self.translate(), (["Show 1x1 → fr"], [], False))
+        cues = subtranslate.parse_srt(self.french.read_text())
+        self.assertEqual(cues, [("00:00:00,000", "00:00:02,000", "Translated by AI (gemini-x)"),
+                                ("00:00:02,000", "00:00:03,500", "FR Hello, Thorfinn."),
+                                ("00:00:04,000", "00:00:05,000", "FR <i>Where is Thorfinn?</i>")])
+        system = self.translator.requests[0][0]
+        for words in ("French", '"Show" (2019)', "A boy wants revenge.", '"Somewhere"', "Thorfinn"):
+            self.assertIn(words, system)
+        self.assertIn(("PATCH", "series", {"seriesid": 3, "action": "scan-disk"}), self.bazarr.calls)
+        self.assertEqual(list(self.state["ai"]), ["/data/media/tv/Show/S01E01.fr.srt"])
+        self.assertTrue(subtranslate.is_translation(self.french))
+        self.assertEqual(list(self.show.glob(".subtranslate-*")), [])
 
-    def test_bazarr_goes_first_on_new_videos(self):
+    def test_waits_for_bazarr_then_for_subextract(self):
         self.assertEqual(self.translate(now=self.video.stat().st_mtime + 2 * DAY)[0], [])
-
-    def test_waits_for_subextract(self):
         self.handled = {}
         self.assertEqual(self.translate()[0], [])
         self.checked()
         self.video.write_bytes(b"a new release")  # subextract hasn't seen this file yet
         self.assertEqual(self.translate()[0], [])
+        self.assertEqual(self.translator.requests, [])
 
-    def test_never_over_a_sidecar_in_that_language(self):
+    def test_never_over_a_subtitle_in_that_language(self):
         (self.show / "S01E01.fr.hi.ass").write_text("")
         self.assertEqual(self.translate()[0], [])
 
-    def test_only_an_english_sidecar_subextract_checked(self):
-        self.english.write_text("1\n00:00:02,000 --> 00:00:03,000\nHello there\n")  # changed since
+    def test_a_subtitle_written_during_the_translation_wins(self):
+        self.translator.before_answer = lambda: self.french.write_text("human")
+        self.assertEqual(self.translate()[0], [])
+        self.assertEqual(self.french.read_text(), "human")
+        self.assertNotIn(str(self.french), str(self.state.get("ai")))
+        self.assertEqual(self.state["attempts"], {})
+        self.assertEqual(list(self.show.glob(".subtranslate-*")), [])
+
+    def test_only_from_an_english_subtitle_subextract_checked(self):
+        self.english.write_text("1\n00:00:02,000 --> 00:00:03,000\nChanged since\n")
+        self.assertEqual(self.translate()[0], [])
+        self.checked()
+        self.english.write_text("1\n00:00:00,000 --> 00:00:02,000\nTranslated by AI (x)\n")
+        self.checked()
         self.assertEqual(self.translate()[0], [])
 
-    def test_hearing_impaired_only_when_there_is_no_plain_one(self):
-        hi = self.show / "S01E01.en.hi.srt"
-        hi.write_text("1\n00:00:02,000 --> 00:00:03,000\n[door creaks]\n")
-        self.bazarr.items[7]["subtitles"].insert(0, {"code2": "en", "path": "/data/media/tv/Show/S01E01.en.hi.srt",
-                                                     "forced": False, "hi": True})
+    def test_plain_english_before_hearing_impaired(self):
+        (self.show / "S01E01.en.hi.srt").write_text("1\n00:00:02,000 --> 00:00:03,000\n[door creaks]\n")
         self.checked()
         self.translate()
-        self.assertEqual(self.bazarr.calls[0][2]["path"], "/data/media/tv/Show/S01E01.en.srt")
+        self.assertNotIn("door", str(self.translator.requests[0][1]))
 
-    def test_no_english_sidecar_or_only_a_translation_means_no_source(self):
-        self.english.write_text(CUE)
-        self.checked()
-        self.assertEqual(self.translate()[0], [])
-        self.bazarr.items[7]["subtitles"].pop()
-        self.assertEqual(self.translate()[0], [])
-
-    def test_three_tries_a_day_apart_then_reported_once(self):
-        self.assertEqual(len(self.translate()[0]), 1)
-        self.assertEqual(self.translate(now=self.now + 3600)[0], [])  # still running, perhaps
-        self.assertEqual(len(self.translate(now=self.now + DAY)[0]), 1)
-        self.assertEqual(len(self.translate(now=self.now + 2 * DAY)[0]), 1)
-        self.assertEqual(self.translate(now=self.now + 3 * DAY), ([], ["Show 1x1 → fr"]))
-        self.assertEqual(self.translate(now=self.now + 4 * DAY), ([], []))
+    def test_a_bad_answer_writes_nothing_and_is_tried_three_times(self):
+        self.translator.answer = lambda lines: [{"i": line["i"], "t": "FR"} for line in lines[1:]]
+        for day in range(3):
+            self.assertEqual(self.translate(now=self.now + day * DAY)[0], [])
+        self.assertFalse(self.french.exists())
+        self.assertEqual(self.translate(now=self.now + 3 * DAY), ([], ["Show 1x1 → fr"], False))
+        self.assertEqual(self.translate(now=self.now + 4 * DAY), ([], [], False))
+        self.assertEqual(len(self.translator.requests), 3)
         self.bazarr.wanted = []
         self.translate(now=self.now + 5 * DAY)
         self.assertEqual(self.state["attempts"], {})
 
-    def test_dry_run_asks_nothing(self):
-        self.assertEqual(len(self.translate(apply=False)[0]), 1)
-        self.assertEqual(self.bazarr.calls, [])
+    def test_empty_doubled_or_unknown_lines_are_refused(self):
+        cues = [("00:00:01,000", "00:00:02,000", "a"), ("00:00:03,000", "00:00:04,000", "b")]
+        for answer in ([{"i": 0, "t": "x"}, {"i": 1, "t": " "}], [{"i": 0, "t": "x"}, {"i": 0, "t": "y"}],
+                       [{"i": 0, "t": "x"}, {"i": 5, "t": "y"}], {"i": 0}):
+            with self.assertRaises(subtranslate.TranslationFailed):
+                subtranslate.translate_cues(lambda system, lines: answer, "", cues)
+
+    def test_a_quota_refusal_stops_the_run_and_costs_no_try(self):
+        def refuse(lines):
+            raise subtranslate.QuotaExceeded("quota")
+        self.translator.answer = refuse
+        self.assertEqual(self.translate(), ([], [], True))
+        self.assertEqual(self.state["attempts"], {})
+        self.assertFalse(self.french.exists())
+
+    def test_a_long_film_goes_in_several_requests(self):
+        cues = [(subtranslate.timestamp(n * 2000 + 1000), subtranslate.timestamp(n * 2000 + 2000), f"line {n}")
+                for n in range(subtranslate.CHUNK + 10)]
+        out = subtranslate.translate_cues(self.translator, "", cues)
+        self.assertEqual(len(self.translator.requests), 2)
+        self.assertEqual(self.translator.requests[1][1][0], {"i": subtranslate.CHUNK, "t": f"line {subtranslate.CHUNK}"})
+        self.assertEqual(out[-1], (cues[-1][0], cues[-1][1], f"FR line {subtranslate.CHUNK + 9}"))
+
+    def test_dry_run_asks_gemini_nothing_and_writes_nothing(self):
+        self.assertEqual(self.translate(apply=False)[0], ["Show 1x1 → fr"])
+        self.assertEqual(self.translator.requests, [])
+        self.assertFalse(self.french.exists())
         self.assertEqual(self.state["attempts"], {})
 
-    def ai_file(self):
-        path = self.show / "S01E01.fr.srt"
-        path.write_text(CUE + "2\n00:00:06,000 --> 00:00:07,000\nBonjour\n")
-        self.bazarr.history = [{"action": 6, "subtitles_path": "/data/media/tv/Show/S01E01.fr.srt",
-                                "sonarrSeriesId": 3, "sonarrEpisodeId": 7, "seriesTitle": "Show",
-                                "episode_number": "1x1", "language": {"code2": "fr"}},
-                               {"action": 1, "subtitles_path": "/data/media/tv/Show/S01E01.en.srt",
-                                "language": {"code2": "en"}}]
-        return path
-
     def look(self, now=None, minimum=90):
-        ai = subtranslate.ai_subtitles(self.bazarr, EPISODE, self.root)
-        return subtranslate.look_for_humans(self.bazarr, EPISODE, ai, self.root, self.state, now or self.now,
-                                            minimum, 5, 7, True, log=lambda *a: None)
-
-    def test_the_cue_marks_an_ai_subtitle(self):
-        path = self.ai_file()
-        self.assertEqual(list(subtranslate.ai_subtitles(self.bazarr, EPISODE, self.root)),
-                         ["/data/media/tv/Show/S01E01.fr.srt"])
-        path.write_text("1\n00:00:06,000 --> 00:00:07,000\nBonjour\n")
-        self.assertEqual(subtranslate.ai_subtitles(self.bazarr, EPISODE, self.root), {})
+        return subtranslate.look_for_humans(self.bazarr, self.root, self.state, {"episode": minimum, "movie": 70},
+                                            now or self.now, 5, 7, True, log=lambda *a: None)
 
     def test_a_human_subtitle_at_the_minimum_score_replaces_it(self):
-        path = self.ai_file()
+        self.translate()
+        self.bazarr.calls = []
         self.bazarr.results = [
             {"language": "fr", "forced": "False", "hearing_impaired": "False", "score": 86, "provider": "a", "subtitle": "low"},
             {"language": "ar", "forced": "False", "hearing_impaired": "False", "score": 99, "provider": "b", "subtitle": "ar"},
             {"language": "fr", "forced": "False", "hearing_impaired": "True", "score": 99, "provider": "c", "subtitle": "hi"},
             {"language": "fr", "forced": "False", "hearing_impaired": "False", "score": 94, "provider": "d", "subtitle": "ok"}]
-        self.bazarr.on_download = lambda: path.write_text("1\n00:00:06,000 --> 00:00:07,000\nSalut\n")
+        self.bazarr.on_download = lambda: self.french.write_text("1\n00:00:06,000 --> 00:00:07,000\nSalut\n")
         self.assertEqual(self.look(), ["Show 1x1 fr (d, 94%)"])
         method, endpoint, query = self.bazarr.calls[0]
-        self.assertEqual((method, endpoint, query["provider"], query["subtitle"], query["episodeid"]),
-                         ("POST", "providers/episodes", "d", "ok", 7))
+        self.assertEqual((method, endpoint, query["provider"], query["subtitle"], query["seriesid"], query["episodeid"]),
+                         ("POST", "providers/episodes", "d", "ok", 3, 7))
+        self.assertEqual(self.state["ai"], {})
 
     def test_nothing_good_enough_waits_a_week(self):
-        path = self.ai_file()
+        self.translate()
         self.bazarr.results = [{"language": "fr", "forced": "False", "hearing_impaired": "False", "score": 86,
                                 "provider": "a", "subtitle": "low"}]
         self.assertEqual(self.look(), [])
-        self.assertEqual(self.bazarr.calls, [])
         self.bazarr.results[0]["score"] = 95
-        self.bazarr.on_download = lambda: path.write_text("1\n00:00:06,000 --> 00:00:07,000\nSalut\n")
+        self.bazarr.on_download = lambda: self.french.write_text("human")
         self.assertEqual(self.look(now=self.now + DAY), [])  # not searched again yet
         self.assertEqual(len(self.look(now=self.now + 7 * DAY)), 1)
+
+    def test_an_ai_subtitle_replaced_by_bazarr_is_forgotten(self):
+        self.translate()
+        self.french.write_text("1\n00:00:06,000 --> 00:00:07,000\nSalut\n")
+        self.assertEqual(self.look(), [])
+        self.assertEqual(self.state["ai"], {})
+
+    def test_waits_for_subextract_to_finish(self):
+        held = subtranslate.subextract_lock(self.root, 0)
+        self.addCleanup(held.close)
+        self.assertIsNone(subtranslate.subextract_lock(self.root, 0))
+        fcntl.flock(held, fcntl.LOCK_UN)
+        again = subtranslate.subextract_lock(self.root, 0)
+        self.assertIsNotNone(again)
+        again.close()
 
 
 if __name__ == "__main__":
