@@ -103,15 +103,21 @@ It runs in three ways:
   Shazam hears a different song than the link said, every old tag goes,
   genre included.
 - **A song already in a library is not filed twice**: same title, an artist
-  in common and the same length within 5 s (so a remix or live take still
-  files) and the new download is dropped (`duplicate ALREADY_IN_LIBRARY`),
+  in common, the same length within 5 s and the same version (a remix, a live
+  or sped-up take still files: `identify.version` reads it from the title's
+  brackets or what follows " - ") and the new download is dropped (`duplicate ALREADY_IN_LIBRARY`),
   unless it is better audio than a copy musicguard filed itself (FLAC over
   MP3, say): then it is filed and the next pass retires the old one.
 - **The same song filed twice keeps its best copy** (`app/dedup.py`), after
   each library pass. One song: the same ISRC or MusicBrainz recording ID, or
   the title and an artist in common with lengths within 5 s, or within 30 s
   when their fingerprints agree (`reference.SAME`): a video's copy carries an
-  intro or an outro, a remix sounds different. On 2026-10-14 a YouTube
+  intro or an outro, a remix sounds different. A title naming another version
+  ("PIRATE (Club Remix)", "PIRATE - Live") is never the original's copy, unless
+  the ISRC or recording ID says so. Such a pair, and one title whose copies
+  turn out to be two recordings, stays and is flagged once to the
+  download-issues channel (`flagged VERSION` or `flagged SAME_TITLE`), so a
+  remix filed as its original gets seen. On 2026-10-14 a YouTube
   "Mghayer (Prod. By Ysos) #CAMÉLÉON" (220 s) and Spotify's "Mghayer" (214 s)
   were both filed. The best audio stays: Lidarr's or Aurral's copy always (they
   own theirs; nothing of theirs is moved), then lossless, then the copy
@@ -127,7 +133,11 @@ It runs in three ways:
   artist), picks the release it belongs to (the full album, else the EP, else
   the single; never a compilation, live or remix release), and has Lidarr
   monitor and search that album, adding the artist with nothing else
-  monitored if it is new. Once Lidarr's file for that recording is in `music`
+  monitored if it is new (`albumsToMonitor`: with "monitor none" alone, Lidarr
+  unmonitored the asked album too, seconds after adding the artist; Lomepal's
+  Jeannine, 2026-10-15). From the next pass musicguard checks that the album
+  and its artist are still monitored, and wants them again if not. A remix or
+  live take is never replaced by the album's original. Once Lidarr's file for that recording is in `music`
   and musicguard has verified it, the YouTube copy and its lyrics go to
   quarantine as `UPGRADED` (not announced on Discord), and its folder and
   cover leave `music-extras`. First it hands over what Lidarr's copy lacks
@@ -251,7 +261,9 @@ reaches Navidrome at `http://caddy:4534`, a Caddy listener that is not
 published on the host. musicguard alone calls `navidrome:4533` directly.
 
 After each scan musicguard posts the albums that just became playable to
-`#downloads` ("Ready to play in Navidrome", `MUSICGUARD_READY_WEBHOOK`).
+`#downloads` ("Ready to play in Navidrome", `MUSICGUARD_READY_WEBHOOK`): one
+card per album ("Artist – Album"), listing its new songs with track number,
+length and quality, and whether they came from Lidarr or a link.
 Lidarr's own Discord connection for `#downloads` has *On Release Import* and
 *On Upgrade* off since 2026-10-11: it announced music minutes before anyone
 could play it.

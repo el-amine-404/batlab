@@ -88,7 +88,7 @@ def recordings_for(title, artist, isrc=""):
         found = [r for r in found if int(r.get("score", 0)) >= MIN_SCORE]
     wanted = identify.names(artist)
     return [r for r in found
-            if identify.same_title(r.get("title", ""), title)
+            if identify.same_title(r.get("title", ""), title) and identify.same_version(r.get("title", ""), title)
             and wanted & identify.names(" & ".join(c.get("name", "") for c in r.get("artist-credit") or []))]
 
 
@@ -143,17 +143,34 @@ class Lidarr:
             "rootFolderPath": root["path"],
             "monitored": True,
             "monitorNewItems": "none",
-            "addOptions": {"monitor": "none", "searchForMissingAlbums": False},
+            # "none" alone unmonitors every album once the artist is added,
+            # the asked one too (Lidarr's post-add actions, 2026-10-15).
+            "addOptions": {"monitor": "none", "albumsToMonitor": [group_id], "searchForMissingAlbums": False},
         })
         album["monitored"] = True
         album["addOptions"] = {"searchForNewAlbum": True}
         return self.call("POST", "album", album)
 
     def want(self, album):
-        """Monitor an album already in Lidarr and search for it."""
+        """Monitor an album already in Lidarr, and its artist, and search for
+        it. True when it had to: it was not wanted."""
+        changed = False
+        artist = self.call("GET", f"artist/{album['artistId']}") if album.get("artistId") else None
+        if artist and not artist.get("monitored"):
+            artist["monitored"] = True
+            self.call("PUT", f"artist/{artist['id']}", artist)
+            changed = True
         if not album.get("monitored"):
             self.call("PUT", "album/monitor", {"albumIds": [album["id"]], "monitored": True})
+            changed = True
+        if changed:
             self.call("POST", "command", {"name": "AlbumSearch", "albumIds": [album["id"]]})
+        return changed
+
+    def still_wanted(self, album_id):
+        """want() for an album asked for earlier, which Lidarr may have
+        unmonitored since. True when it had to."""
+        return self.want(self.call("GET", f"album/{album_id}"))
 
     def remove_track_file(self, group_id, path):
         """Delete the file at path from the album of that release group (Lidarr
@@ -173,10 +190,13 @@ class Lidarr:
         return removed
 
     def track_file(self, album_id, recording_ids, title):
-        """Path of Lidarr's file for this song on that album, or None."""
+        """Path of Lidarr's file for this song on that album, or None. Never
+        the original for a remix or a live take (identify.version)."""
         for track in self.call("GET", "track", albumId=album_id) or []:
             if not track.get("hasFile"):
                 continue
-            if track.get("foreignRecordingId") in recording_ids or identify.same_title(track.get("title", ""), title):
+            named = track.get("title", "")
+            if track.get("foreignRecordingId") in recording_ids or (
+                    identify.same_title(named, title) and identify.same_version(named, title)):
                 return (self.call("GET", f"trackfile/{track['trackFileId']}") or {}).get("path")
         return None

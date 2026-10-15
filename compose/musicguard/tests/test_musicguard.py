@@ -598,12 +598,25 @@ class Duplicates(GuardTestCase):
         self.assertEqual(self.all_files(self.extras), [])
         self.assertEqual(os.stat(lidarr).st_mtime_ns, before)
 
-    def test_a_remix_of_another_length_is_another_song(self):
+    def test_a_remix_is_kept_beside_its_original_and_flagged_once(self):
         self.filed(self.extras, "Stormy/A/01 - PIRATE.mp3", seconds=8, title="PIRATE", artist="Stormy")
-        self.filed(self.extras, "Stormy/B/01 - PIRATE.mp3", seconds=30, title="PIRATE", artist="Stormy")
+        self.filed(self.extras, "Stormy/B/01 - PIRATE (Remix).mp3", seconds=8, title="PIRATE (Remix)",
+                   artist="Stormy")
+        self.guard.roots_pass()
+        self.guard.dedup_pass()
+        self.guard.dedup_pass()
+        self.assertEqual(len(self.all_files(self.extras)), 2)
+        flagged = [e for e in self.guard.events if e["event"] == "flagged"]
+        self.assertEqual([e["reason"] for e in flagged], ["VERSION"])
+        self.assertIn("original and remix", flagged[0]["detail"])
+
+    def test_one_title_far_apart_in_length_is_flagged(self):
+        self.filed(self.extras, "Stormy/A/01 - PIRATE.mp3", seconds=8, title="PIRATE", artist="Stormy")
+        self.filed(self.extras, "Stormy/B/01 - PIRATE.mp3", seconds=50, title="PIRATE", artist="Stormy")
         self.guard.roots_pass()
         self.guard.dedup_pass()
         self.assertEqual(len(self.all_files(self.extras)), 2)
+        self.assertEqual([e["reason"] for e in self.guard.events if e["event"] == "flagged"], ["SAME_TITLE"])
 
     def test_lengths_apart_are_one_song_only_when_they_sound_alike(self):
         self.filed(self.extras, "Stormy/A/01 - PIRATE.mp3", seconds=8, title="PIRATE", artist="Stormy")
@@ -632,6 +645,20 @@ class Duplicates(GuardTestCase):
         self.guard.dedup_pass()
         self.assertEqual(self.all_files(self.extras), ["Stormy/OMEGA (2025)/05 - PIRATE.flac"])
 
+    def test_a_remix_of_a_filed_song_is_filed_too(self):
+        self.filed(self.extras, "Stormy/OMEGA (2025)/05 - PIRATE.mp3", title="PIRATE", artist="Stormy",
+                   album="OMEGA", date="2025", tracknumber="5")
+        self.guard.roots_pass()
+        source = os.path.join(self.inbox, "songdrop", "Stormy - PIRATE (Remix).mp3")
+        os.makedirs(os.path.dirname(source))
+        tone(source)
+        audio = mutagen.File(source, easy=True)
+        audio["title"], audio["artist"] = "PIRATE (Remix)", "Stormy"
+        audio.save()
+        self.inbox_twice()
+        self.assertEqual(len(self.all_files(self.extras)), 2)
+        self.assertNotIn("duplicate", [e["event"] for e in self.guard.events])
+
     def test_a_worse_download_of_a_filed_song_is_dropped(self):
         self.filed(self.extras, "Stormy/PIRATE.flac", title="PIRATE", artist="Stormy")
         self.guard.roots_pass()
@@ -649,6 +676,32 @@ class DedupRules(unittest.TestCase):
     def track(self, title="PIRATE", artist="Stormy", seconds=200, codec="mp3", bitrate=160000, owned=True, **more):
         values = {"title": [title], "artist": [artist], **{k: [v] for k, v in more.items()}}
         return dedup.Track(f"/x/{title}-{seconds}-{codec}", values, seconds, codec, bitrate, owned)
+
+    def test_versions_are_related_not_one_song(self):
+        never = lambda a, b: self.fail("no fingerprint needed")  # noqa: E731
+        original, remix = self.track(), self.track("PIRATE (Stormy Remix)", seconds=201)
+        self.assertFalse(dedup.same_song(original, remix, never))
+        related = []
+        self.assertEqual(dedup.groups([original, remix], never, related), [])
+        self.assertEqual(related[0][2], "two versions of one song (original and remix)")
+        self.assertTrue(dedup.same_song(self.track(isrc="X1"), self.track("PIRATE (Remix)", isrc="X1"), never))
+
+    def test_versions(self):
+        self.assertEqual(identify.version("PIRATE"), ())
+        self.assertEqual(identify.version("PIRATE (Club Mix)"), ("remix",))
+        self.assertEqual(identify.version("PIRATE - Live at Bercy"), ("live",))
+        self.assertEqual(identify.version("PIRATE (feat. X) [Sped Up]"), ("sped up",))
+        for same in ("PIRATE (Original Mix)", "PIRATE (Radio Edit)", "PIRATE (Remastered 2011)",
+                     "Live Forever", "PIRATE (Official Video)"):
+            self.assertEqual(identify.version(same), (), same)
+
+    def test_a_remix_is_not_replaced_by_the_original(self):
+        lidarr = upgrade.Lidarr("http://lidarr", "key")
+        tracks = [{"hasFile": True, "title": "One Dance", "foreignRecordingId": "rec-1", "trackFileId": 7}]
+        with mock.patch.object(lidarr, "call", side_effect=lambda method, path, *rest, **query:
+                               tracks if path == "track" else {"path": "/music/One Dance.flac"}):
+            self.assertIsNone(lidarr.track_file(1, set(), "One Dance (Remix)"))
+            self.assertEqual(lidarr.track_file(1, set(), "One Dance"), "/music/One Dance.flac")
 
     def test_one_song(self):
         never = lambda a, b: self.fail("no fingerprint needed")  # noqa: E731
@@ -929,20 +982,35 @@ class NavidromeScans(GuardTestCase):
             self.guard.roots_pass()
             self.guard.scan_navidrome()
         self.assertEqual(len(sent), 1)
-        self.assertIn("Billie Eilish – HIT ME HARD AND SOFT (2024): SKINNY", sent[0]["content"])
+        card = sent[0]["embeds"][0]
+        self.assertEqual(card["title"], "Billie Eilish – HIT ME HARD AND SOFT (2024)")
+        self.assertRegex(card["description"], r"^`01` \*\*SKINNY\*\* · 0:0\d · MP3 \d+ kb/s$")
+        self.assertEqual(card["footer"]["text"].split(" · ")[0], "1 new song")
+        self.assertTrue(card["footer"]["text"].endswith("from Lidarr"))
 
-    def test_many_new_songs_of_an_album_are_counted_not_named(self):
+    def test_each_album_is_a_card_with_its_songs_in_order(self):
         self.guard.config.ready_webhook = "http://discord.invalid/hook"
-        album = os.path.join(self.music, "Lomepal", "Amina (2019)")
+        album = os.path.join(self.extras, "Lomepal", "Amina (2019)")
         os.makedirs(album)
-        for number in range(1, 5):
-            tone(os.path.join(album, f"{number:02} - Song {number}.mp3"))
+        for number in (16, 2):
+            path = os.path.join(album, f"{number:02} - Song {number}.flac")
+            tone(path, extra=("-c:a", "flac"))
+            audio = mutagen.File(path)
+            audio["title"], audio["artist"], audio["album"] = f"Song {number}", "Lomepal", "Amina"
+            audio["date"], audio["tracknumber"] = "2019", str(number)
+            audio.save()
         sent = []
         with mock.patch.object(guard.urllib.request, "urlopen",
                                side_effect=lambda request, timeout: sent.append(json.loads(request.data)) or mock.MagicMock()):
             self.guard.roots_pass()
             self.guard.scan_navidrome()
-        self.assertIn("Lomepal – Amina (2019) (4 songs)", sent[0]["content"])
+        card = sent[0]["embeds"][0]
+        self.assertEqual(card["title"], "Lomepal – Amina (2019)")
+        lines = card["description"].split("\n")
+        self.assertTrue(lines[0].startswith("`02` **Song 2** · "), lines)
+        self.assertIn("FLAC 16-bit/", lines[1])
+        self.assertTrue(card["footer"]["text"].startswith("2 new songs · "))
+        self.assertTrue(card["footer"]["text"].endswith("from a link (music-extras)"))
 
     def test_song_titles_leave_the_track_number(self):
         self.assertEqual(guard.song_title("16 - Trop beau.opus"), "Trop beau")
@@ -968,7 +1036,17 @@ class FakeLidarr:
         return self.albums[group_id]
 
     def want(self, album):
+        changed = not album["monitored"]
         album["monitored"] = True
+        return changed
+
+    def still_wanted(self, album_id):
+        album = next(a for a in self.albums.values() if a["id"] == album_id)
+        if album["monitored"]:
+            return False
+        self.want(album)
+        self.searched.append(album_id)
+        return True
 
     def track_file(self, album_id, recording_ids, title):
         return self.files.get(album_id)
@@ -1028,6 +1106,16 @@ class Upgrades(GuardTestCase):
         self.assertTrue(os.path.exists(lidarr_file))
         self.assertEqual(self.quarantined_reasons(), ["UPGRADED"], "kept a while, in case")
         self.assertNotIn("quarantined", [e["event"] for e in self.guard.events], "an upgrade is not news")
+
+    def test_an_album_lidarr_unmonitors_after_adding_its_artist_is_wanted_again(self):
+        self.extras_song()
+        self.guard.upgrade_pass()
+        self.lidarr.albums["views"]["monitored"] = False  # Lidarr's post-add "monitor none"
+        self.guard.upgrade_pass()
+        self.assertTrue(self.lidarr.albums["views"]["monitored"])
+        self.assertEqual(self.lidarr.searched, ["views", 1], "searched again")
+        self.guard.upgrade_pass()
+        self.assertEqual(self.lidarr.searched, ["views", 1], "once confirmed, not asked again")
 
     def upgraded(self, lyrics_text, lidarr_seconds=8, album="Views", lidarr_lyrics=None):
         """An extras song with these lyrics and a cover, replaced by Lidarr's copy."""

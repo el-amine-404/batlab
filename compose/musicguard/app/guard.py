@@ -69,8 +69,11 @@ UPGRADE_RETRY_SECONDS = 7 * 86400
 # A single whose song is on no album yet is looked at again after a month.
 SINGLE_RETRY_SECONDS = 30 * 86400
 ORPHAN_SECONDS = 3600
-# The ready message names the songs of an album when this many or fewer came.
-READY_TITLES = 3
+# "Ready to play": songs listed per album card, cards per message (Discord's
+# limit is 10), and the cards' colour.
+READY_SONGS = 15
+READY_CARDS = 10
+READY_COLOUR = 0x8B5CF6
 STATE_VERSION = 1
 # Events after which Navidrome has something new to index.
 LIBRARY_CHANGES = {"filed", "cleaned", "verified", "credited", "quarantined", "reported", "lyrics",
@@ -145,6 +148,25 @@ def log(message):
     print(f"{now_iso()} {message}", flush=True)
 
 
+def minutes(seconds):
+    seconds = int(round(seconds))
+    hours, rest = divmod(seconds, 3600)
+    return f"{hours}:{rest // 60:02}:{rest % 60:02}" if hours else f"{rest // 60}:{rest % 60:02}"
+
+
+def quality(path, track):
+    """"FLAC 24-bit/96 kHz", "Opus 160 kb/s"."""
+    if track.codec in ("flac", "alac"):
+        try:
+            info = mutagen.File(path).info
+            depth, rate = getattr(info, "bits_per_sample", 0), getattr(info, "sample_rate", 0)
+        except Exception:
+            depth = rate = 0
+        return track.codec.upper() + (f" {depth}-bit/{rate / 1000:g} kHz" if depth and rate else "")
+    name = {"opus": "Opus", "aac": "AAC", "vorbis": "Vorbis", "mp3": "MP3"}.get(track.codec, "")
+    return f"{name} {track.bitrate // 1000} kb/s".strip() if track.bitrate else name
+
+
 def song_title(filename):
     """"16 - Trop beau.opus" or "1-01 - Trop beau.flac" → "Trop beau"."""
     stem = os.path.splitext(filename)[0]
@@ -183,11 +205,12 @@ class Guard:
                 state.setdefault("upgrades", {})
                 state.setdefault("singles", {})
                 state.setdefault("sidecars", {})
+                state.setdefault("flagged", {})
                 return state
         except (OSError, ValueError):
             pass
         return {"version": STATE_VERSION, "files": {}, "lyrics": {}, "audited": {}, "releases": {},
-                "upgrades": {}, "singles": {}, "sidecars": {}}
+                "upgrades": {}, "singles": {}, "sidecars": {}, "flagged": {}}
 
     def save_state(self):
         if self.config.dry_run:
@@ -227,7 +250,7 @@ class Guard:
 
     def notify(self):
         """One Discord message for what a pass found that needs a look."""
-        worth = [e for e in self.events if e["event"] in ("quarantined", "suspect", "error", "held")]
+        worth = [e for e in self.events if e["event"] in ("quarantined", "suspect", "error", "held", "flagged")]
         self.events = []
         if not worth or not self.config.webhook or self.config.dry_run:
             return
@@ -702,7 +725,8 @@ class Guard:
 
     def already_in_library(self, found, seconds):
         """A library file that is this song (same title, an artist in common,
-        same length within 5 s, so a remix or live take is not one), or None."""
+        same length within 5 s, and no remix or live take of it: see
+        identify.version), or None."""
         song = identify.Match(layout.first(found, "title"), layout.first(found, "artist"))
         present = set()
         for root in self.config.roots:
@@ -728,7 +752,8 @@ class Guard:
                                   (tags_.get("artist") or [""])[0],
                                   getattr(getattr(audio, "info", None), "length", 0) or 0)
                         self.songs[path] = cached
-                    if abs(cached[4] - seconds) <= 5 and identify.agrees(song, cached[2], cached[3]):
+                    if (abs(cached[4] - seconds) <= 5 and identify.agrees(song, cached[2], cached[3])
+                            and identify.same_version(song.title, cached[2])):
                         return path
         for path in list(self.songs):
             if path not in present:
@@ -957,9 +982,8 @@ class Guard:
         self.announce_ready()
 
     def announce_ready(self):
-        """One Discord message per scan: the albums that just became playable,
-        with the songs' titles when only a few came (a single song filed into
-        its album would otherwise read as the album)."""
+        """Discord messages after a scan: the albums that just became playable,
+        one card each ("Artist – Album"), with their new songs."""
         new, self.ready = self.ready, []
         albums = {}
         for path in new:
@@ -969,26 +993,50 @@ class Guard:
                 if path.startswith(root + os.sep):
                     parts = os.path.relpath(path, root).split(os.sep)
                     if len(parts) >= 3:
-                        key = f"{parts[0]} – {parts[1]}"
-                        albums.setdefault(key, []).append(song_title(parts[-1]))
+                        albums.setdefault(f"{parts[0]} – {parts[1]}", []).append(path)
         if not albums or not self.config.ready_webhook:
             return
-        lines = ["**Ready to play in Navidrome**"]
-        for name, titles in sorted(albums.items())[:20]:
-            if len(titles) <= READY_TITLES:
-                lines.append(f"- {name}: " + ", ".join(sorted(titles)))
-            else:
-                lines.append(f"- {name} ({len(titles)} songs)")
-        if len(albums) > 20:
-            lines.append(f"... and {len(albums) - 20} more")
-        body = json.dumps({"content": "\n".join(lines)[:1900], "allowed_mentions": {"parse": []}})
-        request = urllib.request.Request(self.config.ready_webhook, data=body.encode(), method="POST",
-                                         headers={"Content-Type": "application/json",
-                                                  "User-Agent": "batlab-musicguard"})
-        try:
-            urllib.request.urlopen(request, timeout=15).close()
-        except Exception as error:
-            log(f"ready notification failed: {error}")
+        cards = [self.album_card(name, paths) for name, paths in sorted(albums.items())]
+        for first in range(0, len(cards), READY_CARDS):
+            body = {"content": "**Ready to play in Navidrome**" if first == 0 else "",
+                    "embeds": cards[first:first + READY_CARDS], "allowed_mentions": {"parse": []}}
+            request = urllib.request.Request(self.config.ready_webhook, data=json.dumps(body).encode(),
+                                             method="POST", headers={"Content-Type": "application/json",
+                                                                     "User-Agent": "batlab-musicguard"})
+            try:
+                urllib.request.urlopen(request, timeout=15).close()
+            except Exception as error:
+                log(f"ready notification failed: {error}")
+                return
+
+    def album_card(self, name, paths):
+        """A Discord embed: the album, then "`16` Trop beau · 3:24 · Opus 160 kb/s"
+        per song, and where the songs came from."""
+        owned = paths[0].startswith(self.config.extras + os.sep)
+        songs = []
+        for path in paths:
+            track = self.track(path, owned=path.startswith(self.config.extras + os.sep))
+            number = (track.first("tracknumber") if track else "").split("/")[0].strip()
+            if not number:
+                number = re.match(r"^(\d+(?:-\d+)?)\s*-\s", os.path.basename(path) or "")
+                number = number.group(1) if number else ""
+            title = (track.first("title") if track else "") or song_title(os.path.basename(path))
+            seconds = track.seconds if track else 0
+            details = [minutes(seconds)] if seconds else []
+            if track:
+                details.append(quality(path, track))
+            songs.append((number.zfill(2) if number.isdigit() else number, title, seconds, details))
+        songs.sort(key=lambda song: (song[0] or "~", song[1].casefold()))
+        lines = []
+        for number, title, _, details in songs[:READY_SONGS]:
+            lines.append((f"`{number}` " if number else "") + f"**{title}**" + "".join(f" · {d}" for d in details))
+        if len(songs) > READY_SONGS:
+            lines.append(f"… and {len(songs) - READY_SONGS} more")
+        total = sum(song[2] for song in songs)
+        count = f"{len(songs)} new song" + ("" if len(songs) == 1 else "s")
+        source = "from a link (music-extras)" if owned else "from Lidarr"
+        return {"title": name[:256], "description": "\n".join(lines)[:4000], "color": READY_COLOUR,
+                "footer": {"text": " · ".join(filter(None, [count, minutes(total) if total else "", source]))}}
 
     def orphaned(self, path, stat):
         """A lyrics sidecar whose track has been gone for an hour."""
@@ -1180,7 +1228,8 @@ class Guard:
     def upgrade_one(self, path, entry, lidarr, single=None):
         """The entry to keep for this song, or None once it is replaced.
         single: for a single in Lidarr's library, its release group and IDs."""
-        if "album" not in entry:
+        just_asked = "album" not in entry
+        if just_asked:
             if single:
                 title, artist = single["title"], single["artist"]
                 recordings = upgrade.recordings_for(title, artist)
@@ -1219,6 +1268,13 @@ class Guard:
             if single:
                 return entry
         try:
+            if not entry.get("confirmed") and not just_asked:
+                # Lidarr may have unmonitored it after adding its artist, a few
+                # seconds after the request: looked at from the next pass on.
+                if lidarr.still_wanted(entry["album"]):
+                    self.event("requested", path, detail="Lidarr had left the album unmonitored: wanted again")
+                else:
+                    entry = dict(entry, confirmed=True)
             replacement = lidarr.track_file(entry["album"], set(entry["recordings"]), entry["title"])
         except urllib.error.HTTPError as error:
             if error.code == 404:  # the album was removed from Lidarr: start over
@@ -1344,11 +1400,30 @@ class Guard:
         for path in list(self.tracks):
             if path not in live:
                 self.tracks.pop(path)
-        for group in dedup.groups(tracks, self.alike):
+        related = []
+        for group in dedup.groups(tracks, self.alike, related):
             try:
                 self.resolve(group)
             except Exception as error:  # one group never stops the others
                 log(f"dedup failed for {[t.path for t in group]}: {error}")
+        self.flag_related(related, live)
+
+    def flag_related(self, related, live):
+        """Two copies close enough to be mistaken for one song but not one (a
+        remix beside its original, one title for two recordings): both stay,
+        and each pair is flagged once, for a person to look at."""
+        flagged = self.state["flagged"]
+        for a, b, reason in related:
+            key = "\n".join(sorted((a.path, b.path)))
+            if key in flagged:
+                continue
+            flagged[key] = now_iso()
+            mine, other = (a, b) if a.owned else (b, a)
+            kind = "VERSION" if reason.startswith("two versions") else "SAME_TITLE"
+            self.event("flagged", mine.path, kind, f"{reason}, both kept; the other: {other.path}")
+        for key in list(flagged):
+            if not all(path in live for path in key.split("\n")):
+                flagged.pop(key)
 
     def resolve(self, group):
         keep = dedup.best_audio(group)

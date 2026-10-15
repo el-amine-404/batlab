@@ -107,3 +107,36 @@ def contradicts(match, title, artist):
     any artist overlaps. A remix, a feature or a translated title still shares
     one of them and is not called wrong."""
     return not same_title(match.title, title) and not (names(match.artist) & names(artist))
+
+
+# --- versions of a song ----------------------------------------------------------
+
+# A remix, a live take, a sped-up upload…: another recording of the song, named
+# in brackets or after " - " ("PIRATE (Stormy Remix)", "PIRATE - Live").
+# Edits, remasters and "explicit" are the same recording and are not listed.
+VERSIONS = {
+    "remix": r"re-?mix|rmx|(?<!original )(?<!album )(?<!radio )\bmix",
+    "live": r"live|en concert",
+    "acoustic": r"acoustic|unplugged|acoustique",
+    "instrumental": r"instrumental|karaok[eé]",
+    "a cappella": r"a ?cap+el+a",
+    "extended": r"extended",
+    "sped up": r"sped[ -]?up|speed[ -]?up|nightcore",
+    "slowed": r"slowed",
+    "rework": r"rework|bootleg|vip|flip",
+    "cover": r"cover|reprise",
+    "demo": r"demo",
+}
+_VERSION_PARTS = re.compile(r"[\(\[]([^\)\]]*)[\)\]]|\s[-–—]\s(.+)$")
+_VERSION_WORDS = {name: re.compile(rf"(?i)\b(?:{pattern})\b") for name, pattern in VERSIONS.items()}
+
+
+def version(title):
+    """What sets this take apart from the song's original recording, as a
+    sorted tuple ("live",), ("remix",); () for the original."""
+    parts = " ".join(a or b for a, b in _VERSION_PARTS.findall(title or ""))
+    return tuple(sorted(name for name, words in _VERSION_WORDS.items() if words.search(parts)))
+
+
+def same_version(one, other):
+    return version(one) == version(other)
