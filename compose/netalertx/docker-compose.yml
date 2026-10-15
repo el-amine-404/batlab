@@ -34,6 +34,8 @@ services:
       # The defaults plus APPRISE, the publisher that posts to Apprise.
       - LOADED_PLUGINS=['ARPSCAN','AVAHISCAN','CSVBCKP','DBCLNP','DIGSCAN','INTRNT','MAINT','NEWDEV','NBTSCAN','NSLOOKUP','NTFPRCS','SETPWD','SYNC','VNDRPDT','WORKFLOWS','UI','APPRISE']
       # Apprise on the loopback (host networking), as "netalertx", tag alerts.
+      # WEBHOOK, the Discord publisher before, stays loaded from the saved
+      # settings, so it is switched off here.
       # Notify on new devices; down alerts only fire for devices flagged
       # "Alert Down" in the UI.
       - >-
@@ -47,6 +49,7 @@ services:
         "APPRISE_TARGETTYPE": "tag",
         "APPRISE_TAG": "alerts",
         "APPRISE_PAYLOAD": "text",
+        "WEBHOOK_RUN": "disabled",
         "NTFPRCS_INCLUDED_SECTIONS": "['new_devices','down_devices','down_reconnected']"
         }
     mem_limit: 1g
