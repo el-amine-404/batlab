@@ -18,7 +18,7 @@ class Apprise(ConnectionType):
     fields = (
         Field("url", "Apprise address", "url",
               help="Apprise's /notify/ address with its configuration key.",
-              placeholder="http://apprise:8000/notify/batlab"),
+              placeholder="http://apprise:8000/notify/songdrop"),
         Field("tag", "Channel", "text", required=False,
               help="The tag of the channel in Apprise's configuration, as download-issues. Empty: every channel.",
               placeholder="download-issues"),
@@ -27,7 +27,7 @@ class Apprise(ConnectionType):
     def validate(self, config: dict) -> None:
         if "/notify/" not in urllib.parse.urlsplit(config["url"]).path + "/":
             raise Invalid("The Apprise address ends in /notify/ and the configuration key, "
-                          "as http://apprise:8000/notify/batlab.")
+                          "as http://apprise:8000/notify/songdrop.")
         if "tag" in config and not all(c.isalnum() or c in "-_ ," for c in config["tag"]):
             raise Invalid("A channel is letters, digits, - and _ (several: separated by commas).")
 

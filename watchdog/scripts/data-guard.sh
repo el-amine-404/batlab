@@ -12,8 +12,6 @@ load_watchdog_config
 
 readonly STATE_DIR="/var/lib/batlab-watchdog"
 readonly STOPPED_FILE="$STATE_DIR/stopped-containers"
-readonly RED=15158332
-readonly GREEN=3066993
 
 # name, restart policy, running, whether the last start failed; only for
 # containers bind-mounting something under the data root.
@@ -30,7 +28,7 @@ stop_data_containers() {
   echo "$reason; stopping: ${names:-none}"
   # Before stopping: a container stuck on a hung disk can keep docker stop
   # waiting, and the card must go out regardless.
-  watchdog_notify "🔴 Data disk unavailable" "$RED" \
+  watchdog_notify "🔴 Data disk unavailable" failure \
     "Mount" "\`$WATCHDOG_DATA_ROOT\`" \
     "Reason" "$reason" \
     "Stopping" "${names// /, }"
@@ -65,7 +63,7 @@ start_data_containers() {
   # shellcheck disable=SC2086
   docker start $names >/dev/null
   echo "started: $names"
-  watchdog_notify "🟢 Data disk back" "$GREEN" \
+  watchdog_notify "🟢 Data disk back" success \
     "Mount" "\`$WATCHDOG_DATA_ROOT\`" \
     "Started" "${names// /, }"
 }

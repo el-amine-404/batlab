@@ -34,6 +34,9 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib/batlab-common"))
+from batlab_common import notify as apprise  # noqa: E402
+
 SIDECAR_EXTENSIONS = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".idx", ".sup"}
 RATE, STEP = 8000, 80          # 8 kHz mono, 10 ms loudness bins
 CLIP_SECONDS = 30
@@ -439,6 +442,8 @@ def current_files(sonarr: Arr, episode_ids: set[int]) -> set[str]:
 # --- reporting ----------------------------------------------------------------
 
 def notify(webhook: str, kept: list[str], manual: list[str]) -> None:
+    """Through Apprise as "dub keeper" to #download-issues; straight to the
+    webhook when Apprise is down."""
     fields = []
     for name, lines in (("kept after upgrade", kept), ("needs a look", manual)):
         if lines:
@@ -449,21 +454,16 @@ def notify(webhook: str, kept: list[str], manual: list[str]) -> None:
                     value += f"\n… and {len(lines) - index} more"
                     break
                 value += addition
-            fields.append({"name": f"{name} ({len(lines)})", "value": value, "inline": False})
-    payload = {
-        "username": "dub keeper",
-        "avatar_url": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/sonarr.png",
-        "embeds": [{
-            "title": "🔊 Upgrades checked for lost audio and subtitles" if not manual else "🟠 An upgrade lost audio",
-            "description": "A lost track is in the recycle bin for 14 days after the upgrade: "
-                           "copy it in by hand, or restore the old file from `/data/recycle`.",
-            "color": 15105570 if manual else 3066993, "fields": fields,
-            "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
-        }],
-    }
-    request = urllib.request.Request(webhook, data=json.dumps(payload).encode(), method="POST",
-                                     headers={"Content-Type": "application/json", "User-Agent": "batlab-dubkeeper"})
-    urllib.request.urlopen(request, timeout=15).close()
+            fields.append((f"{name} ({len(lines)})", value))
+    body = ("A lost track is in the recycle bin for 14 days after the upgrade: "
+            "copy it in by hand, or restore the old file from `/data/recycle`.\n\n" + apprise.fields_text(fields))
+    try:
+        apprise.deliver("dubkeeper", "download-issues",
+                        "🔊 Upgrades checked for lost audio and subtitles" if not manual else "🟠 An upgrade lost audio",
+                        body, "warning" if manual else "success",
+                        fallback=webhook if webhook.startswith("http") else None)
+    except apprise.NotSent as error:
+        print(f"message not sent: {error}", file=sys.stderr)
 
 
 def describe(verdict: Verdict) -> str:
@@ -611,7 +611,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         return 1 if failed else 0
     webhook = env_value(env_file, "DISCORD_WEBHOOK_DOWNLOAD_ISSUES")
-    if (kept or manual) and webhook.startswith("http"):
+    if kept or manual:
         notify(webhook, kept, manual)
     # Entries older than the look-back window can never come back; drop them.
     recent = {upgrade.old for upgrade in upgrades}

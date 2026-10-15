@@ -26,27 +26,25 @@ WEBHOOK_FAIL="$(env_value DISCORD_WEBHOOK_ALERTS)"
 readonly HOST_PROFILE_NAME WEBHOOK_OK WEBHOOK_FAIL
 readonly ENV_ARGS=(--env-file compose/versions.env --env-file compose/.env --env-file "hosts/$HOST_PROFILE_NAME/compose.env")
 
+# One message through Apprise as "updater on <host>" (lib/batlab-common,
+# senders.json), straight to the channel's Discord webhook if Apprise is down,
+# as it is while the updater restarts it. Best effort.
+#   notify CHANNEL TITLE KIND [FIELD_NAME FIELD_VALUE]...
 notify() {
-  local webhook="$1" title="$2" color="$3"
+  local channel="$1" title="$2" kind="$3"
   shift 3
-  [[ -n "$webhook" && "$DRY_RUN" != "1" && "$NOTIFY" == "1" ]] || { echo "notify: $title | $*"; return 0; }
-  local payload
-  payload="$(python3 -c '
-import datetime, json, socket, sys
-title, color, pairs = sys.argv[1], int(sys.argv[2]), sys.argv[3:]
-host = socket.gethostname()
-fields = [{"name": "Host", "value": host, "inline": True}]
-fields += [{"name": n, "value": (v or "-")[:1000], "inline": False} for n, v in zip(pairs[::2], pairs[1::2])]
-print(json.dumps({
-    "username": "updater on " + host,
-    "avatar_url": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/renovate.png",
-    "embeds": [{"title": title, "color": color, "fields": fields,
-                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()}],
-}))' "$title" "$color" "$@")"
-  curl -sS -m 15 -H "Content-Type: application/json" -d "$payload" "$webhook" >/dev/null 2>&1 || true
+  [[ "$DRY_RUN" != "1" && "$NOTIFY" == "1" ]] || { echo "notify: $title | $*"; return 0; }
+  local fallback="$WEBHOOK_FAIL" fields=()
+  [[ "$channel" == updates ]] && fallback="$WEBHOOK_OK"
+  while (($#)); do
+    fields+=(--field "$1" "${2-}")
+    shift
+    (($#)) && shift
+  done
+  BATLAB_NOTIFY_FALLBACK="$fallback" python3 -I "$REPO_DIR/lib/batlab-common/batlab_common/notify.py" \
+    updater "$channel" "$kind" "$title" "${fields[@]}" || true
 }
 
-readonly GREEN=3066993 RED=15158332 GREY=9807270
 
 # Remembers which target images were already reported, so a failed or manual
 # update is announced once rather than every night.
@@ -62,13 +60,13 @@ remember() {
 sync_repository() {
   if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
     echo "Working tree has local changes; not pulling." >&2
-    notify "$WEBHOOK_FAIL" "🔴 Updater skipped: repository not clean" "$RED" \
+    notify alerts "🔴 Updater skipped: repository not clean" failure \
       "Fix" "cd ~/batlab && git status"
     exit 1
   fi
   git fetch --quiet origin "$BRANCH"
   if ! git merge --ff-only --quiet "origin/$BRANCH"; then
-    notify "$WEBHOOK_FAIL" "🔴 Updater skipped: cannot fast-forward" "$RED" \
+    notify alerts "🔴 Updater skipped: cannot fast-forward" failure \
       "Fix" "cd ~/batlab && git status && git pull"
     exit 1
   fi
@@ -112,7 +110,7 @@ update_service() {
   if docker compose "${ENV_ARGS[@]}" -f "$compose_file" "${fetch[@]}" "$service" &&
     docker compose "${ENV_ARGS[@]}" -f "$compose_file" up -d --no-deps "$service" &&
     reason="$(wait_until_healthy "$container")"; then
-    notify "$WEBHOOK_OK" "🟢 Updated $service" "$GREEN" \
+    notify updates "🟢 Updated $service" success \
       "Image" "$new_image" "Previous" "$old_image"
     docker image rm "$old_image" >/dev/null 2>&1 || true
     return 0
@@ -130,7 +128,7 @@ update_service() {
   rm -f "$override"
 
   remember "$service $new_image" failed
-  notify "$WEBHOOK_FAIL" "🔴 Update failed: $service" "$RED" \
+  notify alerts "🔴 Update failed: $service" failure \
     "Tried" "$new_image" "Reason" "$reason" "Result" "$rollback to $old_image" \
     "Logs" "docker logs --tail 50 $container"
   return 1
@@ -176,7 +174,7 @@ main() {
       elif ! seen "$service $desired" pending; then
         echo "Manual update pending for $service: $running_image -> $desired"
         remember "$service $desired" pending
-        notify "$WEBHOOK_OK" "⚪ Manual update waiting: $service" "$GREY" \
+        notify updates "⚪ Manual update waiting: $service" info \
           "Running" "$running_image" "In git" "$desired" \
           "Apply" "make up STACK=$stack SERVICE=$service"
       fi

@@ -130,7 +130,7 @@ services:
       - FRIGATE_DVR_HOST=${FRIGATE_DVR_HOST:?set in compose/.env}
       - PYTHONPATH=/opt/batlab-common
       # Through Apprise (compose/apprise), to its "cameras" channel.
-      - CAMWATCH_NOTIFY_URL=http://apprise:8000/notify/batlab
+      - CAMWATCH_NOTIFY_URL=http://apprise:8000/notify/camwatch
     # Frigate's API (5000, no login) and Apprise; the DVR is reached from here
     # through the host, as Frigate reaches it.
     networks:

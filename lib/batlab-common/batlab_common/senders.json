@@ -1,0 +1,16 @@
+{
+  "_comment": "Who sends batlab's messages. Apprise (compose/apprise/render.py) gives each sender its own /notify/<key> address, where Discord shows `name` and `avatar`; notify.deliver uses the same for its direct Discord fallback. {host} is the machine's name. `link` makes the title a link.",
+  "batlab": {"name": "batlab"},
+  "musicguard": {"name": "musicguard"},
+  "songdrop": {"name": "songdrop"},
+  "camwatch": {"name": "camwatch"},
+  "diun": {"name": "diun", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/diun.png"},
+  "netalertx": {"name": "netalertx"},
+  "mediascan": {"name": "mediascan on {host}"},
+  "vpnguard": {"name": "vpn guard"},
+  "dubkeeper": {"name": "dub keeper", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/sonarr.png"},
+  "updater": {"name": "updater on {host}", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/renovate.png"},
+  "watchdog": {"name": "watchdog on {host}", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/debian-linux.png"},
+  "netdata": {"name": "netdata on {host}", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/netdata.png",
+              "link": "http://netdata.homelab.lan"}
+}

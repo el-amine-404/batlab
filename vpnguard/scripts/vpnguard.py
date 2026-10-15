@@ -15,21 +15,23 @@ Every run (a timer, every five minutes):
       ask qBittorrent to re-announce every torrent, so trackers stop handing
       out the old port for up to half an hour
 
-Each reconnect, and giving up for the hour, is posted to Discord.
+Each reconnect, and giving up for the hour, is posted to #download-issues
+(through Apprise, lib/batlab-common).
 """
 
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import json
 import os
 import subprocess
 import sys
 import time
-import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib/batlab-common"))
+from batlab_common import notify as apprise  # noqa: E402
 
 CONTROL = "http://127.0.0.1:8000"
 QBITTORRENT = "http://127.0.0.1:8080"
@@ -137,14 +139,12 @@ def decide(state: State, running: bool, port: int, now: float) -> Plan:
 
 
 def notify(webhook: str, title: str, text: str, ok: bool) -> None:
-    payload = {
-        "username": "vpn guard",
-        "embeds": [{"title": title, "description": text, "color": 3066993 if ok else 15158332,
-                    "timestamp": dt.datetime.now(dt.timezone.utc).isoformat()}],
-    }
-    request = urllib.request.Request(webhook, data=json.dumps(payload).encode(), method="POST",
-                                     headers={"Content-Type": "application/json", "User-Agent": "batlab-vpnguard"})
-    urllib.request.urlopen(request, timeout=15).close()
+    """Through Apprise as "vpn guard"; straight to the webhook when Apprise is down."""
+    try:
+        apprise.deliver("vpnguard", "download-issues", title, text, "success" if ok else "failure",
+                        fallback=webhook if webhook.startswith("http") else None)
+    except apprise.NotSent as error:
+        print(f"message not sent: {error}", file=sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -190,10 +190,9 @@ def main(argv: list[str] | None = None) -> int:
                     f"was reconnected ({len(state.reconnects)}/{MAX_RECONNECTS_PER_HOUR} this hour). "
                     + (f"New port {new_port}; qBittorrent was told to re-announce."
                        if new_port else f"Still no port after {PORT_WAIT_SECONDS} s; the next run tries again."))
-            if webhook.startswith("http"):
-                notify(webhook, "🔁 VPN reconnected for port forwarding", text, bool(new_port))
+            notify(webhook, "🔁 VPN reconnected for port forwarding", text, bool(new_port))
             print(text)
-        elif plan.give_up and webhook.startswith("http"):
+        elif plan.give_up:
             notify(webhook, "🛑 VPN port forwarding still down",
                    f"{MAX_RECONNECTS_PER_HOUR} reconnects in the last hour got no forwarded port, so the guard "
                    "is waiting for the hour to pass. Check Proton's status, or widen GLUETUN_SERVER_COUNTRIES.", False)

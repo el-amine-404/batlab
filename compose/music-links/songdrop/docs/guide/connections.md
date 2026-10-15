@@ -24,7 +24,7 @@ how its last message went.
 
 | Field | |
 | --- | --- |
-| Apprise address | Its `/notify/` address with the configuration key: `http://apprise:8000/notify/batlab` in batlab. |
+| Apprise address | Its `/notify/` address with the configuration key: `http://apprise:8000/notify/songdrop` in batlab (each sender has its own key, so the message shows who sent it). |
 | Channel | The tag of the destinations in Apprise's configuration, as `download-issues`. Several, separated by commas; empty sends to every destination. |
 
 The message has the event's subject as its title, its details as the text and

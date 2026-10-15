@@ -1,6 +1,6 @@
 name: netalertx
-# Watches the LAN with arp-scan every few minutes and posts to Discord when a
-# device it has never seen joins. Host networking is what lets arp-scan reach
+# Watches the LAN with arp-scan every few minutes and posts to #alerts (through
+# Apprise, compose/apprise) when a device it has never seen joins. Host networking is what lets arp-scan reach
 # the LAN; the web UI listens only on the home_server gateway, which is how
 # Caddy reaches it (like Netdata). Settings in APP_CONF_OVERRIDE are forced on
 # every start and cannot be changed in the UI; everything else can. The API
@@ -31,21 +31,22 @@ services:
       - LISTEN_ADDR=${HOME_SERVER_GATEWAY_IP}
       - PORT=${NETALERTX_PORT}
       - GRAPHQL_PORT=${NETALERTX_API_PORT}
-      # The defaults plus WEBHOOK, the publisher that posts to Discord.
-      - LOADED_PLUGINS=['ARPSCAN','AVAHISCAN','CSVBCKP','DBCLNP','DIGSCAN','INTRNT','MAINT','NEWDEV','NBTSCAN','NSLOOKUP','NTFPRCS','SETPWD','SYNC','VNDRPDT','WORKFLOWS','UI','WEBHOOK']
-      # A Discord webhook URL is posted to its Slack-compatible endpoint by the
-      # plugin itself. Notify on new devices; down alerts only fire for devices
-      # flagged "Alert Down" in the UI.
+      # The defaults plus APPRISE, the publisher that posts to Apprise.
+      - LOADED_PLUGINS=['ARPSCAN','AVAHISCAN','CSVBCKP','DBCLNP','DIGSCAN','INTRNT','MAINT','NEWDEV','NBTSCAN','NSLOOKUP','NTFPRCS','SETPWD','SYNC','VNDRPDT','WORKFLOWS','UI','APPRISE']
+      # Apprise on the loopback (host networking), as "netalertx", tag alerts.
+      # Notify on new devices; down alerts only fire for devices flagged
+      # "Alert Down" in the UI.
       - >-
         APP_CONF_OVERRIDE={
         "SCAN_SUBNETS": "['${NETALERTX_SUBNET:?set in hosts/<profile>/compose.env} --interface=${NETALERTX_INTERFACE:?set in hosts/<profile>/compose.env}']",
         "TIMEZONE": "${TZ}",
         "BACKEND_API_URL": "/server",
         "API_TOKEN": "${NETALERTX_API_TOKEN:?set in compose/.env}",
-        "WEBHOOK_RUN": "on_notification",
-        "WEBHOOK_URL": "${DISCORD_WEBHOOK_ALERTS:?set in compose/.env}",
-        "WEBHOOK_REQUEST_METHOD": "POST",
-        "WEBHOOK_PAYLOAD": "text",
+        "APPRISE_RUN": "on_notification",
+        "APPRISE_HOST": "http://${HOST_LOOPBACK_IP}:${APPRISE_HTTP_PORT:-8011}/notify/netalertx",
+        "APPRISE_TARGETTYPE": "tag",
+        "APPRISE_TAG": "alerts",
+        "APPRISE_PAYLOAD": "text",
         "NTFPRCS_INCLUDED_SECTIONS": "['new_devices','down_devices','down_reconnected']"
         }
     mem_limit: 1g

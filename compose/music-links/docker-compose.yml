@@ -77,7 +77,7 @@ services:
       # songs still missing after a download, and what later tries bring
       # back, through Apprise (compose/apprise) to the download-issues
       # channel, beside musicguard's findings.
-      - SONGDROP_APPRISE_URL=http://apprise:8000/notify/batlab
+      - SONGDROP_APPRISE_URL=http://apprise:8000/notify/songdrop
       - SONGDROP_APPRISE_TAG=download-issues
       - SONGDROP_PUBLIC_URL=http://songdrop.homelab.lan
       # First values; the Settings page can change these and more.

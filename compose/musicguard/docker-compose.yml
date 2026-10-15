@@ -43,7 +43,7 @@ services:
       # "download-issues" channel, "Ready to play" (after the scan that
       # indexed new music) to "downloads". Lidarr's own import message is
       # off: it came before the checks, when the music was not playable yet.
-      - MUSICGUARD_NOTIFY_URL=http://apprise:8000/notify/batlab
+      - MUSICGUARD_NOTIFY_URL=http://apprise:8000/notify/musicguard
       # The host's clamd (installed for mediascan). Files are held in the
       # inbox, not passed, while it is down.
       - CLAMD_SOCKET=/run/clamav/clamd.ctl

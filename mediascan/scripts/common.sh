@@ -63,15 +63,16 @@ read_exclude_list() {
 }
 
 # Notifications are best-effort: a scan that found something must not fail
-# because the webhook was unreachable.
+# because a message didn't go out. They go through Apprise as "mediascan on
+# <host>" (lib/batlab-common, senders.json) to the alerts channel, straight to
+# MEDIASCAN_DISCORD_WEBHOOK when Apprise is down, and to Pushover when neither
+# took it and Pushover is set.
 mediascan_notify() {
   local title="$1" body="$2"
 
-  if [[ -n "${MEDIASCAN_DISCORD_WEBHOOK:-}" ]]; then
-    local payload
-    payload="$(python3 -c 'import json,sys; print(json.dumps({"content": sys.argv[1] + "\n" + sys.argv[2][:1800]}))' "$title" "$body")"
-    curl -sS -m 15 -H "Content-Type: application/json" -d "$payload" \
-      "$MEDIASCAN_DISCORD_WEBHOOK" >/dev/null 2>&1 || true
+  if BATLAB_NOTIFY_FALLBACK="${MEDIASCAN_DISCORD_WEBHOOK:-}" python3 -I \
+    "$(dirname -- "${BASH_SOURCE[0]}")/../../lib/batlab-common/batlab_common/notify.py" \
+    mediascan alerts warning "$title" --body "$body" >/dev/null 2>&1; then
     return 0
   fi
 

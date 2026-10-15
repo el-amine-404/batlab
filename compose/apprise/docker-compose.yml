@@ -1,14 +1,17 @@
 name: ${APPRISE_PROJECT_NAME:-apprise}
 # Notifications for every batlab service (docs/services.md): a service sends a
-# message once, to http://apprise:8000/notify/batlab with a tag naming the
+# message once, to http://apprise:8000/notify/<sender> with a tag naming the
 # channel, and Apprise (https://github.com/caronc/apprise-api) delivers it to
 # that channel's destinations: Discord here, or Telegram, ntfy, e-mail and
-# 100 more for anyone else.
+# 100 more for anyone else. The senders, and the name and avatar each shows on
+# Discord, are in lib/batlab-common/batlab_common/senders.json.
 #
 # The channels and their URLs come from NOTIFY_<CHANNEL> in compose/.env
 # (render.py); here they default to the Discord webhooks of the same name.
-# Its API is reachable only on home_server, the configuration can't be read
-# or changed through it, and it sends only to the configured URLs.
+# Its API is reachable on home_server and, for the host's scripts and the
+# host-network containers (Netdata, NetAlertX), on the loopback at
+# APPRISE_HTTP_PORT. The configuration can't be read or changed through it,
+# and it sends only to the configured URLs. It has no page of its own.
 services:
   apprise:
     image: ${IMAGE_APPRISE}:${TAG_APPRISE}
@@ -27,6 +30,8 @@ services:
       # A few messages an hour: one worker (the default, one per core, needs
       # far more memory).
       - APPRISE_WORKER_COUNT=1
+      # {host} in a sender's name (senders.json).
+      - BATLAB_HOST=${HOST_PROFILE:-}
       - NOTIFY_DOWNLOADS=${NOTIFY_DOWNLOADS:-${DISCORD_WEBHOOK_DOWNLOADS:-}}
       - NOTIFY_DOWNLOAD_ISSUES=${NOTIFY_DOWNLOAD_ISSUES:-${DISCORD_WEBHOOK_DOWNLOAD_ISSUES:-}}
       - NOTIFY_ALERTS=${NOTIFY_ALERTS:-${DISCORD_WEBHOOK_ALERTS:-}}
@@ -35,6 +40,10 @@ services:
       - NOTIFY_CAMERAS=${NOTIFY_CAMERAS:-${DISCORD_WEBHOOK_CAMERAS:-}}
     volumes:
       - ./render.py:/render.py:ro
+      # Relative to this file, not CONFIGS_ROOT (a symlink on lab2).
+      - ../../lib/batlab-common/batlab_common/senders.json:/senders.json:ro
+    ports:
+      - ${HOST_LOOPBACK_IP:-127.0.0.1}:${APPRISE_HTTP_PORT:-8011}:8000
     tmpfs:
       - /config:mode=0700,uid=${PUID},gid=${PGID}
       - /attach:mode=0700,uid=${PUID},gid=${PGID}

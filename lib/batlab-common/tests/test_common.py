@@ -117,6 +117,32 @@ class Notify(unittest.TestCase):
         with self.assertRaisesRegex(notify.NotSent, "Couldn't reach Apprise"):
             notify.send("http://127.0.0.1:9/notify/batlab", "t", "b", timeout=2)
 
+    def test_a_sender_has_its_own_address(self):
+        base = self.endpoint.rsplit("/", 1)[0]
+        self.assertEqual(notify.deliver("updater", "updates", "Updated x", "b", "success", base=base), "apprise")
+        self.assertEqual(Apprise.received[0][0], "/notify/updater")
+        self.assertEqual(notify.sender("watchdog", host="lab2")["name"], "watchdog on lab2")
+        self.assertEqual(notify.sender("someone")["name"], "someone")
+
+    def test_apprise_down_goes_straight_to_discord(self):
+        hook = self.endpoint.replace("/notify/batlab", "/api/webhooks/1/x")
+        how = notify.deliver("netdata", "alerts", "Disk full", notify.fields_text([("Value", "98%")]), "failure",
+                             fallback=hook, base="http://127.0.0.1:9/notify", timeout=2)
+        self.assertEqual(how, "discord")
+        path, posted = Apprise.received[0]
+        self.assertEqual(path, "/api/webhooks/1/x")
+        self.assertTrue(posted["username"].startswith("netdata on "))
+        card = posted["embeds"][0]
+        self.assertEqual((card["title"], card["description"], card["color"], card["url"]),
+                         ("Disk full", "**Value**\n98%", 15158332, "http://netdata.homelab.lan"))
+
+    def test_no_fallback_when_apprise_answered(self):
+        Apprise.status = 424
+        base = self.endpoint.rsplit("/", 1)[0]
+        with self.assertRaisesRegex(notify.NotSent, "every destination"):
+            notify.deliver("updater", "updates", "t", "b", fallback=base + "/api/webhooks/1/x", base=base)
+        self.assertEqual(len(Apprise.received), 1)
+
 
 class Spacing(unittest.TestCase):
     def test_requests_to_one_host_are_spaced(self):

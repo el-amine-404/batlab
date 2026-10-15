@@ -47,7 +47,9 @@ migrations out of both. Majors never automerge regardless of the list.
 Renovate needs its GitHub app installed on the repository in interactive mode,
 with "Allow auto-merge" enabled under the repository's pull request settings.
 
-The updater runs as `potato`, reads its Discord webhooks from `compose/.env`, and
+The updater runs as `potato`, posts through Apprise (`compose/apprise`, the
+updates and alerts channels) and straight to the Discord webhooks in
+`compose/.env` while Apprise is down (it restarts Apprise too), and
 keeps state in `~/.local/state/batlab-updater`. Only the units need root:
 
 ```bash

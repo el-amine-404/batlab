@@ -32,12 +32,29 @@ metrics:
   path: /metrics
 
 notif:
-  discord:
-    renderEmbeds: true
-    renderFields: true
+  # Through Apprise (compose/apprise) as "diun", to the updates channel. The
+  # body carries what Diun's own Discord card had as fields.
+  apprise:
+    endpoint: http://apprise:8000
+    token: diun
+    tags:
+      - updates
     timeout: 10s
+    templateTitle: '{{ .Entry.Image }} {{ if (eq .Entry.Status "new") }}is available{{ else }}has been updated{{ end }}'
     templateBody: |
-      Docker tag {{ .Entry.Image }} which you subscribed to through {{ .Entry.Provider }} provider has been released.
+      Docker tag {{ if .Entry.Image.HubLink }}[**{{ .Entry.Image }}**]({{ .Entry.Image.HubLink }}){{ else }}**{{ .Entry.Image }}**{{ end }} which you subscribed to through {{ .Entry.Provider }} provider has been released.
+
+      **Host**
+      {{ .Meta.Hostname }}
+
+      **Created**
+      {{ if .Entry.Manifest.Created }}{{ .Entry.Manifest.Created.Format "Jan 02, 2006 15:04 UTC" }}{{ else }}-{{ end }}
+
+      **Platform**
+      {{ .Entry.Manifest.Platform }}
+
+      **Digest**
+      `{{ .Entry.Manifest.Digest }}`
 
 providers:
   docker:

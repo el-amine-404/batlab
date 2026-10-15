@@ -13,3 +13,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["batlab_common"]
+
+[tool.setuptools.package-data]
+batlab_common = ["senders.json"]

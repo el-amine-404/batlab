@@ -20,31 +20,20 @@ load_watchdog_config() {
 }
 
 # Notifications are best-effort: a guard that stopped containers must not fail
-# because Discord was unreachable.
-#   watchdog_notify TITLE COLOR [FIELD_NAME FIELD_VALUE]...
+# because a message didn't go out. They go through Apprise as "watchdog on
+# <host>" (lib/batlab-common, senders.json) to the alerts channel, and straight
+# to WATCHDOG_DISCORD_WEBHOOK when Apprise is down, which is often exactly when
+# the watchdog has something to say.
+#   watchdog_notify TITLE KIND [FIELD_NAME FIELD_VALUE]...   (KIND: info, success, warning, failure)
 watchdog_notify() {
-  local title="$1" color="$2"
+  local title="$1" kind="$2" fields=()
   shift 2
-
-  [[ -n "${WATCHDOG_DISCORD_WEBHOOK:-}" ]] || return 0
-
-  local payload
-  payload="$(python3 -c '
-import datetime, json, socket, sys
-title, color, pairs = sys.argv[1], int(sys.argv[2]), sys.argv[3:]
-host = socket.gethostname()
-fields = [{"name": "Host", "value": host, "inline": True}]
-fields += [{"name": n, "value": v[:1000] or "-", "inline": False} for n, v in zip(pairs[::2], pairs[1::2])]
-print(json.dumps({
-    "username": "watchdog on " + host,
-    "avatar_url": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/debian-linux.png",
-    "embeds": [{
-        "title": title,
-        "color": color,
-        "fields": fields,
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    }],
-}))' "$title" "$color" "$@")"
-  curl -sS -m 15 -H "Content-Type: application/json" -d "$payload" \
-    "$WATCHDOG_DISCORD_WEBHOOK" >/dev/null 2>&1 || true
+  while (($#)); do
+    fields+=(--field "$1" "${2-}")
+    shift
+    (($#)) && shift
+  done
+  BATLAB_NOTIFY_FALLBACK="${WATCHDOG_DISCORD_WEBHOOK:-}" python3 -I \
+    "$(dirname -- "${BASH_SOURCE[0]}")/../../lib/batlab-common/batlab_common/notify.py" \
+    watchdog alerts "$kind" "$title" "${fields[@]}" >/dev/null 2>&1 || true
 }

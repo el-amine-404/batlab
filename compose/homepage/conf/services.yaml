@@ -295,6 +295,12 @@
         description: Real-time Log Viewer
         siteMonitor: http://dozzle:8080
         statusStyle: "dot"
+    - Apprise:
+        icon: apprise
+        # No page: an API only (compose/apprise), so the dot is its health.
+        description: Sends every message (Discord channels)
+        siteMonitor: http://apprise:8000/status
+        statusStyle: "dot"
 
 - Utilities:
     - Frigate:

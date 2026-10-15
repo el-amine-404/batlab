@@ -13,8 +13,6 @@ load_watchdog_config
 readonly STATE_DIR="/var/lib/batlab-watchdog"
 readonly FAILING_FILE="$STATE_DIR/heartbeat-failing"
 readonly DISK_FAILS_FILE="$STATE_DIR/data-disk-failures"
-readonly RED=15158332
-readonly GREEN=3066993
 
 failures=()
 
@@ -91,9 +89,9 @@ install -d -m 750 "$STATE_DIR"
 # a failure reaches the channel even if healthchecks.io is not set to notify.
 if ((${#failures[@]})) && [[ ! -e "$FAILING_FILE" ]]; then
   printf '%s\n' "${failures[@]}" >"$FAILING_FILE"
-  watchdog_notify "🔴 Self-test failing" "$RED" "Failed" "$(printf '%s\n' "${failures[@]}")"
+  watchdog_notify "🔴 Self-test failing" failure "Failed" "$(printf '%s\n' "${failures[@]}")"
 elif ((${#failures[@]} == 0)) && [[ -e "$FAILING_FILE" ]]; then
-  watchdog_notify "🟢 Self-test passing again" "$GREEN" "Was failing" "$(<"$FAILING_FILE")"
+  watchdog_notify "🟢 Self-test passing again" success "Was failing" "$(<"$FAILING_FILE")"
   rm -f "$FAILING_FILE"
 fi
 

@@ -13,6 +13,9 @@ services:
     environment:
       - TZ=${TZ}
       - NETDATA_LISTENER_PORT=${NETDATA_PORT}
+      # Alerts go to Apprise (compose/apprise) on the loopback; the webhook is
+      # for when Apprise is down (alerts/health_alarm_notify.conf).
+      - NETDATA_APPRISE_URL=http://${HOST_LOOPBACK_IP}:${APPRISE_HTTP_PORT:-8011}/notify/netdata
       - DISCORD_WEBHOOK_ALERTS=${DISCORD_WEBHOOK_ALERTS}
     volumes:
       - ${VOLUMES_ROOT}/netdata/conf:/etc/netdata

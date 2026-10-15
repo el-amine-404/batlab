@@ -2,23 +2,49 @@
 batlab's services send a message once, with a tag naming the channel
 ("downloads", "download-issues"), and Apprise delivers it to whatever the
 user set up for that tag: Discord, Telegram, ntfy, e-mail, and 100 more.
+
+Each sender has its own address, /notify/<sender> (senders.json), so Discord
+shows who sent it. Scripts on the host send with deliver(), or from a shell:
+
+    python3 -I lib/batlab-common/batlab_common/notify.py updater updates success \\
+        "Updated jellyfin" --field Version "10.11.0"
+
+and with BATLAB_NOTIFY_FALLBACK set to a Discord webhook, a message still goes
+out when Apprise is down: an alert must not depend on the thing that broke.
+Standard library only, and no import from the package, so that a shell can
+run this file on its own.
 """
 
+import argparse
+import datetime
 import json
+import os
+import socket
+import sys
 import urllib.error
 import urllib.request
 
 KINDS = ("info", "success", "warning", "failure")
 MAX_BODY = 3800  # Discord's limit for one message's text, less a margin
+# Apprise from the host (compose/apprise publishes it on the loopback).
+HOST_BASE = "http://127.0.0.1:8011/notify"
+SENDERS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "senders.json")
+# The colours batlab's Discord cards had before Apprise, for the fallback.
+COLOURS = {"info": 9807270, "success": 3066993, "warning": 15105570, "failure": 15158332}
 
 
 class NotSent(RuntimeError):
-    """The message did not go out; the text says why, for a log or a person."""
+    """The message did not go out; the text says why, for a log or a person.
+    reached is False when Apprise itself could not be reached."""
+
+    def __init__(self, message, reached=True):
+        super().__init__(message)
+        self.reached = reached
 
 
 def send(endpoint, title, body, tag=None, kind="info", timeout=15):
     """Send one message. endpoint: Apprise's /notify/<key> address, as
-    http://apprise:8000/notify/batlab. body is Markdown."""
+    http://apprise:8000/notify/musicguard. body is Markdown."""
     if kind not in KINDS:
         raise ValueError(f"kind must be one of {KINDS}")
     payload = {"title": title[:250], "body": body[:MAX_BODY], "type": kind, "format": "markdown"}
@@ -44,9 +70,84 @@ def send(endpoint, title, body, tag=None, kind="info", timeout=15):
             raise NotSent(f"Apprise has no destination for the tag {tag!r}." if tag else "Apprise has no destination.")
         if error.code == 424:
             raise NotSent(f"Apprise couldn't deliver it to every destination{f': {detail}' if detail else ''}.")
-        raise NotSent(f"Apprise answered {error.code}{f': {detail}' if detail else ''}.") from error
+        raise NotSent(f"Apprise answered {error.code}{f': {detail}' if detail else ''}.",
+                      reached=error.code < 500) from error
     except (urllib.error.URLError, OSError) as error:
         reason = getattr(error, "reason", error)
-        raise NotSent(f"Couldn't reach Apprise at {endpoint}: {reason}.") from error
+        raise NotSent(f"Couldn't reach Apprise at {endpoint}: {reason}.", reached=False) from error
     if status == 204:
         raise NotSent(f"Apprise has no destination for the tag {tag!r}." if tag else "Apprise has no destination.")
+
+
+def sender(key, host=None):
+    """{"name", "avatar", "link"} of a sender in senders.json, {host} filled
+    in; a sender not listed is named by its key."""
+    with open(SENDERS, encoding="utf-8") as file:
+        found = dict(json.load(file).get(key) or {"name": key})
+    found["name"] = found["name"].replace("{host}", host or socket.gethostname())
+    return found
+
+
+def fields_text(fields):
+    """Markdown for (name, value) pairs: the name in bold over its value."""
+    return "\n\n".join(f"**{name}**\n{(value or '-')[:1000]}" for name, value in fields)
+
+
+def discord(webhook, key, title, body, kind="info", timeout=15):
+    """Post a card straight to a Discord webhook, as sender key would through
+    Apprise. NotSent when Discord does not take it."""
+    who = sender(key)
+    card = {"title": title[:250], "description": body[:MAX_BODY], "color": COLOURS[kind],
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()}
+    if who.get("link"):
+        card["url"] = who["link"]
+    payload = {"username": who["name"][:80], "embeds": [card], "allowed_mentions": {"parse": []}}
+    if who.get("avatar"):
+        payload["avatar_url"] = who["avatar"]
+    request = urllib.request.Request(webhook, data=json.dumps(payload).encode(), method="POST",
+                                     headers={"Content-Type": "application/json", "User-Agent": "batlab"})
+    try:
+        urllib.request.urlopen(request, timeout=timeout).close()
+    except (urllib.error.URLError, OSError) as error:
+        raise NotSent(f"Discord didn't take it either: {getattr(error, 'reason', error)}.") from error
+
+
+def deliver(key, tag, title, body, kind="info", fallback=None, base=None, timeout=15):
+    """Send as sender key through Apprise at base (HOST_BASE, or
+    BATLAB_NOTIFY_BASE); when Apprise can't be reached and fallback is a
+    Discord webhook, straight to it. Returns "apprise" or "discord"; NotSent
+    when neither took it."""
+    base = (base or os.environ.get("BATLAB_NOTIFY_BASE") or HOST_BASE).rstrip("/")
+    try:
+        send(f"{base}/{key}", title, body, tag=tag, kind=kind, timeout=timeout)
+        return "apprise"
+    except NotSent as error:
+        if error.reached or not fallback:
+            raise
+        discord(fallback, key, title, body, kind, timeout)
+        return "discord"
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Send one message through Apprise as one of batlab's senders.")
+    parser.add_argument("sender", help="a key of senders.json: updater, watchdog…")
+    parser.add_argument("tag", help="the channel: alerts, updates, download-issues…")
+    parser.add_argument("kind", choices=KINDS)
+    parser.add_argument("title")
+    parser.add_argument("--body", default="", help="Markdown, before the fields")
+    parser.add_argument("--field", nargs=2, action="append", default=[], metavar=("NAME", "VALUE"))
+    args = parser.parse_args(argv)
+    body = "\n\n".join(part for part in (args.body, fields_text(args.field)) if part)
+    try:
+        how = deliver(args.sender, args.tag, args.title, body or args.title, args.kind,
+                      fallback=os.environ.get("BATLAB_NOTIFY_FALLBACK", "").strip() or None)
+    except NotSent as error:
+        print(f"notify: {error}", file=sys.stderr)
+        return 1
+    if how == "discord":
+        print("notify: Apprise is unreachable; sent straight to Discord", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

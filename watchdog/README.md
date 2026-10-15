@@ -34,6 +34,11 @@ answering, and nothing told anyone.
 Netdata's Discord alerts, including the blocked-process alert that would have
 caught the outage, are configured in `compose/netdata/alerts/`.
 
+Every card goes through Apprise (`compose/apprise`) to the alerts channel, as
+"watchdog on <host>", and straight to `WATCHDOG_DISCORD_WEBHOOK` when Apprise
+can't be reached: with the data disk gone or Docker down, that's the usual
+case (`lib/batlab-common/batlab_common/notify.py`).
+
 A disk that disappears from the bus, the 2026-09 failure, raises no SMART
 warning at all: smartd can only ask disks it can still talk to. The data guard
 and the heartbeat cover that case; SMART covers the disk that is still answering
