@@ -2,6 +2,7 @@
 # adguardhome-sync runs on lab1, which holds the AdGuard settings.
 adguardhome
 ai
+apprise
 arr
 aurral
 caddy

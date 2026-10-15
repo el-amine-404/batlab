@@ -12,6 +12,10 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+# batlab_common: in the image on PYTHONPATH, in the repository in lib/.
+sys.path.insert(1, str(Path(__file__).resolve().parents[5] / "lib" / "batlab-common"))
+
+from batlab_common import fingerprint, notify, previews  # noqa: E402
 
 from app import connections, cookies, detect, events, folders, messages, options, outbound, preferences, problems  # noqa: E402
 from app.config import Settings  # noqa: E402
@@ -46,17 +50,19 @@ class VerifyTest(unittest.TestCase):
         import subprocess
         subprocess.run(["ffmpeg", "-v", "error", "-y", "-nostdin", "-ss", "8", "-t", "30", "-i", self.song,
                         "-b:a", "96k", preview], check=True)
-        self.assertGreater(verify.similarity(verify.fingerprint(preview), verify.fingerprint(self.song)), 0.85)
+        self.assertGreater(fingerprint.similarity(fingerprint.fingerprint(preview), fingerprint.fingerprint(self.song)),
+                           0.85)
 
     def test_other_audio_scores_low(self):
         other = os.path.join(self.dir.name, "other.mp3")
         _tone(other, "-af", "aeval=sin(2*PI*330*t)*0.5|sin(2*PI*330*t)*0.5")
-        self.assertLess(verify.similarity(verify.fingerprint(other), verify.fingerprint(self.song)), verify.OTHER)
+        self.assertLess(fingerprint.similarity(fingerprint.fingerprint(other), fingerprint.fingerprint(self.song)),
+                        verify.OTHER)
 
     def test_no_preview_is_no_verdict(self):
-        with mock.patch.object(verify, "preview_url", return_value=None):
+        with mock.patch.object(previews, "spotify", return_value=None):
             self.assertIsNone(verify.score(self.song, "4MjhDzeuvIU3f4E8SqGH4q"))
-        with mock.patch.object(verify, "preview_url", side_effect=OSError("offline")):
+        with mock.patch.object(previews, "spotify", side_effect=OSError("offline")):
             self.assertIsNone(verify.score(self.song, "4MjhDzeuvIU3f4E8SqGH4q"))
 
 
@@ -604,7 +610,7 @@ class ConnectionsTest(unittest.TestCase):
 
     def test_only_enabled_connections_that_want_the_event_get_it(self):
         self.store.create({"name": "A", "type": "webhook", "events": ["song.gave_up"],
-                           "config": {"url": "http://notifier:8900/api/v1/events"}})
+                           "config": {"url": "http://my-app:8080/songdrop-events"}})
         self.store.create({"name": "B", "type": "webhook", "enabled": False, "events": ["job.finished"],
                            "config": {"url": "http://off.lan/hook"}})
         self.store.emit(events.Event("job.finished", "x"))
@@ -613,7 +619,7 @@ class ConnectionsTest(unittest.TestCase):
         time.sleep(0.1)
         self.assertEqual(len(self.sent), 1)
         self.assertEqual((url, body["source"], body["event"], body["data"]),
-                         ("http://notifier:8900/api/v1/events", "songdrop", "song.gave_up", {"job": {"id": "1"}}))
+                         ("http://my-app:8080/songdrop-events", "songdrop", "song.gave_up", {"job": {"id": "1"}}))
 
     def test_bad_connections_refused_with_a_reason(self):
         for bad, words in (({"name": "x", "type": "discord", "config": {"webhook_url": "https://evil.example/h"}},
@@ -637,12 +643,36 @@ class ConnectionsTest(unittest.TestCase):
             result = self.store.test({"name": "Music", "type": "discord", "config": {}}, made["id"])
         self.assertEqual(result, {"ok": False, "message": "discord.com answered 404."})
 
-    def test_the_environment_webhook_becomes_the_first_connection(self):
-        store = connections.Connections(self.state / "fresh", connections.TYPES, seed_discord=HOOK)
+    def test_the_environment_names_the_first_connection(self):
+        seed = connections.Seed("discord", "Discord", {"webhook_url": HOOK})
+        store = connections.Connections(self.state / "fresh", connections.TYPES, seed=seed)
         [made] = store.list()
         self.assertEqual((made["type"], made["events"]), ("discord", list(events.DEFAULTS)))
-        self.assertEqual(connections.Connections(self.state / "fresh", connections.TYPES, seed_discord=None).list(),
+        self.assertEqual(connections.Connections(self.state / "fresh", connections.TYPES, seed=None).list(),
                          [made], "kept, not made again")
+        bad = connections.Seed("apprise", "Apprise", {"url": "http://apprise:8000/"})
+        self.assertEqual(connections.Connections(self.state / "other", connections.TYPES, seed=bad).list(), [])
+
+    def test_apprise_gets_the_event_with_its_tag_and_kind(self):
+        sent = []
+        made = self.store.create({"name": "Apprise", "type": "apprise", "events": ["song.gave_up"],
+                                  "config": {"url": "http://apprise:8000/notify/batlab", "tag": "download-issues"}})
+        self.assertEqual(made["summary"], "apprise:8000/notify/batlab · download-issues")
+        with mock.patch.object(notify, "send", side_effect=lambda *a, **k: sent.append((a, k))):
+            self.store.emit(events.Event("song.gave_up", "songdrop · gave up on PIRATE", ("3 tries",),
+                                         url="http://songdrop.lan/activity/missing"))
+            deadline = time.monotonic() + 5
+            while not sent and time.monotonic() < deadline:
+                time.sleep(0.02)
+        [(args, kwargs)] = sent
+        self.assertEqual(args, ("http://apprise:8000/notify/batlab", "songdrop · gave up on PIRATE",
+                                "3 tries\n[Open in songdrop](http://songdrop.lan/activity/missing)"))
+        self.assertEqual(kwargs, {"tag": "download-issues", "kind": "failure"})
+        with mock.patch.object(notify, "send", side_effect=notify.NotSent("Apprise has no destination for the tag 'x'.")):
+            result = self.store.test({"name": "Apprise", "type": "apprise", "config": made["config"]})
+        self.assertEqual(result, {"ok": False, "message": "Apprise has no destination for the tag 'x'."})
+        with self.assertRaisesRegex(connections.Invalid, "ends in /notify/"):
+            self.store.create({"name": "x", "type": "apprise", "config": {"url": "http://apprise:8000/"}})
 
 
 class FoldersTest(unittest.TestCase):

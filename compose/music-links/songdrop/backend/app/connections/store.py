@@ -8,6 +8,7 @@ import os
 import threading
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -21,6 +22,15 @@ log = logging.getLogger("songdrop.connections")
 FILE = "connections.json"
 MAX_CONNECTIONS = 20
 TEST_EVENT = Event("test", "songdrop · test message", ("If you can read this, this connection works.",))
+
+
+@dataclass(frozen=True)
+class Seed:
+    """The connection made on the first start, from the environment."""
+
+    type: str
+    name: str
+    config: dict
 
 
 class ConnectionIn(BaseModel):
@@ -51,17 +61,17 @@ class ConnectionIn(BaseModel):
 
 
 class Connections:
-    def __init__(self, state_dir: Path, types: dict[str, ConnectionType], seed_discord: str | None = None):
+    def __init__(self, state_dir: Path, types: dict[str, ConnectionType], seed: "Seed | None" = None):
         self._path = state_dir / FILE
         self._types = types
         self._lock = threading.Lock()
         # The last send of each connection, since songdrop started.
         self._last: dict[str, dict] = {}
-        self._items: list[dict] = self._read(seed_discord)
+        self._items: list[dict] = self._read(seed)
 
     # ---- reading and writing -------------------------------------------------
 
-    def _read(self, seed_discord: str | None) -> list[dict]:
+    def _read(self, seed: "Seed | None") -> list[dict]:
         try:
             return json.loads(self._path.read_text(encoding="utf-8"))["connections"]
         except FileNotFoundError:
@@ -69,15 +79,15 @@ class Connections:
         except (OSError, ValueError, KeyError):
             log.exception("ignoring unreadable %s", self._path)
             return []
-        # First start: the webhook from the environment (SONGDROP_DISCORD_WEBHOOK).
-        if not seed_discord:
+        # First start: the connection the environment names (context.py).
+        if not seed:
             return []
         try:
-            config = self._types["discord"].check({"webhook_url": seed_discord})
-        except Invalid:
-            log.warning("SONGDROP_DISCORD_WEBHOOK isn't a Discord webhook; no connection made from it")
+            config = self._types[seed.type].check(seed.config)
+        except Invalid as exc:
+            log.warning("no %s connection made from the environment: %s", seed.type, exc)
             return []
-        items = [{"id": uuid.uuid4().hex[:12], "name": "Discord", "type": "discord", "enabled": True,
+        items = [{"id": uuid.uuid4().hex[:12], "name": seed.name, "type": seed.type, "enabled": True,
                   "events": list(events.DEFAULTS), "config": config}]
         self._write(items)
         return items

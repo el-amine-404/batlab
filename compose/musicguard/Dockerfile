@@ -22,7 +22,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
 
 # ffmpeg probes, decodes and rebuilds every file; Debian's build is the one
 # the server's mediascan already trusts. fpcalc (Chromaprint) compares a file
-# with the real song when Shazam disagrees with its tags (app/reference.py).
+# with the real song when Shazam disagrees with its tags (app/reference.py),
+# four times faster than ffmpeg's own (batlab_common.fingerprint).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg libchromaprint-tools \
        libglib2.0-0t64 libsoup-3.0-0 libpipewire-0.3-0t64 libasound2t64 \
@@ -33,6 +34,11 @@ COPY --from=songrec /usr/local/cargo/bin/songrec /usr/local/bin/songrec
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --require-hashes --only-binary=:all: -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt
+
+# batlab's shared code (lib/batlab-common), handed in by compose as the build
+# context "common".
+COPY --from=common batlab_common /opt/batlab-common/batlab_common
+ENV PYTHONPATH=/opt/batlab-common
 
 COPY app/ /app/
 COPY tests/ /tests/

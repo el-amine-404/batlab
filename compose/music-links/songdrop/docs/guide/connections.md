@@ -16,8 +16,21 @@ how its last message went.
 
 | Type | What it does |
 | --- | --- |
+| Apprise | Sends through [Apprise](https://github.com/caronc/apprise-api) to the channel its tag names. Apprise delivers to Discord, Telegram, ntfy, e-mail and about 100 more, as its configuration says. The way batlab's own services send. |
 | Discord | Posts a message to a channel, through a webhook (the channel's settings, Integrations, Webhooks). |
 | Webhook | Sends each event as JSON to an address of your choice: any app can listen. |
+
+### Apprise
+
+| Field | |
+| --- | --- |
+| Apprise address | Its `/notify/` address with the configuration key: `http://apprise:8000/notify/batlab` in batlab. |
+| Channel | The tag of the destinations in Apprise's configuration, as `download-issues`. Several, separated by commas; empty sends to every destination. |
+
+The message has the event's subject as its title, its details as the text and
+a link to the page. Its type says how it reads: `warning` for missing songs,
+`failure` when songdrop gives up, `success` for a song back or a finished
+download. A **Test** that names a tag Apprise doesn't know says so.
 
 ## Events
 
@@ -30,8 +43,8 @@ how its last message went.
 
 ## What a webhook receives
 
-A `POST` with JSON, the format the planned batlab notifier takes
-(`docs/services.md` in the repository):
+A `POST` with JSON (batlab's event format, `docs/services.md` in the
+repository):
 
 ```json
 {
@@ -49,8 +62,10 @@ A `POST` with JSON, the format the planned batlab notifier takes
 `song.gave_up` add `data.song` (its name) and `data.tries`. Answer with any
 `2xx`; songdrop doesn't send a failed message again.
 
-## Before Connect
+## The first connection
 
-songdrop used to take one Discord webhook in Settings. On its first start with
-Connect, that webhook (or `SONGDROP_DISCORD_WEBHOOK`) becomes a connection named
-Discord with the events ticked by default. After that, only Connect counts.
+When songdrop starts with no connection saved, it makes one from its
+environment, with the events ticked by default: an Apprise connection when
+`SONGDROP_APPRISE_URL` is set (`SONGDROP_APPRISE_TAG` its channel), else a
+Discord one from `SONGDROP_DISCORD_WEBHOOK` or the webhook older versions kept
+in Settings. After that, only Connect counts.

@@ -3,11 +3,11 @@
 Two files are one song when they share an ISRC or a MusicBrainz recording ID,
 or when their titles and an artist agree (identify.agrees) and their lengths
 are within 5 s. Within 30 s they are one song only if they sound alike
-(reference.SAME): a video's copy often carries an intro or an outro (on
+(batlab_common.fingerprint.SAME): a video's copy often carries an intro or an outro (on
 2026-10-14, a YouTube "Mghayer (Prod. By Ysos) #CAMÉLÉON" ran 220 s, Spotify's
 "Mghayer" 214 s), while a remix or a live take sounds different.
 
-A remix, a live take or any other version named in the title (identify.version)
+A remix, a live take or any other version named in the title (titles.version)
 is never the same song as the original. Such a pair, and a pair of one title
 that turned out to be two recordings, is kept and flagged (related) so a
 person can look: a remix filed as its original is the mistake to catch.
@@ -23,6 +23,7 @@ from the others.
 import re
 
 import identify
+from batlab_common import titles
 
 SAME = "same"
 SAME_LENGTH = 5      # seconds: one song
@@ -60,7 +61,7 @@ def compare(a, b, alike):
     if not identify.agrees(identify.Match(a.first("title"), a.first("artist")),
                            b.first("title"), b.first("artist")):
         return None
-    versions = identify.version(a.first("title")), identify.version(b.first("title"))
+    versions = titles.version(a.first("title")), titles.version(b.first("title"))
     if versions[0] != versions[1]:
         named = " and ".join(" ".join(v) or "original" for v in versions)
         return f"two versions of one song ({named})"
@@ -82,7 +83,7 @@ def groups(tracks, alike, related=None):
     gets (a, b, reason) for each pair that is close but not one song."""
     by_artist = {}
     for track in tracks:
-        for name in identify.names(track.first("artist")) or {""}:
+        for name in titles.names(track.first("artist")) or {""}:
             by_artist.setdefault(name, []).append(track)
     parent = {id(t): t for t in tracks}
 

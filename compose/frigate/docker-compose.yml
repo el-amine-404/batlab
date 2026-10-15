@@ -120,12 +120,16 @@ services:
     user: "10001:10001"
     volumes:
       - ${CONFIGS_ROOT}/frigate/camwatch/camwatch.py:/app/camwatch.py:ro
+      # batlab's shared code (lib/batlab-common): its Apprise client.
+      - ${CONFIGS_ROOT}/../lib/batlab-common/batlab_common:/opt/batlab-common/batlab_common:ro
     environment:
       - TZ=${TZ}
       - PYTHONDONTWRITEBYTECODE=1
       - FRIGATE_DVR_HOST=${FRIGATE_DVR_HOST:?set in compose/.env}
-      - CAMWATCH_WEBHOOK=${DISCORD_WEBHOOK_CAMERAS:?set in compose/.env}
-    # Frigate's API (5000, no login) and Discord; the DVR is reached from here
+      - PYTHONPATH=/opt/batlab-common
+      # Through Apprise (compose/apprise), to its "cameras" channel.
+      - CAMWATCH_NOTIFY_URL=http://apprise:8000/notify/batlab
+    # Frigate's API (5000, no login) and Apprise; the DVR is reached from here
     # through the host, as Frigate reaches it.
     networks:
       - home_server

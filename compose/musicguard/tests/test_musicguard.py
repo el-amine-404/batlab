@@ -21,6 +21,8 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
+# batlab_common: in the image on PYTHONPATH, in the repository in lib/.
+sys.path.insert(1, os.path.join(os.path.dirname(__file__), "..", "..", "..", "lib", "batlab-common"))
 
 import mutagen  # noqa: E402
 from mutagen.id3 import APIC, COMM, ID3, TIT2, TPE1, TXXX, WOAS, WXXX  # noqa: E402
@@ -30,6 +32,12 @@ import clamd  # noqa: E402
 import credits  # noqa: E402
 import dedup  # noqa: E402
 import guard  # noqa: E402
+import urllib.request  # noqa: E402
+import navidrome  # noqa: E402
+import musicbrainz  # noqa: E402
+import apple  # noqa: E402
+import settings  # noqa: E402
+from parts import announce  # noqa: E402
 import identify  # noqa: E402
 import layout  # noqa: E402
 import lyrics  # noqa: E402
@@ -140,17 +148,17 @@ class GuardTestCase(unittest.TestCase):
                                     "MUSICGUARD_STATE", "MUSICGUARD_LYRICS", "MUSICGUARD_SETTLE_SECONDS"):
                 del os.environ[key]
         # And no test talks to the network unless it says so.
-        self.offline = mock.patch.object(guard.urllib.request, "urlopen",
+        self.offline = mock.patch.object(urllib.request, "urlopen",
                                          side_effect=OSError("tests are offline"))
         self.offline.start()
-        self.musicbrainz = mock.patch.object(guard.musicbrainz, "artist_side", return_value=None)
+        self.musicbrainz = mock.patch.object(musicbrainz, "artist_side", return_value=None)
         self.musicbrainz.start()
         # Offline by default: no Shazam, no MusicBrainz credits.
-        self.shazam = mock.patch.object(guard.identify, "recognise", return_value=None)
+        self.shazam = mock.patch.object(identify, "recognise", return_value=None)
         self.shazam.start()
-        self.credit_lookup = mock.patch.object(guard.credit_fix.Credits, "wanted", return_value=None)
+        self.credit_lookup = mock.patch.object(credits.Credits, "wanted", return_value=None)
         self.credit_lookup.start()
-        self.reference = mock.patch.object(guard.reference, "compare", return_value=None)
+        self.reference = mock.patch.object(reference, "compare", return_value=None)
         self.reference.start()
         self.guard = guard.Guard(guard.Config())
 
@@ -357,8 +365,11 @@ class Libraries(GuardTestCase):
         os.makedirs(os.path.dirname(path))
         ffmpeg("-f", "lavfi", "-i", "sine=frequency=440:duration=8", "-c:a", "wmav2", "-f", "asf", path)
         with mock.patch.dict(media.FORMATS, {".wma": {"asf"}}):
-            with mock.patch.object(guard, "AUDIO_EXTENSIONS", guard.AUDIO_EXTENSIONS | {".wma"}):
+            settings.AUDIO_EXTENSIONS.add(".wma")  # one set, shared by every part
+            try:
                 self.guard.roots_pass()
+            finally:
+                settings.AUDIO_EXTENSIONS.discard(".wma")
         self.assertTrue(os.path.exists(path))
         self.assertEqual(self.quarantined_reasons(), [])
         self.assertEqual([e["reason"] for e in self.guard.events], ["UNSUPPORTED_CODEC"])
@@ -398,7 +409,7 @@ class Libraries(GuardTestCase):
         for path in (kept, orphan, fresh):
             with open(path, "w", encoding="utf-8") as handle:
                 handle.write("[00:01.00] la\n")
-        old = time.time() - 2 * guard.ORPHAN_SECONDS
+        old = time.time() - 2 * settings.ORPHAN_SECONDS
         for path in (kept, orphan):
             os.utime(path, (old, old))
         self.guard.roots_pass()
@@ -412,7 +423,7 @@ class Libraries(GuardTestCase):
         os.makedirs(folder, exist_ok=True)
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(text)
-        old = time.time() - 2 * guard.ORPHAN_SECONDS
+        old = time.time() - 2 * settings.ORPHAN_SECONDS
         os.utime(path, (old, old))
         return path
 
@@ -686,15 +697,6 @@ class DedupRules(unittest.TestCase):
         self.assertEqual(related[0][2], "two versions of one song (original and remix)")
         self.assertTrue(dedup.same_song(self.track(isrc="X1"), self.track("PIRATE (Remix)", isrc="X1"), never))
 
-    def test_versions(self):
-        self.assertEqual(identify.version("PIRATE"), ())
-        self.assertEqual(identify.version("PIRATE (Club Mix)"), ("remix",))
-        self.assertEqual(identify.version("PIRATE - Live at Bercy"), ("live",))
-        self.assertEqual(identify.version("PIRATE (feat. X) [Sped Up]"), ("sped up",))
-        for same in ("PIRATE (Original Mix)", "PIRATE (Radio Edit)", "PIRATE (Remastered 2011)",
-                     "Live Forever", "PIRATE (Official Video)"):
-            self.assertEqual(identify.version(same), (), same)
-
     def test_a_remix_is_not_replaced_by_the_original(self):
         lidarr = upgrade.Lidarr("http://lidarr", "key")
         tracks = [{"hasFile": True, "title": "One Dance", "foreignRecordingId": "rec-1", "trackFileId": 7}]
@@ -735,7 +737,7 @@ class Identification(GuardTestCase):
         path = os.path.join(self.inbox, "metube", "Georgie Fame - Stormy.mp3")
         tone(path)
         self.guard.config.identify = True
-        guard.identify.recognise.return_value = identify.Match(
+        identify.recognise.return_value = identify.Match(
             "PIRATE", "Stormy", album="OMEGA - EP", year="2025", isrc="FRIDO2417560")
         self.inbox_twice()
         self.assertEqual(self.all_files(self.extras), ["Stormy/OMEGA - EP (2025)/PIRATE.mp3"])
@@ -751,18 +753,18 @@ class Identification(GuardTestCase):
         id3.add(WOAS(url="https://open.spotify.com/track/4MjhDzeuvIU3f4E8SqGH4q"))
         id3.save()
         self.guard.config.identify = True
-        guard.identify.recognise.return_value = identify.Match("Pala Lagat Rahe Ho Lahnga", "Chhote Raja")
+        identify.recognise.return_value = identify.Match("Pala Lagat Rahe Ho Lahnga", "Chhote Raja")
 
     def test_a_catalogue_named_download_of_other_audio_is_quarantined(self):
         self.spotdl_la_paille()
-        guard.reference.compare.return_value = None  # no Apple preview to compare with
+        reference.compare.return_value = None  # no Apple preview to compare with
         self.inbox_twice()
         self.assertEqual(self.all_files(self.extras), [])
         self.assertEqual(self.quarantined_reasons(), ["WRONG_SONG"])
 
     def test_a_catalogue_named_download_like_the_real_song_keeps_its_name(self):
         self.spotdl_la_paille()
-        guard.reference.compare.return_value = 0.95
+        reference.compare.return_value = 0.95
         self.inbox_twice()
         self.assertEqual(self.all_files(self.extras), ["ElGrandeToto/La Paille/01 - La Paille.mp3"])
 
@@ -786,12 +788,12 @@ class Identification(GuardTestCase):
         id3.add(WOAS(url="https://open.spotify.com/track/3mEdyuPV0yvg8F5op87n25"))
         id3.save()
         self.guard.config.identify = True
-        guard.identify.recognise.return_value = identify.Match("Halla halla", "ElGrandeToto", apple_id="1")
-        apple = guard.apple.Release({"collectionName": "Caméléon", "trackName": "Halla halla",
+        identify.recognise.return_value = identify.Match("Halla halla", "ElGrandeToto", apple_id="1")
+        release = apple.Release({"collectionName": "Caméléon", "trackName": "Halla halla",
                                      "artistName": "ElGrandeToto", "trackNumber": 6, "trackCount": 17,
                                      "releaseDate": "2020-12-25T08:00:00Z", "primaryGenreName": "Rap"},
                                     {"artistName": "ElGrandeToto"})
-        with mock.patch.object(guard.apple, "release", return_value=apple):
+        with mock.patch.object(apple, "release", return_value=release):
             self.inbox_twice()
         self.assertEqual(self.all_files(self.extras), ["ElGrandeToto/Caméléon (2021)/06 - Halla halla.mp3"])
         filed = mutagen.File(os.path.join(self.extras, "ElGrandeToto", "Caméléon (2021)", "06 - Halla halla.mp3"),
@@ -805,7 +807,7 @@ class Identification(GuardTestCase):
         audio = mutagen.File(path, easy=True)
         audio["title"], audio["artist"] = "Stormy", "Georgie Fame"
         audio.save()
-        guard.identify.recognise.return_value = identify.Match("PIRATE", "Stormy", isrc="FRIDO2417560")
+        identify.recognise.return_value = identify.Match("PIRATE", "Stormy", isrc="FRIDO2417560")
         self.guard.roots_pass()
         self.assertEqual(self.quarantined_reasons(), ["WRONG_SONG"])
 
@@ -820,22 +822,22 @@ class Identification(GuardTestCase):
 
     def test_the_real_song_overrules_shazam(self):
         path = self.lidarr_4l()
-        guard.identify.recognise.return_value = identify.Match("Just TEN", "Thedjnino", isrc="QZ0000000001")
-        guard.reference.compare.return_value = 0.99
+        identify.recognise.return_value = identify.Match("Just TEN", "Thedjnino", isrc="QZ0000000001")
+        reference.compare.return_value = 0.99
         self.guard.roots_pass()
         self.assertTrue(os.path.exists(path))
         self.assertIn("SHAZAM_OVERRULED", [e["reason"] for e in self.guard.events])
 
     def test_a_file_unlike_the_real_song_is_wrong_whatever_shazam_is(self):
         self.lidarr_4l()
-        guard.identify.recognise.return_value = identify.Match("Just TEN", "Thedjnino")
-        guard.reference.compare.return_value = 0.55
+        identify.recognise.return_value = identify.Match("Just TEN", "Thedjnino")
+        reference.compare.return_value = 0.55
         self.guard.roots_pass()
         self.assertEqual(self.quarantined_reasons(), ["WRONG_SONG"])
 
     def test_a_weak_shazam_entry_alone_moves_nothing(self):
         path = self.lidarr_4l()
-        guard.identify.recognise.return_value = identify.Match("Just TEN", "Thedjnino")
+        identify.recognise.return_value = identify.Match("Just TEN", "Thedjnino")
         self.guard.roots_pass()
         self.assertTrue(os.path.exists(path))
         self.assertIn("SHAZAM_UNSURE", [e["reason"] for e in self.guard.events])
@@ -847,7 +849,7 @@ class Identification(GuardTestCase):
         audio = mutagen.File(path, easy=True)
         audio["title"], audio["artist"] = "Stormy", "Georgie Fame"
         audio.save()
-        guard.identify.recognise.return_value = identify.Match("PIRATE", "Stormy")
+        identify.recognise.return_value = identify.Match("PIRATE", "Stormy")
         rows = self.guard.audit([self.music])
         self.assertEqual([r["verdict"] for r in rows], ["WRONG"])
         self.guard.roots_pass()
@@ -860,7 +862,7 @@ class Identification(GuardTestCase):
         audio = mutagen.File(path, easy=True)
         audio["title"], audio["artist"] = "Captain - la relève", "Stormy"
         audio.save()
-        guard.identify.recognise.return_value = identify.Match("Hugo", "Stormy")
+        identify.recognise.return_value = identify.Match("Hugo", "Stormy")
         self.guard.roots_pass()
         self.assertTrue(os.path.exists(path))
         self.assertIn("WRONG_TITLE", [e["reason"] for e in self.guard.events])
@@ -875,7 +877,7 @@ class Identification(GuardTestCase):
         audio.save()
         link = os.path.join(self.tmp, "seed.flac")
         os.link(path, link)
-        guard.credit_fix.Credits.wanted.return_value = ("Manal & Stormy", ["Manal", "Stormy"], "Manal & Stormy")
+        credits.Credits.wanted.return_value = ("Manal & Stormy", ["Manal", "Stormy"], "Manal & Stormy")
         self.guard.roots_pass()
         done = mutagen.File(path)
         self.assertEqual((done["artist"], done["albumartist"], done["artists"]),
@@ -889,7 +891,7 @@ class LinkMetadata(GuardTestCase):
                  "artistName": "Stormy", "trackNumber": 5, "trackCount": 6, "discNumber": 1,
                  "discCount": 1, "releaseDate": "2025-01-09T12:00:00Z", "primaryGenreName": "Hip-Hop/Rap",
                  "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/x/cover.jpg/100x100bb.jpg"}
-        release = guard.apple.Release(track, {"artistName": "Stormy"})
+        release = apple.Release(track, {"artistName": "Stormy"})
         release.cover = lambda: None
         return release
 
@@ -900,10 +902,10 @@ class LinkMetadata(GuardTestCase):
         audio["title"], audio["artist"], audio["genre"] = "Stormy", "Georgie Fame", "Soul Jazz"
         audio.save()
         self.guard.config.identify = True
-        guard.identify.recognise.return_value = identify.Match("PIRATE", "Stormy", album="OMEGA - EP",
+        identify.recognise.return_value = identify.Match("PIRATE", "Stormy", album="OMEGA - EP",
                                                                year="2025", apple_id="1786653398",
                                                                genre="Hip-Hop/Rap")
-        with mock.patch.object(guard.apple, "release", return_value=self.apple_release()):
+        with mock.patch.object(apple, "release", return_value=self.apple_release()):
             self.inbox_twice()
         self.assertEqual(self.all_files(self.extras), ["Stormy/OMEGA (2025)/05 - PIRATE.mp3"])
         done = mutagen.File(os.path.join(self.extras, "Stormy/OMEGA (2025)/05 - PIRATE.mp3"), easy=True)
@@ -928,7 +930,7 @@ class NavidromeScans(GuardTestCase):
     def setUp(self):
         super().setUp()
         self.guard.config.navidrome_user = "musicguard"
-        self.scan = mock.patch.object(guard.navidrome, "start_scan")
+        self.scan = mock.patch.object(navidrome, "start_scan")
         self.scan.start()
 
     def tearDown(self):
@@ -942,16 +944,16 @@ class NavidromeScans(GuardTestCase):
         self.guard.config.settle = 3600  # just arrived: not checked yet
         self.guard.roots_pass()
         self.guard.scan_navidrome()
-        guard.navidrome.start_scan.assert_not_called()
+        navidrome.start_scan.assert_not_called()
 
         self.guard.config.settle = 0
         self.guard.roots_pass()
         self.guard.scan_navidrome()
-        guard.navidrome.start_scan.assert_called_once()
+        navidrome.start_scan.assert_called_once()
 
         self.guard.roots_pass()  # nothing new: no second scan
         self.guard.scan_navidrome()
-        guard.navidrome.start_scan.assert_called_once()
+        navidrome.start_scan.assert_called_once()
 
     def test_lyrics_written_by_another_tool_bring_a_scan(self):
         path = os.path.join(self.music, "A", "B (2020)", "01 - C.mp3")
@@ -959,37 +961,43 @@ class NavidromeScans(GuardTestCase):
         tone(path)
         self.guard.roots_pass()
         self.guard.scan_navidrome()
-        guard.navidrome.start_scan.reset_mock()
+        navidrome.start_scan.reset_mock()
         with open(path[:-4] + ".lrc", "w") as out:  # Stanzarr writes lyrics
             out.write("[00:01.00] la\n")
         self.guard.roots_pass()
         self.guard.scan_navidrome()
-        guard.navidrome.start_scan.assert_called_once()
+        navidrome.start_scan.assert_called_once()
         self.guard.roots_pass()  # nothing new: no scan
         self.guard.scan_navidrome()
-        guard.navidrome.start_scan.assert_called_once()
+        navidrome.start_scan.assert_called_once()
+
+    def sent_to_apprise(self):
+        """Patches urlopen; the list gets (address, payload) of each message."""
+        self.guard.config.notify_url = "http://apprise.invalid/notify/batlab"
+        sent = []
+        return sent, mock.patch.object(urllib.request, "urlopen", side_effect=lambda request, timeout: sent.append(
+            (request.full_url, json.loads(request.data))) or mock.MagicMock())
 
     def test_new_albums_are_announced_once_playable(self):
-        self.guard.config.ready_webhook = "http://discord.invalid/hook"
         path = os.path.join(self.music, "Billie Eilish", "HIT ME HARD AND SOFT (2024)", "01 - SKINNY.mp3")
         os.makedirs(os.path.dirname(path))
         tone(path)
-        sent = []
-        with mock.patch.object(guard.urllib.request, "urlopen",
-                               side_effect=lambda request, timeout: sent.append(json.loads(request.data)) or mock.MagicMock()):
+        sent, apprise = self.sent_to_apprise()
+        with apprise:
             self.guard.roots_pass()
             self.guard.scan_navidrome()
             self.guard.roots_pass()
             self.guard.scan_navidrome()
         self.assertEqual(len(sent), 1)
-        card = sent[0]["embeds"][0]
-        self.assertEqual(card["title"], "Billie Eilish – HIT ME HARD AND SOFT (2024)")
-        self.assertRegex(card["description"], r"^`01` \*\*SKINNY\*\* · 0:0\d · MP3 \d+ kb/s$")
-        self.assertEqual(card["footer"]["text"].split(" · ")[0], "1 new song")
-        self.assertTrue(card["footer"]["text"].endswith("from Lidarr"))
+        address, message = sent[0]
+        self.assertEqual(address, "http://apprise.invalid/notify/batlab")
+        self.assertEqual((message["tag"], message["type"], message["format"]), ("downloads", "success", "markdown"))
+        self.assertEqual(message["title"], "Ready to play: Billie Eilish – HIT ME HARD AND SOFT (2024)")
+        song, blank, footer = message["body"].split("\n")
+        self.assertRegex(song, r"^`01` \*\*SKINNY\*\* · 0:0\d · MP3 \d+ kb/s$")
+        self.assertRegex(footer, r"^\*1 new song · 0:0\d · from Lidarr\*$")
 
-    def test_each_album_is_a_card_with_its_songs_in_order(self):
-        self.guard.config.ready_webhook = "http://discord.invalid/hook"
+    def test_each_album_is_a_message_with_its_songs_in_order(self):
         album = os.path.join(self.extras, "Lomepal", "Amina (2019)")
         os.makedirs(album)
         for number in (16, 2):
@@ -999,23 +1007,34 @@ class NavidromeScans(GuardTestCase):
             audio["title"], audio["artist"], audio["album"] = f"Song {number}", "Lomepal", "Amina"
             audio["date"], audio["tracknumber"] = "2019", str(number)
             audio.save()
-        sent = []
-        with mock.patch.object(guard.urllib.request, "urlopen",
-                               side_effect=lambda request, timeout: sent.append(json.loads(request.data)) or mock.MagicMock()):
+        sent, apprise = self.sent_to_apprise()
+        with apprise:
             self.guard.roots_pass()
             self.guard.scan_navidrome()
-        card = sent[0]["embeds"][0]
-        self.assertEqual(card["title"], "Lomepal – Amina (2019)")
-        lines = card["description"].split("\n")
+        message = sent[0][1]
+        self.assertEqual(message["title"], "Ready to play: Lomepal – Amina (2019)")
+        lines = message["body"].split("\n")
         self.assertTrue(lines[0].startswith("`02` **Song 2** · "), lines)
         self.assertIn("FLAC 16-bit/", lines[1])
-        self.assertTrue(card["footer"]["text"].startswith("2 new songs · "))
-        self.assertTrue(card["footer"]["text"].endswith("from a link (music-extras)"))
+        self.assertRegex(lines[-1], r"^\*2 new songs · .* · from a link \(music-extras\)\*$")
+
+    def test_findings_go_to_the_issues_channel_by_kind(self):
+        self.guard.event("quarantined", "/inbox/a.mp3", "WRONG_SONG", "Shazam heard another song")
+        self.guard.event("flagged", "/x/PIRATE (Remix).mp3", "VERSION", "two versions of one song, both kept")
+        self.guard.event("filed", "/x/b.mp3")  # routine: not a finding
+        sent, apprise = self.sent_to_apprise()
+        with apprise:
+            self.guard.notify()
+        message = sent[0][1]
+        self.assertEqual((message["tag"], message["type"]), ("download-issues", "warning"))
+        self.assertEqual(message["title"], "musicguard: 2 files to look at")
+        self.assertEqual(message["body"], "**Quarantined**\n- `WRONG_SONG` a.mp3\n  Shazam heard another song\n"
+                                          "**Flagged**\n- `VERSION` PIRATE (Remix).mp3\n  two versions of one song, both kept")
 
     def test_song_titles_leave_the_track_number(self):
-        self.assertEqual(guard.song_title("16 - Trop beau.opus"), "Trop beau")
-        self.assertEqual(guard.song_title("1-01 - Trop beau.flac"), "Trop beau")
-        self.assertEqual(guard.song_title("Trop beau.mp3"), "Trop beau")
+        self.assertEqual(announce.song_title("16 - Trop beau.opus"), "Trop beau")
+        self.assertEqual(announce.song_title("1-01 - Trop beau.flac"), "Trop beau")
+        self.assertEqual(announce.song_title("Trop beau.mp3"), "Trop beau")
 
 
 class FakeLidarr:
@@ -1062,9 +1081,9 @@ class Upgrades(GuardTestCase):
         super().setUp()
         self.guard.config.upgrade = True
         self.lidarr = FakeLidarr()
-        self.client = mock.patch.object(guard.upgrade, "Lidarr", return_value=self.lidarr)
+        self.client = mock.patch.object(upgrade, "Lidarr", return_value=self.lidarr)
         self.client.start()
-        self.lookup = mock.patch.object(guard.upgrade, "recordings_for", return_value=[{
+        self.lookup = mock.patch.object(upgrade, "recordings_for", return_value=[{
             "id": "rec-1", "releases": [{"status": "Official", "date": "2016-05-06",
                                          "release-group": {"id": "views", "title": "Views",
                                                            "primary-type": "Album"}}]}])
@@ -1201,7 +1220,7 @@ class Upgrades(GuardTestCase):
         audio["musicbrainz_releasegroupid"] = "6f4c3295-db6b-4954-b0f0-c95a6b79b458"
         audio["musicbrainz_trackid"] = "57c319d6-31ed-4668-acf1-13350ab8b67b"
         audio.save()
-        with mock.patch.object(guard.upgrade, "recording", return_value={"id": "rec-1", "releases": []}):
+        with mock.patch.object(upgrade, "recording", return_value={"id": "rec-1", "releases": []}):
             self.guard.roots_pass()
             self.guard.upgrade_pass()
             self.assertEqual(self.lidarr.searched, ["views"], "the album is requested")
@@ -1230,40 +1249,12 @@ class Upgrades(GuardTestCase):
 
     def test_song_musicbrainz_does_not_know_is_kept_and_asked_weekly(self):
         path = self.extras_song()
-        guard.upgrade.recordings_for.return_value = []
+        upgrade.recordings_for.return_value = []
         self.guard.upgrade_pass()
         self.guard.upgrade_pass()
         self.assertTrue(os.path.exists(path))
-        self.assertEqual(guard.upgrade.recordings_for.call_count, 1)
+        self.assertEqual(upgrade.recordings_for.call_count, 1)
         self.assertEqual([e["reason"] for e in self.guard.events], ["NOT_IN_MUSICBRAINZ"])
-
-
-class ReferenceRules(unittest.TestCase):
-    def test_similarity_finds_the_preview_inside_the_song(self):
-        song = [(i * 2654435761) & 0xFFFFFFFF for i in range(300)]
-        self.assertEqual(reference.similarity(song[100:140], song), 1.0)
-        other = [(i * 40503 + 7) & 0xFFFFFFFF for i in range(40)]
-        self.assertLess(reference.similarity(other, song), reference.SAME)
-
-    def test_fpcalc_tells_the_same_song_from_another(self):
-        if not shutil.which("fpcalc"):
-            self.skipTest("fpcalc not installed (it is in the image)")
-        workdir = tempfile.mkdtemp()
-        try:
-            song, clip, other = (os.path.join(workdir, n) for n in ("song.flac", "clip.flac", "other.flac"))
-            # Two different melodies: Chromaprint hears pitch, so noise
-            # against noise would look alike (0.76) without being a song.
-            ffmpeg("-f", "lavfi", "-i", "aevalsrc=0.4*sin(2*PI*(262+131*floor(mod(t*2\\,4)))*t)"
-                   "+0.2*sin(2*PI*(392+98*floor(mod(t*3\\,5)))*t):d=60:s=44100", song)
-            ffmpeg("-ss", "20", "-t", "30", "-i", song, clip)
-            ffmpeg("-f", "lavfi", "-i", "aevalsrc=0.4*sin(2*PI*(311+155*floor(mod(t*5\\,3)))*t)"
-                   "+0.2*sin(2*PI*(466+117*floor(mod(t*1.5\\,6)))*t):d=30:s=44100", other)
-            same = reference.similarity(reference.fingerprint(clip), reference.fingerprint(song))
-            different = reference.similarity(reference.fingerprint(other), reference.fingerprint(song))
-            self.assertGreaterEqual(same, reference.SAME)
-            self.assertLess(different, reference.OTHER)
-        finally:
-            shutil.rmtree(workdir)
 
 
 class CarryRules(unittest.TestCase):

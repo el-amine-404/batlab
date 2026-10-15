@@ -1,0 +1,65 @@
+name: ${APPRISE_PROJECT_NAME:-apprise}
+# Notifications for every batlab service (docs/services.md): a service sends a
+# message once, to http://apprise:8000/notify/batlab with a tag naming the
+# channel, and Apprise (https://github.com/caronc/apprise-api) delivers it to
+# that channel's destinations: Discord here, or Telegram, ntfy, e-mail and
+# 100 more for anyone else.
+#
+# The channels and their URLs come from NOTIFY_<CHANNEL> in compose/.env
+# (render.py); here they default to the Discord webhooks of the same name.
+# Its API is reachable only on home_server, the configuration can't be read
+# or changed through it, and it sends only to the configured URLs.
+services:
+  apprise:
+    image: ${IMAGE_APPRISE}:${TAG_APPRISE}
+    container_name: apprise
+    user: "${PUID}:${PGID}"
+    entrypoint: ["sh", "-c", "python /render.py && exec /opt/apprise/webapp/supervisord-startup"]
+    environment:
+      - TZ=${TZ}
+      - APPRISE_STATEFUL_MODE=simple
+      # The URLs hold secrets: not shown, not changeable through the API.
+      - APPRISE_CONFIG_LOCK=yes
+      # No sending to URLs given in a request: only to the configured ones.
+      - APPRISE_STATELESS_MODE=no
+      - APPRISE_API_ONLY=yes
+      - APPRISE_DEFAULT_CONFIG_ID=batlab
+      # A few messages an hour: one worker (the default, one per core, needs
+      # far more memory).
+      - APPRISE_WORKER_COUNT=1
+      - NOTIFY_DOWNLOADS=${NOTIFY_DOWNLOADS:-${DISCORD_WEBHOOK_DOWNLOADS:-}}
+      - NOTIFY_DOWNLOAD_ISSUES=${NOTIFY_DOWNLOAD_ISSUES:-${DISCORD_WEBHOOK_DOWNLOAD_ISSUES:-}}
+      - NOTIFY_ALERTS=${NOTIFY_ALERTS:-${DISCORD_WEBHOOK_ALERTS:-}}
+      - NOTIFY_UPDATES=${NOTIFY_UPDATES:-${DISCORD_WEBHOOK_UPDATES:-}}
+      - NOTIFY_REQUESTS=${NOTIFY_REQUESTS:-${DISCORD_WEBHOOK_REQUESTS:-}}
+      - NOTIFY_CAMERAS=${NOTIFY_CAMERAS:-${DISCORD_WEBHOOK_CAMERAS:-}}
+    volumes:
+      - ./render.py:/render.py:ro
+    tmpfs:
+      - /config:mode=0700,uid=${PUID},gid=${PGID}
+      - /attach:mode=0700,uid=${PUID},gid=${PGID}
+      - /tmp
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/status', timeout=5)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - home_server
+    restart: unless-stopped
+    mem_limit: 256m
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  home_server:
+    external: true
+    name: home_server

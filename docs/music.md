@@ -198,7 +198,8 @@ and streaming-only music than MusicBrainz's AcoustID.
   Before anything moves, the file is compared with **the real song**
   (`app/reference.py`): Apple Music's 30 s preview of the song its tags name,
   Chromaprint fingerprints of both (AcoustID's technique), the preview slid
-  along the file. 0.85 or more of the fingerprint bits alike: it is that song,
+  along the file (`batlab_common.previews` and `.fingerprint`, shared with
+  songdrop: `lib/batlab-common`). 0.85 or more of the fingerprint bits alike: it is that song,
   kept (`SHAZAM_OVERRULED`). Below 0.70: it is not, `WRONG_SONG`. With no
   preview (the song is not on Apple), Shazam decides only when its answer is
   a real release, with an ISRC or an Apple Music ID; an entry with neither
@@ -215,12 +216,24 @@ Stormy" was Stormy - PIRATE, "Ombladon - Made in Romania" was Ionuț Cercel -
 Made In Romania.
 
 When clamd is down, inbox files are **held**, not passed: they stay in the
-inbox and `#download-issues` hears about it once. Findings go to Discord
-`#download-issues` (`DISCORD_WEBHOOK_DOWNLOAD_ISSUES`) and every event to
+inbox and `#download-issues` hears about it once. Findings go through Apprise
+(`compose/apprise`) to its `download-issues` channel, grouped by kind
+(quarantined, suspect, flagged, held, errors), and every event to
 `${VOLUMES_ROOT}/musicguard/reports/<month>.jsonl`.
+
+The code is one module per job (`compose/musicguard/app`): `guard.py` starts
+the passes and puts the parts together; `parts/` holds them (`checks`, the
+safety and identity checks; `filing`, one file into its library; `passes`,
+the inbox and library passes; `duplicates`; `upgrades`, Lidarr; `lyrics_files`;
+`quarantine`; `announce`, Navidrome's scan and "Ready to play"; `reporting`;
+`state`); `settings.py` is what the environment can set. The modules beside
+them (`dedup`, `upgrade`, `tags`, `layout`, `lyrics`…) are the rules and the
+clients, with no state of their own, and what songdrop also needs lives in
+`lib/batlab-common`.
 
 ```bash
 python3 -m unittest discover -s compose/musicguard/tests     # needs ffmpeg and mutagen
+python3 -m unittest discover -s lib/batlab-common/tests      # the shared code
 docker logs -f musicguard
 docker exec musicguard python /app/guard.py check /data/media/music-extras/<file>   # dry run
 ```
@@ -393,8 +406,8 @@ its download copies are removed, never the library's.
   Apple Music.
 - **Right song.** spotDL picks a YouTube upload by title and length; a
   re-upload can carry both over other audio. Each download is fingerprinted
-  against Spotify's own 30 s preview (from the track's embed page, ffmpeg's
-  chromaprint muxer, `runners/verify.py`): the same song scores about 0.9,
+  against Spotify's own 30 s preview (from the track's embed page,
+  `runners/verify.py` with `batlab_common.previews`): the same song scores about 0.9,
   another about 0.55. Below 0.70 the file is deleted and the next YouTube
   uploads of the same length (within 7 s) are tried, up to four, until one
   sounds right; none does, and the song fails with that reason. No preview:
@@ -414,10 +427,10 @@ its download copies are removed, never the library's.
   pending.
 - **Connect** (Settings): songdrop reports events (`job.incomplete`,
   `song.recovered`, `song.gave_up`, `job.finished`) to connections, each with
-  its type (Discord, or a Webhook that gets the event as JSON) and the events
-  it wants. On its first start with Connect, `SONGDROP_DISCORD_WEBHOOK`
-  (`#download-issues`) became a Discord connection with the first three.
-  musicguard's quarantines (`WRONG_SONG`, `DUPLICATE`) go to the same channel.
+  its type (Apprise, Discord, or a Webhook that gets the event as JSON) and
+  the events it wants. Here it is one Apprise connection to the
+  `download-issues` channel (`SONGDROP_APPRISE_URL` and `_TAG` make it on a
+  first start), where musicguard's findings go too.
 - **Long videos, playlists and sign-in** (yt-dlp links, in Options):
   *One song per chapter* splits a video at its chapters (a whole album or a
   mix uploaded as one); each part is tagged with the chapter's title, without

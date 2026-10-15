@@ -14,7 +14,7 @@ Navidrome, Frigate…) are described in [hosted_services.md](hosted_services.md)
    service's API or a hand-off folder (below).
 3. **Usable alone.** Its page and its API work without any other service of this
    repository running. What another service adds (musicguard checking songs,
-   the notifier posting to Discord) is optional.
+   Apprise delivering messages) is optional.
 4. **An API before a page.** The page is a client of the API like any other app.
    Nothing the page does is out of reach of the API.
 5. **Says what happened, not who to tell.** A service reports events; it does not
@@ -47,28 +47,53 @@ in), the consumer takes it and removes it. Neither knows the other exists.
 | `inbox/music/metube` | MeTube | musicguard |
 | `media/music-extras` | musicguard | Navidrome, Stanzarr (read and write lyrics beside songs) |
 
-## Events
+## Messages
 
-Each service will post what happened to one **notifier** service
-(planned), which decides the channels (Discord today) and the wording:
+Every service sends its messages through **Apprise** (`compose/apprise`,
+[apprise-api](https://github.com/caronc/apprise-api)): one address,
+`http://apprise:8000/notify/batlab`, and a tag naming the channel. Apprise
+delivers to that channel's destinations, which `NOTIFY_<CHANNEL>` in
+`compose/.env` lists as Apprise URLs: Discord webhooks here (they default to
+`DISCORD_WEBHOOK_<CHANNEL>`), Telegram, ntfy, e-mail or any of about 100
+services elsewhere. A service never knows where its messages end up.
+
+| Channel (tag) | Who sends | What |
+| --- | --- | --- |
+| `downloads` | musicguard | "Ready to play: Artist – Album", once Navidrome has it |
+| `download-issues` | musicguard, songdrop | files quarantined, suspect, flagged or held; songs missing after a download, back, or given up |
+| `cameras` | camwatch | a camera dark, and back |
+| `alerts`, `updates`, `requests` | (nothing yet) | ready for the services that post there today (Netdata, NetAlertX, Diun, Seerr) |
+
+Each message has a title, a Markdown body and a type (`info`, `success`,
+`warning`, `failure`), sent with `batlab_common.notify.send`. Apprise's API
+listens only on `home_server`; its configuration can't be read or changed
+through it (`APPRISE_CONFIG_LOCK`), and it sends only to configured URLs.
+
+A program that wants songdrop's events as data, not as a message, takes them
+through a Webhook connection (Settings, Connect), as JSON:
 
 ```http
-POST http://notifier:8900/api/v1/events
-{"source": "songdrop", "event": "song.failed", "time": 1792008398.7,
- "subject": "Stormy, JRK 19 - EL MEJOR", "data": {"job_id": "…", "next_try_at": 1792009000}}
+POST <your address>
+{"source": "songdrop", "event": "song.gave_up", "time": 1792008398.7,
+ "subject": "Stormy, JRK 19 - EL MEJOR", "data": {"job": {"id": "…"}, "song": "…", "tries": 4}}
 ```
 
-Until the notifier exists, musicguard and camwatch post to their Discord
-webhooks themselves. songdrop already sends events through its connections
-(Settings, Connect): a Discord connection, or a Webhook that gets the event in
-the format above; the notifier will be one more Webhook. Event names are
-`<thing>.<what happened>`:
+Event names are `<thing>.<what happened>`:
 
 | Source | Events |
 | --- | --- |
 | songdrop | `job.incomplete` (songs missing after a download), `song.recovered`, `song.gave_up`, `job.finished` |
-| musicguard | `file.quarantined`, `file.held`, `album.ready` (playable in Navidrome), `song.deduplicated`, `song.upgraded` |
-| camwatch | `camera.dark`, `camera.back` |
+
+## Shared code
+
+`lib/batlab-common` is the Python package every service of this repository
+may use: whether two titles name one song and which version (`titles`:
+remix, live…), audio fingerprints (`fingerprint`), Spotify's and Apple's
+previews (`previews`), and Apprise (`notify`). Standard library only, so it
+also runs in spotDL's environment. Images get it through compose's build
+context `common` (`additional_contexts`) on `PYTHONPATH`; a mounted script
+(camwatch) mounts it. Its tests: `python3 -m unittest discover -s
+lib/batlab-common/tests`.
 
 ## The services
 
@@ -100,12 +125,15 @@ service itself.
 - **Alone**: point its inbox and library folders anywhere; it needs only ffmpeg
   and, for malware checks, clamd.
 - **Plugs in through**: the hand-off folders, Lidarr's and Navidrome's APIs, its
-  events (Discord today) and its reports (`reports/<month>.jsonl`).
+  messages (Apprise) and its reports (`reports/<month>.jsonl`).
 - **Owns**: `$VOLUMES_ROOT/musicguard`, `media/music-extras`, the quarantine.
-- **Not one job yet.** The planned split: **guard** (safe and really audio:
-  checks and rebuild), **identify** (which song, and its tags), **librarian**
-  (where it goes: filing, duplicates, upgrades). The audio-fingerprint
-  comparison it shares with songdrop becomes one library both use.
+- **Several jobs, one service.** Its code is one module per job
+  (`app/parts/`: checks, filing, duplicates, upgrades, lyrics, quarantine,
+  announcements; docs/music.md). They stay one service on purpose: each file
+  goes through them in order, on one copy, under one lock; three services
+  would hand every file over twice through folders and agree on its state
+  through APIs, for no gain while one machine runs them. A part becomes a
+  service when something else needs it alone.
 
 ### Stanzarr: lyrics
 
@@ -123,7 +151,7 @@ service itself.
 
 - **Job**: says when a Frigate camera gives no picture, why, and when it is back.
 - **Alone**: needs only Frigate's API.
-- **Plugs in through**: its events (Discord today).
+- **Plugs in through**: its messages (Apprise, `cameras`).
 
 ### tv-remote: TV remote
 
@@ -137,12 +165,13 @@ service itself.
 
 | Service | One job | API v1 | Docs at `/docs` | Settings API | Events |
 | --- | --- | --- | --- | --- | --- |
-| songdrop | yes | yes | yes | yes | its connections (Discord, Webhook) |
-| musicguard | no (split planned) | none | none | environment only | Discord directly |
+| songdrop | yes | yes | yes | yes | its connections (Apprise here; Discord, Webhook) |
+| musicguard | several, one module each | none | none | environment only | Apprise |
 | Stanzarr | yes | own (private project) | no | in its page | none |
-| camwatch | yes | none (needs none) | none | environment only | Discord directly |
+| camwatch | yes | none (needs none) | none | environment only | Apprise |
 | tv-remote | yes | unversioned | no | environment only | none |
 
-Next, in order: the notifier, and musicguard and camwatch posting events to it
-(songdrop through a Webhook connection); the fingerprint library; musicguard's
-split.
+Next: the third-party apps that post to Discord themselves (Lidarr, Diun,
+Netdata, NetAlertX, frigate-notify) can send through Apprise too, each has an
+Apprise or webhook option; and installing batlab elsewhere (published images,
+a short `.env.example`).

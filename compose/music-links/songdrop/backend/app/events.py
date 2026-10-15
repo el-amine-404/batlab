@@ -16,20 +16,24 @@ class EventType:
     description: str
     # Ticked when a new connection is made.
     default: bool
+    # How it reads where a message has a colour or an icon (Apprise's types).
+    kind: str = "info"
 
 
 CATALOG: tuple[EventType, ...] = (
     EventType("job.incomplete", "Songs missing after a download",
-              "A download ended without some of its songs. Says which, why, and when they are tried again.", True),
+              "A download ended without some of its songs. Says which, why, and when they are tried again.", True,
+              "warning"),
     EventType("song.recovered", "A missing song came back",
-              "A later try downloaded a song that was missing.", True),
+              "A later try downloaded a song that was missing.", True, "success"),
     EventType("song.gave_up", "songdrop gave up on a song",
-              "The last later try of a song failed; only Retry now tries again.", True),
+              "The last later try of a song failed; only Retry now tries again.", True, "failure"),
     EventType("job.finished", "Every finished download",
-              "Any download that ended, complete or not.", False),
+              "Any download that ended, complete or not.", False, "success"),
 )
 NAMES = frozenset(item.name for item in CATALOG)
 DEFAULTS = tuple(item.name for item in CATALOG if item.default)
+KINDS = {item.name: item.kind for item in CATALOG}
 
 
 @dataclass(frozen=True)
@@ -50,7 +54,7 @@ class Event:
             raise ValueError(f"unknown event {self.name}")
 
     def as_payload(self) -> dict:
-        """The JSON a webhook receives: the notifier's format (docs/services.md)."""
+        """The JSON a Webhook connection receives (docs/services.md, "Messages")."""
         return {
             "source": "songdrop",
             "event": self.name,

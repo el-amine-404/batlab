@@ -1,4 +1,4 @@
-"""Tells Discord when Frigate's cameras go dark, and why, and when they are back.
+"""Says when Frigate's cameras go dark, and why, and when they are back.
 
 On 2026-10-14 the DVR moved from 192.168.1.101 to .2 (a static lease AdGuard
 had just been given) while Frigate still dialed .101: both cameras were dark
@@ -8,7 +8,8 @@ ffmpeg every few seconds but tells no one.
 Every CAMWATCH_INTERVAL seconds Frigate's stats are read; a camera giving no
 frames (camera_fps 0) for CAMWATCH_AFTER seconds is announced once, with what
 the DVR's address answers, then again every CAMWATCH_REMIND seconds while it
-stays dark. Standard library only.
+stays dark. Messages go through Apprise (compose/apprise) to the "cameras"
+channel. Standard library and batlab_common (lib/batlab-common) only.
 """
 
 import json
@@ -16,16 +17,18 @@ import os
 import socket
 import time
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime
+
+from batlab_common import notify as apprise
 
 FRIGATE = os.environ.get("CAMWATCH_FRIGATE", "http://frigate:5000")
 DVR_HOST = os.environ.get("FRIGATE_DVR_HOST", "")
-WEBHOOK = os.environ.get("CAMWATCH_WEBHOOK", "")
+NOTIFY_URL = os.environ.get("CAMWATCH_NOTIFY_URL", "")
+NOTIFY_TAG = os.environ.get("CAMWATCH_NOTIFY_TAG", "cameras")
 INTERVAL = int(os.environ.get("CAMWATCH_INTERVAL", "60"))
 AFTER = int(os.environ.get("CAMWATCH_AFTER", "300"))
 REMIND = int(os.environ.get("CAMWATCH_REMIND", "21600"))
 HEARTBEAT = "/tmp/heartbeat"
-RED, GREEN = 15158332, 3066993
 
 
 def log(message):
@@ -75,22 +78,15 @@ def diagnose():
             "check the RTSP login (FRIGATE_RTSP_*) and the cameras on the DVR.")
 
 
-def notify(title, color, fields):
-    if not WEBHOOK:
+def notify(title, kind, fields):
+    """One message: the title, then a "**name**: value" line per field."""
+    if not NOTIFY_URL:
         return
-    body = json.dumps({
-        "username": "camwatch",
-        "embeds": [{"title": title, "color": color,
-                    "fields": [{"name": n, "value": v[:1000] or "-", "inline": False} for n, v in fields],
-                    "timestamp": datetime.now(timezone.utc).isoformat()}],
-        "allowed_mentions": {"parse": []},
-    }).encode()
-    request = urllib.request.Request(WEBHOOK, data=body, method="POST",
-                                     headers={"Content-Type": "application/json", "User-Agent": "batlab-camwatch"})
+    body = "\n".join(f"**{name}**: {value[:1000] or '-'}" for name, value in fields)
     try:
-        urllib.request.urlopen(request, timeout=15).close()
-    except Exception as error:  # a lost message never stops the watch
-        log(f"discord: {error}")
+        apprise.send(NOTIFY_URL, title, body, tag=NOTIFY_TAG, kind=kind)
+    except apprise.NotSent as error:  # a lost message never stops the watch
+        log(f"notification: {error}")
 
 
 def duration(seconds):
@@ -114,7 +110,7 @@ def main():
                 continue
             if key in announced:
                 label = "Frigate" if key == "frigate" else friendly.get(key, key)
-                notify(f"🟢 {label} is back", GREEN, [("Was dark for", duration(now - since[key]))])
+                notify(f"🟢 {label} is back", "success", [("Was dark for", duration(now - since[key]))])
                 log(f"{key} back after {duration(now - since[key])}")
             since.pop(key)
             announced.pop(key, None)
@@ -126,7 +122,7 @@ def main():
             reminder = all(k in announced for k in due)
             title = ("🔴 Still dark: " if reminder else "🔴 Cameras dark: ") + ", ".join(labels)
             longest = max(now - since[k] for k in due)
-            notify(title, RED, [("For", duration(longest)), ("Why", diagnose()),
+            notify(title, "failure", [("For", duration(longest)), ("Why", diagnose()),
                                 ("Fix", "docs/cameras.md, \"The DVR's address\"")])
             log(f"announced {due}")
             for key in due:

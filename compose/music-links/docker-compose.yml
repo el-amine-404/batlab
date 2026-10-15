@@ -57,6 +57,8 @@ services:
     image: local/batlab-songdrop:${TAG_SPOTDL}-yt-dlp-${VERSION_YTDLP}
     build:
       context: ./songdrop
+      additional_contexts:
+        common: ../../lib/batlab-common
       network: host
       args:
         BASE_IMAGE: ${IMAGE_SPOTDL}:${TAG_SPOTDL}
@@ -71,9 +73,12 @@ services:
       - TZ=${TZ}
       - SONGDROP_PORT=${SONGDROP_HTTP_PORT:?set in compose/.env}
       - SONGDROP_RETENTION_HOURS=24
-      # Songs still missing after a download, and what later tries bring back,
-      # to #download-issues beside musicguard's findings.
-      - SONGDROP_DISCORD_WEBHOOK=${DISCORD_WEBHOOK_DOWNLOAD_ISSUES:-}
+      # The first connection (Settings, Connect), made when there is none:
+      # songs still missing after a download, and what later tries bring
+      # back, through Apprise (compose/apprise) to the download-issues
+      # channel, beside musicguard's findings.
+      - SONGDROP_APPRISE_URL=http://apprise:8000/notify/batlab
+      - SONGDROP_APPRISE_TAG=download-issues
       - SONGDROP_PUBLIC_URL=http://songdrop.homelab.lan
       # First values; the Settings page can change these and more.
       - SONGDROP_OUTPUT_FOLDER=music/songdrop

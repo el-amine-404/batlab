@@ -1,5 +1,5 @@
-"""Any program: the event as JSON (docs/services.md, "Events"). The planned
-notifier service is reached this way."""
+"""Any program: the event as JSON (docs/services.md, "Messages"), as data
+rather than a message for people."""
 
 import urllib.parse
 
@@ -15,7 +15,7 @@ class Webhook(ConnectionType):
     fields = (
         Field("url", "URL", "secret_url",
               help="Receives a POST with source, event, time, subject, text, url and data (the job).",
-              placeholder="http://notifier:8900/api/v1/events"),
+              placeholder="http://my-app:8080/songdrop-events"),
     )
 
     def send(self, event: Event, config: dict) -> None:

@@ -32,13 +32,18 @@ RUN uv venv --python /usr/local/bin/python3 .venv \
  && uv pip install --python .venv/bin/python --no-cache --require-hashes -r requirements.txt \
  && uv pip install --python .venv/bin/python --no-cache "yt-dlp[default]==${YTDLP_VERSION}"
 COPY backend/app ./app
+# batlab's shared code (lib/batlab-common), handed in by compose as the build
+# context "common"; on PYTHONPATH for both interpreters (spotDL's runs
+# runners/verify.py).
+COPY --from=common batlab_common /opt/batlab-common/batlab_common
 COPY --from=page /src/dist ./static
 COPY --from=docs /src/.vitepress/dist ./static/docs
-RUN .venv/bin/python -m compileall -q app
+RUN .venv/bin/python -m compileall -q app /opt/batlab-common
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    SONGDROP_STATIC=/opt/songdrop/static
+    SONGDROP_STATIC=/opt/songdrop/static \
+    PYTHONPATH=/opt/batlab-common
 USER spotdl
 EXPOSE 8810
 ENTRYPOINT ["/opt/songdrop/.venv/bin/python", "-m", "app"]

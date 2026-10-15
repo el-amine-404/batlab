@@ -45,6 +45,9 @@ class Settings:
     # The first Discord connection, made on the first start only
     # (connections/store.py); after that, connections are kept in state_dir.
     discord_webhook: str | None = None
+    # The first connection, when there is none yet: Apprise if given, else Discord.
+    apprise_url: str | None = None
+    apprise_tag: str | None = None
     # The page's address, for links in event messages.
     public_url: str = ""
     deliver: bool = True
@@ -79,5 +82,7 @@ def load() -> Settings:
         app_python=os.environ.get("SONGDROP_APP_PYTHON", sys.executable),
         deno=deno if os.access(deno, os.X_OK) else None,
         discord_webhook=os.environ.get("SONGDROP_DISCORD_WEBHOOK", "").strip() or None,
+        apprise_url=os.environ.get("SONGDROP_APPRISE_URL", "").strip() or None,
+        apprise_tag=os.environ.get("SONGDROP_APPRISE_TAG", "").strip() or None,
         public_url=os.environ.get("SONGDROP_PUBLIC_URL", "").strip().rstrip("/"),
     )

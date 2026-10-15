@@ -13,7 +13,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-import identify
+from batlab_common import titles
 
 API = "https://lrclib.net/api"
 USER_AGENT = "batlab-musicguard/1.0 (self-hosted music library)"
@@ -113,9 +113,9 @@ def pick(results, seconds, title=None, artist=None):
             continue
         if gap >= 3.5:
             continue
-        if title and not identify.same_title(result.get("trackName") or "", title):
+        if title and not titles.same_title(result.get("trackName") or "", title):
             continue
-        if artist and not identify.names(result.get("artistName") or "") & identify.names(artist):
+        if artist and not titles.names(result.get("artistName") or "") & titles.names(artist):
             continue
         synced = clean(result.get("syncedLyrics") or "")
         if synced.strip() and synced_ok(synced):

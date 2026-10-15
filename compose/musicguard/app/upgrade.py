@@ -23,7 +23,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-import identify
+from batlab_common import titles
 
 MUSICBRAINZ = "https://musicbrainz.org/ws/2/recording"
 USER_AGENT = "batlab-musicguard/1.0 (self-hosted music library)"
@@ -86,10 +86,10 @@ def recordings_for(title, artist, isrc=""):
     if not found:
         found = _musicbrainz(f"recording:{_quoted(title)} AND artist:{_quoted(artist)}").get("recordings") or []
         found = [r for r in found if int(r.get("score", 0)) >= MIN_SCORE]
-    wanted = identify.names(artist)
+    wanted = titles.names(artist)
     return [r for r in found
-            if identify.same_title(r.get("title", ""), title) and identify.same_version(r.get("title", ""), title)
-            and wanted & identify.names(" & ".join(c.get("name", "") for c in r.get("artist-credit") or []))]
+            if titles.same_title(r.get("title", ""), title) and titles.same_version(r.get("title", ""), title)
+            and wanted & titles.names(" & ".join(c.get("name", "") for c in r.get("artist-credit") or []))]
 
 
 def best_release_group(recordings):
@@ -191,12 +191,12 @@ class Lidarr:
 
     def track_file(self, album_id, recording_ids, title):
         """Path of Lidarr's file for this song on that album, or None. Never
-        the original for a remix or a live take (identify.version)."""
+        the original for a remix or a live take (titles.version)."""
         for track in self.call("GET", "track", albumId=album_id) or []:
             if not track.get("hasFile"):
                 continue
             named = track.get("title", "")
             if track.get("foreignRecordingId") in recording_ids or (
-                    identify.same_title(named, title) and identify.same_version(named, title)):
+                    titles.same_title(named, title) and titles.same_version(named, title)):
                 return (self.call("GET", f"trackfile/{track['trackFileId']}") or {}).get("path")
         return None

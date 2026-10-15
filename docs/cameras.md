@@ -34,10 +34,10 @@ Two things keep that from happening again:
   the old value).
 - **camwatch** (`compose/frigate/camwatch`) reads Frigate's stats every
   minute. A camera without frames for 5 minutes, or a Frigate that does not
-  answer, goes to the cameras Discord channel with the reason (the name does
-  not resolve; the DVR does not answer at its address; or it answers but
-  Frigate gets no frames), again every 6 hours while it lasts, and a green
-  message when it is back. `docker logs camwatch` shows the same.
+  answer, goes to Apprise's `cameras` channel (the cameras Discord channel
+  here) with the reason (the name does not resolve; the DVR does not answer
+  at its address; or it answers but Frigate gets no frames), again every 6
+  hours while it lasts, and a message when it is back. `docker logs camwatch` shows the same.
 
 `cam-home --find` (or an RTSP scan of port 554) tells the DVR's address.
 
@@ -129,7 +129,8 @@ docker exec frigate curl -s -X POST -H 'Content-Type: application/json' \
 
 ```bash
 # compose/.env: FRIGATE_DVR_HOST, FRIGATE_RTSP_USER, FRIGATE_RTSP_PASSWORD,
-# DISCORD_WEBHOOK_CAMERAS
+# DISCORD_WEBHOOK_CAMERAS (frigate-notify's alerts, and camwatch's through
+# Apprise's "cameras" channel: compose/apprise)
 compose/frigate/setup.sh
 compose/frigate/build-model.sh s 320
 sudo compose/frigate/setup-storage.sh 20G
