@@ -83,6 +83,10 @@ class GeminiUnavailable(RuntimeError):
     """Gemini over quota, overloaded or unreachable: no more translations
     this run, and no try counted against the video."""
 
+    def __init__(self, message: str, quota: bool = False) -> None:
+        super().__init__(message)
+        self.quota = quota
+
 
 class TranslationFailed(RuntimeError):
     pass
@@ -344,11 +348,26 @@ def instructions(language: str, show: dict, kind: str, episode_title: str, names
 
 
 class Gemini:
-    def __init__(self, key: str, model: str, timeout: int = 300) -> None:
-        self.key, self.model, self.timeout = key, model, timeout
+    # Waits before asking again when Gemini is overloaded (500, 503) or out of
+    # reach: Google calls such spikes temporary, and gemini-3.8-flash had two
+    # on its first day. A quota refusal (429) isn't retried.
+    RETRY_WAITS = (30, 90)
+
+    def __init__(self, key: str, model: str, timeout: int = 300, sleep=time.sleep) -> None:
+        self.key, self.model, self.timeout, self.sleep = key, model, timeout, sleep
         self.requests = 0
 
     def __call__(self, system: str, lines: list[dict]) -> list[dict]:
+        for wait in (*self.RETRY_WAITS, None):
+            try:
+                return self.ask(system, lines)
+            except GeminiUnavailable as error:
+                if wait is None or error.quota:
+                    raise
+                print(f"gemini: {str(error)[:120]}; asking again in {wait} s", file=sys.stderr)
+                self.sleep(wait)
+
+    def ask(self, system: str, lines: list[dict]) -> list[dict]:
         body = {"systemInstruction": {"parts": [{"text": system}]},
                 "contents": [{"role": "user", "parts": [{"text": json.dumps(lines, ensure_ascii=False)}]}],
                 "generationConfig": {"temperature": 0.3, "responseMimeType": "application/json",
@@ -365,7 +384,8 @@ class Gemini:
         except urllib.error.HTTPError as error:
             detail = error.read(2000).decode(errors="replace")
             if error.code == 429 or error.code >= 500:
-                raise GeminiUnavailable(f"Gemini answered {error.code}: {detail[:200]}") from error
+                raise GeminiUnavailable(f"Gemini answered {error.code}: {detail[:200]}",
+                                        quota=error.code == 429) from error
             raise TranslationFailed(f"Gemini answered {error.code}: {detail[:300]}") from error
         except (urllib.error.URLError, OSError) as error:
             raise GeminiUnavailable(f"Gemini unreachable: {getattr(error, 'reason', error)}") from error

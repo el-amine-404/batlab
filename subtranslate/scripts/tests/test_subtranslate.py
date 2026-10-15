@@ -205,6 +205,29 @@ class Subtranslate(unittest.TestCase):
         self.assertEqual(self.state["attempts"], {})
         self.assertFalse(self.french.exists())
 
+    def test_gemini_overloaded_is_asked_again_quota_is_not(self):
+        answers = []
+
+        class Flaky(subtranslate.Gemini):
+            def ask(self, system, lines):
+                outcome = answers.pop(0)
+                if isinstance(outcome, Exception):
+                    raise outcome
+                return outcome
+        waits = []
+        gemini = Flaky("key", "model", sleep=waits.append)
+        answers[:] = [subtranslate.GeminiUnavailable("503"), subtranslate.GeminiUnavailable("503"), ["ok"]]
+        self.assertEqual(gemini("", []), ["ok"])
+        self.assertEqual(waits, [30, 90])
+        answers[:] = [subtranslate.GeminiUnavailable("503")] * 3
+        with self.assertRaises(subtranslate.GeminiUnavailable):
+            gemini("", [])
+        waits.clear()
+        answers[:] = [subtranslate.GeminiUnavailable("429", quota=True)]
+        with self.assertRaises(subtranslate.GeminiUnavailable):
+            gemini("", [])
+        self.assertEqual(waits, [])
+
     def test_a_long_film_goes_in_several_requests(self):
         cues = [(subtranslate.timestamp(n * 2000 + 1000), subtranslate.timestamp(n * 2000 + 2000), f"line {n}")
                 for n in range(subtranslate.CHUNK + 10)]
