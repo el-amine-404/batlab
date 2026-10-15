@@ -19,6 +19,7 @@ reported.
 import argparse
 import json
 import os
+import re
 import shutil
 import signal
 import sys
@@ -68,6 +69,8 @@ UPGRADE_RETRY_SECONDS = 7 * 86400
 # A single whose song is on no album yet is looked at again after a month.
 SINGLE_RETRY_SECONDS = 30 * 86400
 ORPHAN_SECONDS = 3600
+# The ready message names the songs of an album when this many or fewer came.
+READY_TITLES = 3
 STATE_VERSION = 1
 # Events after which Navidrome has something new to index.
 LIBRARY_CHANGES = {"filed", "cleaned", "verified", "credited", "quarantined", "reported", "lyrics",
@@ -140,6 +143,12 @@ def now_iso():
 
 def log(message):
     print(f"{now_iso()} {message}", flush=True)
+
+
+def song_title(filename):
+    """"16 - Trop beau.opus" or "1-01 - Trop beau.flac" → "Trop beau"."""
+    stem = os.path.splitext(filename)[0]
+    return re.sub(r"^\d+(?:-\d+)?\s*-\s*", "", stem) or stem
 
 
 class Guard:
@@ -948,7 +957,9 @@ class Guard:
         self.announce_ready()
 
     def announce_ready(self):
-        """One Discord message per scan: the albums that just became playable."""
+        """One Discord message per scan: the albums that just became playable,
+        with the songs' titles when only a few came (a single song filed into
+        its album would otherwise read as the album)."""
         new, self.ready = self.ready, []
         albums = {}
         for path in new:
@@ -959,12 +970,15 @@ class Guard:
                     parts = os.path.relpath(path, root).split(os.sep)
                     if len(parts) >= 3:
                         key = f"{parts[0]} – {parts[1]}"
-                        albums[key] = albums.get(key, 0) + 1
+                        albums.setdefault(key, []).append(song_title(parts[-1]))
         if not albums or not self.config.ready_webhook:
             return
         lines = ["**Ready to play in Navidrome**"]
-        for name, count in sorted(albums.items())[:20]:
-            lines.append(f"- {name}" + (f" ({count} songs)" if count > 1 else ""))
+        for name, titles in sorted(albums.items())[:20]:
+            if len(titles) <= READY_TITLES:
+                lines.append(f"- {name}: " + ", ".join(sorted(titles)))
+            else:
+                lines.append(f"- {name} ({len(titles)} songs)")
         if len(albums) > 20:
             lines.append(f"... and {len(albums) - 20} more")
         body = json.dumps({"content": "\n".join(lines)[:1900], "allowed_mentions": {"parse": []}})

@@ -929,7 +929,25 @@ class NavidromeScans(GuardTestCase):
             self.guard.roots_pass()
             self.guard.scan_navidrome()
         self.assertEqual(len(sent), 1)
-        self.assertIn("Billie Eilish – HIT ME HARD AND SOFT (2024)", sent[0]["content"])
+        self.assertIn("Billie Eilish – HIT ME HARD AND SOFT (2024): SKINNY", sent[0]["content"])
+
+    def test_many_new_songs_of_an_album_are_counted_not_named(self):
+        self.guard.config.ready_webhook = "http://discord.invalid/hook"
+        album = os.path.join(self.music, "Lomepal", "Amina (2019)")
+        os.makedirs(album)
+        for number in range(1, 5):
+            tone(os.path.join(album, f"{number:02} - Song {number}.mp3"))
+        sent = []
+        with mock.patch.object(guard.urllib.request, "urlopen",
+                               side_effect=lambda request, timeout: sent.append(json.loads(request.data)) or mock.MagicMock()):
+            self.guard.roots_pass()
+            self.guard.scan_navidrome()
+        self.assertIn("Lomepal – Amina (2019) (4 songs)", sent[0]["content"])
+
+    def test_song_titles_leave_the_track_number(self):
+        self.assertEqual(guard.song_title("16 - Trop beau.opus"), "Trop beau")
+        self.assertEqual(guard.song_title("1-01 - Trop beau.flac"), "Trop beau")
+        self.assertEqual(guard.song_title("Trop beau.mp3"), "Trop beau")
 
 
 class FakeLidarr:
