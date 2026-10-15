@@ -9,12 +9,14 @@ run at once:
 1. Translate. For each language on Bazarr's wanted list, at most --translate
    per run, once:
    - the video is GRACE_DAYS old, so Bazarr's searches go first;
-   - subextract has handled this very file completely (its state says so), so
-     a language the release carries inside the video is already a sidecar;
-   - no subtitle in that language is next to the video;
-   - an English sidecar subextract checked against the audio, unchanged since
-     and not itself a translation, is there to translate from (a plain one
-     rather than hearing-impaired: sound descriptions translate badly).
+   - no subtitle in that language is next to the video, nor inside it (any
+     track tagged with that language, text or picture: that one is
+     subextract's to extract, or a person's to choose);
+   - an English sidecar, not itself a translation, fits the video's audio (a
+     plain one rather than hearing-impaired: sound descriptions translate
+     badly). Fits means subextract checked that very file, or it passes
+     subextract's own check now, run by this job (at most --checks per run;
+     the verdict is kept until the file changes).
    Gemini gets the show, its summary, the episode's title, names to keep, and
    the dialogue 400 lines at a time; it returns the text of each line, and the
    numbering and timing are copied from the English by code. An answer missing
@@ -55,6 +57,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib/batlab-common"))
 from batlab_common import notify as apprise  # noqa: E402
+
+REPO = Path(__file__).resolve().parents[2]
 
 TAG = "Translated by AI"
 MARKERS = (TAG, "# Subtitles translated with ")  # ours, and Bazarr's own translator
@@ -167,13 +171,97 @@ def file_stamp(path: Path) -> list[int]:
     return [stat.st_size, stat.st_mtime_ns, stat.st_ino]
 
 
-def checked_by_subextract(video: Path, handled: dict) -> dict | None:
-    """subextract's record of this very file, when its last run on it was
-    complete; else None."""
-    record = handled.get(str(video))
-    try:
-        return record if record and record.get("video") == file_stamp(video) else None
-    except OSError:
+_subextract = None
+
+
+def subextract():
+    """subextract's module, for its language codes and its timing check."""
+    global _subextract
+    if _subextract is None:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("subextract", REPO / "subextract/scripts/subextract.py")
+        _subextract = importlib.util.module_from_spec(spec)
+        sys.modules["subextract"] = _subextract
+        spec.loader.exec_module(_subextract)
+    return _subextract
+
+
+def embedded_languages(info: dict) -> set[str]:
+    """Two-letter languages of the subtitle tracks inside the video."""
+    found = set()
+    for stream in info.get("streams", []):
+        if stream.get("codec_type") == "subtitle":
+            language = ((stream.get("tags") or {}).get("language") or "").lower()
+            if language and language not in ("und", "zxx", "mis"):
+                found.add(subextract().two_letter(language))
+    return found
+
+
+def probe(video: Path) -> dict:
+    import subprocess
+    result = subprocess.run(["ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", str(video)],
+                            capture_output=True, text=True, check=True, timeout=120)
+    return json.loads(result.stdout)
+
+
+def english_sidecars(video: Path) -> list[Path]:
+    """The English SRTs next to the video, plain before hearing-impaired,
+    never forced or a translation."""
+    found = []
+    for path in video.parent.iterdir():
+        if not path.name.startswith(video.stem + ".") or path.suffix.lower() != ".srt":
+            continue
+        parts = path.name[len(video.stem) + 1:].lower().split(".")[:-1]
+        if parts[:1] == [SOURCE_LANGUAGE] and "forced" not in parts and not is_translation(path):
+            found.append(("hi" in parts or "sdh" in parts, path.name, path))
+    return [path for *_, path in sorted(found)]
+
+
+class Timing:
+    """Whether an English sidecar fits the video's audio: subextract's record
+    of that very file, an earlier verdict of this job on it, or subextract's
+    check run now while the budget lasts. Verdicts are kept in state."""
+
+    def __init__(self, handled: dict, state: dict, data_root: Path, budget: int, container: str = "bazarr",
+                 check=None, log=print) -> None:
+        self.handled, self.verdicts = handled, state.setdefault("english", {})
+        self.data_root, self.budget, self.container, self.log = data_root, budget, container, log
+        self.check = check or self.subextract_check
+
+    def subextract_check(self, video: Path, sidecar: Path) -> tuple[bool, str]:
+        module = subextract()
+        with tempfile.TemporaryDirectory(prefix="subtranslate-") as workdir:
+            fit = module.Fit(video, module.keeper.probe(video), self.data_root, Path(workdir), self.container)
+            return fit(sidecar)
+
+    def fits(self, video: Path, sidecar: Path) -> bool | None:
+        """True or False, or None when it can't be told this run."""
+        stamp = file_stamp(sidecar)
+        record = self.handled.get(str(video)) or {}
+        if record.get("video") == file_stamp(video) and (record.get("sidecars") or {}).get(str(sidecar)) == stamp:
+            return True
+        known = self.verdicts.get(str(sidecar))
+        if known and known["stamp"] == stamp and known["video"] == file_stamp(video):
+            return known["fits"]
+        if self.budget <= 0:
+            return None
+        self.budget -= 1
+        try:
+            fits, reason = self.check(video, sidecar)
+        except (OSError, ValueError, RuntimeError) as error:
+            self.log(f"timing: {sidecar.name}: couldn't check ({error})")
+            return None
+        self.log(f"timing: {sidecar.name}: {reason}")
+        self.verdicts[str(sidecar)] = {"stamp": stamp, "video": file_stamp(video), "fits": fits, "reason": reason}
+        return fits
+
+    def source(self, video: Path) -> Path | None:
+        for sidecar in english_sidecars(video):
+            verdict = self.fits(video, sidecar)
+            if verdict:
+                return sidecar
+            if verdict is None:
+                return None  # a plain one unchecked yet: don't fall back to hearing-impaired meanwhile
         return None
 
 
@@ -182,24 +270,6 @@ def has_sidecar(video: Path, language: str) -> bool:
     prefix = f"{video.stem}.{language}."
     return any(path.name.startswith(prefix) and path.suffix.lower() in SUBTITLE_EXTENSIONS
                for path in video.parent.iterdir())
-
-
-def english_source(video: Path, record: dict) -> Path | None:
-    """The English SRT next to the video that subextract checked against the
-    audio and that hasn't changed since, plain before hearing-impaired, never
-    a translation."""
-    found = []
-    for name, stamp in (record.get("sidecars") or {}).items():
-        path = Path(name)
-        parts = path.name[len(video.stem) + 1:].lower().split(".") if path.name.startswith(video.stem + ".") else []
-        if parts[:1] != [SOURCE_LANGUAGE] or path.suffix.lower() != ".srt" or "forced" in parts:
-            continue
-        try:
-            if file_stamp(path) == stamp and not is_translation(path):
-                found.append(("hi" in parts or "sdh" in parts, path.name, path))
-        except OSError:
-            continue
-    return min(found)[2] if found else None
 
 
 # --- subtitles ------------------------------------------------------------------
@@ -408,9 +478,10 @@ def publish(path: Path, text: str) -> bool:
 
 # --- the run ----------------------------------------------------------------------
 
-def candidates(bazarr, media: Media, data_root: Path, handled: dict, state: dict, now: float):
-    """(row, language, video, English source) for each wanted language this
-    job may translate now; attempts no longer wanted are forgotten."""
+def candidates(bazarr, media: Media, data_root: Path, state: dict, now: float):
+    """(row, language, video) for each wanted language old enough and with
+    no subtitle next to the video; attempts no longer wanted are forgotten.
+    The costlier checks are translate_missing's."""
     wanted = bazarr.get(f"{media.plural}/wanted", start=0, length=-1)["data"]
     pairs = [(row, missing["code2"]) for row in wanted for missing in row.get("missing_subtitles") or []
              if missing["code2"] in LANGUAGES and not missing.get("forced") and not missing.get("hi")]
@@ -429,20 +500,18 @@ def candidates(bazarr, media: Media, data_root: Path, handled: dict, state: dict
                 continue
         except OSError:
             continue
-        record = checked_by_subextract(video, handled)
-        source = english_source(video, record) if record else None
-        if source:
-            yield row, language, video, source
+        yield row, language, video
 
 
-def translate_missing(bazarr, media: Media, data_root: Path, handled: dict, state: dict, now: float,
-                      translator, model: str, limit: int, apply: bool, only: str = "", log=print):
+def translate_missing(bazarr, media: Media, data_root: Path, timing: Timing, state: dict, now: float,
+                      translator, model: str, limit: int, apply: bool, only: str = "", log=print, probe=probe):
     """Translate up to limit wanted languages. Returns (translated, gave up,
     stopped): stopped when Gemini is unavailable (quota, load, network), which counts as no try."""
     attempts = state.setdefault("attempts", {})
     done, gave_up = [], []
     shows: dict[int, dict] = {}
-    for row, language, video, source in list(candidates(bazarr, media, data_root, handled, state, now)):
+    inside: dict[Path, set[str]] = {}
+    for row, language, video in list(candidates(bazarr, media, data_root, state, now)):
         title = f"{media.title(row)} → {language}"
         if only and only.lower() not in title.lower():
             continue
@@ -457,6 +526,19 @@ def translate_missing(bazarr, media: Media, data_root: Path, handled: dict, stat
             continue
         if len(done) >= limit:
             break
+        if has_sidecar(video, language):
+            continue  # one file holding two episodes, translated for the first
+        if video not in inside:
+            try:
+                inside[video] = embedded_languages(probe(video))
+            except (OSError, ValueError, RuntimeError) as error:
+                log(f"translate: {title}: can't read the video's tracks ({error})")
+                continue
+        if language in inside[video]:
+            continue
+        source = timing.source(video)
+        if not source:
+            continue
         log(f"translate: {title} from {source.name}")
         if not apply:
             done.append(title)
@@ -586,8 +668,10 @@ def run(args, data_root: Path, env_file: Path, apply: bool) -> int:
     try:
         handled = json.loads(Path(args.subextract_state).read_text())
     except (OSError, ValueError) as error:
-        print(f"subextract's state can't be read ({error}); not translating", file=sys.stderr)
+        print(f"subextract's state can't be read ({error}); English timing is checked here", file=sys.stderr)
         handled = {}
+    state["english"] = {path: verdict for path, verdict in state.get("english", {}).items() if Path(path).exists()}
+    timing = Timing(handled, state, data_root, args.checks if (translator or not apply) else 0)
     now = time.time()
     translated, replaced, gave_up, failed = [], [], [], 0
     try:
@@ -596,7 +680,7 @@ def run(args, data_root: Path, env_file: Path, apply: bool) -> int:
         replaced = look_for_humans(bazarr, data_root, state, minimum, now, args.searches, args.research_days, apply)
         left = args.translate if (translator or not apply) else 0
         for media in KINDS.values():
-            done, missed, stopped = translate_missing(bazarr, media, data_root, handled, state, now, translator,
+            done, missed, stopped = translate_missing(bazarr, media, data_root, timing, state, now, translator,
                                                       model or "?", left, apply, args.only)
             translated += done
             gave_up += missed
@@ -626,6 +710,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bazarr-url", default="http://bazarr.homelab.lan")
     parser.add_argument("--translate", type=int, default=6, help="translations per run (Gemini's quota)")
     parser.add_argument("--only", default="", help="translate only titles containing this ('Vinland Saga 2x1 → fr')")
+    parser.add_argument("--checks", type=int, default=6,
+                        help="English subtitles checked against the audio per run (a minute or two each)")
     parser.add_argument("--searches", type=int, default=8, help="AI subtitles searched again per run")
     parser.add_argument("--research-days", type=float, default=7, help="days between searches for one AI subtitle")
     parser.add_argument("--subextract-state", default=str(state_home / "batlab-subextract/handled.json"))

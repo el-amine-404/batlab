@@ -77,6 +77,14 @@ class Subtranslate(unittest.TestCase):
         self.checked()
         self.bazarr, self.translator, self.state = Bazarr(), Translator(), {}
         self.now = self.video.stat().st_mtime + 30 * DAY
+        self.streams = [{"codec_type": "audio", "tags": {"language": "jpn"}},
+                        {"codec_type": "subtitle", "codec_name": "ass", "tags": {"language": "eng"}}]
+        self.fit, self.checks, self.budget = (True, "audio timing OK"), [], 5
+
+    def check(self, video, sidecar):
+        """subextract's timing check, as this job would run it."""
+        self.checks.append(sidecar.name)
+        return self.fit
 
     def checked(self):
         """subextract's record after a complete run on the video."""
@@ -84,9 +92,11 @@ class Subtranslate(unittest.TestCase):
             str(path): subtranslate.file_stamp(path) for path in self.show.glob("*.srt")}}}
 
     def translate(self, now=None, limit=5, apply=True):
-        return subtranslate.translate_missing(self.bazarr, EPISODE, self.root, self.handled, self.state,
+        timing = subtranslate.Timing(self.handled, self.state, self.root, self.budget, check=self.check,
+                                     log=lambda *a: None)
+        return subtranslate.translate_missing(self.bazarr, EPISODE, self.root, timing, self.state,
                                               now or self.now, self.translator, "gemini-x", limit, apply,
-                                              log=lambda *a: None)
+                                              log=lambda *a: None, probe=lambda video: {"streams": self.streams})
 
     def test_writes_the_translation_with_the_english_timing_and_the_tag(self):
         self.assertEqual(self.translate(), (["Show 1x1 → fr"], [], False))
@@ -102,14 +112,48 @@ class Subtranslate(unittest.TestCase):
         self.assertTrue(subtranslate.is_translation(self.french))
         self.assertEqual(list(self.show.glob(".subtranslate-*")), [])
 
-    def test_waits_for_bazarr_then_for_subextract(self):
+    def test_bazarr_goes_first_on_new_videos(self):
         self.assertEqual(self.translate(now=self.video.stat().st_mtime + 2 * DAY)[0], [])
-        self.handled = {}
+        self.assertEqual(self.translator.requests, [])
+
+    def test_english_subextract_checked_is_used_as_it_is(self):
+        self.assertEqual(len(self.translate()[0]), 1)
+        self.assertEqual(self.checks, [])
+
+    def test_english_subextract_didnt_check_is_checked_here_once(self):
+        self.handled = {}  # subextract's run on this video wasn't complete, or it came later
+        self.fit = (False, "it is +2.50 s off")
         self.assertEqual(self.translate()[0], [])
+        self.assertEqual(self.translate(now=self.now + DAY)[0], [])
+        self.assertEqual(self.checks, ["S01E01.en.srt"])  # the verdict is kept
+        self.english.write_text(ENGLISH.replace("Hello", "Hi"), encoding="utf-8", newline="")
+        self.fit = (True, "audio timing OK")
+        self.assertEqual(len(self.translate(now=self.now + 2 * DAY)[0]), 1)  # a new file, checked again
+        self.assertEqual(len(self.checks), 2)
+
+    def test_a_video_that_changed_is_checked_again(self):
+        self.video.write_bytes(b"a new release")
+        self.assertEqual(len(self.translate()[0]), 1)
+        self.assertEqual(self.checks, ["S01E01.en.srt"])
+
+    def test_no_check_left_this_run_means_wait(self):
+        self.handled, self.budget = {}, 0
+        self.assertEqual(self.translate()[0], [])
+        (self.show / "S01E01.en.hi.srt").write_text("1\n00:00:02,000 --> 00:00:03,000\n[door creaks]\n")
         self.checked()
-        self.video.write_bytes(b"a new release")  # subextract hasn't seen this file yet
+        self.handled[str(self.video)]["sidecars"].pop(str(self.english))
+        self.assertEqual(self.translate()[0], [])  # the plain one first, not the checked hearing-impaired one
+
+    def test_never_a_language_inside_the_video(self):
+        self.streams.append({"codec_type": "subtitle", "codec_name": "hdmv_pgs_subtitle", "tags": {"language": "fre"}})
         self.assertEqual(self.translate()[0], [])
         self.assertEqual(self.translator.requests, [])
+
+    def test_one_file_for_two_episodes_is_translated_once(self):
+        second = dict(self.bazarr.wanted[0], episode_number="1x2", sonarrEpisodeId=8)
+        self.bazarr.wanted.append(second)
+        self.assertEqual(self.translate()[0], ["Show 1x1 → fr"])
+        self.assertEqual(len(self.translator.requests), 1)
 
     def test_never_over_a_subtitle_in_that_language(self):
         (self.show / "S01E01.fr.hi.ass").write_text("")
@@ -123,10 +167,7 @@ class Subtranslate(unittest.TestCase):
         self.assertEqual(self.state["attempts"], {})
         self.assertEqual(list(self.show.glob(".subtranslate-*")), [])
 
-    def test_only_from_an_english_subtitle_subextract_checked(self):
-        self.english.write_text("1\n00:00:02,000 --> 00:00:03,000\nChanged since\n")
-        self.assertEqual(self.translate()[0], [])
-        self.checked()
+    def test_never_from_a_translation(self):
         self.english.write_text("1\n00:00:00,000 --> 00:00:02,000\nTranslated by AI (x)\n")
         self.checked()
         self.assertEqual(self.translate()[0], [])
