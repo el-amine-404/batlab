@@ -250,6 +250,7 @@ export function MissingSongRow({
             </>
           )}
           {error.state === "gave_up" && <>No more tries on its own.</>}
+          {error.state === "failed" && <>It has no link of its own, so it can't be tried alone.</>}
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-1">

@@ -6,7 +6,7 @@ from .. import cookies, preferences, problems, schemas
 from ..context import base_settings, manager
 
 log = logging.getLogger("songdrop")
-router = APIRouter(tags=["settings"])
+router = APIRouter(tags=["Settings"])
 
 
 @router.get("/settings", summary="The current settings", response_model=schemas.Settings)

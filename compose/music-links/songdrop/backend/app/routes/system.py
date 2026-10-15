@@ -3,7 +3,7 @@ from fastapi import APIRouter
 from .. import schemas, system
 from ..context import manager
 
-router = APIRouter(tags=["system"])
+router = APIRouter(tags=["System"])
 
 
 @router.get("/system/status", summary="Tool versions, free space and jobs at a glance",

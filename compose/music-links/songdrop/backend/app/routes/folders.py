@@ -3,7 +3,7 @@ from fastapi import APIRouter, Query
 from .. import folders, schemas
 from ..context import manager
 
-router = APIRouter(tags=["folders"])
+router = APIRouter(tags=["Folders"])
 
 
 @router.get("/folders", summary="The folders inside one under the output root, for choosing the output folder",

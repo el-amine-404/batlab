@@ -7,7 +7,7 @@ from ..context import manager
 from ..jobs import JobError
 from .links import LinkIn
 
-router = APIRouter(tags=["jobs"])
+router = APIRouter(tags=["Jobs"])
 
 
 class JobIn(LinkIn):
@@ -82,7 +82,7 @@ def delete_job(job_id: str):
     return Response(status_code=204)
 
 
-@router.get("/jobs/{job_id}/files/{file_id}", tags=["files"], summary="Download one song",
+@router.get("/jobs/{job_id}/files/{file_id}", tags=["Files"], summary="Download one song",
             response_class=FileResponse)
 def download_file(job_id: str, file_id: str):
     """410 once the job has expired."""
@@ -90,7 +90,7 @@ def download_file(job_id: str, file_id: str):
     return FileResponse(path, filename=name, media_type="application/octet-stream")
 
 
-@router.get("/jobs/{job_id}/archive", tags=["files"], summary="Download a job's songs as one zip",
+@router.get("/jobs/{job_id}/archive", tags=["Files"], summary="Download a job's songs as one zip",
             response_class=FileResponse)
 def download_archive(job_id: str):
     """409 while the job runs."""

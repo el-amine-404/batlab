@@ -11,18 +11,18 @@ class LinkIn(BaseModel):
     url: str = Field(max_length=detect.MAX_URL_LENGTH, description="The link to download.")
 
 
-@router.get("/health", tags=["service"], summary="Whether songdrop is up", response_model=schemas.Health)
+@router.get("/health", tags=["Service"], summary="Whether songdrop is up", response_model=schemas.Health)
 def health():
     return {"ok": True}
 
 
-@router.get("/options", tags=["links"], summary="The download options of each engine, with their defaults",
+@router.get("/options", tags=["Links"], summary="The download options of each engine, with their defaults",
             response_model=schemas.OptionsSpec)
 def get_options():
     return options.describe(manager.settings.defaults)
 
 
-@router.post("/detect", tags=["links"], summary="Which engine would take a link, without downloading",
+@router.post("/detect", tags=["Links"], summary="Which engine would take a link, without downloading",
              response_model=schemas.Detection, response_model_exclude_none=True)
 def post_detect(body: LinkIn):
     try:

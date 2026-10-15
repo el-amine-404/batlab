@@ -46,6 +46,16 @@ app = FastAPI(
     docs_url=None,
     redoc_url=None,
     openapi_url="/api/v1/openapi.json",
+    openapi_tags=[
+        {"name": "Jobs", "description": "A job is one link being downloaded: its songs, the missing ones, and their later tries."},
+        {"name": "Files", "description": "The songs of a job, while it is kept."},
+        {"name": "Links", "description": "What songdrop makes of a link, and the download options."},
+        {"name": "Settings", "description": "What the Settings screens change. Secrets are write-only."},
+        {"name": "Folders", "description": "The folders under the output root, for choosing the output folder."},
+        {"name": "Connections", "description": "Where events go (Settings, Connect): one connection per destination."},
+        {"name": "System", "description": "Tool versions, disk space, jobs at a glance."},
+        {"name": "Service", "description": "Health."},
+    ],
     lifespan=lifespan,
 )
 

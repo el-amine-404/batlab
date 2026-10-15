@@ -5,7 +5,7 @@ from ..connections import TYPES
 from ..connections.store import ConnectionIn
 from ..context import connections
 
-router = APIRouter(tags=["connections"])
+router = APIRouter(tags=["Connections"])
 _PROBLEMS = {404: {"model": schemas.Problem}, 422: {"model": schemas.Problem}}
 
 
