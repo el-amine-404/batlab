@@ -12,10 +12,10 @@ subextract and this job take the same lock, so they never run at once, and
 this job writes its files itself, in one step that never replaces a file.
 
 ```
-subextract    every 15 min   embedded subtitles → sidecars, checked against the audio;
-                             records each video it handled completely
-subtranslate  every 6 h      a wanted language with no sidecar, on a video subextract
-                             handled completely → Gemini → <video>.<lang>.srt
+subextract    every 15 min   embedded subtitles → sidecars, checked against the audio
+subtranslate  every 6 h      a wanted language neither next to nor inside the video,
+                             from an English sidecar that fits the audio
+                             → Gemini → <video>.<lang>.srt
 Bazarr        its own times  downloads human subtitles; a download replaces an AI one
 ```
 
