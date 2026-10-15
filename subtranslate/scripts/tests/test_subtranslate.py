@@ -158,7 +158,7 @@ class Subtranslate(unittest.TestCase):
 
     def test_a_quota_refusal_stops_the_run_and_costs_no_try(self):
         def refuse(lines):
-            raise subtranslate.QuotaExceeded("quota")
+            raise subtranslate.GeminiUnavailable("quota")
         self.translator.answer = refuse
         self.assertEqual(self.translate(), ([], [], True))
         self.assertEqual(self.state["attempts"], {})
@@ -205,7 +205,7 @@ class Subtranslate(unittest.TestCase):
 
         def answer(lines):
             if "max" in lines[0]:
-                raise subtranslate.QuotaExceeded("quota")
+                raise subtranslate.GeminiUnavailable("quota")
             return [{"i": 0, "t": "Alors, qu'est-ce que tu as vu là-bas ?"}]
         self.translator.answer = answer
         self.assertEqual(self.translate(), (["Show 1x1 → fr"], [], True))

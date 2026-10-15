@@ -34,8 +34,8 @@ run at once:
 
 What it did goes to the downloads channel in one message per run. Gemini's key
 and model are GEMINI_API_KEY and GEMINI_MODEL in compose/.env; on a project
-with no billing account nothing can be charged, and a refusal for quota ends
-the run's translations.
+with no billing account nothing can be charged, and a refusal for quota, an overload
+or no answer ends the run's translations without counting a try.
 """
 from __future__ import annotations
 
@@ -75,8 +75,9 @@ TIMING = re.compile(r"^\s*(\d+:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(\d+:\d{2}:\d{2}[,.
 GEMINI = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 
-class QuotaExceeded(RuntimeError):
-    """Gemini refused for quota: no more translations this run."""
+class GeminiUnavailable(RuntimeError):
+    """Gemini over quota, overloaded or unreachable: no more translations
+    this run, and no try counted against the video."""
 
 
 class TranslationFailed(RuntimeError):
@@ -289,11 +290,11 @@ class Gemini:
                 answer = json.load(response)
         except urllib.error.HTTPError as error:
             detail = error.read(2000).decode(errors="replace")
-            if error.code == 429:
-                raise QuotaExceeded(f"Gemini: quota ({detail[:200]})") from error
+            if error.code == 429 or error.code >= 500:
+                raise GeminiUnavailable(f"Gemini answered {error.code}: {detail[:200]}") from error
             raise TranslationFailed(f"Gemini answered {error.code}: {detail[:300]}") from error
         except (urllib.error.URLError, OSError) as error:
-            raise TranslationFailed(f"Gemini unreachable: {getattr(error, 'reason', error)}") from error
+            raise GeminiUnavailable(f"Gemini unreachable: {getattr(error, 'reason', error)}") from error
         candidate = (answer.get("candidates") or [{}])[0]
         if candidate.get("finishReason") not in (None, "STOP"):
             raise TranslationFailed(f"Gemini stopped: {candidate.get('finishReason')}")
@@ -358,7 +359,7 @@ def shorten(translator, language: str, english: list[tuple[str, str, str]],
     longer than the English line, down to whichever is longer. Timing
     unchanged. A line comes back only shorter or not at all, and a failed
     request keeps the long lines. Returns (cues, stopped), stopped on a
-    quota refusal."""
+    refusal for quota or load."""
     limit = [max(room(start, stop), visible(words)) for start, stop, words in english]
     fast = [n for n, (_, _, words) in enumerate(translated) if visible(words) > limit[n]]
     if not fast:
@@ -370,7 +371,7 @@ def shorten(translator, language: str, english: list[tuple[str, str, str]],
         lines = [{"i": n, "t": translated[n][2], "en": english[n][2], "max": limit[n]} for n in numbers]
         try:
             texts = read_answer(translator(system, lines), set(numbers))
-        except QuotaExceeded:
+        except GeminiUnavailable:
             stopped = True
             break
         except TranslationFailed as error:
@@ -437,7 +438,7 @@ def candidates(bazarr, media: Media, data_root: Path, handled: dict, state: dict
 def translate_missing(bazarr, media: Media, data_root: Path, handled: dict, state: dict, now: float,
                       translator, model: str, limit: int, apply: bool, only: str = "", log=print):
     """Translate up to limit wanted languages. Returns (translated, gave up,
-    stopped): stopped when Gemini refused for quota, which counts as no try."""
+    stopped): stopped when Gemini is unavailable (quota, load, network), which counts as no try."""
     attempts = state.setdefault("attempts", {})
     done, gave_up = [], []
     shows: dict[int, dict] = {}
@@ -469,7 +470,7 @@ def translate_missing(bazarr, media: Media, data_root: Path, handled: dict, stat
                               names_to_keep(cues))
         try:
             translated = translate_cues(translator, system, cues)
-        except QuotaExceeded as error:
+        except GeminiUnavailable as error:
             attempts[key] = tried
             if not tried["count"]:
                 del attempts[key]
@@ -493,7 +494,7 @@ def translate_missing(bazarr, media: Media, data_root: Path, handled: dict, stat
             log(f"translate: Bazarr's rescan failed ({error}); its next scan will see it")
         done.append(title)
         if stopped:
-            log("translate: Gemini's quota is used up; the rest next time")
+            log("translate: Gemini is unavailable (quota, load); the rest next time")
             return done, gave_up, True
     return done, gave_up, False
 
