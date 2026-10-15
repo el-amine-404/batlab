@@ -6,10 +6,19 @@ Bazarr wants English, French and Arabic for every video. When no site has a
 language, this asks Bazarr to translate the video's English subtitle into it
 (Bazarr → Settings → Subtitles → Translating: Gemini). Every 6 hours:
 
-1. Translate. For each language on Bazarr's wanted list, once the video is
-   GRACE_DAYS old (Bazarr's searches go first) and has an English sidecar that
-   is not a translation itself, at most --translate per run. A translation that
-   doesn't appear is tried again a day later, three times in all.
+1. Translate. For each language on Bazarr's wanted list, at most --translate
+   per run, once:
+   - the video is GRACE_DAYS old, so Bazarr's searches go first;
+   - subextract has handled this very file (its state says so), so a language
+     the release carries inside the video is already a sidecar, and an
+     incomplete run (a track refused or skipped) leaves the video alone;
+   - no sidecar in that language is on disk, whatever Bazarr's list says:
+     Bazarr writes the translation as <video>.<lang>.srt, over anything there;
+   - an English sidecar subextract checked against the audio, and not itself
+     a translation, is there to translate from (not hearing-impaired when
+     there is a choice: sound descriptions translate badly).
+   A translation that doesn't appear is tried again a day later, three times
+   in all.
 2. Tag. Bazarr opens every translation with a cue, "# Subtitles translated with
    <model> #", shown for the first seconds. That cue is what marks a file as
    AI-made, for viewers and for this job; Bazarr's history (action 6) says
@@ -40,6 +49,7 @@ MARKER = "# Subtitles translated with "
 SOURCE_LANGUAGE = "en"
 TRANSLATED = 6           # Bazarr's history action for a translation
 GRACE_DAYS = 7
+SUBTITLE_EXTENSIONS = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".sup"}
 RETRY_SECONDS = 24 * 3600
 MAX_TRIES = 3
 DAY = 24 * 3600
@@ -109,12 +119,44 @@ def is_translation(path: Path) -> bool:
         return False
 
 
-def english_source(item: dict, data_root: Path) -> str | None:
-    """The Bazarr path of the video's English sidecar, not hearing-impaired
-    when there is a choice, and never one that is itself a translation."""
+def file_stamp(path: Path) -> list[int]:
+    """As subextract records a file: size, modification time, inode."""
+    stat = path.stat()
+    return [stat.st_size, stat.st_mtime_ns, stat.st_ino]
+
+
+def checked_by_subextract(video: Path, handled: dict) -> dict | None:
+    """subextract's record of this very file, when its last run on it was
+    complete; else None."""
+    record = handled.get(str(video))
+    try:
+        return record if record and record.get("video") == file_stamp(video) else None
+    except OSError:
+        return None
+
+
+def has_sidecar(video: Path, language: str) -> bool:
+    """A subtitle file in that language next to the video (.fr.srt, .fr.hi.ass…)."""
+    prefix = f"{video.stem}.{language}."
+    return any(path.name.startswith(prefix) and path.suffix.lower() in SUBTITLE_EXTENSIONS
+               for path in video.parent.iterdir())
+
+
+def english_source(item: dict, data_root: Path, record: dict) -> str | None:
+    """The Bazarr path of the video's English sidecar that subextract checked
+    against the audio (unchanged since), not hearing-impaired when there is a
+    choice, and never one that is itself a translation."""
+    checked = record.get("sidecars") or {}
+
+    def usable(path: str) -> bool:
+        local = host_path(path, data_root)
+        try:
+            return checked.get(str(local)) == file_stamp(local) and not is_translation(local)
+        except OSError:
+            return False
+
     found = [s for s in item.get("subtitles") or []
-             if s.get("code2") == SOURCE_LANGUAGE and s.get("path") and not s.get("forced")
-             and not is_translation(host_path(s["path"], data_root))]
+             if s.get("code2") == SOURCE_LANGUAGE and s.get("path") and not s.get("forced") and usable(s["path"])]
     found.sort(key=lambda s: bool(s.get("hi")))
     return found[0]["path"] if found else None
 
@@ -131,7 +173,7 @@ def ai_subtitles(bazarr, media: Media, data_root: Path) -> dict[str, dict]:
     return found
 
 
-def translate_missing(bazarr, media: Media, data_root: Path, state: dict, now: float, limit: int,
+def translate_missing(bazarr, media: Media, data_root: Path, state: dict, handled: dict, now: float, limit: int,
                       apply: bool, log=print) -> tuple[list[str], list[str]]:
     """Ask Bazarr to translate wanted languages. Returns what was asked, and
     what is still wanted a day after its last try (reported once)."""
@@ -166,9 +208,10 @@ def translate_missing(bazarr, media: Media, data_root: Path, state: dict, now: f
             age = now - video.stat().st_mtime
         except OSError:
             continue
-        if age < GRACE_DAYS * DAY:
+        if age < GRACE_DAYS * DAY or has_sidecar(video, language):
             continue
-        source = english_source(item, data_root)
+        record = checked_by_subextract(video, handled)
+        source = english_source(item, data_root, record) if record else None
         if not source:
             continue
         log(f"translate: {media.title(row)} {SOURCE_LANGUAGE} → {language}")
@@ -235,6 +278,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--translate", type=int, default=6, help="translations asked per run (Gemini's quota)")
     parser.add_argument("--searches", type=int, default=8, help="AI subtitles searched again per run")
     parser.add_argument("--research-days", type=float, default=7, help="days between searches for one AI subtitle")
+    parser.add_argument("--subextract-state", default=os.path.join(
+        os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"), "batlab-subextract/handled.json"))
     parser.add_argument("--state-dir", default=os.path.join(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"),
                                                             "batlab-subtranslate"))
     args = parser.parse_args(argv)
@@ -246,6 +291,11 @@ def main(argv: list[str] | None = None) -> int:
     state_path = Path(args.state_dir) / "state.json"
     state = json.loads(state_path.read_text()) if state_path.exists() else {}
     now = time.time()
+    try:
+        handled = json.loads(Path(args.subextract_state).read_text())
+    except (OSError, ValueError) as error:
+        print(f"subextract's state can't be read ({error}); not translating", file=sys.stderr)
+        handled = {}
     # The first run reports no translation: those were there before it.
     known = set(state["ai"]) if "ai" in state else None
 
@@ -266,7 +316,8 @@ def main(argv: list[str] | None = None) -> int:
             replaced += look_for_humans(bazarr, media, ai, data_root, state, now,
                                         int(settings["general"][media.score_setting]), args.searches,
                                         args.research_days, apply)
-            asked, missed = translate_missing(bazarr, media, data_root, state, now, args.translate, apply)
+            asked, missed = translate_missing(bazarr, media, data_root, state, handled, now, args.translate,
+                                              apply)
             args.translate -= len(asked)
             gave_up += missed
     except (urllib.error.URLError, OSError, ValueError, KeyError) as error:

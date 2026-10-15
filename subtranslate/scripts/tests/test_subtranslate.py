@@ -48,7 +48,9 @@ class Subtranslate(unittest.TestCase):
         self.show.mkdir(parents=True)
         self.video = self.show / "S01E01.mkv"
         self.video.write_bytes(b"v")
-        (self.show / "S01E01.en.srt").write_text("1\n00:00:02,000 --> 00:00:03,000\nHello\n")
+        self.english = self.show / "S01E01.en.srt"
+        self.english.write_text("1\n00:00:02,000 --> 00:00:03,000\nHello\n")
+        self.checked()
         self.bazarr = Bazarr()
         self.bazarr.wanted = [{"seriesTitle": "Show", "episode_number": "1x1", "sonarrSeriesId": 3,
                                "sonarrEpisodeId": 7, "missing_subtitles": [
@@ -60,9 +62,14 @@ class Subtranslate(unittest.TestCase):
         self.state = {}
         self.now = self.video.stat().st_mtime + 30 * DAY
 
+    def checked(self):
+        """subextract's record after a complete run on the video."""
+        self.handled = {str(self.video): {"video": subtranslate.file_stamp(self.video), "sidecars": {
+            str(path): subtranslate.file_stamp(path) for path in self.show.glob("*.srt")}}}
+
     def translate(self, now=None, limit=5, apply=True):
-        return subtranslate.translate_missing(self.bazarr, EPISODE, self.root, self.state, now or self.now,
-                                              limit, apply, log=lambda *a: None)
+        return subtranslate.translate_missing(self.bazarr, EPISODE, self.root, self.state, self.handled,
+                                              now or self.now, limit, apply, log=lambda *a: None)
 
     def test_translates_the_missing_language_from_the_english_sidecar(self):
         asked, gave_up = self.translate()
@@ -75,8 +82,33 @@ class Subtranslate(unittest.TestCase):
     def test_bazarr_goes_first_on_new_videos(self):
         self.assertEqual(self.translate(now=self.video.stat().st_mtime + 2 * DAY)[0], [])
 
+    def test_waits_for_subextract(self):
+        self.handled = {}
+        self.assertEqual(self.translate()[0], [])
+        self.checked()
+        self.video.write_bytes(b"a new release")  # subextract hasn't seen this file yet
+        self.assertEqual(self.translate()[0], [])
+
+    def test_never_over_a_sidecar_in_that_language(self):
+        (self.show / "S01E01.fr.hi.ass").write_text("")
+        self.assertEqual(self.translate()[0], [])
+
+    def test_only_an_english_sidecar_subextract_checked(self):
+        self.english.write_text("1\n00:00:02,000 --> 00:00:03,000\nHello there\n")  # changed since
+        self.assertEqual(self.translate()[0], [])
+
+    def test_hearing_impaired_only_when_there_is_no_plain_one(self):
+        hi = self.show / "S01E01.en.hi.srt"
+        hi.write_text("1\n00:00:02,000 --> 00:00:03,000\n[door creaks]\n")
+        self.bazarr.items[7]["subtitles"].insert(0, {"code2": "en", "path": "/data/media/tv/Show/S01E01.en.hi.srt",
+                                                     "forced": False, "hi": True})
+        self.checked()
+        self.translate()
+        self.assertEqual(self.bazarr.calls[0][2]["path"], "/data/media/tv/Show/S01E01.en.srt")
+
     def test_no_english_sidecar_or_only_a_translation_means_no_source(self):
-        (self.show / "S01E01.en.srt").write_text(CUE)
+        self.english.write_text(CUE)
+        self.checked()
         self.assertEqual(self.translate()[0], [])
         self.bazarr.items[7]["subtitles"].pop()
         self.assertEqual(self.translate()[0], [])

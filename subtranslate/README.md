@@ -6,11 +6,24 @@ exist on no subtitle site: in 2026-10, Arabic for most of *Attack on Titan* and
 translation of the English subtitle, and keeps looking for a human one to
 replace it. It runs every 6 hours:
 
-1. **Translate.** For each language on Bazarr's wanted list, once the video is
-   7 days old (Bazarr's own searches go first) and has an English sidecar, it
-   asks Bazarr to translate that sidecar with Gemini, at most 6 per run. A
-   translation that doesn't appear is tried again a day later, three times in
-   all, then reported once.
+1. **Translate.** For each language on Bazarr's wanted list, it asks Bazarr to
+   translate the English sidecar with Gemini, at most 6 per run, once:
+   - the video is 7 days old, so Bazarr's own searches go first;
+   - [subextract](../subextract/README.md) has handled that very file
+     completely (its state says so), so a language the release carries inside
+     the video is already a sidecar and is never translated; a video with a
+     track subextract refused or skipped is left alone;
+   - no subtitle in that language is next to the video, whatever Bazarr's list
+     says: Bazarr writes `<video>.<lang>.srt`, over anything there;
+   - the English sidecar is one subextract checked against the audio and that
+     hasn't changed since; a plain one rather than hearing-impaired (sound
+     descriptions translate badly), and never a translation.
+
+   A translation that doesn't appear is tried again a day later, three times
+   in all, then reported once.
+
+   Gemini gets the show's title, year and summary from Bazarr, and the
+   dialogue 300 lines at a time, so most of an episode in one request.
 2. **Tag.** Bazarr opens every translation with the line `# Subtitles
    translated with <model> #`, shown for the first seconds of the video. That
    line marks the file as AI-made, for whoever watches and for this job.
@@ -23,10 +36,10 @@ Bazarr refuses AI and machine-translated subtitles from OpenSubtitles, so a
 replacement is always a human one. A run that did something posts one message
 to `#downloads`: what was translated, replaced, or given up on.
 
-Nothing is translated from a translation, nor into English, and a video with
-no English sidecar is left alone (most of *Courage the Cowardly Dog*).
-[subextract](../subextract/README.md) writes the English sidecar from the
-release's own subtitles. Expect AI subtitles to get jokes, names and he/she
+Nothing is translated into English, and a video with no English sidecar is
+left alone (most of *Courage the Cowardly Dog*). Where a release has several
+English tracks, subextract already chose one (the release's default, then the
+least cluttered, then the most complete). Expect AI subtitles to get jokes, names and he/she
 wrong now and then; they are a stopgap.
 
 ## Setting up Gemini
