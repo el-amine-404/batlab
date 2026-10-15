@@ -120,8 +120,10 @@ services:
     user: "10001:10001"
     volumes:
       - ${CONFIGS_ROOT}/frigate/camwatch/camwatch.py:/app/camwatch.py:ro
-      # batlab's shared code (lib/batlab-common): its Apprise client.
-      - ${CONFIGS_ROOT}/../lib/batlab-common/batlab_common:/opt/batlab-common/batlab_common:ro
+      # batlab's shared code (lib/batlab-common): its Apprise client. Relative
+      # to this file: CONFIGS_ROOT/.. would be read as text, not through
+      # CONFIGS_ROOT's symlink, and Docker would mount an empty folder.
+      - ../../lib/batlab-common/batlab_common:/opt/batlab-common/batlab_common:ro
     environment:
       - TZ=${TZ}
       - PYTHONDONTWRITEBYTECODE=1
