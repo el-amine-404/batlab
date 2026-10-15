@@ -266,7 +266,9 @@ def main(argv: list[str] | None = None) -> int:
             replaced += look_for_humans(bazarr, media, ai, data_root, state, now,
                                         int(settings["general"][media.score_setting]), args.searches,
                                         args.research_days, apply)
-            gave_up += translate_missing(bazarr, media, data_root, state, now, args.translate, apply)[1]
+            asked, missed = translate_missing(bazarr, media, data_root, state, now, args.translate, apply)
+            args.translate -= len(asked)
+            gave_up += missed
     except (urllib.error.URLError, OSError, ValueError, KeyError) as error:
         print(f"subtranslate: Bazarr: {error}", file=sys.stderr)
         failed = 1
