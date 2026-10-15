@@ -230,7 +230,11 @@ class Timing:
 
     def subextract_check(self, video: Path, sidecar: Path) -> tuple[bool, str]:
         module = subextract()
-        with tempfile.TemporaryDirectory(prefix="subtranslate-") as workdir:
+        # Where subextract works: on the data disk, which the checker's container sees as /data.
+        workroot = self.data_root / "recycle" / ".subextract"
+        workroot.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="subtranslate-", dir=workroot) as workdir:
+            os.chmod(workdir, 0o777)  # Bazarr may run as a different user; it writes there too
             fit = module.Fit(video, module.keeper.probe(video), self.data_root, Path(workdir), self.container)
             return fit(sidecar)
 
