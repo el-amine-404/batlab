@@ -30,7 +30,7 @@ lost. Now:
 
 ## What it does
 
-1. **Translate.** For each language on Bazarr's wanted list, at most 6 per
+1. **Translate.** For each language on Bazarr's wanted list, at most 3 per
    run, once:
    - the video is 7 days old, so Bazarr's own searches go first;
    - no subtitle in that language is next to the video, nor inside it: a
@@ -86,6 +86,11 @@ Dog*). Expect AI subtitles to get jokes, names and he/she wrong now and then;
 they are a stopgap.
 
 ## Gemini
+
+The free tier allows 20 requests a day for each model (`gemini-3.8-flash`,
+2026-10). A translation takes one request, two with the reading-speed pass, so
+about 10 subtitles a day: 3 per run, over the day's four runs. A run that finds
+the quota used up stops, and the next day carries on.
 
 `GEMINI_API_KEY` and `GEMINI_MODEL` in `compose/.env`. A key from
 [Google AI Studio](https://aistudio.google.com/apikey) on a project with no

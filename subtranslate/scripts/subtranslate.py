@@ -732,7 +732,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--env-file", default=str(repo / "compose/.env"))
     parser.add_argument("--data-root", default="/mnt/storage/data")
     parser.add_argument("--bazarr-url", default="http://bazarr.homelab.lan")
-    parser.add_argument("--translate", type=int, default=6, help="translations per run (Gemini's quota)")
+    # Gemini's free tier allows 20 requests a day per model; a translation takes one or two (the
+    # reading-speed pass), so three per run, four runs a day, share the day's quota across the runs.
+    parser.add_argument("--translate", type=int, default=3, help="translations per run (Gemini's quota)")
     parser.add_argument("--only", default="", help="translate only titles containing this ('Vinland Saga 2x1 → fr')")
     parser.add_argument("--checks", type=int, default=6,
                         help="English subtitles checked against the audio per run (a minute or two each)")
