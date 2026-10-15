@@ -18,7 +18,10 @@ run at once:
    Gemini gets the show, its summary, the episode's title, names to keep, and
    the dialogue 400 lines at a time; it returns the text of each line, and the
    numbering and timing are copied from the English by code. An answer missing
-   a line, or with an empty one, is refused. The file is written in one step
+   a line, or with an empty one, is refused. Lines harder to read than the
+   English (over MAX_CPS characters a second and longer than the English line)
+   go back to Gemini once, to be shortened with the same meaning; the timing
+   never changes. The file is written in one step
    that never replaces a file: a subtitle Bazarr wrote meanwhile wins, and one
    Bazarr writes later replaces the translation, as it should.
 2. Tag. Every translation opens with a line, "Translated by AI (<model>)",
@@ -63,6 +66,10 @@ RETRY_SECONDS = 24 * 3600
 MAX_TRIES = 3
 DAY = 24 * 3600
 CHUNK = 400
+# Characters a second an adult reads comfortably (Netflix's guideline for English). 17, the usual figure
+# for other languages, is broken by a quarter of the English lines in anime: a translation is held to
+# the English it comes from, never asked to be shorter than it.
+MAX_CPS = 20
 SUBTITLE_EXTENSIONS = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".sup"}
 TIMING = re.compile(r"^\s*(\d+:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(\d+:\d{2}:\d{2}[,.]\d{3})")
 GEMINI = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -199,7 +206,7 @@ def english_source(video: Path, record: dict) -> Path | None:
 def parse_srt(text: str) -> list[tuple[str, str, str]]:
     """(start, end, text) of each cue with text."""
     cues = []
-    for block in re.split(r"\n\s*\n", text.replace("\r\n", "\n").replace("\r", "\n").lstrip("﻿")):
+    for block in re.split(r"\n\s*\n", text.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")):
         lines = block.strip("\n").split("\n")
         for number, line in enumerate(lines[:2]):
             match = TIMING.match(line)
@@ -297,28 +304,86 @@ class Gemini:
             raise TranslationFailed("Gemini's answer isn't the JSON asked for") from error
 
 
+def read_answer(answer: object, wanted: set[int]) -> dict[int, str]:
+    """{line number: text} from Gemini's answer; TranslationFailed when a
+    line is missing, doubled, unknown or empty."""
+    if not isinstance(answer, list):
+        raise TranslationFailed("Gemini's answer isn't a list of lines")
+    texts = {}
+    for line in answer:
+        if not isinstance(line, dict) or not isinstance(line.get("t"), str) or line.get("i") in texts:
+            raise TranslationFailed("Gemini's answer has a malformed or doubled line")
+        texts[line["i"]] = line["t"].strip()
+    if set(texts) != wanted or not all(texts.values()):
+        missing = len(wanted - set(texts)) + sum(1 for i in wanted if not texts.get(i))
+        raise TranslationFailed(f"Gemini's answer lacks {missing} of {len(wanted)} lines")
+    return texts
+
+
 def translate_cues(translator, system: str, cues: list[tuple[str, str, str]]) -> list[tuple[str, str, str]]:
     """The cues with their text translated, CHUNK lines per request; timing
-    and order are the English's. TranslationFailed when a line is missing,
-    doubled, unknown or empty."""
+    and order are the English's."""
     out = []
     for first in range(0, len(cues), CHUNK):
         part = cues[first:first + CHUNK]
         lines = [{"i": first + number, "t": words} for number, (_, _, words) in enumerate(part)]
-        answer = translator(system, lines)
-        if not isinstance(answer, list):
-            raise TranslationFailed("Gemini's answer isn't a list of lines")
-        texts = {}
-        for line in answer:
-            if not isinstance(line, dict) or not isinstance(line.get("t"), str) or line.get("i") in texts:
-                raise TranslationFailed("Gemini's answer has a malformed or doubled line")
-            texts[line["i"]] = line["t"].strip()
-        wanted = {line["i"] for line in lines}
-        if set(texts) != wanted or not all(texts.values()):
-            missing = len(wanted - set(texts)) + sum(1 for i in wanted if not texts.get(i))
-            raise TranslationFailed(f"Gemini's answer lacks {missing} of {len(wanted)} lines")
+        texts = read_answer(translator(system, lines), {line["i"] for line in lines})
         out += [(start, stop, texts[first + number]) for number, (start, stop, _) in enumerate(part)]
     return out
+
+
+def visible(text: str) -> int:
+    """Characters a viewer reads: tags left out, a line break as a space."""
+    return len(re.sub(r"<[^>]+>", "", text).replace("\n", " ").strip())
+
+
+def room(start: str, stop: str) -> int:
+    """Characters a line on screen from start to stop can hold at MAX_CPS."""
+    return max(1, (milliseconds(stop) - milliseconds(start)) * MAX_CPS // 1000)
+
+
+def shortening_instructions(language: str) -> str:
+    return (f"These {language} subtitle lines, translated from English, are too long to read in the time they "
+            f"are on screen. Give each a shorter {language} line with the same meaning, at most \"max\" "
+            "characters; \"en\" is the English, for the meaning. Drop filler, repetition and what the picture "
+            "already shows; keep names and tags such as <i>…</i>. The input is a JSON array of {\"i\", \"t\", "
+            "\"en\", \"max\"}; answer with an array of {\"i\", \"t\"}: every \"i\" once, in the same order. "
+            "Never add notes or explanations.")
+
+
+def shorten(translator, language: str, english: list[tuple[str, str, str]],
+            translated: list[tuple[str, str, str]], log=print) -> tuple[list[tuple[str, str, str]], bool]:
+    """The translation with its lines harder to read than the English
+    shortened by a second request: over MAX_CPS for their time on screen and
+    longer than the English line, down to whichever is longer. Timing
+    unchanged. A line comes back only shorter or not at all, and a failed
+    request keeps the long lines. Returns (cues, stopped), stopped on a
+    quota refusal."""
+    limit = [max(room(start, stop), visible(words)) for start, stop, words in english]
+    fast = [n for n, (_, _, words) in enumerate(translated) if visible(words) > limit[n]]
+    if not fast:
+        return translated, False
+    out, shortened, stopped = list(translated), 0, False
+    system = shortening_instructions(language)
+    for first in range(0, len(fast), CHUNK):
+        numbers = fast[first:first + CHUNK]
+        lines = [{"i": n, "t": translated[n][2], "en": english[n][2], "max": limit[n]} for n in numbers]
+        try:
+            texts = read_answer(translator(system, lines), set(numbers))
+        except QuotaExceeded:
+            stopped = True
+            break
+        except TranslationFailed as error:
+            log(f"reading speed: {error}; long lines kept")
+            continue
+        for n in numbers:
+            if visible(texts[n]) < visible(out[n][2]):
+                out[n] = (out[n][0], out[n][1], texts[n])
+                shortened += 1
+    still = sum(1 for n, (_, _, words) in enumerate(out) if visible(words) > limit[n])
+    log(f"reading speed: {len(fast)} line(s) harder to read than the English, {shortened} shortened, "
+        f"{still} still over")
+    return out, stopped
 
 
 def publish(path: Path, text: str) -> bool:
@@ -413,6 +478,7 @@ def translate_missing(bazarr, media: Media, data_root: Path, handled: dict, stat
         except TranslationFailed as error:
             log(f"translate: {title}: {error}")
             continue
+        translated, stopped = shorten(translator, LANGUAGES[language], cues, translated, log)
         destination = video.with_name(f"{video.stem}.{language}.srt")
         del attempts[key]
         if not publish(destination, compose_srt(translated, f"{TAG} ({model})")):
@@ -426,6 +492,9 @@ def translate_missing(bazarr, media: Media, data_root: Path, handled: dict, stat
         except (urllib.error.URLError, OSError) as error:
             log(f"translate: Bazarr's rescan failed ({error}); its next scan will see it")
         done.append(title)
+        if stopped:
+            log("translate: Gemini's quota is used up; the rest next time")
+            return done, gave_up, True
     return done, gave_up, False
 
 

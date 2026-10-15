@@ -50,6 +50,19 @@ lost. Now:
    each line; the numbering and timing are copied from the English by code.
    An answer missing a line, doubling one or leaving one empty is refused and
    tried again a day later, three times in all, then reported once.
+
+   **Reading speed.** The timing is the English's on purpose: a line shows
+   while a character speaks, whatever the language, and subextract checked
+   that timing against this very video. What a translation changes is the
+   length: French runs 15 to 20% longer than English. A translated line over
+   20 characters a second (Netflix's guideline for English) and longer than
+   the English line goes back to Gemini once, with the most characters it may
+   have, to be shortened with the same meaning; it comes back only shorter or
+   not at all. A translation is held to the English, never made shorter than
+   it: 17 a second, the usual figure for other languages, is broken by a
+   quarter of the English lines of *Attack on Titan* S03E03. Estimated at
+   French length, that pass sends 31 of 200 lines of *Vinland Saga* S02E01
+   and 104 of 384 of *Attack on Titan* S03E03: one more request.
 2. **Tag.** Every translation opens with `Translated by AI (<model>)` for its
    first seconds. That line marks the file for whoever watches and for this
    job, which tells Bazarr to rescan the show so it stops asking for it.

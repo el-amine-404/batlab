@@ -9,9 +9,9 @@ import subtranslate  # noqa: E402
 
 DAY = 24 * 3600
 EPISODE = subtranslate.KINDS["episode"]
-ENGLISH = ("﻿1\r\n00:00:02,000 --> 00:00:03,500\r\nHello, Thorfinn.\r\n\r\n"
-           "2\r\n00:00:04,000 --> 00:00:05,000\r\n<i>Where is Thorfinn?</i>\r\n\r\n"
-           "3\r\n00:00:06,000 --> 00:00:07,000\r\n\r\n")  # an empty cue is dropped
+ENGLISH = ("\ufeff1\r\n00:00:02,000 --> 00:00:03,500\r\nHello, Thorfinn.\r\n\r\n"
+           "2\r\n00:00:04,000 --> 00:00:06,000\r\n<i>Where is Thorfinn?</i>\r\n\r\n"
+           "3\r\n00:00:07,000 --> 00:00:08,000\r\n\r\n")  # an empty cue is dropped
 
 
 class Bazarr:
@@ -57,6 +57,8 @@ class Translator:
             self.before_answer()
         if self.answer:
             return self.answer(lines)
+        if "max" in lines[0]:  # the reading-speed request
+            return [{"i": line["i"], "t": line["t"][:line["max"]]} for line in lines]
         return [{"i": line["i"], "t": "FR " + line["t"]} for line in lines]
 
 
@@ -91,7 +93,7 @@ class Subtranslate(unittest.TestCase):
         cues = subtranslate.parse_srt(self.french.read_text())
         self.assertEqual(cues, [("00:00:00,000", "00:00:02,000", "Translated by AI (gemini-x)"),
                                 ("00:00:02,000", "00:00:03,500", "FR Hello, Thorfinn."),
-                                ("00:00:04,000", "00:00:05,000", "FR <i>Where is Thorfinn?</i>")])
+                                ("00:00:04,000", "00:00:06,000", "FR <i>Where is Thorfinn?</i>")])
         system = self.translator.requests[0][0]
         for words in ("French", '"Show" (2019)', "A boy wants revenge.", '"Somewhere"', "Thorfinn"):
             self.assertIn(words, system)
@@ -169,6 +171,45 @@ class Subtranslate(unittest.TestCase):
         self.assertEqual(len(self.translator.requests), 2)
         self.assertEqual(self.translator.requests[1][1][0], {"i": subtranslate.CHUNK, "t": f"line {subtranslate.CHUNK}"})
         self.assertEqual(out[-1], (cues[-1][0], cues[-1][1], f"FR line {subtranslate.CHUNK + 9}"))
+
+    def test_lines_too_long_for_their_time_are_shortened(self):
+        fast = "So, what did you see out there, Thorfinn?"  # 41 characters in 1.5 s: already over 20 a second
+        english = [("00:00:01,000", "00:00:02,000", "Run!"),           # 20 characters fit in 1 s
+                   ("00:00:03,000", "00:00:06,000", "Where were you?"),  # 60 fit in 3 s
+                   ("00:00:07,000", "00:00:08,500", fast)]
+        long, short = "Cours, cours aussi vite que tu peux !", "Où étais-tu ?"
+        same = "Alors, t'as vu quoi là-bas, Thorfinn ?"  # shorter than the English: left alone
+        longer = "Alors, qu'est-ce que tu as vu là-bas, Thorfinn ?"
+        translated = [(*english[0][:2], long), (*english[1][:2], short), (*english[2][:2], same)]
+        out, stopped = subtranslate.shorten(self.translator, "French", english, translated, log=lambda *a: None)
+        self.assertFalse(stopped)
+        self.assertEqual(self.translator.requests[0][1], [{"i": 0, "t": long, "en": "Run!", "max": 20}])
+        self.assertIn("French", self.translator.requests[0][0])
+        self.assertEqual(out, [(*english[0][:2], long[:20]), translated[1], translated[2]])
+        translated[2] = (*english[2][:2], longer)
+        subtranslate.shorten(self.translator, "French", english, translated, log=lambda *a: None)
+        self.assertEqual(self.translator.requests[1][1][1], {"i": 2, "t": longer, "en": fast, "max": len(fast)})
+
+    def test_a_shortening_that_isnt_shorter_or_fails_keeps_the_line(self):
+        english = [("00:00:01,000", "00:00:02,000", "Run!")]
+        translated = [(*english[0][:2], "<i>Cours, cours aussi vite que tu peux !</i>")]
+        for answer in (lambda lines: [{"i": 0, "t": "Cours, cours, cours aussi vite que tu le peux !"}],
+                       lambda lines: []):
+            self.translator.answer = answer
+            out, stopped = subtranslate.shorten(self.translator, "French", english, translated, log=lambda *a: None)
+            self.assertEqual((out, stopped), (translated, False))
+
+    def test_a_quota_refusal_while_shortening_still_writes_the_translation(self):
+        self.english.write_text("1\n00:00:02,000 --> 00:00:02,500\nSo, what did you see out there?\n")
+        self.checked()
+
+        def answer(lines):
+            if "max" in lines[0]:
+                raise subtranslate.QuotaExceeded("quota")
+            return [{"i": 0, "t": "Alors, qu'est-ce que tu as vu là-bas ?"}]
+        self.translator.answer = answer
+        self.assertEqual(self.translate(), (["Show 1x1 → fr"], [], True))
+        self.assertIn("qu'est-ce que tu as vu là-bas", self.french.read_text())
 
     def test_dry_run_asks_gemini_nothing_and_writes_nothing(self):
         self.assertEqual(self.translate(apply=False)[0], ["Show 1x1 → fr"])
