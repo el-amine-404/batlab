@@ -13,7 +13,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import cookies, detect, messages, notify, options, preferences  # noqa: E402
+from app import connections, cookies, detect, events, folders, messages, options, outbound, preferences, problems  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.jobs import JobError, JobManager  # noqa: E402
 
@@ -318,13 +318,11 @@ class JobsTest(unittest.TestCase):
             job_timeout_seconds=60, spotdl_python=sys.executable, app_python=sys.executable, deno=None,
         )
         self.runner = runner
-        self.sent = []
-        self.notify = mock.patch.object(notify, "send", side_effect=lambda hook, lines: self.sent.append(lines))
-        self.notify.start()
+        self.events = []
         self.manager = self._manager()
 
     def _manager(self):
-        manager = JobManager(self.settings)
+        manager = JobManager(self.settings, emit=self.events.append)
         manager._runner_command = lambda job, job_dir, url=None: ([sys.executable, str(self.runner)],
                                                                   {"url": url or job.url})
         manager.start()
@@ -332,8 +330,10 @@ class JobsTest(unittest.TestCase):
 
     def tearDown(self):
         self.manager.stop()
-        self.notify.stop()
         self.tmp.cleanup()
+
+    def _sent(self, name):
+        return [event for event in self.events if event.name == name]
 
     def _submit(self, mode):
         found = detect.Detection("ytdlp", "YouTube", "playlist", f"https://youtube.com/{mode}")
@@ -446,7 +446,7 @@ class JobsTest(unittest.TestCase):
             time.sleep(0.05)
         self.fail("retry did not end")
 
-    def test_a_missing_song_waits_for_a_later_try_and_discord_hears(self):
+    def test_a_missing_song_waits_for_a_later_try_and_is_reported(self):
         job = self._wait(self._spotify("flaky")["id"])
         self.assertEqual(job["status"], "partial")
         [error] = job["errors"]
@@ -454,10 +454,12 @@ class JobsTest(unittest.TestCase):
         self.assertAlmostEqual(error["next_retry_at"], time.time() + 600, delta=30)
         self.assertEqual(error["url"], "https://open.spotify.com/track/comesback")
         self.assertEqual(job["notes"][0]["name"], "Artist - Song 0")
-        [message] = self.sent
-        self.assertIn("1 of 2 songs", message[0])
-        self.assertTrue(any("Artist - Song 1" in line and "Trying again in 10 min" in line for line in message))
-        self.assertTrue(any("another song" in line for line in message))
+        [event] = self._sent("job.incomplete")
+        self.assertEqual(len(self._sent("job.finished")), 1)
+        self.assertIn("1 of 2 songs", event.subject)
+        self.assertTrue(any("Artist - Song 1" in line and "Trying again in 10 min" in line for line in event.lines))
+        self.assertTrue(any("another song" in line for line in event.lines))
+        self.assertEqual(event.data["job"]["id"], job["id"])
         # Not removed while a try is pending, whatever its age.
         self.assertEqual(self.manager.expire(now=time.time() + 25 * 3600), 0)
 
@@ -468,7 +470,7 @@ class JobsTest(unittest.TestCase):
         self.assertIn("Artist - Song 1.opus", os.listdir(self.settings.output_dir))
         path, _ = self.manager.file(job["id"], next(f["id"] for f in job["files"] if f["title"] == "Song 1"))
         self.assertTrue(path.is_file())
-        self.assertIn("got Artist - Song 1 on try 2", self.sent[-1][0])
+        self.assertIn("got Artist - Song 1 on try 2", self._sent("song.recovered")[-1].subject)
 
     def test_gives_up_after_the_last_try_and_says_so(self):
         job = self._wait(self._spotify("lost")["id"])
@@ -476,7 +478,7 @@ class JobsTest(unittest.TestCase):
             job = self._try_again(job["id"])
         [error] = job["errors"]
         self.assertEqual((error["state"], error["tries"], error["next_retry_at"]), ("gave_up", MAX_TRIES, None))
-        self.assertIn("gave up on Artist - Song 1", self.sent[-1][0])
+        self.assertIn("gave up on Artist - Song 1", self._sent("song.gave_up")[-1].subject)
         self.assertEqual(self.manager.expire(now=time.time() + 25 * 3600), 1)
 
     def test_no_retry_while_running_or_for_unknown_songs(self):
@@ -503,7 +505,7 @@ class JobsTest(unittest.TestCase):
 
     def test_the_caller_is_told_when_its_job_ends(self):
         calls = []
-        with mock.patch.object(notify, "post_json", side_effect=lambda url, payload: calls.append((url, payload))):
+        with mock.patch.object(outbound, "post_json", side_effect=lambda url, payload: calls.append((url, payload))):
             found = detect.Detection("ytdlp", "YouTube", "playlist", "https://youtube.com/ok")
             job = self.manager.submit(found, options.parse("ytdlp", {}), "http://browser.lan/hook")
             self._wait(job["id"])
@@ -525,10 +527,10 @@ class PreferencesTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.state = Path(self.tmp.name)
-        self.base = Settings(port=0, state_dir=self.state, output_root=Path("/output"), output_folder="music/songdrop",
+        (self.state / "out").mkdir()
+        self.base = Settings(port=0, state_dir=self.state, output_root=self.state / "out", output_folder="music/songdrop",
                              static_dir=self.state, retention_hours=24, max_items=200, concurrent_jobs=1,
-                             spotdl_parallel=3, job_timeout_seconds=10800, spotdl_python="", app_python="", deno=None,
-                             discord_webhook="https://discord.com/api/webhooks/1/env-secret")
+                             spotdl_parallel=3, job_timeout_seconds=10800, spotdl_python="", app_python="", deno=None)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -540,24 +542,18 @@ class PreferencesTest(unittest.TestCase):
         self.assertEqual(again.max_items, 200, "untouched: the environment's")
         self.assertEqual(os.stat(self.state / preferences.FILE).st_mode & 0o777, 0o600)
 
-    def test_the_webhook_is_never_shown(self):
-        shown = json.dumps(preferences.public(self.base))
-        self.assertNotIn("env-secret", shown)
-        self.assertTrue(preferences.public(self.base)["discord_webhook_set"])
-        cleared = preferences.update(self.base, self.state, {"discord_webhook": ""})
-        self.assertFalse(preferences.public(cleared)["discord_webhook_set"])
-
     def test_bad_settings_refused_with_a_reason(self):
         for bad, words in (({"output_folder": "../etc"}, "inside the output folder"),
                            ({"output_folder": "/"}, "inside the output folder"),
                            ({"retry_minutes": [0]}, "between 1 minute"),
-                           ({"discord_webhook": "https://evil.example/hook"}, "Discord webhook"),
+                           ({"discord_webhook": "https://discord.com/api/webhooks/1/x"}, "Discord webhook isn't"),
                            ({"concurrent_jobs": 9}, "Concurrent jobs"),
                            ({"defaults": {"ytdlp": {"format": "wav"}}}, "default download options"),
                            ({"port": 80}, "Port")):
             with self.assertRaises(preferences.Invalid, msg=bad) as caught:
                 preferences.update(self.base, self.state, bad)
             self.assertIn(words, str(caught.exception))
+            self.assertTrue(str(caught.exception).endswith("."), str(caught.exception))
         self.assertFalse((self.state / preferences.FILE).exists())
 
     def test_saved_defaults_are_used_by_jobs_and_shown(self):
@@ -566,6 +562,130 @@ class PreferencesTest(unittest.TestCase):
         self.assertEqual(options.with_defaults("ytdlp", changed.defaults, {"format": "m4a"}).format, "m4a")
         described = {f["key"]: f["default"] for f in options.describe(changed.defaults)["engines"]["ytdlp"]["fields"]}
         self.assertEqual(described["format"], "mp3")
+
+
+HOOK = "https://discord.com/api/webhooks/123456789/secret-token"
+
+
+class ConnectionsTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.state = Path(self.tmp.name)
+        self.sent = []
+        self.post = mock.patch.object(outbound, "post_json", side_effect=lambda url, body: self.sent.append((url, body)))
+        self.post.start()
+        self.store = connections.Connections(self.state, connections.TYPES)
+
+    def tearDown(self):
+        self.post.stop()
+        self.tmp.cleanup()
+
+    def _wait_sent(self, count):
+        deadline = time.monotonic() + 5
+        while len(self.sent) < count and time.monotonic() < deadline:
+            time.sleep(0.02)
+        return self.sent
+
+    def test_secrets_are_never_shown_and_kept_when_left_out(self):
+        made = self.store.create({"name": "Music", "type": "discord", "config": {"webhook_url": HOOK}})
+        self.assertNotIn("secret-token", json.dumps(self.store.list()))
+        self.assertEqual((made["secrets_set"], made["summary"]), (["webhook_url"], "Webhook …6789"))
+        self.assertEqual(made["events"], list(events.DEFAULTS))
+        changed = self.store.update(made["id"], {"name": "Renamed", "type": "discord", "events": ["job.finished"],
+                                                 "config": {"webhook_url": ""}})
+        self.assertEqual((changed["name"], changed["events"]), ("Renamed", ["job.finished"]))
+        again = connections.Connections(self.state, connections.TYPES)  # a restart
+        self.store = again
+        again.emit(events.Event("job.finished", "songdrop · Album (3 of 3 songs)", ("line",)))
+        [(url, body)] = self._wait_sent(1)
+        self.assertEqual(url, HOOK)
+        self.assertEqual(body["content"], "**songdrop · Album (3 of 3 songs)**\nline")
+        self.assertEqual(os.stat(self.state / "connections.json").st_mode & 0o777, 0o600)
+
+    def test_only_enabled_connections_that_want_the_event_get_it(self):
+        self.store.create({"name": "A", "type": "webhook", "events": ["song.gave_up"],
+                           "config": {"url": "http://notifier:8900/api/v1/events"}})
+        self.store.create({"name": "B", "type": "webhook", "enabled": False, "events": ["job.finished"],
+                           "config": {"url": "http://off.lan/hook"}})
+        self.store.emit(events.Event("job.finished", "x"))
+        self.store.emit(events.Event("song.gave_up", "songdrop · gave up", data={"job": {"id": "1"}}))
+        [(url, body)] = self._wait_sent(1)
+        time.sleep(0.1)
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual((url, body["source"], body["event"], body["data"]),
+                         ("http://notifier:8900/api/v1/events", "songdrop", "song.gave_up", {"job": {"id": "1"}}))
+
+    def test_bad_connections_refused_with_a_reason(self):
+        for bad, words in (({"name": "x", "type": "discord", "config": {"webhook_url": "https://evil.example/h"}},
+                            "isn't a Discord webhook"),
+                           ({"name": "x", "type": "discord"}, "Webhook URL is needed"),
+                           ({"name": "x", "type": "pigeon"}, "no connection type"),
+                           ({"name": " ", "type": "webhook", "config": {"url": "http://a.lan"}}, "name"),
+                           ({"name": "x", "type": "webhook", "events": ["job.exploded"], "config": {"url": "http://a"}},
+                            "isn't one songdrop sends")):
+            with self.assertRaises(connections.Invalid, msg=bad) as caught:
+                self.store.create(bad)
+            self.assertIn(words, str(caught.exception))
+        self.assertEqual(self.store.list(), [])
+
+    def test_a_test_message_says_whether_it_arrived(self):
+        made = self.store.create({"name": "Music", "type": "discord", "config": {"webhook_url": HOOK}})
+        result = self.store.test({"name": "Music", "type": "discord", "config": {}}, made["id"])
+        self.assertEqual(result["ok"], True)
+        self.assertEqual(self.sent[0][0], HOOK, "the saved secret")
+        with mock.patch.object(outbound, "post_json", side_effect=outbound.SendFailed("discord.com answered 404.")):
+            result = self.store.test({"name": "Music", "type": "discord", "config": {}}, made["id"])
+        self.assertEqual(result, {"ok": False, "message": "discord.com answered 404."})
+
+    def test_the_environment_webhook_becomes_the_first_connection(self):
+        store = connections.Connections(self.state / "fresh", connections.TYPES, seed_discord=HOOK)
+        [made] = store.list()
+        self.assertEqual((made["type"], made["events"]), ("discord", list(events.DEFAULTS)))
+        self.assertEqual(connections.Connections(self.state / "fresh", connections.TYPES, seed_discord=None).list(),
+                         [made], "kept, not made again")
+
+
+class FoldersTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "output"
+        (self.root / "music" / "songdrop").mkdir(parents=True)
+        (self.root / "music" / ".hidden").mkdir()
+        (self.root / "torrents").mkdir()
+        (self.root / "file.txt").write_text("x")
+        (self.root / "escape").symlink_to(Path(self.tmp.name))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_lists_folders_inside_the_root_only(self):
+        top = folders.listing(self.root, "")
+        self.assertEqual([f["name"] for f in top["folders"]], ["music", "torrents"])
+        self.assertIsNone(top["parent"])
+        inside = folders.listing(self.root, "/music/")
+        self.assertEqual((inside["path"], inside["parent"], inside["folders"]),
+                         ("music", "", [{"name": "songdrop", "path": "music/songdrop"}]))
+        for bad in ("../", "music/../..", "escape", "nowhere"):
+            with self.assertRaises(folders.Outside, msg=bad):
+                folders.listing(self.root, bad)
+
+    def test_checks_whether_songs_can_go_there(self):
+        self.assertEqual(folders.check(self.root, "music/songdrop")["exists"], True)
+        later = folders.check(self.root, "music/new/place")
+        self.assertEqual((later["ok"], later["exists"]), (True, False))
+        self.assertIn("made with the first song", later["message"])
+        for bad in ("", "../x", "file.txt/x", "escape/x"):
+            self.assertFalse(folders.check(self.root, bad)["ok"], bad)
+
+
+class ProblemsTest(unittest.TestCase):
+    def test_validation_errors_read_as_sentences(self):
+        self.assertEqual(problems.explain([{"loc": ("body", "retention_hours"), "type": "less_than_equal",
+                                            "msg": "Input should be less than or equal to 720"}]),
+                         "Retention hours: input should be less than or equal to 720.")
+        self.assertEqual(problems.explain([{"loc": ("body", "x"), "msg": "Value error, Say it like this."}]),
+                         "Say it like this.")
+        self.assertEqual(problems.explain([]), "That request wasn't understood.")
 
 
 if __name__ == "__main__":

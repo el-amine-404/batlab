@@ -30,3 +30,10 @@ export function timeLeft(seconds: number, now = Date.now() / 1000): string {
   if (delta < 3600) return `${Math.max(1, Math.round(delta / 60))} min`;
   return `${Math.round(delta / 3600)} h`;
 }
+
+/** 90 → "1.5 h"; for delays in minutes. */
+export function duration(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 1440) return `${+(minutes / 60).toFixed(1)} h`;
+  return `${+(minutes / 1440).toFixed(1)} d`;
+}

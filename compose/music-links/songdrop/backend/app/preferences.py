@@ -1,7 +1,7 @@
 """The settings the page and the API may change (GET and PATCH
-/api/v1/settings), checked here and kept in state_dir/settings.json (mode 600:
-it may hold the Discord webhook). The environment gives the first values;
-whatever is saved wins. The webhook is write-only: it is never sent back.
+/api/v1/settings), checked here and kept in state_dir/settings.json (mode
+600). The environment gives the first values; whatever is saved wins.
+Connections (where events go) are kept apart: connections/.
 """
 
 import dataclasses
@@ -12,21 +12,24 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from . import folders, problems
 from . import options as opts
 from .config import Settings
 
 FILE = "settings.json"
 # Worker threads always running; concurrent_jobs says how many may work.
 MAX_CONCURRENT_JOBS = 4
-_FOLDER = re.compile(r"^[A-Za-z0-9 _.-]+(?:/[A-Za-z0-9 _.-]+)*$")
-_WEBHOOK = re.compile(r"^https://(?:discord\.com|discordapp\.com|ptb\.discord\.com|canary\.discord\.com)/api/webhooks/\d+/[\w-]+$")
+
+
+FOLDER = "Choose a folder inside the output folder, like music/songdrop."
+DEFAULTS = "One of the default download options isn't valid."
 
 
 class Invalid(ValueError):
     """The message is shown to the user as is."""
 
 
-class Patch(BaseModel):
+class SettingsPatch(BaseModel):
     """Every field optional: what is left out keeps its value."""
 
     model_config = ConfigDict(extra="forbid")
@@ -39,8 +42,6 @@ class Patch(BaseModel):
     spotdl_parallel: int | None = Field(None, ge=1, le=8)
     job_timeout_minutes: int | None = Field(None, ge=10, le=1440)
     retry_minutes: list[int] | None = Field(None, max_length=6)
-    # "" removes it.
-    discord_webhook: str | None = Field(None, max_length=300)
     public_url: str | None = Field(None, max_length=300)
     defaults: dict[str, dict] | None = None
 
@@ -49,30 +50,26 @@ class Patch(BaseModel):
     def _folder(cls, value):
         if value is None:
             return value
-        value = value.strip().strip("/")
-        if not value or not _FOLDER.match(value) or any(part in (".", "..") for part in value.split("/")):
-            raise ValueError("folder")
+        try:
+            value = folders.normalise(value)
+        except folders.Outside:
+            raise ValueError(FOLDER) from None
+        if not value:
+            raise ValueError(FOLDER)
         return value
 
     @field_validator("retry_minutes")
     @classmethod
     def _retries(cls, value):
         if value is not None and any(not 1 <= minutes <= 10080 for minutes in value):
-            raise ValueError("retries")
+            raise ValueError("Each later try must be between 1 minute and 7 days away.")
         return value
-
-    @field_validator("discord_webhook")
-    @classmethod
-    def _webhook(cls, value):
-        if value and not _WEBHOOK.match(value.strip()):
-            raise ValueError("webhook")
-        return value.strip() if value is not None else None
 
     @field_validator("public_url")
     @classmethod
     def _public(cls, value):
         if value and not re.match(r"^https?://[^\s/]+(?:/[^\s]*)?$", value.strip()):
-            raise ValueError("public_url")
+            raise ValueError("The page address must start with http:// or https://.")
         return value.strip().rstrip("/") if value is not None else None
 
     @field_validator("defaults")
@@ -83,33 +80,12 @@ class Patch(BaseModel):
         checked = {}
         for engine, chosen in value.items():
             if engine not in opts.MODELS:
-                raise ValueError("defaults")
+                raise ValueError(DEFAULTS)
             try:
                 checked[engine] = opts.parse(engine, chosen).model_dump()
             except ValidationError:
-                raise ValueError("defaults") from None
+                raise ValueError(DEFAULTS) from None
         return checked
-
-
-_MESSAGES = {
-    "folder": "The folder must be a path inside the output folder, like music/songdrop.",
-    "retries": "Each later try must be between 1 minute and 7 days away.",
-    "webhook": "That isn't a Discord webhook link (https://discord.com/api/webhooks/…).",
-    "public_url": "The page address must start with http:// or https://.",
-    "defaults": "One of the default download options isn't valid.",
-}
-
-
-def _explain(exc: ValidationError) -> str:
-    for error in exc.errors():
-        text = str(error.get("msg", ""))
-        for key, message in _MESSAGES.items():
-            if text.endswith(key):
-                return message
-        field = ".".join(str(part) for part in error.get("loc", ()))
-        if field:
-            return f"{field.replace('_', ' ').capitalize()} isn't valid: {text.removeprefix('Value error, ')}."
-    return "One of the settings isn't valid."
 
 
 def _path(state_dir: Path) -> Path:
@@ -134,8 +110,6 @@ def apply(base: Settings, saved: dict) -> Settings:
         changes["job_timeout_seconds"] = saved["job_timeout_minutes"] * 60
     if "retry_minutes" in saved:
         changes["retry_minutes"] = tuple(saved["retry_minutes"])
-    if "discord_webhook" in saved:
-        changes["discord_webhook"] = saved["discord_webhook"] or None
     if "defaults" in saved:
         changes["defaults"] = saved["defaults"]
     if "concurrent_jobs" in changes:
@@ -145,10 +119,15 @@ def apply(base: Settings, saved: dict) -> Settings:
 
 def update(base: Settings, state_dir: Path, raw: dict) -> Settings:
     try:
-        patch = Patch.model_validate(raw or {})
+        patch = SettingsPatch.model_validate(raw or {})
     except ValidationError as exc:
-        raise Invalid(_explain(exc)) from exc
+        raise Invalid(problems.explain(exc.errors())) from exc
+    if patch.output_folder is not None:
+        usable = folders.check(base.output_root, patch.output_folder)
+        if not usable["ok"]:
+            raise Invalid(f"Output folder: {usable['message']}")
     saved = stored(state_dir)
+    saved.pop("discord_webhook", None)  # before connections; now in connections.json
     saved.update(patch.model_dump(exclude_none=True))
     target = _path(state_dir)
     partial = target.with_name("." + FILE + ".tmp")
@@ -159,7 +138,7 @@ def update(base: Settings, state_dir: Path, raw: dict) -> Settings:
 
 
 def public(settings: Settings) -> dict:
-    """What GET /api/v1/settings answers: never the webhook itself."""
+    """What GET /api/v1/settings answers."""
     return {
         "deliver": settings.deliver,
         "output_root": str(settings.output_root),
@@ -171,7 +150,6 @@ def public(settings: Settings) -> dict:
         "spotdl_parallel": settings.spotdl_parallel,
         "job_timeout_minutes": settings.job_timeout_seconds // 60,
         "retry_minutes": list(settings.retry_minutes),
-        "discord_webhook_set": bool(settings.discord_webhook),
         "public_url": settings.public_url,
         "defaults": {engine: opts.with_defaults(engine, settings.defaults).model_dump() for engine in opts.MODELS},
         "limits": {

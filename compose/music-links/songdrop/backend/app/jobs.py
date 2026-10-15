@@ -21,13 +21,15 @@ import time
 import uuid
 import zipfile
 from collections import deque
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from . import cookies, messages, notify
+from . import cookies, messages, outbound, problems
 from . import options as opts
 from .config import Settings
 from .detect import Detection
+from .events import Event
 
 log = logging.getLogger("songdrop.jobs")
 
@@ -52,11 +54,8 @@ RETRY_CHECK_SECONDS = 20
 PENDING = ("waiting", "queued", "retrying")
 
 
-class JobError(Exception):
-    def __init__(self, status: int, message: str):
-        super().__init__(message)
-        self.status = status
-        self.message = message
+class JobError(problems.Problem):
+    """No such job, or not now (a running job can't be removed…)."""
 
 
 @dataclass
@@ -96,8 +95,10 @@ def _safe_name(text: str, fallback: str) -> str:
 
 
 class JobManager:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, emit: Callable[[Event], None] = lambda event: None):
         self.settings = settings
+        # Where events go (connections.Connections.emit); jobs never pick a channel.
+        self._emit = emit
         self._jobs: dict[str, Job] = {}
         self._lock = threading.RLock()
         self._deliver_lock = threading.Lock()
@@ -543,43 +544,51 @@ class JobManager:
                 self._call_back(job)
             self._save(job)
 
-    # ---- Discord ---------------------------------------------------------------
+    # ---- events --------------------------------------------------------------
 
-    def _page(self) -> str:
-        return f" · {self.settings.public_url}" if self.settings.public_url else ""
+    def _link(self, page: str) -> str:
+        return f"{self.settings.public_url}{page}" if self.settings.public_url else ""
 
     def _announce(self, job: Job) -> None:
-        """After a job: the songs still missing, and replaced uploads."""
-        if job.status == "cancelled" or not (job.errors or job.notes):
+        """After a job: job.finished, and job.incomplete when songs are missing."""
+        if job.status == "cancelled":
             return
         name = job.title or job.url
         got = f"{len(job.files)} of {job.total} songs" if job.total > 1 else ("downloaded" if job.files else "not downloaded")
-        lines = [f"**songdrop** · {name} ({got}){self._page()}"]
+        lines = []
+        if job.status == "failed" and job.message:
+            lines.append(job.message)
         for entry in job.errors[:10]:
             later = ""
             if entry.get("state") == "waiting":
-                later = f" Trying again in {notify.minutes(entry['next_retry_at'] - time.time())}."
+                later = f" Trying again in {_minutes(entry['next_retry_at'] - time.time())}."
             lines.append(f"- missing: {entry['name']}: {entry['message']}{later}")
         if len(job.errors) > 10:
             lines.append(f"... and {len(job.errors) - 10} more")
         for note in job.notes[:5]:
             lines.append(f"- {note['name']}: {note['message']}")
-        notify.send(self.settings.discord_webhook, lines)
+        data = {"job": self._public(job)}
+        subject = f"songdrop · {name} ({got})"
+        self._emit(Event("job.finished", subject, tuple(lines), self._link("/activity/history"), data))
+        if job.errors:
+            self._emit(Event("job.incomplete", subject, tuple(lines), self._link("/activity/missing"), data))
 
     def _announce_retry(self, job: Job, entry: dict, got: bool) -> None:
         name = job.title or job.url
+        data = {"job": self._public(job), "song": entry["name"], "tries": entry["tries"]}
         if got:
-            line = (f"**songdrop** · got {entry['name']} on try {entry['tries']} ({name}); "
-                    f"it's on its way to the library{self._page()}")
+            self._emit(Event("song.recovered", f"songdrop · got {entry['name']} on try {entry['tries']}",
+                             (f"From {name}. It's on its way to the library.",), self._link("/activity/history"), data))
         else:
-            line = (f"**songdrop** · gave up on {entry['name']} after {entry['tries']} tries ({name}): "
-                    f"{entry['message']} Press \"Retry now\" on the page to try once more{self._page()}")
-        notify.send(self.settings.discord_webhook, [line])
+            self._emit(Event("song.gave_up", f"songdrop · gave up on {entry['name']} after {entry['tries']} tries",
+                             (f"From {name}: {entry['message']}", "Press \"Retry now\" on the page to try once more."),
+                             self._link("/activity/missing"), data))
 
     def _call_back(self, job: Job) -> None:
         """The caller that asked to be told (callback_url) gets the job."""
         if job.callback_url:
-            notify.post_json(job.callback_url, {"event": "job.updated", "job": self._public(job)})
+            outbound.in_background("callback", outbound.post_json, job.callback_url,
+                                   {"event": "job.updated", "job": self._public(job)})
 
     def _drain(self, job_id: str, process: subprocess.Popen, output: deque) -> None:
         for raw in process.stdout:
@@ -842,3 +851,11 @@ class JobManager:
             "notes": [dict(item) for item in job.notes],
             "archive_url": f"/api/v1/jobs/{job.id}/archive" if len(job.files) > 1 and job.status not in ACTIVE else None,
         }
+
+
+def _minutes(seconds: float) -> str:
+    seconds = max(0, round(seconds))
+    if seconds < 3600:
+        return f"{max(1, round(seconds / 60))} min"
+    hours = seconds / 3600
+    return f"{hours:.0f} h" if hours >= 2 else f"{hours:.1f} h"

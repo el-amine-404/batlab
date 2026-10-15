@@ -2,3 +2,6 @@ frontend/node_modules
 frontend/dist
 backend/tests
 **/__pycache__
+docs/node_modules
+docs/.vitepress/cache
+docs/.vitepress/dist

@@ -1,26 +1,33 @@
-"""songdrop's HTTP API (/api/v1), its docs (/docs) and its page.
+"""songdrop's web server: the API (/api/v1, routes/), the docs (/docs) and
+the page (everything else).
 
 LAN-only behind Caddy, without a login, like MeTube. The page is a client of
-the API like any other; docs/api.md describes every route.
+the API like any other.
 """
 
 import logging
 import threading
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from . import config, cookies, detect, options, preferences
-from .jobs import JobError, JobManager
+from . import connections, cookies, detect, folders, preferences, problems
+from .context import base_settings, manager
+from .routes import ROUTERS
 
 log = logging.getLogger("songdrop")
 
-base_settings = config.load()
-manager = JobManager(preferences.apply(base_settings, preferences.stored(base_settings.state_dir)))
+DESCRIPTION = """\
+Turns a link into audio files. Start a download with `POST /api/v1/jobs`, then
+poll `GET /api/v1/jobs/{id}` or pass a `callback_url`.
+
+Errors answer a 4xx or 5xx status with `{"detail": "<sentence>"}`. Times are
+Unix seconds. The guide: [/docs](/docs/).
+"""
 
 
 @asynccontextmanager
@@ -35,48 +42,47 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(
     title="songdrop",
     version="1",
-    summary="Turns a link into audio files.",
+    description=DESCRIPTION,
     docs_url=None,
     redoc_url=None,
     openapi_url="/api/v1/openapi.json",
     lifespan=lifespan,
 )
+
 api = APIRouter(prefix="/api/v1")
+for router in ROUTERS:
+    api.include_router(router)
+app.include_router(api)
 
 
-class LinkIn(BaseModel):
-    url: str = Field(max_length=detect.MAX_URL_LENGTH, description="The link to download.")
-
-
-class JobIn(LinkIn):
-    options: dict | None = Field(None, description="Download options; see GET /api/v1/options. "
-                                                   "Left out: the saved defaults.")
-    callback_url: str | None = Field(None, max_length=2048,
-                                     description="Gets the job (POST, JSON) when it ends and when a later try ends.")
-
-    @field_validator("callback_url")
-    @classmethod
-    def _http(cls, value):
-        if value and not value.startswith(("http://", "https://")):
-            raise ValueError("callback_url must start with http:// or https://")
-        return value or None
-
+# ---- errors: {"detail": "<sentence>"} ----------------------------------------------
 
 def _error(status: int, message: str) -> JSONResponse:
     return JSONResponse({"detail": message}, status_code=status)
 
 
-@app.exception_handler(JobError)
-async def job_error(_request: Request, exc: JobError):
+# Exceptions whose message is meant for the user, and their status.
+_STATUS: dict[type[Exception], int] = {
+    preferences.Invalid: 422,
+    connections.Invalid: 422,
+    connections.NotFound: 404,
+    folders.Outside: 400,
+    cookies.BadCookies: 400,
+}
+
+
+@app.exception_handler(problems.Problem)
+async def problem(_request: Request, exc: problems.Problem):
     return _error(exc.status, exc.message)
+
+
+for _kind, _status in _STATUS.items():
+    app.add_exception_handler(_kind, lambda _request, exc, status=_status: _error(status, str(exc)))
 
 
 @app.exception_handler(RequestValidationError)
 async def invalid_request(_request: Request, exc: RequestValidationError):
-    for error in exc.errors():
-        if "callback_url" in error.get("loc", ()):
-            return _error(422, "callback_url must start with http:// or https://.")
-    return _error(422, "That request wasn't understood.")
+    return _error(422, problems.explain(exc.errors()))
 
 
 @app.exception_handler(Exception)
@@ -85,148 +91,22 @@ async def unexpected(_request: Request, exc: Exception):
     return _error(500, "Something went wrong on the server.")
 
 
-# ---- links and options ------------------------------------------------------
-
-@api.get("/health", tags=["service"], summary="Whether songdrop is up")
-def health():
-    return {"ok": True}
-
-
-@api.get("/options", tags=["links"], summary="The download options of each engine, with their defaults")
-def get_options():
-    return options.describe(manager.settings.defaults)
-
-
-@api.post("/detect", tags=["links"], summary="Which engine would take a link, without downloading")
-def post_detect(body: LinkIn):
-    try:
-        return {"supported": True, **detect.detect(body.url).as_dict()}
-    except detect.UnsupportedLink as exc:
-        return {"supported": False, "message": str(exc)}
-
-
-# ---- jobs ------------------------------------------------------------------------
-
-@api.get("/jobs", tags=["jobs"], summary="Every job, newest first")
-def list_jobs():
-    return {"jobs": manager.list(), "retention_hours": manager.settings.retention_hours}
-
-
-@api.post("/jobs", status_code=201, tags=["jobs"], summary="Download a link")
-def create_job(body: JobIn):
-    try:
-        detection = detect.detect(body.url)
-    except detect.UnsupportedLink as exc:
-        return _error(400, str(exc))
-    try:
-        chosen = options.with_defaults(detection.engine, manager.settings.defaults, body.options)
-    except ValidationError as exc:
-        text = " ".join(str(error.get("msg")) for error in exc.errors())
-        for clue, message in (("not a time", "Write clip times like 1:23 or 1:02:03."),
-                              ("ends before", "The clip ends before it starts."),
-                              ("not both", "Choose one song per chapter or a clip, not both.")):
-            if clue in text:
-                return _error(422, message)
-        return _error(422, "One of the options isn't valid.")
-    return manager.submit(detection, chosen, body.callback_url)
-
-
-@api.get("/jobs/{job_id}", tags=["jobs"], summary="One job")
-def get_job(job_id: str):
-    return manager.get(job_id)
-
-
-@api.post("/jobs/{job_id}/cancel", tags=["jobs"], summary="Stop a queued or running job")
-def cancel_job(job_id: str):
-    return manager.cancel(job_id)
-
-
-@api.post("/jobs/{job_id}/errors/{index}/retry", tags=["jobs"], summary="Try a missing song again now")
-def retry_song(job_id: str, index: int):
-    return manager.retry(job_id, index)
-
-
-@api.delete("/jobs/{job_id}", status_code=204, tags=["jobs"], summary="Remove a finished job and its files")
-def delete_job(job_id: str):
-    manager.delete(job_id)
-    return Response(status_code=204)
-
-
-@api.get("/jobs/{job_id}/files/{file_id}", tags=["files"], summary="Download one song")
-def download_file(job_id: str, file_id: str):
-    path, name = manager.file(job_id, file_id)
-    return FileResponse(path, filename=name, media_type="application/octet-stream")
-
-
-@api.get("/jobs/{job_id}/archive", tags=["files"], summary="Download a job's songs as one zip")
-def download_archive(job_id: str):
-    path, name = manager.archive(job_id)
-    return FileResponse(path, filename=name, media_type="application/zip")
-
-
-# ---- settings --------------------------------------------------------------------
-
-@api.get("/settings", tags=["settings"], summary="The current settings")
-def get_settings():
-    return preferences.public(manager.settings)
-
-
-@api.patch("/settings", tags=["settings"], summary="Change some settings; the others keep their value")
-def patch_settings(body: dict):
-    try:
-        manager.settings = preferences.update(base_settings, base_settings.state_dir, body)
-    except preferences.Invalid as exc:
-        return _error(422, str(exc))
-    log.info("settings changed: %s", ", ".join(sorted(key for key in body if key != "discord_webhook"))
-             + (" (and the Discord webhook)" if "discord_webhook" in body else ""))
-    return preferences.public(manager.settings)
-
-
-@api.get("/cookies", tags=["settings"], summary="Whether YouTube cookies are saved, and until when")
-def cookie_status():
-    return cookies.status(base_settings.state_dir)
-
-
-@api.put("/cookies", tags=["settings"], summary="Save a cookies.txt (the request body is the file)")
-async def put_cookies(request: Request):
-    data = b""
-    async for chunk in request.stream():
-        data += chunk
-        if len(data) > cookies.MAX_BYTES:
-            return _error(413, "That file is too big for a cookies.txt.")
-    try:
-        return cookies.save(base_settings.state_dir, data)
-    except cookies.BadCookies as exc:
-        return _error(400, str(exc))
-
-
-@api.delete("/cookies", status_code=204, tags=["settings"], summary="Remove the saved cookies")
-def delete_cookies():
-    cookies.delete(base_settings.state_dir)
-    return Response(status_code=204)
-
-
-app.include_router(api)
-
-
 @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
 def api_not_found(rest: str):
-    return _error(404, "Not found. The API is under /api/v1/ (see /docs/api).")
+    return _error(404, "Not found. The API is under /api/v1/ (see /docs/api/).")
 
 
-# ---- docs and the page -------------------------------------------------------------
+# ---- the docs and the page -----------------------------------------------------------
 
 static = base_settings.static_dir
-# The page: hashed assets are cached for good, index.html never.
-if (static / "assets").is_dir():
-    app.mount("/assets", StaticFiles(directory=static / "assets"), name="assets")
 
 
 @app.middleware("http")
-async def cache_headers(request: Request, call_next):
+async def headers(request: Request, call_next):
     response = await call_next(request)
     path = request.url.path
-    if path.startswith("/assets/") and response.status_code == 200:
+    if "/assets/" in path and response.status_code == 200:
+        # Hashed names: a new build has new names.
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
     elif not path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-cache"
@@ -235,30 +115,47 @@ async def cache_headers(request: Request, call_next):
     return response
 
 
+def _file_in(folder: Path, rel: str) -> Path | None:
+    """folder/rel, folder/rel.html or folder/rel/index.html, never outside folder."""
+    folder = folder.resolve()
+    rel = rel.strip("/")
+    for candidate in ((folder / rel) if rel else None, folder / f"{rel}.html", folder / rel / "index.html"):
+        if candidate is None:
+            continue
+        candidate = candidate.resolve()
+        if (candidate == folder or folder in candidate.parents) and candidate.is_file():
+            return candidate
+    return None
+
+
 @app.get("/docs", include_in_schema=False)
 def docs_home():
     return RedirectResponse("/docs/")
 
 
-@app.get("/docs/{page:path}", include_in_schema=False)
-def docs(page: str):
-    """The docs, built from docs/*.md: /docs/ and /docs/api."""
-    folder = (static / "docs").resolve()
-    name = (page.strip("/") or "index").removesuffix(".html")
-    candidate = (folder / f"{name}.html").resolve()
-    if folder in candidate.parents and candidate.is_file():
-        return FileResponse(candidate, media_type="text/html")
-    asset = (folder / page).resolve()
-    if folder in asset.parents and asset.is_file():
-        return FileResponse(asset)
+@app.get("/docs/{rest:path}", include_in_schema=False)
+def docs(rest: str):
+    """The docs site (docs/, built with VitePress) and its API reference (/docs/api/)."""
+    found = _file_in(static / "docs", rest)
+    if found:
+        return FileResponse(found)
+    missing = static / "docs" / "404.html"
+    if missing.is_file():
+        return FileResponse(missing, status_code=404, media_type="text/html")
     return _error(404, "No such page in the docs.")
+
+
+if (static / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=static / "assets"), name="assets")
 
 
 @app.get("/{rest:path}", include_in_schema=False)
 def page(rest: str):
-    candidate = (static / rest).resolve() if rest else None
-    if candidate and static.resolve() in candidate.parents and candidate.is_file():
-        return FileResponse(candidate)
+    """A file of the page, else the page itself: it has its own routes
+    (/activity/queue, /settings/general…)."""
+    found = _file_in(static, rest) if rest else None
+    if found and found.name != "index.html":
+        return FileResponse(found)
     index = static / "index.html"
     if not index.is_file():
         return _error(503, "The page isn't built.")

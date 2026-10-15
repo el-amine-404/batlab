@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API reference · songdrop docs</title>
+<link rel="icon" href="/favicon.svg">
+<style>
+  body { margin: 0; }
+  .back { position: fixed; right: 16px; bottom: 16px; z-index: 1000; padding: 8px 14px; border-radius: 999px;
+          background: #7c3aed; color: #fff; font: 500 13px/1 system-ui, sans-serif; text-decoration: none;
+          box-shadow: 0 6px 20px rgb(0 0 0 / 0.3); }
+</style>
+</head>
+<body>
+<!-- Made from songdrop's own OpenAPI description, so it is always the API as it runs. -->
+<div id="app"></div>
+<a class="back" href="/docs/">← Docs</a>
+<script src="/docs/api/scalar.js"></script>
+<script>
+  Scalar.createApiReference("#app", {
+    url: "/api/v1/openapi.json",
+    theme: "purple",
+    withDefaultFonts: false,
+    hideDarkModeToggle: false,
+    metaData: { title: "songdrop API" },
+  });
+</script>
+</body>
+</html>

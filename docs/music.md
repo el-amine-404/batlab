@@ -354,13 +354,15 @@ still arrives as a pull request. When spotDL starts failing with 403, check
 
 ### songdrop
 
-songdrop's own docs, for using it and for its API (`/api/v1`), are on the
-service: http://songdrop.homelab.lan/docs (sources in
-`compose/music-links/songdrop/docs/*.md`, built to HTML with the page). Its
-Settings screen changes the output folder (inside the inbox, mounted at
-`/output`), how long downloads stay, how much runs at once, the later tries,
-Discord, the default options and the YouTube cookies; they are kept in
-`$VOLUMES_ROOT/songdrop/jobs/settings.json` over the environment's values.
+songdrop's own docs, for using it, for its API (`/api/v1`) and for working on
+it, are on the service: http://songdrop.homelab.lan/docs (VitePress, sources in
+`compose/music-links/songdrop/docs/`), with an API reference made from the
+running API's OpenAPI description at `/docs/api/`. The page has a sidebar like
+the *arr apps: Add (the link box), Activity (Queue, History, Missing),
+Settings (General, Downloads, Retries, Connect, Spotify, Other sites, YouTube)
+and System (Status). Settings are kept in
+`$VOLUMES_ROOT/songdrop/jobs/settings.json` over the environment's values,
+connections (where events go) in `connections.json` beside it, both mode 600.
 What it does and does not do is in [services.md](services.md).
 
 FastAPI with a React page (shadcn/ui, Tailwind), in one container on spotDL's
@@ -398,11 +400,12 @@ its download copies are removed, never the library's.
   the song on Spotify; a song a later try brings back gets its download
   button and goes to the library. A job is not removed while a try is
   pending.
-- **Discord** (`#download-issues`, `SONGDROP_DISCORD_WEBHOOK`): what is
-  missing after a job and when it is tried next, uploads replaced because
-  they were another song, songs a later try brought back, and songs songdrop
-  gave up on. musicguard's quarantines (`WRONG_SONG`, `DUPLICATE`) go to the
-  same channel.
+- **Connect** (Settings): songdrop reports events (`job.incomplete`,
+  `song.recovered`, `song.gave_up`, `job.finished`) to connections, each with
+  its type (Discord, or a Webhook that gets the event as JSON) and the events
+  it wants. On its first start with Connect, `SONGDROP_DISCORD_WEBHOOK`
+  (`#download-issues`) became a Discord connection with the first three.
+  musicguard's quarantines (`WRONG_SONG`, `DUPLICATE`) go to the same channel.
 - **Long videos, playlists and sign-in** (yt-dlp links, in Options):
   *One song per chapter* splits a video at its chapters (a whole album or a
   mix uploaded as one); each part is tagged with the chapter's title, without
@@ -411,8 +414,8 @@ its download copies are removed, never the library's.
   is dropped; a video without chapters stays one song and the page says so.
   *Clip from / to* (1:23 or 1:02:03) keeps only part of a video, one song of
   a live set say; not together with chapters. *How much of the playlist*
-  keeps the first 10 to 100 items. **YouTube cookies**, on the page under the
-  downloads: a cookies.txt exported from a signed-in browser lets every
+  keeps the first 10 to 100 items. **YouTube cookies** (Settings, YouTube):
+  a cookies.txt exported from a signed-in browser lets every
   download (spotDL's too) fetch videos YouTube shows only to a signed-in
   viewer. It is kept in `$VOLUMES_ROOT/songdrop/jobs/cookies.txt` (mode 600),
   never sent back to the page, which shows only when it was saved and when the
@@ -423,18 +426,18 @@ its download copies are removed, never the library's.
 
 ```bash
 # tests, in the image
-docker run --rm --entrypoint /opt/songdrop/.venv/bin/python \
-  -v "$PWD/compose/music-links/songdrop/backend/tests:/opt/songdrop/tests:ro" \
-  -w /opt/songdrop local/batlab-songdrop:<tag> -m unittest discover -s tests
+docker run --rm --network none --entrypoint /opt/songdrop/.venv/bin/python \
+  -v "$PWD/compose/music-links/songdrop/backend:/w" -w /w \
+  local/batlab-songdrop:<tag> -m unittest discover -s tests
 # after changing requirements.in
 docker run --rm -v "$PWD/compose/music-links/songdrop/backend:/w" -w /w \
   ghcr.io/astral-sh/uv:0.13.0-python3.14-trixie-slim \
   uv pip compile requirements.in --generate-hashes --python-version 3.14 --no-header -o requirements.txt
 ```
 
-The server's own packages (FastAPI, uvicorn) and the page's npm packages are
-pinned in `requirements.txt` and `package-lock.json` and are not followed by
-Renovate; yt-dlp, spotDL and Node are, through `compose/versions.env`.
+The server's own packages (FastAPI, uvicorn) and the page's and docs' npm
+packages are pinned in `requirements.txt` and the two `package-lock.json` and
+are not followed by Renovate; yt-dlp, spotDL and Node are, through `compose/versions.env`.
 
 Both are LAN-only (Caddy `localSubnets`) and have no login, like Seerr's
 request page. YouTube audio is lossy (about 130-160 kbps Opus); for an album

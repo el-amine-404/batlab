@@ -58,12 +58,15 @@ POST http://notifier:8900/api/v1/events
  "subject": "Stormy, JRK 19 - EL MEJOR", "data": {"job_id": "…", "next_try_at": 1792009000}}
 ```
 
-Until the notifier exists, songdrop, musicguard and camwatch post to their
-Discord webhooks themselves. Event names are `<thing>.<what happened>`:
+Until the notifier exists, musicguard and camwatch post to their Discord
+webhooks themselves. songdrop already sends events through its connections
+(Settings, Connect): a Discord connection, or a Webhook that gets the event in
+the format above; the notifier will be one more Webhook. Event names are
+`<thing>.<what happened>`:
 
 | Source | Events |
 | --- | --- |
-| songdrop | `job.finished`, `song.failed`, `song.recovered`, `song.gave_up`, `song.replaced` (another upload was the right song) |
+| songdrop | `job.incomplete` (songs missing after a download), `song.recovered`, `song.gave_up`, `job.finished` |
 | musicguard | `file.quarantined`, `file.held`, `album.ready` (playable in Navidrome), `song.deduplicated`, `song.upgraded` |
 | camwatch | `camera.dark`, `camera.back` |
 
@@ -82,7 +85,7 @@ service itself.
 - **Plugs in through**: its API (a music browsing app calls
   `POST /api/v1/jobs`); its output folder (a hand-off folder; musicguard's
   inbox in this stack); its events.
-- **Owns**: `$VOLUMES_ROOT/songdrop/jobs` (jobs, settings, cookies).
+- **Owns**: `$VOLUMES_ROOT/songdrop/jobs` (jobs, settings, connections, cookies).
 - **Not its job**: naming and tagging songs, lyrics, filing into a library
   (musicguard and Stanzarr).
 
@@ -134,11 +137,12 @@ service itself.
 
 | Service | One job | API v1 | Docs at `/docs` | Settings API | Events |
 | --- | --- | --- | --- | --- | --- |
-| songdrop | yes | yes | yes | yes | Discord directly |
+| songdrop | yes | yes | yes | yes | its connections (Discord, Webhook) |
 | musicguard | no (split planned) | none | none | environment only | Discord directly |
 | Stanzarr | yes | own (private project) | no | in its page | none |
 | camwatch | yes | none (needs none) | none | environment only | Discord directly |
 | tv-remote | yes | unversioned | no | environment only | none |
 
-Next, in order: the notifier, and songdrop, musicguard and camwatch posting
-events to it; the fingerprint library; musicguard's split.
+Next, in order: the notifier, and musicguard and camwatch posting events to it
+(songdrop through a Webhook connection); the fingerprint library; musicguard's
+split.

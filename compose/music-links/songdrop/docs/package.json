@@ -1,0 +1,14 @@
+{
+  "name": "songdrop-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build && node scripts/copy-scalar.mjs",
+    "preview": "vitepress preview"
+  },
+  "devDependencies": {
+    "@scalar/api-reference": "1.72.3",
+    "vitepress": "1.6.4"
+  }
+}

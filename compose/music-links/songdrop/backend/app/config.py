@@ -42,9 +42,10 @@ class Settings:
     app_python: str
     # spotDL's Deno, which yt-dlp needs for YouTube's challenge scripts.
     deno: str | None
-    # Discord: songs still missing after a job, and what later tries bring back.
+    # The first Discord connection, made on the first start only
+    # (connections/store.py); after that, connections are kept in state_dir.
     discord_webhook: str | None = None
-    # The page's address, for links in those messages.
+    # The page's address, for links in event messages.
     public_url: str = ""
     deliver: bool = True
     # Minutes before each later try of a failed song; empty: none on its own.

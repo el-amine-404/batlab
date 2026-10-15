@@ -1,117 +1,38 @@
+/**
+ * The songdrop API (/api/v1). The types come from its OpenAPI description
+ * (schema.d.ts, made by `npm run gen:api`): change the backend's
+ * app/schemas.py, regenerate, and TypeScript shows what to update here.
+ */
+import type { components } from "./schema";
+
+type Schemas = components["schemas"];
+
 export type Engine = "spotdl" | "ytdlp";
-
-export type Detection =
-  | {
-      supported: true;
-      engine: Engine;
-      engine_label: string;
-      site: string;
-      kind: string;
-      url: string;
-      has_playlist: boolean;
-    }
-  | { supported: false; message: string };
-
-export type Choice = { value: string; label: string };
-
-export type Field = {
-  key: string;
-  type: "select" | "switch" | "time";
-  flag: string;
-  label: string;
-  help: string;
-  choices?: Choice[];
-  /** Where this option starts: the saved default (Settings), else builtin. */
-  default: string | boolean;
-  builtin: string | boolean;
-  kinds?: string[];
-  /** has_playlist: a video inside a playlist; list: a playlist, or a video inside one. */
-  needs?: "has_playlist" | "list";
-};
-
-export type OptionsSpec = { engines: Record<Engine, { label: string; fields: Field[] }> };
+export type Detection = Schemas["Detection"];
+export type OptionField = Schemas["OptionField"];
+export type OptionsSpec = Schemas["OptionsSpec"];
 export type OptionValues = Record<string, string | boolean>;
+export type Job = Schemas["Job"];
+export type JobStatus = Job["status"];
+export type JobFile = Schemas["JobFile"];
+export type MissingSong = Schemas["MissingSong"];
+export type RetryState = MissingSong["state"];
+export type Settings = Schemas["Settings"];
+export type SettingsPatch = Schemas["SettingsPatch"];
+export type CookieStatus = Schemas["CookieStatus"];
+export type FolderListing = Schemas["FolderListing"];
+export type FolderCheck = Schemas["FolderCheck"];
+export type Connection = Schemas["Connection"];
+export type ConnectionIn = Schemas["ConnectionIn"];
+export type ConnectionType = Schemas["ConnectionType"];
+export type ConnectionTypes = Schemas["ConnectionTypes"];
+export type TestResult = Schemas["TestResult"];
+export type SystemStatus = Schemas["SystemStatus"];
 
-export type JobStatus = "queued" | "running" | "done" | "partial" | "failed" | "cancelled";
-
-export type JobFile = {
-  id: string;
-  name: string;
-  size: number;
-  title: string | null;
-  artist: string | null;
-  delivered: boolean;
-  url: string;
-};
-
-export type Job = {
-  id: string;
-  url: string;
-  engine: Engine;
-  site: string;
-  kind: string;
-  status: JobStatus;
-  title: string | null;
-  message: string | null;
-  total: number;
-  completed: number;
-  progress: number | null;
-  current: string | null;
-  created_at: number;
-  started_at: number | null;
-  finished_at: number | null;
-  expires_at: number | null;
-  files: JobFile[];
-  errors: JobError[];
-  notes: { name: string; message: string }[];
-  archive_url: string | null;
-};
-
-/** A song that failed: "waiting" for a later try, "queued" or "retrying" for
- * one now, "gave_up" after the last, "failed" when it can't be tried alone. */
-export type RetryState = "waiting" | "queued" | "retrying" | "gave_up" | "failed";
-
-export type JobError = {
-  index: number | null;
-  name: string;
-  message: string;
-  url: string | null;
-  state: RetryState;
-  tries: number;
-  max_tries: number;
-  next_retry_at: number | null;
-};
-
-/** The page's YouTube cookies; never the cookies themselves. */
-export type CookieStatus =
-  | { present: false }
-  | { present: true; saved_at: number; expires_at: number | null; expired: boolean };
-
-export type Settings = {
-  deliver: boolean;
-  output_root: string;
-  output_folder: string;
-  output_folder_exists: boolean;
-  retention_hours: number;
-  max_items: number;
-  concurrent_jobs: number;
-  spotdl_parallel: number;
-  job_timeout_minutes: number;
-  retry_minutes: number[];
-  discord_webhook_set: boolean;
-  public_url: string;
-  defaults: Record<Engine, OptionValues>;
-  limits: Record<string, number[] | number>;
-};
-
-/** What PATCH /api/v1/settings takes: any subset; discord_webhook "" removes it. */
-export type SettingsPatch = Partial<
-  Omit<Settings, "output_root" | "output_folder_exists" | "discord_webhook_set" | "limits">
-> & { discord_webhook?: string };
-
-export const RETRYING: RetryState[] = ["queued", "retrying"];
-
+/** Waiting to start, or downloading. */
 export const ACTIVE: JobStatus[] = ["queued", "running"];
+/** A missing song in a later try now. */
+export const RETRYING: RetryState[] = ["queued", "retrying"];
 
 export class ApiError extends Error {
   constructor(
@@ -125,9 +46,9 @@ export class ApiError extends Error {
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(path, {
+    response = await fetch(`/api/v1${path}`, {
       ...init,
-      headers: { Accept: "application/json", ...(init.body ? { "Content-Type": "application/json" } : {}) },
+      headers: { Accept: "application/json", ...(typeof init.body === "string" ? { "Content-Type": "application/json" } : {}) },
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
@@ -138,7 +59,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     try {
       detail = (await response.json()).detail;
     } catch {
-      // not JSON: a proxy error page
+      // not JSON: a proxy's error page
     }
     throw new ApiError(detail ?? `The server answered ${response.status}.`, response.status);
   }
@@ -146,20 +67,43 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await response.json()) as T;
 }
 
+const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
+const query = (params: Record<string, string>) => new URLSearchParams(params).toString();
+
 export const api = {
-  options: () => request<OptionsSpec>("/api/v1/options"),
-  detect: (url: string, signal?: AbortSignal) =>
-    request<Detection>("/api/v1/detect", { method: "POST", body: JSON.stringify({ url }), signal }),
-  jobs: () => request<{ jobs: Job[]; retention_hours: number }>("/api/v1/jobs"),
-  create: (url: string, options: OptionValues) =>
-    request<Job>("/api/v1/jobs", { method: "POST", body: JSON.stringify({ url, options }) }),
-  cancel: (id: string) => request<Job>(`/api/v1/jobs/${id}/cancel`, { method: "POST" }),
-  remove: (id: string) => request<void>(`/api/v1/jobs/${id}`, { method: "DELETE" }),
-  retry: (id: string, index: number) => request<Job>(`/api/v1/jobs/${id}/errors/${index}/retry`, { method: "POST" }),
-  settings: () => request<Settings>("/api/v1/settings"),
-  saveSettings: (patch: SettingsPatch) =>
-    request<Settings>("/api/v1/settings", { method: "PATCH", body: JSON.stringify(patch) }),
-  cookies: () => request<CookieStatus>("/api/v1/cookies"),
-  saveCookies: (file: File) => request<CookieStatus>("/api/v1/cookies", { method: "PUT", body: file }),
-  removeCookies: () => request<void>("/api/v1/cookies", { method: "DELETE" }),
+  options: () => request<OptionsSpec>("/options"),
+  detect: (url: string, signal?: AbortSignal) => request<Detection>("/detect", { ...json("POST", { url }), signal }),
+
+  jobs: () => request<{ jobs: Job[]; retention_hours: number }>("/jobs"),
+  createJob: (url: string, options: OptionValues) => request<Job>("/jobs", json("POST", { url, options })),
+  cancelJob: (id: string) => request<Job>(`/jobs/${id}/cancel`, { method: "POST" }),
+  removeJob: (id: string) => request<void>(`/jobs/${id}`, { method: "DELETE" }),
+  retrySong: (id: string, index: number) => request<Job>(`/jobs/${id}/errors/${index}/retry`, { method: "POST" }),
+
+  settings: () => request<Settings>("/settings"),
+  saveSettings: (patch: SettingsPatch) => request<Settings>("/settings", json("PATCH", patch)),
+
+  cookies: () => request<CookieStatus>("/cookies"),
+  saveCookies: (file: File) => request<CookieStatus>("/cookies", { method: "PUT", body: file }),
+  removeCookies: () => request<void>("/cookies", { method: "DELETE" }),
+
+  folders: (path: string, signal?: AbortSignal) => request<FolderListing>(`/folders?${query({ path })}`, { signal }),
+  checkFolder: (path: string, signal?: AbortSignal) =>
+    request<FolderCheck>(`/folders/check?${query({ path })}`, { signal }),
+
+  connectionTypes: () => request<ConnectionTypes>("/connections/types"),
+  connections: () => request<{ connections: Connection[] }>("/connections"),
+  createConnection: (body: ConnectionIn) => request<Connection>("/connections", json("POST", body)),
+  updateConnection: (id: string, body: ConnectionIn) => request<Connection>(`/connections/${id}`, json("PUT", body)),
+  removeConnection: (id: string) => request<void>(`/connections/${id}`, { method: "DELETE" }),
+  /** Without an id: a connection not saved yet. With one: its saved secrets fill the gaps. */
+  testConnection: (body: ConnectionIn, id?: string) =>
+    request<TestResult>(id ? `/connections/${id}/test` : "/connections/test", json("POST", body)),
+
+  status: () => request<SystemStatus>("/system/status"),
 };
+
+/** The message of anything thrown by api.*, for a toast. */
+export function errorText(caught: unknown, fallback = "Something went wrong."): string {
+  return caught instanceof ApiError ? caught.message : fallback;
+}
