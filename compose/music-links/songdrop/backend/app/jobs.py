@@ -385,6 +385,8 @@ class JobManager:
             "PYTHONUNBUFFERED": "1",
             "PYTHONIOENCODING": "utf-8",
             "PYTHONDONTWRITEBYTECODE": "1",
+            # batlab_common (lib/batlab-common), which runners/verify.py imports.
+            "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
             "SONGDROP_EVENTS_FD": str(write_fd),
         }
         try:
