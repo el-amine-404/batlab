@@ -14,8 +14,10 @@ state_file="${STATE_FILE:-/run/batlab-isponsorblocktv-youtube}"
 ip="$(python3 -c 'import json, sys; print(next(iter(json.load(open(sys.argv[1])).values()))["ip"])' \
   "$volumes/tv-remote/tvs.json")"
 
-# YouTube's DIAL state: running, stopped, or nothing when the TV is off.
-now="$(curl -s -m 3 "http://$ip:8080/ws/apps/YouTube" | sed -n 's:.*<state>\([^<]*\)</state>.*:\1:p')"
+# YouTube's DIAL state: running, stopped, or nothing when the TV is off. An off
+# TV makes curl time out; that is a state to record, not a failure, or a TV
+# turned off during YouTube would stay "running" and its next start be missed.
+now="$(curl -s -m 3 "http://$ip:8080/ws/apps/YouTube" | sed -n 's:.*<state>\([^<]*\)</state>.*:\1:p' || true)"
 now="${now:-off}"
 prev="$(cat "$state_file" 2>/dev/null || echo unknown)"
 echo "$now" >"$state_file"
