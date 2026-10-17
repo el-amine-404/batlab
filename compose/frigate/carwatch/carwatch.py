@@ -36,7 +36,6 @@ SPOTS = dict(pair.split("=", 1) for pair in
              os.environ.get("CARWATCH_SPOTS", "spot_1=Car 1,spot_2=Car 2").split(","))
 NOTIFY_URL = os.environ.get("CARWATCH_NOTIFY_URL", "")
 NOTIFY_TAG = os.environ.get("CARWATCH_NOTIFY_TAG", "cameras")
-LINK = os.environ.get("CARWATCH_LINK", "")
 KEEPALIVE = 60
 HEARTBEAT = "/tmp/heartbeat"
 
@@ -119,15 +118,13 @@ def picture():
         return None
 
 
-def notify(title, kind, fields, image=None):
-    """One message: the title, then a "**name**: value" line per field, and
-    the picture under it."""
+def notify(text, kind, image=None):
+    """One message, Markdown, with the picture under it."""
     if not NOTIFY_URL:
         return
-    body = "\n".join(f"**{name}**: {value}" for name, value in fields)
     attach = [(f"{CAMERA}.jpg", image)] if image else ()
     try:
-        apprise.send(NOTIFY_URL, title, body, tag=NOTIFY_TAG, kind=kind, attach=attach)
+        apprise.send(NOTIFY_URL, "", text, tag=NOTIFY_TAG, kind=kind, attach=attach)
     except apprise.NotSent as error:  # a lost message never stops the watch
         log(f"notification: {error}")
 
@@ -182,16 +179,12 @@ class Watch:
 
     def tell(self, spot, kind, car, when):
         name, at = SPOTS[spot], datetime.fromtimestamp(when).strftime("%H:%M:%S")
-        fields = [("At", at)]
+        line = at
         before = self.last.get(spot)
         if before and before[0] != kind:
-            fields.append(("Away for" if kind == "arrived" else "Parked for", duration(when - before[1])))
-        if LINK:
-            fields.append(("See", LINK))
-        if kind == "left":
-            notify(f"🚗 {name} left", "info", fields, picture())
-        else:
-            notify(f"🅿️ {name} is back", "success", fields, picture())
+            line += f" · {'away' if kind == 'arrived' else 'parked'} {duration(when - before[1])}"
+        title = f"{name} left" if kind == "left" else f"{name} is back"
+        notify(f"***{title}***\n{line}", "info" if kind == "left" else "success", picture())
         log(f"told: {name} {kind} at {at} ({car})")
         self.last[spot] = (kind, when)
 

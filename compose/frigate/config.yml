@@ -195,6 +195,13 @@ cameras:
     objects:
       track:
         - car
+      # The lot on the left: its cars are not watched, nor boxed in the
+      # pictures. A car whose box's bottom middle is inside is ignored.
+      mask:
+        left_lot:
+          friendly_name: Parking lot on the left
+          enabled: true
+          coordinates: "0.000,0.380,0.360,0.380,0.430,0.750,0.430,1.0,0.000,1.0"
     # Fractions of the 960x576 sub stream frame, as on camera_1.
     motion:
       mask:

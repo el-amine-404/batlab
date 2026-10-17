@@ -178,7 +178,6 @@ services:
       # The zones of camera_2 in config.yml, and who parks there.
       - CARWATCH_SPOTS=spot_1=Clio 4,spot_2=Ford
       - CARWATCH_NOTIFY_URL=http://apprise:8000/notify/carwatch
-      - CARWATCH_LINK=http://frigate.homelab.lan
     # mqtt for the broker; home_server for Frigate's pictures and Apprise.
     networks:
       - home_server
