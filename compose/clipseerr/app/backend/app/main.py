@@ -17,7 +17,8 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 
 from . import integrations, problems, seed
-from .context import cache, catalog, conf, db, engine, http, notification_store, notifier, service_store
+from .context import (cache, catalog, conf, db, engine, http, library, library_store, notification_store, notifier,
+                      service_store)
 from .routes import ROUTERS
 from .tracker import store as request_store
 
@@ -49,14 +50,16 @@ async def _housekeeping() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    seed.run(db, conf, service_store, notification_store)
+    seed.run(db, conf, service_store, notification_store, library_store)
     engine.start()
+    library.start()
     housekeeping = asyncio.get_running_loop().create_task(_housekeeping(), name="housekeeping")
     yield
     housekeeping.cancel()
     with suppress(asyncio.CancelledError):
         await housekeeping
     await engine.stop()
+    await library.stop()
     await notifier.drain()
     await http.aclose()
     db.close()
@@ -74,6 +77,9 @@ app = FastAPI(
         {"name": "Requests", "description": "A song or a video asked for, and every service's attempt at it."},
         {"name": "Services", "description": "The apps requests go to, in order (Settings, Services)."},
         {"name": "Notifications", "description": "Where clipseerr's events go (Settings, Notifications)."},
+        {"name": "Libraries", "description": "Where songs and music videos already are (Settings, Libraries): "
+                                             "what they hold is marked on every video."},
+        {"name": "Hot", "description": "The Hot category's own picks, and the artists it has shown."},
         {"name": "Settings", "description": "What Settings, General changes."},
         {"name": "System", "description": "Health, versions, the cache."},
         {"name": "Hooks", "description": "Where services call back."},

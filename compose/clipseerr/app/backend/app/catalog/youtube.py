@@ -199,9 +199,29 @@ async def playlist(region: str, playlist_id: str, limit: int = 100) -> tuple[str
     return found.get("title") or "", to_videos(found.get("tracks") or [])
 
 
+async def _with_artists(region: str, items: list[dict]) -> list[dict]:
+    """Search results YouTube Music gave without their artists (it does, now
+    and then: an official video credited to "Unknown artist") get them from
+    the video's own entry."""
+    async def fill(item: dict) -> dict:
+        try:
+            watch = await _call(region, "get_watch_playlist", videoId=item["videoId"], limit=1)
+        except Exception:
+            return item
+        track = next((t for t in watch.get("tracks") or [] if t.get("videoId") == item["videoId"]), None)
+        return {**item, "artists": track["artists"]} if track and track.get("artists") else item
+
+    missing = [i for i, item in enumerate(items) if item.get("videoId") and not item.get("artists")][:10]
+    filled = await asyncio.gather(*(fill(items[i]) for i in missing))
+    items = list(items)
+    for i, item in zip(missing, filled):
+        items[i] = item
+    return items
+
+
 async def search_videos(region: str, query: str, limit: int = 40) -> list[Video]:
     results = await _call(region, "search", query, filter="videos", limit=limit)
-    videos = to_videos(results)
+    videos = to_videos(await _with_artists(region, results))
     # The artists' own videos before covers and fan uploads.
     return sorted(videos, key=lambda v: not v.official)
 
@@ -279,3 +299,54 @@ def short_count(value: int | None) -> str | None:
             return f"{text}{suffix}"
     return str(value)
 
+
+
+async def credits(region: str, video_id: str) -> dict:
+    """YouTube Music's "Song credits": {"credits": [{"role", "names"}],
+    "provider"}; empty when it has none."""
+    found = await asyncio.to_thread(lambda: _client(region)._send_request("browse", {"browseId": f"MPTC{video_id}"}))
+    sections, stack = [], [found]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            if "dismissableDialogContentSectionRenderer" in node:
+                sections.append(node["dismissableDialogContentSectionRenderer"])
+            else:
+                stack.extend(reversed(list(node.values())))
+        elif isinstance(node, list):
+            stack.extend(reversed(node))
+    result: dict = {"credits": [], "provider": None}
+    for section in sections:
+        role = _text(section.get("title")).strip()
+        names = [n.strip() for n in _text(section.get("subtitle")).split("\n") if n.strip()]
+        if not role or not names:
+            continue
+        if role.casefold().startswith("music metadata provided by"):
+            result["provider"] = ", ".join(names)
+        else:
+            result["credits"].append({"role": role, "names": names})
+    return result
+
+
+async def lyrics(region: str, video_id: str) -> dict | None:
+    """YouTube Music's lyrics of a song (LyricFind's, timed when it can):
+    {"synced": [{"start", "text"}], "plain", "source"}; None when it has none."""
+    watch = await _call(region, "get_watch_playlist", videoId=video_id, limit=1)
+    browse = watch.get("lyrics")
+    if not browse:
+        return None
+    try:
+        found = await _call(region, "get_lyrics", browse, timestamps=True)
+    except Exception:
+        found = await _call(region, "get_lyrics", browse)
+    if not found:
+        return None
+    source = (found.get("source") or "").removeprefix("Source: ").strip() or None
+    lines = found.get("lyrics")
+    if found.get("hasTimestamps") and isinstance(lines, list):
+        synced = [{"start": line.start_time / 1000, "text": line.text} for line in lines]
+        return {"synced": synced, "plain": "\n".join(line["text"] for line in synced),
+                "source": f"YouTube Music ({source})" if source else "YouTube Music"}
+    if isinstance(lines, str) and lines.strip():
+        return {"synced": [], "plain": lines.strip(), "source": f"YouTube Music ({source})" if source else "YouTube Music"}
+    return None

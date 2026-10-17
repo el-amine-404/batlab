@@ -30,6 +30,8 @@ class Video(BaseModel):
     explicit: bool = False
     official: bool = Field(True, description="The artist's own video (YouTube's OMV), not a fan upload.")
     preview_url: str | None = Field(None, description="A 30 s preview (Apple), playable without YouTube.")
+    library: list[Literal["audio", "video"]] = Field(
+        default_factory=list, description="What the libraries (Settings, Libraries) have of it: its song, its video.")
 
 
 class AudioMatch(BaseModel):
@@ -106,3 +108,38 @@ class SearchResults(BaseModel):
     query: str
     artists: list[ArtistSummary]
     videos: list[Video]
+
+
+class Credit(BaseModel):
+    role: str = Field(description='"Performed by", "Written by", "Produced by"…, as YouTube Music says.')
+    names: list[str]
+
+
+class Credits(BaseModel):
+    """Who made the song, from YouTube Music's credits page."""
+
+    credits: list[Credit]
+    provider: str | None = Field(None, description="Who gave YouTube Music the credits (the label).")
+
+
+class LyricLine(BaseModel):
+    start: float = Field(description="Seconds into the song.")
+    text: str
+
+
+class Lyrics(BaseModel):
+    """The song's words: timed lines when a source has them, else plain text."""
+
+    synced: list[LyricLine] = Field(default_factory=list)
+    plain: str | None = None
+    instrumental: bool = False
+    source: str | None = Field(None, description='"LRCLIB" or "YouTube Music (LyricFind)".')
+
+
+class HotArtist(BaseModel):
+    name: str
+    id: str | None = Field(None, description="Their YouTube Music page, once found.")
+    thumbnail: str | None = None
+    videos: int = Field(description="Their videos Hot has shown.")
+    first_seen: float
+    last_seen: float

@@ -9,21 +9,31 @@ import { clock, cn, dated, upcoming } from "@/lib/utils";
 import { Thumb } from "./Thumb";
 import type { Requested } from "./useRequested";
 
-function RequestedMark({ requested }: { requested?: Requested }) {
-  if (!requested) return null;
-  const marks = (["audio", "video"] as const).filter((kind) => requested[kind] && requested[kind] !== "failed");
-  if (!marks.length) return null;
-  const done = marks.every((kind) => requested[kind] === "completed");
+/**
+ * What there is of a video already: a green check when its song or its file
+ * is in a library (or a request for it finished), "Requested" while one is
+ * under way. The icons say which: the song, the video.
+ */
+function StatusMark({ video, requested }: { video: Video; requested?: Requested }) {
+  const kinds = ["audio", "video"] as const;
+  const owned = kinds.filter((kind) => video.library?.includes(kind) || requested?.[kind] === "completed");
+  const asked = kinds.filter((kind) => !owned.includes(kind) && requested?.[kind] && !["failed", "completed"].includes(requested[kind]!));
+  if (!owned.length && !asked.length) return null;
+  const icon = (kind: "audio" | "video") => (kind === "audio" ? <Music2 key={kind} className="size-3" /> : <Film key={kind} className="size-3" />);
   return (
-    <span
-      className={cn(
-        "absolute top-2 right-2 flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium backdrop-blur-md",
-        done ? "bg-success/25 text-emerald-100" : "bg-black/60 text-rose-100",
+    <span className="absolute top-2 right-2 flex flex-col items-end gap-1">
+      {owned.length > 0 && (
+        <span className="flex items-center gap-1 rounded-full bg-emerald-500 px-2 py-0.5 text-[11px] font-semibold text-white shadow-lg shadow-black/30"
+              title={`In your library: ${owned.map((k) => (k === "audio" ? "the song" : "the video")).join(" and ")}`}>
+          <Check className="size-3.5" strokeWidth={3} /> {owned.map(icon)}
+        </span>
       )}
-      title={done ? "In your library" : "Requested"}
-    >
-      {done ? <Check className="size-3" /> : <Clock3 className="size-3" />}
-      {marks.map((kind) => (kind === "audio" ? <Music2 key={kind} className="size-3" /> : <Film key={kind} className="size-3" />))}
+      {asked.length > 0 && (
+        <span className="flex items-center gap-1 rounded-full bg-rose-500/90 px-2 py-0.5 text-[11px] font-semibold text-white shadow-lg shadow-black/30 backdrop-blur-md"
+              title={`Requested: ${asked.map((k) => (k === "audio" ? "the song" : "the video")).join(" and ")}`}>
+          <Clock3 className="size-3" /> Requested {asked.map(icon)}
+        </span>
+      )}
     </span>
   );
 }
@@ -82,7 +92,7 @@ export const VideoCard = memo(function VideoCard({ video, requested, className, 
             </span>
           )}
         </div>
-        <RequestedMark requested={requested} />
+        <StatusMark video={video} requested={requested} />
         {!!video.duration && !soon && (
           <span className="absolute right-2 bottom-2 rounded-md bg-black/75 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-white">
             {clock(video.duration)}

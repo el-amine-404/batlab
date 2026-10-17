@@ -16,10 +16,10 @@ from batlab_common import titles
 
 from ..cache import Cache
 from ..problems import Problem
-from . import match, youtube
+from . import lrclib, match, youtube
 from .apple import GENRES, Apple
-from .models import (ArtistPage, ArtistRef, AudioMatch, Category, CategoryGroup, SearchResults, Shelf, Version,
-                     Versions, Video, VideoDetail)
+from .models import (ArtistPage, ArtistRef, AudioMatch, Category, CategoryGroup, Credits, Lyrics, SearchResults, Shelf,
+                     Version, Versions, Video, VideoDetail)
 
 log = logging.getLogger("clipseerr.catalog")
 
@@ -55,6 +55,8 @@ class Catalog:
         self._apple = Apple(http)
         self._settings = settings
         self._gate = asyncio.Semaphore(FAN_OUT)
+        # Hot's picks and artists (hotlist.py), when there is one.
+        self.hotlist = None
         # The last answer or failure of each source, for the status screen.
         self.health: dict[str, dict] = {}
 
@@ -225,7 +227,9 @@ class Catalog:
         searches, each dated by YouTube."""
         region, settings = self.region, self._settings()
         queries, feeds = settings["hot_queries"], settings.get("hot_feeds") or []
-        key = f"hot:{region}:" + hashlib.sha1(json.dumps([queries, feeds]).encode()).hexdigest()[:12]
+        picks = self.hotlist.picks() if self.hotlist else []
+        key = f"hot:{region}:" + hashlib.sha1(json.dumps([queries, feeds, [p["id"] for p in picks]]).encode()
+                                             ).hexdigest()[:12]
 
         async def search(query: str):
             async def fetch():
@@ -244,7 +248,8 @@ class Catalog:
             lists = [r for r in found if isinstance(r, list)]
             if not lists and found:
                 raise next(r for r in found if isinstance(r, Exception))
-            # Feeds first: when a feed and a search both have a video, the feed's entry (dated, checked) stays.
+            # Picks first, then feeds: when two have a video, the first one's entry stays.
+            lists.insert(0, [{k: v for k, v in p.items() if k != "picked_at"} for p in picks])
             seen, items = set(), []
             for item in (i for found_list in lists for i in found_list):
                 if item["official"] and item["id"] not in seen:
@@ -252,6 +257,8 @@ class Catalog:
                     items.append(item)
             await self._date(items)
             items.sort(key=lambda i: i.get("released") or "", reverse=True)
+            if self.hotlist:
+                self.hotlist.saw(items)
             return Shelf(id="hot", title="Hot", subtitle="Sexy, twerk and uncensored music videos, newest first.",
                          source="youtube", items=items, total=len(items)).model_dump()
 
@@ -386,7 +393,7 @@ class Catalog:
             wanted = match.titles.simple(name)
             for artist in found:
                 if match.titles.simple(artist.name) == wanted:
-                    return {"id": artist.id, "name": artist.name}
+                    return {"id": artist.id, "name": artist.name, "thumbnail": artist.thumbnail}
             return None
 
         return await self._get("youtube", f"yt:artist-name:{region}:{name.casefold()}", fetch, fresh=30 * DAY)
@@ -509,7 +516,73 @@ class Catalog:
             thumbnail=youtube._image(picked.get("thumbnails"), 544),
         )
 
+    # ---- who made the song, and its words ---------------------------------------------------------
+
+    async def credits(self, video_id: str) -> Credits:
+        """The song's credits (its official audio's, else the video's)."""
+        detail = await self.video(video_id)
+        region = self.region
+        ids = [i for i in ((detail.audio.youtube_id if detail.audio else None), detail.youtube_id) if i]
+
+        async def fetch():
+            for youtube_id in ids:
+                found = await youtube.credits(region, youtube_id)
+                if found["credits"]:
+                    return found
+            return {"credits": [], "provider": None}
+
+        if not ids:
+            return Credits(credits=[])
+        return Credits.model_validate(await self._get("youtube", f"yt:credits:{ids[0]}", fetch, fresh=30 * DAY,
+                                                      stale=90 * DAY))
+
+    async def lyrics(self, video_id: str) -> Lyrics:
+        """The song's words: LRCLIB's (timed when it has them), else YouTube
+        Music's; none when neither has them."""
+        detail = await self.video(video_id)
+        region = self.region
+        song = detail.audio
+        title, artist = (song.title, song.artist) if song else (detail.title, detail.artist)
+        seconds = (song.duration if song else None) or detail.duration
+        first = (_credit_names(artist) or [artist])[0]
+
+        async def fetch():
+            found = None
+            try:
+                found = await lrclib.find(self._http, _bare(title), first, seconds)
+            except Exception as exc:
+                log.info("LRCLIB failed for %s - %s: %r", first, title, exc)
+            if not found or not (found["synced"] or found["plain"]):
+                youtube_id = song.youtube_id if song else detail.youtube_id
+                try:
+                    from_youtube = await youtube.lyrics(region, youtube_id) if youtube_id else None
+                except Exception as exc:
+                    log.info("YouTube Music lyrics failed for %s: %r", youtube_id, exc)
+                    from_youtube = None
+                found = from_youtube or found
+            return Lyrics.model_validate(found or {}).model_dump()
+
+        key = f"lyrics:{titles.simple(first)}:{titles.simple(title)}:{seconds or 0}"
+        return Lyrics.model_validate(await self._cache.get(key, fetch, fresh=7 * DAY, stale=90 * DAY))
+
     # ---- keeping the front page warm --------------------------------------------------------------
+
+    async def _resolve_hot_artists(self, limit: int = 150) -> None:
+        """Finds the YouTube Music page and picture of Hot's artists, some each
+        round (about an hour for the first 600)."""
+        if not self.hotlist:
+            return
+
+        async def look(name: str):
+            async with self._gate:
+                return await self.artist_by_name(name)
+
+        names = self.hotlist.unresolved(limit)
+        found = await asyncio.gather(*(look(name) for name in names), return_exceptions=True)
+        for name, hit in zip(names, found):
+            if isinstance(hit, Exception):
+                continue
+            self.hotlist.resolved(name, (hit or {}).get("id"), (hit or {}).get("thumbnail"))
 
     async def warm(self) -> None:
         try:
@@ -517,6 +590,7 @@ class Catalog:
             await self.categories()
             await self.hot()
             await self.releases()
+            await self._resolve_hot_artists()
         except Exception as exc:
             log.warning("warming the catalog failed: %r", exc)
 

@@ -46,6 +46,13 @@ class Config:
     aurral_api_key: str
     songdrop_url: str
     metube_url: str
+    # The first libraries (seed.py): Navidrome, and the music videos folder.
+    navidrome_url: str
+    navidrome_user: str
+    navidrome_password: str
+    navidrome_token: str
+    navidrome_salt: str
+    music_videos_dir: str
 
     @property
     def database(self) -> Path:
@@ -69,4 +76,10 @@ def load() -> Config:
         aurral_api_key=_text("CLIPSEERR_AURRAL_API_KEY"),
         songdrop_url=_text("CLIPSEERR_SONGDROP_URL"),
         metube_url=_text("CLIPSEERR_METUBE_URL"),
+        navidrome_url=_text("CLIPSEERR_NAVIDROME_URL"),
+        navidrome_user=_text("CLIPSEERR_NAVIDROME_USER"),
+        navidrome_password=_text("CLIPSEERR_NAVIDROME_PASSWORD"),
+        navidrome_token=_text("CLIPSEERR_NAVIDROME_TOKEN"),
+        navidrome_salt=_text("CLIPSEERR_NAVIDROME_SALT"),
+        music_videos_dir=_text("CLIPSEERR_MUSIC_VIDEOS_DIR"),
     )

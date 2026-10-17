@@ -150,7 +150,8 @@ the service.
   services in order, followed, and announced.
 - **Alone**: browse and watch with no service at all; requests wait for one.
 - **Plugs in through**: its services (Aurral, songdrop, MeTube, or any app
-  through a Webhook), its notifications (Apprise, Discord, Webhook), its API
+  through a Webhook), its notifications (Apprise, Discord, Webhook), its
+  libraries (Navidrome, a folder: what is there already), its API
   (`/api/v1`: requests, the catalog, settings).
 - **Owns**: `$VOLUMES_ROOT/clipseerr` (one SQLite database).
 - **Not its job**: downloading, checking or filing anything.

@@ -142,7 +142,7 @@ export function IntegrationDialog({ family, types, saved, open, onOpenChange, on
     }
   };
 
-  const noun = family === "services" ? "service" : "notification";
+  const noun = family === "services" ? "service" : family === "libraries" ? "library" : "notification";
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
@@ -151,7 +151,9 @@ export function IntegrationDialog({ family, types, saved, open, onOpenChange, on
           <DialogDescription>
             {family === "services"
               ? "An app that downloads what is asked for. Requests go to the services in their order."
-              : "Where clipseerr tells about requests."}
+              : family === "libraries"
+                ? "Where songs or music videos already are: what it holds gets a green check."
+                : "Where clipseerr tells about requests."}
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="flex flex-col gap-5">
@@ -209,7 +211,7 @@ export function IntegrationDialog({ family, types, saved, open, onOpenChange, on
         </DialogBody>
         <DialogFooter className="justify-end">
           <Button variant="secondary" onClick={test} disabled={!kind || !!busy}>
-            {busy === "test" && <Loader2 className="animate-spin" />} {family === "services" ? "Test" : "Send a test"}
+            {busy === "test" && <Loader2 className="animate-spin" />} {family === "notifications" ? "Send a test" : "Test"}
           </Button>
           <Button onClick={save} disabled={!kind || !!busy}>
             {busy === "save" && <Loader2 className="animate-spin" />} {saved ? "Save" : "Add"}

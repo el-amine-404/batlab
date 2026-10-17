@@ -4,7 +4,7 @@ the same routes for both, under /services and /notifications."""
 from fastapi import APIRouter, Response
 
 from .. import events, outbound, schemas
-from ..context import engine, http, notification_store, notifier, service_store
+from ..context import engine, http, library, library_store, notification_store, notifier, service_store
 from ..integrations import IntegrationIn
 from ..services import Context
 
@@ -20,9 +20,17 @@ async def _test_service(raw: dict, item_id: str | None = None) -> dict:
     return {"ok": True, "message": message}
 
 
-def _routes(prefix: str, tag: str, store, test, event_list) -> APIRouter:
+async def _test_library(raw: dict, item_id: str | None = None) -> dict:
+    _body, kind, config = library_store.parse(raw, item_id)
+    try:
+        return {"ok": True, "message": await kind.test(http, config)}
+    except Exception as exc:
+        return {"ok": False, "message": f"Couldn't read it: {exc}"[:300]}
+
+
+def _routes(prefix: str, tag: str, store, test, event_list, changed=engine.wake, noun: str | None = None) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=[tag])
-    noun = tag.lower().rstrip("s")
+    noun = noun or tag.lower().rstrip("s")
 
     @router.get("/types", summary=f"The {noun} types and their fields", response_model=schemas.IntegrationTypes)
     def types():
@@ -36,7 +44,7 @@ def _routes(prefix: str, tag: str, store, test, event_list) -> APIRouter:
                  responses=_PROBLEMS)
     def create(body: IntegrationIn):
         item = store.create(body.model_dump())
-        engine.wake()
+        changed()
         return item
 
     @router.post("/test", summary=f"Try a {noun} not saved yet", response_model=schemas.TestResult,
@@ -57,7 +65,7 @@ def _routes(prefix: str, tag: str, store, test, event_list) -> APIRouter:
                 response_model=schemas.Integration, responses=_PROBLEMS)
     def update(item_id: str, body: IntegrationIn):
         item = store.update(item_id, body.model_dump())
-        engine.wake()
+        changed()
         return item
 
     @router.post("/{item_id}/test", summary=f"Try a saved {noun}, changed as the body says",
@@ -68,11 +76,14 @@ def _routes(prefix: str, tag: str, store, test, event_list) -> APIRouter:
     @router.delete("/{item_id}", status_code=204, summary=f"Remove a {noun}", responses=_PROBLEMS)
     def delete(item_id: str):
         store.delete(item_id)
+        changed()
         return Response(status_code=204)
 
     return router
 
 
 services_router = _routes("/services", "Services", service_store, _test_service, [])
+libraries_router = _routes("/libraries", "Libraries", library_store, _test_library, [], changed=library.changed,
+                           noun="library")
 notifications_router = _routes("/notifications", "Notifications", notification_store, notifier.test,
                                [vars(item) for item in events.CATALOG])

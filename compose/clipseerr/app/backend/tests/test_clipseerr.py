@@ -168,6 +168,82 @@ class HotFeeds(unittest.TestCase):
                          [("yt:fLCd0tXSLZU", "Mystika", "Ellize", "2026-10-16")])
 
 
+class Libraries(unittest.TestCase):
+    def test_a_folder_of_music_videos(self):
+        from app.libraries.folder import scan
+
+        with tempfile.TemporaryDirectory() as root:
+            folder = Path(root) / "Tate McRae"
+            folder.mkdir()
+            (folder / "Tate McRae - Housewife (Official Video) [DPEodkHzH-s].mp4").touch()
+            (folder / "Blue Moon.mkv").touch()
+            (folder / "cover.jpg").touch()
+            found = scan(Path(root), "videos")
+        self.assertEqual(found.videos, {"DPEodkHzH-s"})
+        self.assertEqual(found.video_songs, {("housewife", "tatemcrae"), ("bluemoon", "tatemcrae")})
+        self.assertEqual(found.songs, set())
+
+    def test_marks(self):
+        from app.libraries import LibraryIndex, Snapshot
+
+        index = LibraryIndex(None, None)
+        snapshot = Snapshot()
+        snapshot.add_song("Gnarly", "KATSEYE")
+        snapshot.add_video("Housewife", "Tate McRae", "DPEodkHzH-s")
+        index._snapshot = snapshot
+        self.assertEqual(index.held("x", "Gnarly (Clean Edit)", "KATSEYE & Ice Spice"), ["audio"])
+        self.assertEqual(index.held("DPEodkHzH-s", "Housewife (Live)", "Someone"), ["video"])
+        self.assertEqual(index.held("other", "Housewife", "Tate McRae"), ["video"])
+        self.assertEqual(index.held("other", "Gnarly Night", "KATSEYE"), [])
+
+
+class LyricsChoice(unittest.TestCase):
+    def test_the_right_take_timed_first(self):
+        from app.catalog import lrclib
+
+        entries = [
+            {"trackName": "Gnarly", "artistName": "KATSEYE", "duration": 137.3, "instrumental": True},
+            {"trackName": "Gnarly", "artistName": "KATSEYE", "duration": 2.0, "syncedLyrics": "[00:01.00] x"},
+            {"trackName": "Gnarly", "artistName": "KATSEYE", "duration": 142.0, "plainLyrics": "plain"},
+            {"trackName": "Gnarly", "artistName": "KATSEYE", "duration": 139.0, "syncedLyrics": "[00:01.00] y"},
+            {"trackName": "Gnarly (Ice Spice Remix)", "artistName": "KATSEYE", "duration": 138.0,
+             "syncedLyrics": "[00:01.00] z"}]
+        self.assertEqual(lrclib.best(entries, "Gnarly", "KATSEYE", 138)["syncedLyrics"], "[00:01.00] y")
+
+    def test_lrc(self):
+        from app.catalog import lrclib
+
+        self.assertEqual(lrclib.parse_lrc("[ar:x]\n[00:12.50]Hello\n[01:02.00][00:05.00]Twice\n"),
+                         [{"start": 5.0, "text": "Twice"}, {"start": 12.5, "text": "Hello"},
+                          {"start": 62.0, "text": "Twice"}])
+
+
+class HotListTests(unittest.TestCase):
+    def test_artists_stay_and_resolve(self):
+        from app.hotlist import HotList
+
+        with tempfile.TemporaryDirectory() as folder:
+            db = Database(Path(folder) / "t.db")
+            hot = HotList(db)
+            hot.saw([{"artists": [{"name": "Jayelle", "id": None}, {"name": "bludnymph", "id": None}]},
+                     {"artists": [{"name": "TateMcRaeVEVO", "id": "UCvevo"}]},
+                     {"artists": [{"name": "Jayelle"}]}])
+            hot.saw([])
+            names = [(a["name"], a["videos"], a["id"]) for a in hot.artists()]
+            self.assertEqual(names[0], ("Jayelle", 2, None))
+            # A VEVO channel is not the artist's page.
+            self.assertIn(("TateMcRae", 1, None), names)
+            hot.resolved("Jayelle", "UCjayelle", None)
+            self.assertNotIn("Jayelle", hot.unresolved(10))
+            hot.saw([{"artists": [{"name": "Jayelle"}]}])
+            self.assertEqual(hot.artists()[0]["id"], "UCjayelle")
+            hot.pick({"id": "yt:a", "title": "A"})
+            hot.pick({"id": "yt:b", "title": "B"})
+            hot.pick({"id": "yt:a", "title": "A"})
+            self.assertEqual(hot.pick_ids(), ["yt:a", "yt:b"])
+            db.close()
+
+
 class AurralFeed(unittest.TestCase):
     def entry(self, status, label, **more):
         return {"kind": "track_download", "jobId": "j", "status": status, "statusLabel": label, "source": "slskd",

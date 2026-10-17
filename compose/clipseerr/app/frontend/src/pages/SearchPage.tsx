@@ -9,7 +9,7 @@ import type { ArtistSummary } from "@/lib/api";
 import { prefetchArtist, useSearch } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
-export function ArtistBubble({ artist }: { artist: ArtistSummary }) {
+export function ArtistBubble({ artist, note }: { artist: ArtistSummary; note?: string }) {
   return (
     <Link to={`/artist/${artist.id}`} onPointerEnter={() => prefetchArtist(artist.id)} onFocus={() => prefetchArtist(artist.id)}
           className="group flex w-28 shrink-0 flex-col items-center gap-2 rounded-xl p-2 text-center outline-none focus-visible:ring-[3px] focus-visible:ring-ring sm:w-32">
@@ -17,7 +17,9 @@ export function ArtistBubble({ artist }: { artist: ArtistSummary }) {
         {artist.thumbnail && <img src={artist.thumbnail} alt="" loading="lazy" decoding="async" className="size-full object-cover" />}
       </span>
       <span className="w-full truncate text-sm font-medium">{artist.name}</span>
-      {artist.subscribers && <span className="-mt-1.5 truncate text-xs text-muted-foreground">{artist.subscribers} subscribers</span>}
+      {(note || artist.subscribers) && (
+        <span className="-mt-1.5 truncate text-xs text-muted-foreground">{note ?? `${artist.subscribers} subscribers`}</span>
+      )}
     </Link>
   );
 }

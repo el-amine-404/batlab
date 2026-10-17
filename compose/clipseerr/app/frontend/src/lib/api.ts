@@ -12,6 +12,9 @@ export type VideoDetail = Schemas["VideoDetail"];
 export type Shelf = Schemas["Shelf"];
 export type Version = Schemas["Version"];
 export type Versions = Schemas["Versions"];
+export type Credits = Schemas["Credits"];
+export type Lyrics = Schemas["Lyrics"];
+export type HotArtist = Schemas["HotArtist"];
 export type CategoryGroup = Schemas["CategoryGroup"];
 export type ArtistPage = Schemas["ArtistPage"];
 export type ArtistSummary = Schemas["ArtistSummary"];
@@ -77,7 +80,7 @@ export const PAGE = 48;
 export type Page = { limit?: number; offset?: number; source?: "youtube" | "apple" };
 
 /** Services and notifications have the same routes. */
-export type Family = "services" | "notifications";
+export type Family = "services" | "notifications" | "libraries";
 
 export const api = {
   home: (signal?: AbortSignal) => request<{ shelves: Shelf[] }>("/home", { signal }),
@@ -90,6 +93,14 @@ export const api = {
   artist: (id: string, signal?: AbortSignal) => request<ArtistPage>(`/artists/${encodeURIComponent(id)}`, { signal }),
   video: (id: string, signal?: AbortSignal) => request<VideoDetail>(`/videos/${encodeURIComponent(id)}`, { signal }),
   versions: (id: string, signal?: AbortSignal) => request<Versions>(`/videos/${encodeURIComponent(id)}/versions`, { signal }),
+  credits: (id: string, signal?: AbortSignal) => request<Credits>(`/videos/${encodeURIComponent(id)}/credits`, { signal }),
+  lyrics: (id: string, signal?: AbortSignal) => request<Lyrics>(`/videos/${encodeURIComponent(id)}/lyrics`, { signal }),
+  /** Where the lyrics download as a file. */
+  lyricsFile: (id: string, format: "lrc" | "txt") => `/api/v1/videos/${encodeURIComponent(id)}/lyrics.${format}`,
+  hotPicks: (signal?: AbortSignal) => request<{ ids: string[] }>("/hot/picks", { signal }),
+  addHotPick: (id: string) => request<{ ids: string[] }>(`/hot/picks/${encodeURIComponent(id)}`, { method: "PUT" }),
+  removeHotPick: (id: string) => request<void>(`/hot/picks/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  hotArtists: (signal?: AbortSignal) => request<{ artists: HotArtist[] }>("/hot/artists", { signal }),
   videoRequests: (id: string, signal?: AbortSignal) =>
     request<VideoRequests>(`/videos/${encodeURIComponent(id)}/requests`, { signal }),
 

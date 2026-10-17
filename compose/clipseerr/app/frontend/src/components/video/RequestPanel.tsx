@@ -1,4 +1,4 @@
-import { ArrowRight, Film, Loader2, Music2, RotateCw } from "lucide-react";
+import { ArrowRight, Check, Film, Loader2, Music2, RotateCw } from "lucide-react";
 import { Link } from "react-router";
 
 import { Button } from "@/components/ui/button";
@@ -26,9 +26,11 @@ function KindCard({ video, kind, request, chain }: { video: VideoDetail; kind: K
   const busy = ask.isPending || action.isPending;
   const unavailable = kind === "video" && !video.youtube_id;
   const noService = chain.length === 0;
+  const owned = video.library?.includes(kind) ?? false;
 
   return (
-    <div className={cn("flex flex-col gap-3 rounded-xl border border-border bg-card p-4", request?.status === "completed" && "border-success/25")}>
+    <div className={cn("flex flex-col gap-3 rounded-xl border border-border bg-card p-4",
+                       (request?.status === "completed" || owned) && "border-success/30")}>
       <div className="flex items-start gap-3">
         <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-lg",
                             kind === "audio" ? "bg-rose-500/15 text-rose-300" : "bg-orange-400/15 text-orange-200")}>
@@ -64,6 +66,19 @@ function KindCard({ video, kind, request, chain }: { video: VideoDetail; kind: K
               </Link>
             </Button>
           </div>
+        </div>
+      ) : owned ? (
+        <div className="flex flex-col gap-2">
+          <p className="flex items-center gap-2 text-sm font-medium text-success">
+            <span className="flex size-5 items-center justify-center rounded-full bg-emerald-500 text-white"><Check className="size-3.5" strokeWidth={3} /></span>
+            In your library
+          </p>
+          <p className="text-[11px] text-muted-foreground">
+            {kind === "audio" ? "A library has this song already." : "This video's file is in a library already."}
+          </p>
+          <Button size="sm" variant="ghost" className="self-start" onClick={() => ask.mutate(kind)} disabled={busy || unavailable || noService}>
+            {ask.isPending ? <Loader2 className="animate-spin" /> : <RotateCw />} Get it again
+          </Button>
         </div>
       ) : (
         <div className="flex flex-col gap-2">

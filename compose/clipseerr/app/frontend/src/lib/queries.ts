@@ -77,6 +77,29 @@ export const useVideo = (id: string) =>
 export const useVersions = (id: string, enabled = true) =>
   useQuery({ queryKey: keys.versions(id), queryFn: ({ signal }) => api.versions(id, signal), enabled: enabled && !!id, staleTime: 60 * MINUTE });
 
+export const useCredits = (id: string, enabled = true) =>
+  useQuery({ queryKey: ["credits", id], queryFn: ({ signal }) => api.credits(id, signal), enabled: enabled && !!id, staleTime: 60 * MINUTE });
+export const useLyrics = (id: string, enabled = true) =>
+  useQuery({ queryKey: ["lyrics", id], queryFn: ({ signal }) => api.lyrics(id, signal), enabled: enabled && !!id, staleTime: 60 * MINUTE });
+export const useHotPicks = () => useQuery({ queryKey: ["hot", "picks"], queryFn: ({ signal }) => api.hotPicks(signal), staleTime: 0 });
+export const useHotArtists = () =>
+  useQuery({ queryKey: ["hot", "artists"], queryFn: ({ signal }) => api.hotArtists(signal), staleTime: 10 * MINUTE });
+
+/** Adds a video to Hot, or takes it out; Hot is read again. */
+export function useHotPick() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, add }: { id: string; add: boolean }): Promise<unknown> => (add ? api.addHotPick(id) : api.removeHotPick(id)),
+    onSuccess: (_data, { add }) => {
+      void client.invalidateQueries({ queryKey: ["hot"] });
+      void client.invalidateQueries({ queryKey: ["category", "hot"] });
+      void client.invalidateQueries({ queryKey: ["shelf", "releases"] });
+      toast.success(add ? "Added to Hot" : "Taken out of Hot");
+    },
+    onError: (error) => toast.error(errorText(error)),
+  });
+}
+
 const anyActive = (requests: (Request | null | undefined)[]) =>
   requests.some((request) => request && ACTIVE.includes(request.status));
 

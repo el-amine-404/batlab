@@ -1,10 +1,12 @@
 from typing import Literal
+from urllib.parse import quote
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Response
 
 from .. import schemas
-from ..catalog.models import ArtistPage, CategoryGroup, SearchResults, Shelf, VideoDetail, Versions
-from ..context import catalog, requests, settings
+from ..catalog.models import ArtistPage, CategoryGroup, Credits, Lyrics, SearchResults, Shelf, VideoDetail, Versions
+from ..context import catalog, library, requests, settings
+from ..problems import Problem
 
 router = APIRouter(tags=["Catalog"])
 _404 = {404: {"model": schemas.Problem}, 502: {"model": schemas.Problem}}
@@ -21,6 +23,7 @@ def _page(shelf: Shelf, limit: int, offset: int, source: str | None = None) -> S
     items = [v for v in _clean(shelf.items) if not source or v.source == source]
     shelf.total = len(items)
     shelf.items = items[offset:offset + limit]
+    library.mark(shelf.items)
     return shelf
 
 
@@ -35,6 +38,7 @@ async def home():
     shelves = await catalog.home()
     for shelf in shelves:
         shelf.items = _clean(shelf.items)
+        library.mark(shelf.items)
     return {"shelves": shelves}
 
 
@@ -62,6 +66,7 @@ async def category(category_id: str, limit: int = _LIMIT, offset: int = _OFFSET,
 async def search(q: str = Query("", max_length=200, description="Words of the title or the artist.")):
     found = await catalog.search(q)
     found.videos = _clean(found.videos)
+    library.mark(found.videos)
     return found
 
 
@@ -70,13 +75,16 @@ async def search(q: str = Query("", max_length=200, description="Words of the ti
 async def artist(artist_id: str):
     found = await catalog.artist(artist_id)
     found.videos = _clean(found.videos)
+    library.mark(found.videos)
     return found
 
 
 @router.get("/videos/{video_id}", summary="One video: what it is, where it plays, its official audio",
             response_model=VideoDetail, responses=_404)
 async def video(video_id: str):
-    return await catalog.video(video_id)
+    found = await catalog.video(video_id)
+    library.mark([found])
+    return found
 
 
 @router.get("/videos/{video_id}/versions", summary="Other takes of a video's song: clean or explicit, "
@@ -85,7 +93,49 @@ async def versions(video_id: str):
     found = await catalog.versions(video_id)
     found.videos = _clean(found.videos)
     found.songs = _clean(found.songs)
+    library.mark([*found.videos, *found.songs])
     return found
+
+
+@router.get("/videos/{video_id}/credits", summary="Who made the song: performed, written, produced by…",
+            response_model=Credits, responses=_404)
+async def credits(video_id: str):
+    return await catalog.credits(video_id)
+
+
+@router.get("/videos/{video_id}/lyrics", summary="The song's words: timed lines (LRCLIB, else YouTube Music) "
+            "or plain text", response_model=Lyrics, responses=_404)
+async def lyrics(video_id: str):
+    return await catalog.lyrics(video_id)
+
+
+def _file_name(detail: VideoDetail, ext: str) -> str:
+    name = f"{detail.artist} - {detail.title}"
+    name = "".join(c for c in name if c not in '\\/:*?"<>|').strip() or "lyrics"
+    return f"{name}.{ext}"
+
+
+def _lrc(seconds: float) -> str:
+    return f"{int(seconds // 60):02d}:{seconds % 60:05.2f}"
+
+
+@router.get("/videos/{video_id}/lyrics.{fmt}", summary="The lyrics as a file: .lrc (timed) or .txt",
+            response_class=Response, responses={200: {"content": {"text/plain": {}}}, **_404})
+async def lyrics_file(video_id: str, fmt: Literal["lrc", "txt"]):
+    found, detail = await catalog.lyrics(video_id), await catalog.video(video_id)
+    if fmt == "lrc":
+        if not found.synced:
+            raise Problem(404, "There are no timed lyrics for this song.")
+        head = f"[ar:{detail.artist}]\n[ti:{detail.title}]\n" + (f"[al:{detail.audio.album}]\n" if detail.audio and
+                                                                   detail.audio.album else "")
+        body = head + "\n".join(f"[{_lrc(line.start)}]{line.text}" for line in found.synced) + "\n"
+    else:
+        if not found.plain:
+            raise Problem(404, "There are no lyrics for this song.")
+        body = found.plain + "\n"
+    name = _file_name(detail, fmt)
+    return Response(body, media_type="text/plain; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
 
 
 @router.get("/videos/{video_id}/requests", summary="The newest request of each kind for one video",

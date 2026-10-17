@@ -16,6 +16,7 @@ import { WatchPage } from "@/pages/WatchPage";
 // Settings are opened now and then: their code loads when they are.
 const ServicesPage = lazy(() => import("@/pages/settings/ServicesPage"));
 const NotificationsPage = lazy(() => import("@/pages/settings/NotificationsPage"));
+const LibrariesPage = lazy(() => import("@/pages/settings/LibrariesPage"));
 const GeneralPage = lazy(() => import("@/pages/settings/GeneralPage"));
 const StatusPage = lazy(() => import("@/pages/settings/StatusPage"));
 
@@ -37,6 +38,7 @@ export const router = createBrowserRouter([
       { path: "/settings", element: <Navigate to="/settings/services" replace /> },
       { path: "/settings/services", element: <ServicesPage /> },
       { path: "/settings/notifications", element: <NotificationsPage /> },
+      { path: "/settings/libraries", element: <LibrariesPage /> },
       { path: "/settings/general", element: <GeneralPage /> },
       { path: "/settings/status", element: <StatusPage /> },
       { path: "*", element: <NotFoundPage /> },

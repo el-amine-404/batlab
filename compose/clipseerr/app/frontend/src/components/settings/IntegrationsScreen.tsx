@@ -19,6 +19,11 @@ const COPY: Record<Family, { title: string; description: string; empty: string }
     description: "The apps that download what is asked for. A request goes to the first one that takes its kind; when that one fails, to the next.",
     empty: "No service yet: requests wait until there is one.",
   },
+  libraries: {
+    title: "Libraries",
+    description: "Where songs and music videos already are. clipseerr reads them every 10 minutes: what they hold gets a green check, everywhere.",
+    empty: "No library yet: only what clipseerr asked for is marked.",
+  },
   notifications: {
     title: "Notifications",
     description: "Where clipseerr tells about requests: made, done, failed.",

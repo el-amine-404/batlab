@@ -10,9 +10,13 @@ from .integrations import Integrations, Invalid
 
 log = logging.getLogger("clipseerr.seed")
 KEY = "seeded"
+# Libraries came later: their own first start.
+LIBRARIES_KEY = "seeded_libraries"
 
 
-def run(db: Database, conf: Config, services: Integrations, notifications: Integrations) -> None:
+def run(db: Database, conf: Config, services: Integrations, notifications: Integrations,
+        libraries: Integrations) -> None:
+    _libraries(db, conf, libraries)
     if db.get(KEY):
         return
     wanted = []
@@ -32,3 +36,22 @@ def run(db: Database, conf: Config, services: Integrations, notifications: Integ
         except Invalid as exc:
             log.warning("no %s %s from the environment: %s", store.family, name, exc)
     db.put(KEY, True)
+
+
+def _libraries(db: Database, conf: Config, libraries: Integrations) -> None:
+    if db.get(LIBRARIES_KEY):
+        return
+    wanted = []
+    if conf.navidrome_url and conf.navidrome_user:
+        wanted.append(("Navidrome", "navidrome", {"base_url": conf.navidrome_url, "user": conf.navidrome_user,
+                                                  "password": conf.navidrome_password, "token": conf.navidrome_token,
+                                                  "salt": conf.navidrome_salt}))
+    if conf.music_videos_dir:
+        wanted.append(("Music videos", "folder", {"path": conf.music_videos_dir, "holds": "videos"}))
+    for name, kind, config in wanted:
+        try:
+            libraries.seed(name, kind, config)
+            log.info("made the library %s from the environment", name)
+        except Invalid as exc:
+            log.warning("no library %s from the environment: %s", name, exc)
+    db.put(LIBRARIES_KEY, True)

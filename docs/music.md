@@ -504,6 +504,23 @@ Jellyfin play. Its API reference is at `/api/docs` on the service.
   (pinned in `compose/versions.env`, followed by Renovate) and Apple's public
   feeds. Answers are kept in its database and refreshed in the background
   (the front page every 20 min), so a page opens from the cache in a few ms.
+- **What you have.** Settings, Libraries: where songs and music videos
+  already are. Navidrome (its songs, read through Caddy's :4534 with
+  Homepage's token, so a scan asked there never reaches it) and the music
+  videos folder (`media/music-videos`, mounted read only; a YouTube id in a
+  file's name matches exactly, else artist and title). They are read every
+  10 min; every video clipseerr shows gets a green check when its song or its
+  file is there, "Requested" while a request is under way, and its page says
+  "In your library" (with "Get it again").
+- **Hot's own.** "Add to Hot" on a video's page puts a video no feed or
+  search found into Hot. Hot keeps every artist it has shown (their pages
+  and pictures are found in the background), listed above its videos.
+- **The song.** A video's page shows the song's credits (performed, written,
+  produced by, and who gave them: YouTube Music's "Song credits") and its
+  lyrics: LRCLIB's, timed when it has them, else YouTube Music's
+  (LyricFind's), in a box that follows the song while "Song" plays (a click
+  on a line plays from it), with `.lrc` and `.txt` downloads; "Lyrics not
+  available" when neither has them.
 - **Watch.** The video, or the song alone (its official audio on YouTube
   Music, found by title, artist and length: a video often runs longer than
   its song), or Apple's 30 s preview. Nothing loads from YouTube until play

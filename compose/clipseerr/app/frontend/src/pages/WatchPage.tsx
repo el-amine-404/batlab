@@ -1,4 +1,4 @@
-import { CalendarClock, ChevronDown, ExternalLink, Film, Music2 } from "lucide-react";
+import { CalendarClock, Check, ChevronDown, ExternalLink, Film, Flame, Music2 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 
@@ -9,7 +9,8 @@ import { RequestPanel } from "@/components/video/RequestPanel";
 import { ShelfRow } from "@/components/video/ShelfRow";
 import { Thumb } from "@/components/video/Thumb";
 import type { Shelf, Version, Video, VideoDetail } from "@/lib/api";
-import { prefetchArtist, prefetchVideo, queryClient, useArtist, useVersions, useVideo } from "@/lib/queries";
+import { CreditsPanel, LyricsPanel } from "@/components/video/SongInfo";
+import { prefetchArtist, prefetchVideo, queryClient, useArtist, useHotPick, useHotPicks, useVersions, useVideo } from "@/lib/queries";
 import { ago, clock, cn, day, upcoming } from "@/lib/utils";
 
 /** The video as a list already showed it: the page shows that at once, while its details load. */
@@ -70,6 +71,23 @@ function Artists({ video }: { video: Video }) {
         </span>
       ))}
     </span>
+  );
+}
+
+/** Adds the video to the Hot category, or takes it out. */
+function HotButton({ video }: { video: VideoDetail }) {
+  const { data } = useHotPicks();
+  const pick = useHotPick();
+  if (!video.youtube_id) return null;
+  const id = `yt:${video.youtube_id}`;
+  const picked = data?.ids.includes(id) ?? false;
+  return (
+    <button type="button" disabled={!data || pick.isPending} onClick={() => pick.mutate({ id: picked ? id : video.id, add: !picked })}
+            title={picked ? "Take it out of Hot" : "Add it to the Hot category"}
+            className={cn("flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition",
+                          picked ? "border-orange-400/40 bg-orange-400/15 text-orange-200" : "border-border text-muted-foreground hover:border-orange-400/40 hover:text-orange-200")}>
+      {picked ? <Check className="size-3.5" /> : <Flame className="size-3.5" />} {picked ? "In Hot" : "Add to Hot"}
+    </button>
   );
 }
 
@@ -196,6 +214,7 @@ export function WatchPage() {
             </h1>
             <div className="text-[15px]">{video ? <Artists video={data ?? video} /> : <span className="skeleton inline-block h-4 w-40 rounded" />}</div>
             {video && <Meta video={data ?? video} />}
+            {data && <div className="mt-1 flex flex-wrap gap-2"><HotButton video={data} /></div>}
             {data?.audio && (
               <p className="text-xs text-muted-foreground">
                 The song: <span className="text-foreground/80">{data.audio.title}</span>
@@ -225,6 +244,12 @@ export function WatchPage() {
           )}
         </aside>
       </div>
+      {data && (data.youtube_id || data.audio) && (
+        <div className="grid gap-4 md:grid-cols-2">
+          <LyricsPanel video={data} />
+          <CreditsPanel video={data} />
+        </div>
+      )}
       {data && <OtherVersions video={data} />}
       {data && <MoreFrom video={data} />}
     </div>

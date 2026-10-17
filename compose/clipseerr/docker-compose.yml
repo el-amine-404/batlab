@@ -43,12 +43,22 @@ services:
       - CLIPSEERR_AURRAL_API_KEY=${AURRAL_API_KEY:-}
       - CLIPSEERR_SONGDROP_URL=http://songdrop:${SONGDROP_HTTP_PORT:-8810}
       - CLIPSEERR_METUBE_URL=http://metube-videos:8081
+      # The first libraries (Settings, Libraries): Navidrome's songs, through
+      # Caddy's :4534 (a scan asked there never reaches Navidrome), with the
+      # token Homepage reads it with; and the music videos folder.
+      - CLIPSEERR_NAVIDROME_URL=http://caddy:4534
+      - CLIPSEERR_NAVIDROME_USER=${NAVIDROME_USER:-}
+      - CLIPSEERR_NAVIDROME_TOKEN=${NAVIDROME_TOKEN:-}
+      - CLIPSEERR_NAVIDROME_SALT=${NAVIDROME_SALT:-}
+      - CLIPSEERR_MUSIC_VIDEOS_DIR=/library/music-videos
       # The first notification: Discord's #requests, through Apprise.
       - CLIPSEERR_APPRISE_URL=http://apprise:8000/notify/clipseerr
       - CLIPSEERR_APPRISE_TAG=requests
     volumes:
       # The database: requests, services (with Aurral's API key), settings, cache.
       - ${VOLUMES_ROOT}/clipseerr:/state
+      # Read only: what is there already gets its green check.
+      - ${DATA_ROOT}/media/music-videos:/library/music-videos:ro
     tmpfs:
       - /tmp
     read_only: true

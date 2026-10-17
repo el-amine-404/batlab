@@ -2,6 +2,7 @@ import { ExternalLink, Film, Music2, Play, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import type { VideoDetail } from "@/lib/api";
+import { listen, playback } from "@/lib/playback";
 import { cn } from "@/lib/utils";
 
 import { Thumb } from "./Thumb";
@@ -9,7 +10,9 @@ import { Thumb } from "./Thumb";
 type Mode = "video" | "audio" | "preview";
 
 function embed(id: string) {
-  const params = new URLSearchParams({ autoplay: "1", rel: "0", playsinline: "1", modestbranding: "1", iv_load_policy: "3" });
+  // enablejsapi: the player tells its time (lib/playback.ts), for the lyrics to follow.
+  const params = new URLSearchParams({ autoplay: "1", rel: "0", playsinline: "1", modestbranding: "1", iv_load_policy: "3",
+                                       enablejsapi: "1", origin: window.location.origin });
   return `https://www.youtube-nocookie.com/embed/${id}?${params}`;
 }
 
@@ -39,6 +42,12 @@ export function Player({ video }: { video: VideoDetail }) {
 
   const source = mode === "audio" ? video.audio?.youtube_id : video.youtube_id;
 
+  // Nothing plays any more: whoever follows the player stops.
+  useEffect(() => () => {
+    playback.attach(null);
+    playback.set({ mode: null, playing: false, time: 0, videoId: null });
+  }, [video.id]);
+
   return (
     <div className="flex flex-col gap-3">
       <div className="relative overflow-hidden rounded-2xl bg-black shadow-2xl shadow-black/50 ring-1 ring-white/10">
@@ -46,6 +55,7 @@ export function Player({ video }: { video: VideoDetail }) {
           <video src={video.preview_url} poster={video.thumbnail ?? undefined} controls autoPlay playsInline className="aspect-video w-full bg-black" />
         ) : playing && mode && source ? (
           <iframe
+            onLoad={(event) => listen(event.currentTarget, mode, source)}
             key={`${mode}-${source}`}
             src={embed(source)}
             title={`${video.artist} – ${video.title}`}

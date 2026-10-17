@@ -140,6 +140,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/videos/{video_id}/credits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Who made the song: performed, written, produced by… */
+        get: operations["credits_api_v1_videos__video_id__credits_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videos/{video_id}/lyrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The song's words: timed lines (LRCLIB, else YouTube Music) or plain text */
+        get: operations["lyrics_api_v1_videos__video_id__lyrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videos/{video_id}/lyrics.{fmt}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The lyrics as a file: .lrc (timed) or .txt */
+        get: operations["lyrics_file_api_v1_videos__video_id__lyrics__fmt__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/videos/{video_id}/requests": {
         parameters: {
             query?: never;
@@ -149,6 +200,58 @@ export interface paths {
         };
         /** The newest request of each kind for one video */
         get: operations["video_requests_api_v1_videos__video_id__requests_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hot/picks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The videos added to Hot by hand */
+        get: operations["picks_api_v1_hot_picks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hot/picks/{video_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Add a video to Hot */
+        put: operations["add_pick_api_v1_hot_picks__video_id__put"];
+        post?: never;
+        /** Take a video out of Hot's picks (its yt: id) */
+        delete: operations["remove_pick_api_v1_hot_picks__video_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hot/artists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every artist Hot has shown, the most videos first */
+        get: operations["artists_api_v1_hot_artists_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -457,6 +560,111 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/libraries/types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The library types and their fields */
+        get: operations["types_api_v1_libraries_types_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/libraries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every library, in order */
+        get: operations["list_items_api_v1_libraries_get"];
+        put?: never;
+        /** Add a library */
+        post: operations["create_api_v1_libraries_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/libraries/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Try a library not saved yet */
+        post: operations["test_new_api_v1_libraries_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/libraries/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Put the librarys in order */
+        put: operations["order_api_v1_libraries_order_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/libraries/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One library */
+        get: operations["get_api_v1_libraries__item_id__get"];
+        /** Change a library; a secret left empty keeps its value */
+        put: operations["update_api_v1_libraries__item_id__put"];
+        post?: never;
+        /** Remove a library */
+        delete: operations["delete_api_v1_libraries__item_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/libraries/{item_id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Try a saved library, changed as the body says */
+        post: operations["test_saved_api_v1_libraries__item_id__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -689,6 +897,29 @@ export interface components {
             /** Video */
             video: string[];
         };
+        /** Credit */
+        Credit: {
+            /**
+             * Role
+             * @description "Performed by", "Written by", "Produced by"…, as YouTube Music says.
+             */
+            role: string;
+            /** Names */
+            names: string[];
+        };
+        /**
+         * Credits
+         * @description Who made the song, from YouTube Music's credits page.
+         */
+        Credits: {
+            /** Credits */
+            credits: components["schemas"]["Credit"][];
+            /**
+             * Provider
+             * @description Who gave YouTube Music the credits (the label).
+             */
+            provider?: string | null;
+        };
         /** EventDescription */
         EventDescription: {
             /** Name */
@@ -719,6 +950,32 @@ export interface components {
         Home: {
             /** Shelves */
             shelves: components["schemas"]["Shelf"][];
+        };
+        /** HotArtist */
+        HotArtist: {
+            /** Name */
+            name: string;
+            /**
+             * Id
+             * @description Their YouTube Music page, once found.
+             */
+            id?: string | null;
+            /** Thumbnail */
+            thumbnail?: string | null;
+            /**
+             * Videos
+             * @description Their videos Hot has shown.
+             */
+            videos: number;
+            /** First Seen */
+            first_seen: number;
+            /** Last Seen */
+            last_seen: number;
+        };
+        /** HotArtists */
+        HotArtists: {
+            /** Artists */
+            artists: components["schemas"]["HotArtist"][];
         };
         /** Integration */
         Integration: {
@@ -850,6 +1107,36 @@ export interface components {
             /** Message */
             message: string;
         };
+        /** LyricLine */
+        LyricLine: {
+            /**
+             * Start
+             * @description Seconds into the song.
+             */
+            start: number;
+            /** Text */
+            text: string;
+        };
+        /**
+         * Lyrics
+         * @description The song's words: timed lines when a source has them, else plain text.
+         */
+        Lyrics: {
+            /** Synced */
+            synced?: components["schemas"]["LyricLine"][];
+            /** Plain */
+            plain?: string | null;
+            /**
+             * Instrumental
+             * @default false
+             */
+            instrumental: boolean;
+            /**
+             * Source
+             * @description "LRCLIB" or "YouTube Music (LyricFind)".
+             */
+            source?: string | null;
+        };
         /** Media */
         Media: {
             /**
@@ -900,6 +1187,14 @@ export interface components {
             /**
              * Ids
              * @description Every service's id once, first to be asked first.
+             */
+            ids: string[];
+        };
+        /** Picks */
+        Picks: {
+            /**
+             * Ids
+             * @description The videos added by hand (catalog ids), newest first.
              */
             ids: string[];
         };
@@ -1213,6 +1508,11 @@ export interface components {
              */
             preview_url?: string | null;
             /**
+             * Library
+             * @description What the libraries (Settings, Libraries) have of it: its song, its video.
+             */
+            library?: ("audio" | "video")[];
+            /**
              * Kind
              * @description A music video, or the song (its official audio).
              * @enum {string}
@@ -1300,6 +1600,11 @@ export interface components {
              * @description A 30 s preview (Apple), playable without YouTube.
              */
             preview_url?: string | null;
+            /**
+             * Library
+             * @description What the libraries (Settings, Libraries) have of it: its song, its video.
+             */
+            library?: ("audio" | "video")[];
         };
         /** VideoDetail */
         VideoDetail: {
@@ -1370,6 +1675,11 @@ export interface components {
              * @description A 30 s preview (Apple), playable without YouTube.
              */
             preview_url?: string | null;
+            /**
+             * Library
+             * @description What the libraries (Settings, Libraries) have of it: its song, its video.
+             */
+            library?: ("audio" | "video")[];
             /**
              * Embeddable
              * @description YouTube lets other pages play it.
@@ -1450,6 +1760,8 @@ export interface operations {
                 limit?: number;
                 /** @description Videos to skip: the next page starts at offset + limit, until total. */
                 offset?: number;
+                /** @description Only the videos from YouTube, or from Apple Music. */
+                source?: ("youtube" | "apple") | null;
             };
             header?: never;
             path: {
@@ -1542,6 +1854,8 @@ export interface operations {
                 limit?: number;
                 /** @description Videos to skip: the next page starts at offset + limit, until total. */
                 offset?: number;
+                /** @description Only the videos from YouTube, or from Apple Music. */
+                source?: ("youtube" | "apple") | null;
             };
             header?: never;
             path: {
@@ -1786,6 +2100,154 @@ export interface operations {
             };
         };
     };
+    credits_api_v1_videos__video_id__credits_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                video_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Credits"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    lyrics_api_v1_videos__video_id__lyrics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                video_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Lyrics"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    lyrics_file_api_v1_videos__video_id__lyrics__fmt__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                video_id: string;
+                fmt: "lrc" | "txt";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     video_requests_api_v1_videos__video_id__requests_get: {
         parameters: {
             query?: never;
@@ -1813,6 +2275,124 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    picks_api_v1_hot_picks_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Picks"];
+                };
+            };
+        };
+    };
+    add_pick_api_v1_hot_picks__video_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                video_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Picks"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    remove_pick_api_v1_hot_picks__video_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                video_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    artists_api_v1_hot_artists_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HotArtists"];
                 };
             };
         };
@@ -2780,6 +3360,338 @@ export interface operations {
         };
     };
     test_saved_api_v1_notifications__item_id__test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IntegrationIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestResult"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    types_api_v1_libraries_types_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationTypes"];
+                };
+            };
+        };
+    };
+    list_items_api_v1_libraries_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationList"];
+                };
+            };
+        };
+    };
+    create_api_v1_libraries_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IntegrationIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Integration"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    test_new_api_v1_libraries_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IntegrationIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestResult"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    order_api_v1_libraries_order_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Order"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationList"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_api_v1_libraries__item_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Integration"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    update_api_v1_libraries__item_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IntegrationIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Integration"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    delete_api_v1_libraries__item_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    test_saved_api_v1_libraries__item_id__test_post: {
         parameters: {
             query?: never;
             header?: never;
