@@ -5,6 +5,8 @@ when Reddit refuses; a new feed first takes its history from PullPush
 (BACKFILL_PAGES of 100 posts). Every video a post links to is then checked
 once with YouTube Music (verify.py)."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import re
