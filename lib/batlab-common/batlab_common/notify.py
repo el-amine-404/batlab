@@ -16,6 +16,7 @@ run this file on its own.
 """
 
 import argparse
+import base64
 import datetime
 import json
 import os
@@ -42,14 +43,18 @@ class NotSent(RuntimeError):
         self.reached = reached
 
 
-def send(endpoint, title, body, tag=None, kind="info", timeout=15):
+def send(endpoint, title, body, tag=None, kind="info", timeout=15, attach=()):
     """Send one message. endpoint: Apprise's /notify/<key> address, as
-    http://apprise:8000/notify/musicguard. body is Markdown."""
+    http://apprise:8000/notify/musicguard. body is Markdown. attach: (filename,
+    bytes) pairs, as a picture under the message."""
     if kind not in KINDS:
         raise ValueError(f"kind must be one of {KINDS}")
     payload = {"title": title[:250], "body": body[:MAX_BODY], "type": kind, "format": "markdown"}
     if tag:
         payload["tag"] = tag
+    if attach:
+        payload["attachment"] = [{"filename": name, "base64": base64.b64encode(data).decode()}
+                                 for name, data in attach]
     request = urllib.request.Request(endpoint, data=json.dumps(payload).encode(), method="POST",
                                      headers={"Content-Type": "application/json", "Accept": "application/json",
                                               "User-Agent": "batlab"})

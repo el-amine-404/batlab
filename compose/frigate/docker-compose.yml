@@ -155,8 +155,9 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Tells Discord when car 1 or car 2 leaves its spot on the street, and when
-  # it is back (carwatch/carwatch.py), from Frigate's events on the broker.
+  # Tells Discord, with a picture of the street, when the Clio 4 or the Ford
+  # leaves its spot, and when it is back (carwatch/carwatch.py), from
+  # Frigate's events on the broker.
   carwatch:
     # The same Python image as camwatch.
     image: ${IMAGE_CAMWATCH}:${TAG_CAMWATCH}
@@ -175,10 +176,10 @@ services:
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONPATH=/opt/batlab-common
       # The zones of camera_2 in config.yml, and who parks there.
-      - CARWATCH_SPOTS=spot_1=Car 1,spot_2=Car 2
+      - CARWATCH_SPOTS=spot_1=Clio 4,spot_2=Ford
       - CARWATCH_NOTIFY_URL=http://apprise:8000/notify/carwatch
       - CARWATCH_LINK=http://frigate.homelab.lan
-    # mqtt for the broker; home_server for Apprise.
+    # mqtt for the broker; home_server for Frigate's pictures and Apprise.
     networks:
       - home_server
       - mqtt

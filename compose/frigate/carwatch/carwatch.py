@@ -1,11 +1,11 @@
-"""Says when car 1 or car 2 leaves its parking spot on the street, and when it
-is back.
+"""Says when the Clio 4 or the Ford leaves its parking spot on the street,
+and when it is back, with a picture of the street.
 
 Frigate (config.yml, camera_2) follows the cars and has a zone per spot. It
 publishes an event on MQTT each time a car changes zone or goes from moving to
-parked. A car that drives into a spot and parks there has arrived; a car parked
-in a spot that drives out of it has left. Either is told once it has held for
-CARWATCH_HOLD seconds, so a car that pulls out and parks again says nothing.
+parked. A car that drives into a spot has arrived; a car parked in a spot that
+drives out of it has left. Each is told the moment Frigate sees it, with
+Frigate's latest frame of the street, the car boxed.
 
 Counting cars in a spot is not enough: Frigate looks for cars only where
 something moves, so after a restart a parked car stays unseen until someone
@@ -22,17 +22,18 @@ import select
 import socket
 import struct
 import time
+import urllib.request
 from datetime import datetime
 
 from batlab_common import notify as apprise
 
 BROKER = os.environ.get("CARWATCH_MQTT_HOST", "mosquitto")
 PORT = int(os.environ.get("CARWATCH_MQTT_PORT", "1883"))
+FRIGATE = os.environ.get("CARWATCH_FRIGATE", "http://frigate:5000")
 CAMERA = os.environ.get("CARWATCH_CAMERA", "camera_2")
 # zone=name pairs: "spot_1=Car 1,spot_2=Car 2".
 SPOTS = dict(pair.split("=", 1) for pair in
              os.environ.get("CARWATCH_SPOTS", "spot_1=Car 1,spot_2=Car 2").split(","))
-HOLD = int(os.environ.get("CARWATCH_HOLD", "60"))
 NOTIFY_URL = os.environ.get("CARWATCH_NOTIFY_URL", "")
 NOTIFY_TAG = os.environ.get("CARWATCH_NOTIFY_TAG", "cameras")
 LINK = os.environ.get("CARWATCH_LINK", "")
@@ -108,13 +109,25 @@ class Mqtt:
         return [body[2 + length:]]
 
 
-def notify(title, kind, fields):
-    """One message: the title, then a "**name**: value" line per field."""
+def picture():
+    """Frigate's latest frame of the street, the cars boxed; None if it has none."""
+    try:
+        with urllib.request.urlopen(f"{FRIGATE}/api/{CAMERA}/latest.jpg?bbox=1", timeout=10) as response:
+            return response.read()
+    except OSError as error:
+        log(f"picture: {error}")
+        return None
+
+
+def notify(title, kind, fields, image=None):
+    """One message: the title, then a "**name**: value" line per field, and
+    the picture under it."""
     if not NOTIFY_URL:
         return
     body = "\n".join(f"**{name}**: {value}" for name, value in fields)
+    attach = [(f"{CAMERA}.jpg", image)] if image else ()
     try:
-        apprise.send(NOTIFY_URL, title, body, tag=NOTIFY_TAG, kind=kind)
+        apprise.send(NOTIFY_URL, title, body, tag=NOTIFY_TAG, kind=kind, attach=attach)
     except apprise.NotSent as error:  # a lost message never stops the watch
         log(f"notification: {error}")
 
@@ -130,7 +143,7 @@ class Watch:
     def __init__(self):
         self.first = {}    # car (Frigate's id) -> the spot it was first seen in, or None
         self.parked = {}   # car -> the spot it is parked in
-        self.pending = {}  # spot -> ("arrived" | "left", car, when)
+        self.arrived = {}  # car -> the spot it was told arriving in
         self.last = {}     # spot -> ("arrived" | "left", when), what was last told
 
     def spot(self, zones):
@@ -149,52 +162,43 @@ class Watch:
         if was and spot != was and not after.get("stationary"):
             self.parked.pop(car, None)
             self.first[car] = None
-            self.change(was, "left", car, when)
-        elif spot and after.get("stationary") and was != spot:
+            self.arrived.pop(car, None)
+            self.tell(was, "left", car, when)
+        elif (spot and self.first[car] != spot and self.arrived.get(car) != spot
+              and spot not in self.parked.values()):
+            # Driven in from the street, the spot empty (a car passing close
+            # to a parked one is not arriving). Told once: a car manoeuvring
+            # in and out of the spot before it parks says nothing more.
+            self.arrived[car] = spot
+            self.tell(spot, "arrived", car, when)
+        if spot and after.get("stationary") and car not in self.parked:
             self.parked[car] = spot
-            if self.first[car] != spot:
-                self.change(spot, "arrived", car, when)
-            else:
-                log(f"{SPOTS[spot]}: a car already parked there ({car})")
+            log(f"{SPOTS[spot]}: {car} parked")
         if message.get("type") == "end":
             # Gone from the picture: driven off (told above, as it left its
             # spot), or lost while parked, which says nothing.
-            self.first.pop(car, None)
-            self.parked.pop(car, None)
+            for seen in (self.first, self.parked, self.arrived):
+                seen.pop(car, None)
 
-    def change(self, spot, kind, car, when):
-        pending = self.pending.get(spot)
-        if pending and pending[1] == car and pending[0] != kind:
-            # Out and back in, or in and out again: a manoeuvre.
-            log(f"{SPOTS[spot]}: {car} {kind} again within {HOLD}s, nothing to tell")
-            self.pending.pop(spot)
-            return
-        log(f"{SPOTS[spot]}: {car} {kind}")
-        self.pending[spot] = (kind, car, when)
-
-    def tell(self, now):
-        for spot, (kind, car, when) in list(self.pending.items()):
-            if now - when < HOLD:
-                continue
-            self.pending.pop(spot)
-            name, at = SPOTS[spot], datetime.fromtimestamp(when).strftime("%H:%M")
-            fields = [("At", at)]
-            before = self.last.get(spot)
-            if before and before[0] != kind:
-                fields.append(("Away for" if kind == "arrived" else "Parked for", duration(when - before[1])))
-            if LINK:
-                fields.append(("See", LINK))
-            if kind == "left":
-                notify(f"🚗 {name} left", "info", fields)
-            else:
-                notify(f"🅿️ {name} is back", "success", fields)
-            log(f"told: {name} {kind} at {at}")
-            self.last[spot] = (kind, when)
+    def tell(self, spot, kind, car, when):
+        name, at = SPOTS[spot], datetime.fromtimestamp(when).strftime("%H:%M:%S")
+        fields = [("At", at)]
+        before = self.last.get(spot)
+        if before and before[0] != kind:
+            fields.append(("Away for" if kind == "arrived" else "Parked for", duration(when - before[1])))
+        if LINK:
+            fields.append(("See", LINK))
+        if kind == "left":
+            notify(f"🚗 {name} left", "info", fields, picture())
+        else:
+            notify(f"🅿️ {name} is back", "success", fields, picture())
+        log(f"told: {name} {kind} at {at} ({car})")
+        self.last[spot] = (kind, when)
 
 
 def main():
     watch = Watch()
-    log(f"watching {CAMERA} on {BROKER}:{PORT}; spots {SPOTS}; hold {HOLD}s")
+    log(f"watching {CAMERA} on {BROKER}:{PORT}; spots {SPOTS}")
     while True:
         try:
             mqtt = Mqtt(BROKER, PORT, "frigate/events")
@@ -205,7 +209,6 @@ def main():
                         watch.event(json.loads(payload))
                     except (ValueError, KeyError, TypeError) as error:
                         log(f"event: {error}")
-                watch.tell(time.time())
                 with open(HEARTBEAT, "w") as out:
                     out.write(str(int(time.time())))
         except (OSError, ConnectionError) as error:

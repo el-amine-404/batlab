@@ -190,8 +190,8 @@ cameras:
       width: 960
       height: 576
       fps: 5
-    # Cars only: carwatch (compose/frigate/carwatch) says when car 1 or car 2
-    # leaves its spot or comes back.
+    # Cars only: carwatch (compose/frigate/carwatch) says when the Clio 4 or
+    # the Ford leaves its spot or comes back.
     objects:
       track:
         - car
@@ -215,12 +215,12 @@ cameras:
       # counts as in the spot when the bottom middle of its box (its front or
       # back bumper, seen from above) is inside it.
       spot_1:
-        friendly_name: Car 1's spot
+        friendly_name: Clio 4's spot
         coordinates: "0.448,0.781,0.563,0.816,0.568,0.990,0.448,0.972"
         objects:
           - car
       spot_2:
-        friendly_name: Car 2's spot
+        friendly_name: Ford's spot
         coordinates: "0.563,0.816,0.658,0.851,0.658,1.0,0.568,1.0"
         objects:
           - car
