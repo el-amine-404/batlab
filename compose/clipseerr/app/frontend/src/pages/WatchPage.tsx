@@ -86,9 +86,10 @@ function TheSong({ audio }: { audio: NonNullable<VideoDetail["audio"]> }) {
   ) : audio.album;
   const year = album?.year ?? audio.year;
   return (
-    <p className="flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
-      <Music2 className="size-3.5 shrink-0" aria-hidden />
-      The song
+    // Running text, not flex: a flex gap would put a space before the comma.
+    <p className="text-xs text-muted-foreground">
+      <Music2 className="mr-1 inline size-3.5 align-[-2px]" aria-hidden />
+      The song{" "}
       <Link to={`/watch/yt:${audio.youtube_id}`} className="font-medium text-foreground/85 underline-offset-4 hover:text-rose-200 hover:underline">
         {audio.title}
       </Link>
@@ -97,7 +98,7 @@ function TheSong({ audio }: { audio: NonNullable<VideoDetail["audio"]> }) {
       ) : (
         <span>, {number ? `track ${number} of` : "from"} {albumLink}{year && ` (${album?.kind?.toLowerCase() ?? "album"}, ${year})`}</span>
       ))}
-      {audio.duration && <span>· {clock(audio.duration)}</span>}
+      {audio.duration && <span> · {clock(audio.duration)}</span>}
     </p>
   );
 }
