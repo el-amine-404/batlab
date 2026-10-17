@@ -67,7 +67,7 @@ Two things keep that from happening again:
 | Camera | Detection | Kept by Frigate |
 | --- | --- | --- |
 | `camera_1`, Rooftop | people, 5 fps on the sub stream, YOLOv9 on the iGPU | person on the roof (alert): 10 s before to 10 s after, 30 days, with a snapshot; person seen elsewhere (detection): 7 days; any motion: 3 days |
-| `camera_2`, Street | none | nothing, live view only |
+| `camera_2`, Street | cars, 5 fps on the sub stream | every car Frigate sees (detections, no alerts): clips of it moving and a snapshot, 1 day |
 
 Clips are copied from the main stream, never re-encoded. The DVR still keeps
 everything; Frigate is the alarm and the index.
@@ -78,6 +78,19 @@ everything; Frigate is the alarm and the index.
 - **Motion masks**: the DVR's clock and camera-name overlays (they change
   every second), the sky and buildings beyond the walls, the neighbour's
   plants on the right. Motion under a mask never starts detection.
+- **Parking spots** (`camera_2`): zones `spot_1` and `spot_2` over the
+  places car 1 and car 2 park, wide enough for a car parked a little off. A
+  car is in a spot when the bottom middle of its box is inside. Move them in
+  Settings > Masks / Zones if a car is parked where its zone does not reach.
+- **carwatch** (`compose/frigate/carwatch`) reads Frigate's events on the
+  broker and posts "Car 1 left" and "Car 1 is back" (with how long it was
+  away, or parked) to Apprise's `cameras` channel, a minute after it
+  happens, so a car that pulls out and parks again says nothing. A car that
+  drives into a spot and parks has arrived; one parked there that drives out
+  has left. Frigate looks for cars only where something moves, so after a
+  restart a parked car can stay unseen until someone walks past it: such a
+  car is not "back", and it is told when it leaves. Another car parked in a
+  spot is taken for its usual car. `docker logs carwatch` shows each move.
 - **A child playing** is a person like any other: it makes an alert and a
   clip. Frigate cannot tell them apart without training (Settings >
   Classification can learn `child` / `adult` from the snapshots this camera
@@ -142,7 +155,7 @@ make restart STACK=homepage
 ### Later
 
 - **`record.enabled`** must stay `true` on `camera_1`: with it `false` in the
-  config, turning recording on from the UI does nothing. `camera_2` cannot
-  record until its config says so.
+  config, turning recording on from the UI does nothing; the same goes for
+  `camera_2`.
 - The data disk, once reliable (`hosts/lab2/README.md`), could hold a bigger
   image.

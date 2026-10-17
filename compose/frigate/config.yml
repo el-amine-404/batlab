@@ -4,7 +4,8 @@
 #
 # The DVR records both cameras around the clock. Frigate watches the rooftop
 # (camera_1) for people and keeps only those clips, plus a week of its motion;
-# the street (camera_2) is live view only. See docs/cameras.md.
+# on the street (camera_2) it follows cars and keeps a day of them. See
+# docs/cameras.md.
 
 # The config format this file is written in. Without it Frigate assumes an
 # old one and "migrates" it, which breaks masks given as fractions.
@@ -175,14 +176,80 @@ cameras:
     friendly_name: Street
     ffmpeg:
       inputs:
+        # Clips are copied from the main stream (4K H.265), never re-encoded.
+        - path: rtsp://127.0.0.1:8554/camera_2
+          input_args: preset-rtsp-restream
+          roles:
+            - record
         - path: rtsp://127.0.0.1:8554/camera_2_sub
           input_args: preset-rtsp-restream
           roles:
             - detect
     detect:
+      enabled: true
       width: 960
       height: 576
       fps: 5
+    # Cars only: carwatch (compose/frigate/carwatch) says when car 1 or car 2
+    # leaves its spot or comes back.
+    objects:
+      track:
+        - car
+    # Fractions of the 960x576 sub stream frame, as on camera_1.
+    motion:
+      mask:
+        timestamp:
+          friendly_name: DVR clock overlay
+          enabled: true
+          coordinates: "0.000,0.030,0.300,0.030,0.300,0.110,0.000,0.110"
+        camera_label:
+          friendly_name: DVR camera name overlay
+          enabled: true
+          coordinates: "0.710,0.870,0.840,0.870,0.840,0.940,0.710,0.940"
+        buildings:
+          friendly_name: Buildings, garden and trees beyond the fence
+          enabled: true
+          coordinates: "0.385,0.000,1.0,0.000,1.0,0.570,0.845,0.555,0.425,0.255"
+    zones:
+      # One per parking spot, wide enough for a car parked a little off. A car
+      # counts as in the spot when the bottom middle of its box (its front or
+      # back bumper, seen from above) is inside it.
+      spot_1:
+        friendly_name: Car 1's spot
+        coordinates: "0.448,0.781,0.563,0.816,0.568,0.990,0.448,0.972"
+        objects:
+          - car
+      spot_2:
+        friendly_name: Car 2's spot
+        coordinates: "0.563,0.816,0.658,0.851,0.658,1.0,0.568,1.0"
+        objects:
+          - car
+    review:
+      # No alerts: frigate-notify posts every alert as "Person on the roof",
+      # and carwatch already tells. Every car is a detection.
+      alerts:
+        enabled: false
+      detections:
+        labels:
+          - car
+    # A day of everything: clips of the cars that move, and their snapshots
+    # (the pictures a classifier for car 3 would learn from).
+    record:
+      enabled: true
+      continuous:
+        days: 0
+      motion:
+        days: 0
+      detections:
+        pre_capture: 5
+        post_capture: 5
+        retain:
+          days: 1
+          mode: motion
+    snapshots:
+      enabled: true
+      retain:
+        default: 1
     live:
       streams:
         Sub stream: camera_2_sub
