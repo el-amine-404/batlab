@@ -67,7 +67,7 @@ Two things keep that from happening again:
 | Camera | Detection | Kept by Frigate |
 | --- | --- | --- |
 | `camera_1`, Rooftop | people, 5 fps on the sub stream, YOLOv9 on the iGPU | person on the roof (alert): 10 s before to 10 s after, 30 days, with a snapshot; person seen elsewhere (detection): 7 days; any motion: 3 days |
-| `camera_2`, Street | cars, 5 fps on the sub stream | every car Frigate sees (detections, no alerts): clips of it moving and a snapshot, 1 day |
+| `camera_2`, Street | cars and people, 5 fps on the sub stream | every car and person Frigate sees (detections, no alerts): clips of them moving, 1 day; snapshots, 7 days (the car classifier learns from them) |
 
 Clips are copied from the main stream, never re-encoded. The DVR still keeps
 everything; Frigate is the alarm and the index.
@@ -99,6 +99,11 @@ everything; Frigate is the alarm and the index.
   car can stay unseen until someone walks past it: such a car is not
   "back", and it is told when it leaves. Another car parked in a spot is
   taken for its usual car. `docker logs carwatch` shows each move.
+- **Someone at the cars**: the street camera also detects people. The zone
+  `near_cars` (around both spots) counts a person only after 30 s there
+  (`loitering_time`); carwatch then posts "Someone at the cars" with a
+  close-up and the street, and the clip from when they came. At most one in
+  10 minutes (`CARWATCH_PEOPLE_QUIET`), so loading the boot is told once.
 - **A child playing** is a person like any other: it makes an alert and a
   clip. Frigate cannot tell them apart without training (Settings >
   Classification can learn `child` / `adult` from the snapshots this camera

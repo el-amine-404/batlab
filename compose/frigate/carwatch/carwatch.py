@@ -10,6 +10,10 @@ car from the 4K stream. Once the recording is written, a second message says
 which way the car went (or came from) and holds the clip, made small enough
 for Discord to play.
 
+It also says when someone stays at the cars: Frigate puts a person in the
+CARWATCH_PEOPLE_ZONE only after its loitering time there (30 s). Then the
+same: a close-up and the street at once, the clip after.
+
 Counting cars in a spot is not enough: Frigate looks for cars only where
 something moves, so after a restart a parked car stays unseen until someone
 walks past it, and would "arrive" then. Here a car first seen already in its
@@ -57,6 +61,11 @@ WAYS = dict(pair.split("=", 1) for pair in
             os.environ.get("CARWATCH_WAYS", "left=left,right=right").split(","))
 # Seconds of the clip before and after the moment told.
 BEFORE, AFTER = 5, 15
+PEOPLE_ZONE = os.environ.get("CARWATCH_PEOPLE_ZONE", "near_cars")
+# At most one "someone at the cars" in that many seconds: a family loading
+# the boot for ten minutes is told once.
+PEOPLE_QUIET = int(os.environ.get("CARWATCH_PEOPLE_QUIET", "600"))
+LOITER = 30
 FFMPEG = os.environ.get("CARWATCH_FFMPEG", "/usr/lib/ffmpeg/8.0/bin/ffmpeg")
 NOTIFY_URL = os.environ.get("CARWATCH_NOTIFY_URL", "")
 NOTIFY_TAG = os.environ.get("CARWATCH_NOTIFY_TAG", "cameras")
@@ -214,13 +223,19 @@ class Watch:
         self.last = {}     # spot -> ("arrived" | "left", when), what was last told
         self.origin = {}   # car -> where it was first seen; kept after it ends, until told
         self.seen = {}     # car -> where it was last seen; the same
+        self.people = set()  # the people told as staying at the cars
+        self.people_told = float("-inf")
 
     def spot(self, zones):
         return next((zone for zone in zones if zone in SPOTS), None)
 
     def event(self, message):
         after = message.get("after") or {}
-        if after.get("camera") != CAMERA or after.get("label") != "car":
+        if after.get("camera") != CAMERA:
+            return
+        if after.get("label") == "person":
+            return self.person(message, after)
+        if after.get("label") != "car":
             return
         car, when = after["id"], after.get("frame_time") or time.time()
         spot = self.spot(after.get("current_zones") or [])
@@ -258,6 +273,47 @@ class Watch:
             for seen in (self.first, self.start, self.parked, self.arrived):
                 seen.pop(car, None)
 
+    def person(self, message, after):
+        who, when = after["id"], after.get("frame_time") or time.time()
+        if message.get("type") == "end":
+            self.people.discard(who)
+        elif (PEOPLE_ZONE in (after.get("current_zones") or []) and who not in self.people
+              and when - self.people_told >= PEOPLE_QUIET):
+            self.people.add(who)
+            self.people_told = when
+            box = after.get("box") or (0, 0, 0, 0)
+            threading.Thread(target=self.someone, args=(who, when, box), daemon=True).start()
+
+    def someone(self, who, when, box):
+        at = datetime.fromtimestamp(when).strftime("%H:%M:%S")
+        notify(f"***Someone at the cars***\n{at} · there {LOITER} s and more", "warning",
+               [("person.jpg", self.near(box)), ("street.jpg", picture())])
+        log(f"told: someone at the cars at {at} ({who})")
+        # From when they came near, to a little after.
+        video = self.later_clip(when - LOITER - BEFORE, when + AFTER)
+        notify(f"***Someone at the cars***\n{at}" + ("" if video else " · no clip"), "warning",
+               [("person.mp4", video)])
+
+    @staticmethod
+    def near(box):
+        try:
+            return closeup(box)
+        except Exception as error:  # a picture less never loses the message
+            log(f"closeup: {error}")
+            return None
+
+    @staticmethod
+    def later_clip(start, end):
+        """The clip, once Frigate has written it (in 10 s pieces, a little
+        after); None if it never comes."""
+        time.sleep(max(0, end + 25 - time.time()))
+        for _ in range(3):
+            video = clip(start, end)
+            if video:
+                return video
+            time.sleep(20)
+        return None
+
     def tell(self, spot, kind, car, when, box):
         before = self.last.get(spot)
         self.last[spot] = (kind, when)
@@ -271,25 +327,14 @@ class Watch:
         line = at
         if before and before[0] != kind:
             line += f" · {'away' if kind == 'arrived' else 'parked'} {duration(when - before[1])}"
-        try:
-            near = closeup(box)
-        except Exception as error:  # a picture less never loses the message
-            log(f"closeup: {error}")
-            near = None
+        near = self.near(box)
         notify(f"***{title}***\n{line}", "info" if kind == "left" else "success",
                [(f"{spot}.jpg", near), ("street.jpg", picture())])
         log(f"told: {name} {kind} at {at} ({car})")
 
-        # Frigate writes the recording in 10 s pieces, a little after.
-        time.sleep(max(0, when + AFTER + 25 - time.time()))
+        video = self.later_clip(when - BEFORE, when + AFTER)
         where = (self.seen if kind == "left" else self.origin).get(car)
         way = WAYS["left" if where and where[0] < WIDTH / 2 else "right"] if where else None
-        video = None
-        for _ in range(3):
-            video = clip(when - BEFORE, when + AFTER)
-            if video:
-                break
-            time.sleep(20)
         if kind == "left":
             words = f"***{name} went {way}***" if way else f"***{name} left***"
         else:
