@@ -1,0 +1,11 @@
+[Unit]
+Description=Bring the data disk back: clear a dead mount, mount it, power-cycle its USB port
+After=batlab-usb2-only.service docker.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/home/potato/batlab/watchdog/scripts/revive-data-disk.sh
+# It waits for the disk to show up after each step, and fsck can take a while.
+TimeoutStartSec=30min

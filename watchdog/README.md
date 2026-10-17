@@ -136,10 +136,55 @@ to USB 2 (`scripts/usb2-only.sh`) and makes that permanent with the host's
 ssh -t lab2 sudo ~/batlab/watchdog/scripts/recover-data-disk.sh --usb2
 ```
 
+## Bringing the disk back without a hand
+
+On 2026-10-17 lab2 went down at 21:48 with nothing in the journal and booted two
+minutes later without its data disk: the JMS578 enclosure enumerated at USB 3,
+`usb2-only.sh` disabled USB 3 as it does at every boot, and the disk never came
+back on the port's USB 2 side. That had happened after the boots of 10-01 and
+10-03 too, and each time only a replug brought it back.
+
+Two things now do the replug in software, where a root hub lets them:
+
+- `usb2-only.sh` power-cycles the USB 2 side of every port it pushes a device
+  off, so the disk reconnects at 480M at boot instead of hanging between the two.
+- `scripts/revive-data-disk.sh`, every two minutes (`batlab-data-disk-revive.timer`),
+  does nothing while the disk is mounted and answering. Otherwise it clears a
+  dead mount (gone, or hung per the heartbeat's failed reads), mounts a disk that
+  is present (fsck first; the data guard then starts its containers), and if the
+  disk is off the bus power-cycles the USB 2 side of its connector
+  (`WATCHDOG_DATA_USB_PORT`). As a last resort it lets the disk back on at USB 3
+  (`WATCHDOG_REVIVE_USB3_FALLBACK=1`) and says so: a disk that may hang later
+  still serves more than one off the bus. Each revival posts to the alerts
+  channel with how it was done; a disk none of this brings back is announced
+  once as needing a hand and tried again every `WATCHDOG_REVIVE_RETRY_MINUTES`.
+
+A lab2 that freezes outright reboots itself: systemd pings the laptop's iTCO
+hardware watchdog (`hosts/lab2/systemd/system.conf.d/watchdog.conf`), and a
+kernel panic reboots after 10 s (`hosts/lab2/sysctl.d/90-batlab-panic.conf`).
+
+Install on lab2:
+
+```bash
+cd ~/batlab
+sudo install -m 755 watchdog/scripts/usb2-only.sh /usr/local/sbin/batlab-usb2-only
+sudo install -m 644 watchdog/systemd/batlab-data-disk-revive.service \
+  watchdog/systemd/batlab-data-disk-revive.timer /etc/systemd/system/
+sudo install -d /etc/systemd/system.conf.d
+sudo install -m 644 hosts/lab2/systemd/system.conf.d/watchdog.conf /etc/systemd/system.conf.d/
+sudo install -m 644 hosts/lab2/sysctl.d/90-batlab-panic.conf /etc/sysctl.d/
+sudo sysctl --system
+echo WATCHDOG_DATA_USB_PORT=usb1-port1 | sudo tee -a /etc/batlab-watchdog/watchdog.env
+sudo systemctl daemon-reexec
+sudo systemctl enable --now batlab-data-disk-revive.timer
+```
+
 ## Planned maintenance
 
-Unmounting the data disk makes the heartbeat fail. Pause the `lab1` check in
-healthchecks.io first, and resume it afterwards.
+Unmounting the data disk makes the heartbeat fail, and within two minutes
+`revive-data-disk.sh` mounts it again. Stop its timer first
+(`sudo systemctl stop batlab-data-disk-revive.timer`) and pause the
+healthchecks.io check; start and resume both afterwards.
 
 ## SMART alerts
 

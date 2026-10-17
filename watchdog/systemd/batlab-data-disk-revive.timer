@@ -1,0 +1,10 @@
+[Unit]
+Description=Check every two minutes that the data disk is back, and bring it back if not
+
+[Timer]
+OnBootSec=90s
+OnUnitInactiveSec=2min
+Unit=batlab-data-disk-revive.service
+
+[Install]
+WantedBy=timers.target
