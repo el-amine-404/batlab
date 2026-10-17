@@ -22,6 +22,7 @@ This document provides a summary of the self-hosted services configured in this 
 | **Soularr**      | Hands Lidarr's missing albums to slskd and has Lidarr import what it finds.                                | [github.com/mrusse/soularr](https://github.com/mrusse/soularr)           |
 | **songdrop**     | One page for pasted links: Spotify through spotDL, anything else yt-dlp knows; songs go to the music inbox.  | `compose/music-links/songdrop` (built here)                                |
 | **clipseerr**    | The newest music videos to browse and watch; ask for the song (Aurral, else songdrop) or the video (metube-videos, into Jellyfin). | `compose/clipseerr` (built here)                                         |
+| **clipfeed**     | Subreddits' music video links, each checked with YouTube Music, as an API and Atom feeds; clipseerr's Hot reads it. | `compose/clipfeed` (built here)                                          |
 | **MeTube**       | A web UI for yt-dlp: paste a YouTube link, the song lands in the music inbox.                              | [github.com/alexta69/metube](https://github.com/alexta69/metube)         |
 | **musicguard**   | (custom) Checks every music file, keeps only audio and clean tags, adds lyrics, quarantines the rest.     | [docs/music.md](music.md)                                                |
 | **Readarr**      | An ebook and audiobook manager that automates downloading and organizing Usenet and BitTorrent files.    | [readarr.com](https://readarr.com)                                       |

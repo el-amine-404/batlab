@@ -486,9 +486,10 @@ Jellyfin play. Its API reference is at `/api/docs` on the service.
   days and what is about to come out, by day, from YouTube's new videos (each
   dated by YouTube) and every Apple chart. Dates read "16 Oct 2026 ·
   yesterday". Genres are YouTube's genre charts (only some countries have
-  them: the US has eight), about 35 of Apple's, and *Hot*: the official
-  videos of YouTube searches set in Settings, General (twerk, sexy,
-  uncensored… by default). Search finds videos and artists. An artist's page
+  them: the US has eight), about 35 of Apple's, and *Hot*, newest first:
+  the real songs clipfeed found on r/SexyMusicVideos (below) and the official
+  videos of YouTube searches (twerk, sexy, uncensored… by default), both set
+  in Settings, General. Search finds videos and artists. An artist's page
   joins YouTube Music's list (which stops at 150) with Apple's (dated), newest
   first. A video's page lists its other versions: the clean or explicit cut,
   the official video, remixes, live takes, as videos and as songs, each
@@ -553,6 +554,47 @@ cd compose/clipseerr/app/frontend && CLIPSEERR_OPENAPI=http://clipseerr.homelab.
 
 When YouTube changes and the lists come back empty, Settings, Status says
 which source fails; a newer ytmusicapi (Renovate) is usually the fix.
+
+### clipfeed (subreddits as feeds)
+
+`compose/clipfeed`, `clipfeed.homelab.lan` (its API reference opens there).
+It turns a community's posts into a feed a program can read: every YouTube
+link a subreddit's posts carry, checked with YouTube Music, newest first.
+clipseerr's Hot category reads `r/SexyMusicVideos` from it; any app can.
+
+- **Reading.** Every feed is read every 30 min (`poll_minutes`): Reddit's own
+  Atom feed of the newest 100 posts (Reddit refuses its JSON without a login,
+  and answers 429 to an address that asks too often, so calls are 10 s apart,
+  and a refused feed waits longer before the next try), and PullPush's
+  archive when Reddit refuses. A new feed first takes its last 500 posts from
+  PullPush (a few days behind Reddit). A video posted twice keeps its first
+  post.
+- **Checking.** Each video once, with YouTube Music: *official* when it is the
+  artist's video or the song, or an upload of a song YouTube Music has under
+  the same title and artist (`song_id`); *likely* when YouTube Music doesn't
+  know the song (a small artist, not on streaming yet) but the title says it
+  is the official video and not a cover, lyric video, reaction, live take or
+  freestyle; *unofficial* otherwise; *unavailable* when gone. Verdicts are
+  checked again after 7 days (30 for official ones), and all of them when the
+  rules change (`verify.RULES`). On r/SexyMusicVideos' first 496 videos: 415
+  official, 19 likely, 13 unofficial, 49 gone.
+- **API.** `GET /api/v1/feeds/{slug}/items?verdict=official&verdict=likely`
+  (`sort=posted` or `published`, `limit`, `offset`), `GET /api/v1/items` for
+  every feed, `GET /api/v1/feeds/{slug}/atom` for a feed reader. Feeds are
+  made and changed with `POST/PUT/DELETE /api/v1/feeds`, read now with
+  `POST /api/v1/feeds/{slug}/refresh`; `CLIPFEED_FEEDS`
+  (`slug=reddit:Subreddit,…`) makes them on the first start only.
+
+```bash
+# another subreddit
+curl -X POST http://clipfeed.homelab.lan/api/v1/feeds -H 'Content-Type: application/json' \
+  -d '{"title": "r/MusicVideos", "target": "MusicVideos"}'
+# tests (lib/batlab-common on the path)
+cd compose/clipfeed/app && PYTHONPATH=../../../lib/batlab-common python -m unittest discover -s tests
+```
+
+It has the same Python packages as clipseerr: after changing clipseerr's
+`requirements.txt`, copy it to `compose/clipfeed/app/`.
 
 ## Aurral
 

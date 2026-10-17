@@ -120,6 +120,33 @@ class Versions(unittest.TestCase):
         self.assertEqual([(v.youtube_id, v.label) for v in found], [("explicit", "Explicit"), ("clean", "Clean")])
 
 
+class HotFeeds(unittest.TestCase):
+    def test_a_clipfeed_feed_gives_its_real_songs(self):
+        import httpx
+
+        from app.cache import Cache
+        from app.catalog.service import Catalog
+
+        body = {"items": [
+            {"youtube_id": "fLCd0tXSLZU", "verdict": "likely", "title": "Mystika", "artist": "Ellize",
+             "published": "2026-10-16", "duration": 180},
+            {"youtube_id": "bbbbbbbbbbb", "verdict": "unofficial", "title": "Crush (Cover)", "artist": "Fan"},
+            {"youtube_id": "not-an-id", "verdict": "official"}]}
+        transport = httpx.MockTransport(lambda request: httpx.Response(200, json=body))
+        with tempfile.TemporaryDirectory() as folder:
+            db = Database(Path(folder) / "t.db")
+
+            async def run():
+                async with httpx.AsyncClient(transport=transport) as http:
+                    return await Catalog(Cache(db), http, lambda: {}).\
+                        _feed("http://clipfeed:8830/api/v1/feeds/x/items")
+
+            found = asyncio.run(run())
+            db.close()
+        self.assertEqual([(v["id"], v["title"], v["artist"], v["released"]) for v in found],
+                         [("yt:fLCd0tXSLZU", "Mystika", "Ellize", "2026-10-16")])
+
+
 class AurralFeed(unittest.TestCase):
     def entry(self, status, label, **more):
         return {"kind": "track_download", "jobId": "j", "status": status, "statusLabel": label, "source": "slskd",

@@ -34,6 +34,8 @@ services:
       # First values; Settings, General changes them.
       - CLIPSEERR_REGION=${CLIPSEERR_REGION:-US}
       - CLIPSEERR_STOREFRONT=${CLIPSEERR_STOREFRONT:-us}
+      # The Hot category's feeds (compose/clipfeed): r/SexyMusicVideos' real songs.
+      - CLIPSEERR_HOT_FEEDS=http://clipfeed:8830/api/v1/feeds/sexymusicvideos/items?verdict=official&verdict=likely&limit=500
       # The first services, in the order they are asked: songs from Aurral
       # (Soulseek first: lossless when shared), else songdrop (YouTube Music,
       # lossy); videos from MeTube's music videos instance.

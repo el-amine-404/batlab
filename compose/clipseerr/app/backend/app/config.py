@@ -37,6 +37,8 @@ class Config:
     # First values of the settings (settings.py).
     region: str
     storefront: str
+    # The Hot category's feeds: clipfeed item URLs (CLIPSEERR_HOT_FEEDS, comma-separated).
+    hot_feeds: tuple[str, ...]
     # Made on the first start only, when given (seed.py).
     apprise_url: str
     apprise_tag: str
@@ -60,6 +62,7 @@ def load() -> Config:
         internal_url=(_text("CLIPSEERR_INTERNAL_URL") or f"http://clipseerr:{port}").rstrip("/"),
         region=(_text("CLIPSEERR_REGION") or "US").upper(),
         storefront=(_text("CLIPSEERR_STOREFRONT") or "us").lower(),
+        hot_feeds=tuple(u.strip() for u in _text("CLIPSEERR_HOT_FEEDS").split(",") if u.strip()),
         apprise_url=_text("CLIPSEERR_APPRISE_URL"),
         apprise_tag=_text("CLIPSEERR_APPRISE_TAG"),
         aurral_url=_text("CLIPSEERR_AURRAL_URL"),

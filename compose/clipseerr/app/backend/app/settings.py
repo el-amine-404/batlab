@@ -1,6 +1,8 @@
 """The settings the page changes (Settings, General), kept in the database;
 the environment gives their first values (config.py)."""
 
+import re
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .config import Config
@@ -51,6 +53,8 @@ class Settings(BaseModel):
                                                                  "one gets the request.")
     hide_explicit: bool = Field(description="Leave explicit videos out of the lists.")
     hot_queries: list[str] = Field(description="The Hot category: YouTube searches, each giving its official videos.")
+    hot_feeds: list[str] = Field(description="The Hot category: feeds of videos (a clipfeed items URL, or any app "
+                                             "answering the same JSON).")
 
 
 class SettingsPatch(BaseModel):
@@ -62,6 +66,18 @@ class SettingsPatch(BaseModel):
     attempt_timeout_hours: int | None = Field(None, ge=1, le=168)
     hide_explicit: bool | None = None
     hot_queries: list[str] | None = Field(None, max_length=12)
+    hot_feeds: list[str] | None = Field(None, max_length=8)
+
+    @field_validator("hot_feeds")
+    @classmethod
+    def _hot_feeds(cls, value):
+        if value is None:
+            return value
+        feeds = list(dict.fromkeys(u.strip() for u in value if u.strip()))
+        for url in feeds:
+            if not re.fullmatch(r"https?://[^\s/]+(/\S*)?", url) or len(url) > 500:
+                raise ValueError(f"{url!r} isn't a web address (http://… or https://…).")
+        return feeds
 
     @field_validator("hot_queries")
     @classmethod
@@ -70,7 +86,7 @@ class SettingsPatch(BaseModel):
             return value
         queries = list(dict.fromkeys(" ".join(q.split())[:80] for q in value if q.strip()))
         if not queries:
-            raise ValueError("Give the Hot category at least one search.")
+            raise ValueError("Give the Hot category at least one search (the feeds come on top).")
         return queries
 
     @field_validator("region")
@@ -98,6 +114,7 @@ class SettingsStore:
             "attempt_timeout_hours": 12,
             "hide_explicit": False,
             "hot_queries": list(HOT_QUERIES),
+            "hot_feeds": list(config.hot_feeds),
         }
         self._value = self._load()
 

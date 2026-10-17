@@ -226,6 +226,7 @@ setup: check-env
 		$(VOLUMES_ROOT)/metube \
 		$(VOLUMES_ROOT)/metube-videos \
 		$(VOLUMES_ROOT)/clipseerr \
+		$(VOLUMES_ROOT)/clipfeed \
 		$(VOLUMES_ROOT)/musicguard
 
 	@echo "==> Creating data directories..."
@@ -291,6 +292,7 @@ setup: check-env
 		$(VOLUMES_ROOT)/metube \
 		$(VOLUMES_ROOT)/metube-videos \
 		$(VOLUMES_ROOT)/clipseerr \
+		$(VOLUMES_ROOT)/clipfeed \
 		$(VOLUMES_ROOT)/musicguard \
 		$(DATA_ROOT)/media/music \
 		$(DATA_ROOT)/media/music-aurral \

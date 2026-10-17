@@ -6,6 +6,7 @@ apprise
 arr
 aurral
 caddy
+clipfeed
 clipseerr
 diun
 dozzle

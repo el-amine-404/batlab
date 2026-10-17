@@ -1039,6 +1039,11 @@ export interface components {
              * @description The Hot category: YouTube searches, each giving its official videos.
              */
             hot_queries: string[];
+            /**
+             * Hot Feeds
+             * @description The Hot category: feeds of videos (a clipfeed items URL, or any app answering the same JSON).
+             */
+            hot_feeds: string[];
             /** Regions */
             regions: components["schemas"]["Option"][];
             /** Storefronts */
@@ -1058,6 +1063,8 @@ export interface components {
             hide_explicit?: boolean | null;
             /** Hot Queries */
             hot_queries?: string[] | null;
+            /** Hot Feeds */
+            hot_feeds?: string[] | null;
         };
         /** Shelf */
         Shelf: {

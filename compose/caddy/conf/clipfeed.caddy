@@ -1,0 +1,4 @@
+http://clipfeed.homelab.lan {
+  import localSubnets
+	reverse_proxy @localSubnets http://clipfeed:8830
+}

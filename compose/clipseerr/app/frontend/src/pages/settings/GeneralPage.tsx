@@ -34,7 +34,7 @@ export default function GeneralPage() {
   useEffect(() => {
     if (data) setForm({ region: data.region, storefront: data.storefront, poll_seconds: data.poll_seconds,
                         attempt_timeout_hours: data.attempt_timeout_hours, hide_explicit: data.hide_explicit,
-                        hot_queries: data.hot_queries });
+                        hot_queries: data.hot_queries, hot_feeds: data.hot_feeds });
   }, [data]);
 
   if (isPending) return <Loading />;
@@ -43,10 +43,11 @@ export default function GeneralPage() {
   const save = async () => {
     setSaving(true);
     try {
-      const saved = await api.saveSettings({ ...form, hot_queries: form.hot_queries?.map((q) => q.trim()).filter(Boolean) });
+      const lines = (list?: string[] | null) => list?.map((line) => line.trim()).filter(Boolean);
+      const saved = await api.saveSettings({ ...form, hot_queries: lines(form.hot_queries), hot_feeds: lines(form.hot_feeds) });
       client.setQueryData(keys.settings, saved);
       if (saved.region !== data.region || saved.storefront !== data.storefront || saved.hide_explicit !== data.hide_explicit
-          || saved.hot_queries.join("\n") !== data.hot_queries.join("\n")) {
+          || saved.hot_queries.join("\n") !== data.hot_queries.join("\n") || saved.hot_feeds.join("\n") !== data.hot_feeds.join("\n")) {
         // Other charts: every list is read again.
         await client.invalidateQueries({ predicate: (q) => !["settings", "services", "notifications"].includes(String(q.queryKey[0])) });
       }
@@ -84,9 +85,17 @@ export default function GeneralPage() {
           <div>
             <Label htmlFor="hot">The Hot category</Label>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              YouTube searches, one a line (12 at most): Hot lists the official videos each finds, in turn.
+              Newest first, from two kinds of source. Feeds: one address a line (8 at most), a clipfeed items
+              URL such as a subreddit's (clipfeed.homelab.lan/api/docs), only its real songs. Searches: one a
+              line (12 at most), the official videos YouTube finds.
             </p>
           </div>
+          <Label htmlFor="hot-feeds" className="text-xs text-muted-foreground">Feeds</Label>
+          <textarea id="hot-feeds" rows={2} value={(form.hot_feeds ?? []).join("\n")} spellCheck={false}
+                    placeholder="http://clipfeed:8830/api/v1/feeds/sexymusicvideos/items?verdict=official&verdict=likely&limit=500"
+                    onChange={(e) => set("hot_feeds", e.target.value.split("\n").slice(0, 8))}
+                    className="w-full resize-y rounded-lg border border-input bg-black/20 px-3 py-2 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40" />
+          <Label htmlFor="hot" className="text-xs text-muted-foreground">YouTube searches</Label>
           <textarea id="hot" rows={6} value={(form.hot_queries ?? []).join("\n")}
                     onChange={(e) => set("hot_queries", e.target.value.split("\n").slice(0, 12))}
                     className="w-full resize-y rounded-lg border border-input bg-black/20 px-3 py-2 font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40" />

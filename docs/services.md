@@ -155,6 +155,20 @@ the service.
 - **Owns**: `$VOLUMES_ROOT/clipseerr` (one SQLite database).
 - **Not its job**: downloading, checking or filing anything.
 
+### clipfeed: communities → checked video feeds
+
+`compose/clipfeed`, `clipfeed.homelab.lan`. API reference: `/api/docs`.
+
+- **Job**: what subreddits post, as feeds: every YouTube link, checked to be
+  a real song (YouTube Music), newest first.
+- **Alone**: needs nothing else; Reddit, PullPush and YouTube Music without
+  a key.
+- **Plugs in through**: its API (`/api/v1`: items as JSON, feeds to make and
+  change) and Atom feeds. clipseerr's Hot category reads it.
+- **Owns**: `$VOLUMES_ROOT/clipfeed` (one SQLite database).
+- **Not its job**: downloading, or deciding what to show (its readers filter
+  by verdict).
+
 ### musicguard: inbox → checked library
 
 `compose/musicguard`. No page and no API yet.

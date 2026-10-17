@@ -4,6 +4,8 @@ Apple (youtube.py, apple.py), cached (cache.py) so that nothing is waited on
 twice."""
 
 import asyncio
+import hashlib
+import json
 import logging
 import re
 import time
@@ -49,6 +51,7 @@ def _source_failed(name: str, exc: Exception) -> Problem:
 class Catalog:
     def __init__(self, cache: Cache, http: httpx.AsyncClient, settings: Callable[[], dict]):
         self._cache = cache
+        self._http = http
         self._apple = Apple(http)
         self._settings = settings
         self._gate = asyncio.Semaphore(FAN_OUT)
@@ -210,9 +213,13 @@ class Catalog:
                                                           fresh=30 * MIN, stale=DAY))
 
     async def hot(self) -> Shelf:
-        """The Hot category: the official videos of the searches the settings
-        name, taken in turn from each."""
-        region, queries = self.region, self._settings()["hot_queries"]
+        """The Hot category, newest first: the videos of the feeds the
+        settings name (clipfeed: what r/SexyMusicVideos and the like post,
+        checked to be real songs) and the official videos of its YouTube
+        searches, each dated by YouTube."""
+        region, settings = self.region, self._settings()
+        queries, feeds = settings["hot_queries"], settings.get("hot_feeds") or []
+        key = f"hot:{region}:" + hashlib.sha1(json.dumps([queries, feeds]).encode()).hexdigest()[:12]
 
         async def search(query: str):
             async def fetch():
@@ -222,18 +229,58 @@ class Catalog:
             return await self._get("youtube", f"yt:hot:{region}:{query.casefold()}", fetch, fresh=6 * HOUR,
                                    stale=7 * DAY)
 
-        found = await asyncio.gather(*(search(q) for q in queries), return_exceptions=True)
-        lists = [[i for i in r if i.get("official")] for r in found if isinstance(r, list)]
-        if not lists and found:
-            raise next(r for r in found if isinstance(r, Exception))
-        seen, items = set(), []
-        for row in range(max((len(l) for l in lists), default=0)):
-            for found_list in lists:
-                if row < len(found_list) and found_list[row]["id"] not in seen:
-                    seen.add(found_list[row]["id"])
-                    items.append(found_list[row])
-        return Shelf(id="hot", title="Hot", subtitle="Twerk, sexy and uncensored videos · Settings → General "
-                     "changes what it searches", source="youtube", items=items, total=len(items))
+        async def fetch():
+            found = await asyncio.gather(*(self._feed(url) for url in feeds), *(search(q) for q in queries),
+                                         return_exceptions=True)
+            for url, failed in zip(feeds, found):
+                if isinstance(failed, Exception):
+                    log.warning("hot feed %s failed: %r", url, failed)
+            lists = [r for r in found if isinstance(r, list)]
+            if not lists and found:
+                raise next(r for r in found if isinstance(r, Exception))
+            # Feeds first: when a feed and a search both have a video, the feed's entry (dated, checked) stays.
+            seen, items = set(), []
+            for item in (i for found_list in lists for i in found_list):
+                if item["official"] and item["id"] not in seen:
+                    seen.add(item["id"])
+                    items.append(item)
+            await self._date(items)
+            items.sort(key=lambda i: i.get("released") or "", reverse=True)
+            sources = [*(_feed_name(url) for url in feeds), f"{len(queries)} YouTube searches"]
+            return Shelf(id="hot", title="Hot", subtitle=f"Newest first · {', '.join(sources)} · Settings → General "
+                         "changes them", source="youtube", items=items, total=len(items)).model_dump()
+
+        return Shelf.model_validate(await self._cache.get(key, fetch, fresh=30 * MIN, stale=DAY))
+
+    async def _feed(self, url: str) -> list[dict]:
+        """A feed's videos: a clipfeed items URL (or any app answering
+        {"items": [{"youtube_id", "title", "artist", "published", "duration",
+        "verdict"}]}); the real songs only (official or likely)."""
+        response = await self._http.get(url, timeout=httpx.Timeout(15.0, connect=5.0))
+        response.raise_for_status()
+        videos = []
+        for item in (response.json() or {}).get("items") or []:
+            youtube_id = item.get("youtube_id")
+            if not youtube_id or not re.fullmatch(r"[\w-]{11}", youtube_id):
+                continue
+            if item.get("verdict", "official") not in ("official", "likely"):
+                continue
+            artist = item.get("artist") or "Unknown artist"
+            title = item.get("title") or (item.get("post") or {}).get("title") or ""
+            title, credit = match.clean(title, artist)
+            videos.append(Video(id=f"yt:{youtube_id}", source="youtube", youtube_id=youtube_id, title=title,
+                                artist=credit or artist, artists=[ArtistRef(name=n) for n in _credit_names(credit or artist)],
+                                thumbnail=youtube.thumbnail(youtube_id), duration=item.get("duration"),
+                                released=item.get("published"), official=True).model_dump())
+        return videos
+
+    async def _date(self, items: list[dict]) -> None:
+        """Gives the undated ones the day YouTube published them."""
+        undated = [i for i in items if not i.get("released") and i.get("youtube_id")]
+        days = await asyncio.gather(*(self._published(i["youtube_id"]) for i in undated), return_exceptions=True)
+        for item, published in zip(undated, days):
+            if isinstance(published, str):
+                item["released"] = published
 
     async def home(self) -> list[Shelf]:
         """Every shelf, with its first items; a source that fails leaves its
@@ -462,6 +509,7 @@ class Catalog:
         try:
             await self.home()
             await self.categories()
+            await self.hot()
         except Exception as exc:
             log.warning("warming the catalog failed: %r", exc)
 
@@ -494,6 +542,12 @@ def _genre_name(title: str) -> str:
     name = re.sub(r"(?i)^top\s+\d+\s+", "", title or "")
     name = re.split(r"(?i)\s+music videos\b", name)[0]
     return name.strip() or title
+
+
+def _feed_name(url: str) -> str:
+    """ "http://clipfeed:8830/api/v1/feeds/sexymusicvideos/items?…" → "sexymusicvideos"."""
+    found = re.search(r"/feeds/([^/?#]+)", url)
+    return found.group(1) if found else httpx.URL(url).host
 
 
 def _song_key(title: str, artist: str) -> tuple[str, str]:
