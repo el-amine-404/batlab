@@ -57,6 +57,8 @@ class Catalog:
         self._gate = asyncio.Semaphore(FAN_OUT)
         # Hot's picks and artists (hotlist.py), when there is one.
         self.hotlist = None
+        # Every video shown, for the quick search (known.py), when there is one.
+        self.known = None
         # The last answer or failure of each source, for the status screen.
         self.health: dict[str, dict] = {}
 
@@ -621,10 +623,12 @@ class Catalog:
 
     async def warm(self) -> None:
         try:
-            await self.home()
+            shelves = [*await self.home()]
             await self.categories()
-            await self.hot()
-            await self.releases()
+            shelves += [await self.hot(), await self.releases()]
+            if self.known:
+                for shelf in shelves:
+                    self.known.saw(shelf.items, list_id=shelf.id)
             await self._resolve_hot_artists()
         except Exception as exc:
             log.warning("warming the catalog failed: %r", exc)

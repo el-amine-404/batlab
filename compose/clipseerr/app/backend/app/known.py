@@ -10,6 +10,8 @@ import re
 import threading
 import time
 
+from batlab_common import titles
+
 from .catalog.models import ArtistSummary, Video
 from .db import Database
 
@@ -61,7 +63,9 @@ class Known:
                                    "seen_at = excluded.seen_at",
                                    (video.id, video.original_title or video.title, video.artist,
                                     json.dumps(kept, ensure_ascii=False), sign, now)))
-            refs = [(ArtistSummary(id=ref.id, name=ref.name), True) for v in videos for ref in v.artists if ref.id]
+            # A fan upload's "artist" is its channel: not an artist to suggest.
+            refs = [(ArtistSummary(id=ref.id, name=ref.name), True)
+                    for v in videos if v.official for ref in v.artists if ref.id]
             for artist, credited in [*((a, False) for a in artists), *refs]:
                 sign = _sign(artist.name, artist.thumbnail, artist.subscribers)
                 old = self._signed.get(f"artist:{artist.id}")
@@ -87,15 +91,28 @@ class Known:
         query = _query(text)
         if not query:
             return [], []
-        videos = self._db.all(
+        rows = self._db.all(
             "SELECT v.video FROM known_search s JOIN known_videos v ON v.rowid = s.rowid "
-            "WHERE known_search MATCH ? ORDER BY bm25(known_search, 1.0, 2.0) LIMIT ?", (query, limit))
+            "WHERE known_search MATCH ? ORDER BY bm25(known_search, 1.0, 2.0) LIMIT ?", (query, limit * 2))
+        # The same song from YouTube and from Apple: once, in the best one's place, as YouTube's (it plays).
+        at: dict[tuple[str, str], int] = {}
+        videos: list[Video] = []
+        for video in (Video.model_validate_json(row["video"]) for row in rows):
+            key = (titles.simple(video.title), titles.simple(video.artist))
+            if key not in at:
+                at[key] = len(videos)
+                videos.append(video)
+            elif video.source == "youtube" and videos[at[key]].source != "youtube":
+                videos[at[key]] = video
+        videos = videos[:limit]
         artists = self._db.all(
             "SELECT a.id, a.name, a.thumbnail, a.subscribers FROM known_artist_search s "
             "JOIN known_artists a ON a.rowid = s.rowid WHERE known_artist_search MATCH ? "
-            "ORDER BY bm25(known_artist_search), a.thumbnail IS NULL LIMIT 8", (_query(text, " OR "),))
-        return ([ArtistSummary(**dict(row)) for row in artists],
-                [Video.model_validate_json(row["video"]) for row in videos])
+            "ORDER BY bm25(known_artist_search) LIMIT 24", (_query(text, " OR "),))
+        wanted = titles.simple(text)
+        # The artist named exactly first, then those with a picture (seen in a search or on their page).
+        ranked = sorted(artists, key=lambda a: (titles.simple(a["name"]) != wanted, not a["thumbnail"]))
+        return [ArtistSummary(**dict(row)) for row in ranked[:8]], videos
 
     def count(self) -> dict:
         videos = self._db.one("SELECT COUNT(*) AS n FROM known_videos")

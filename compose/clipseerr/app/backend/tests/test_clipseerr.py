@@ -227,7 +227,12 @@ class KnownSearch(unittest.TestCase):
             # A title changed: the index follows.
             known.saw([video("b", "Cafe con Ron (Remix)", "Bad Bunny")])
             self.assertEqual([v.title for v in known.search("remix")[1]], ["Cafe con Ron (Remix)"])
-            self.assertEqual(Known(db).count(), {"videos": 2, "artists": 1})
+            # The same song from Apple: once, as YouTube's; a fan upload's channel isn't an artist.
+            known.saw([Video(id="am:1", source="apple", title="Soltera", artist="Shakira", artists=[]),
+                       video("c", "Soltera (cover)", "Fan Channel", "UCfan").model_copy(update={"official": False})])
+            self.assertEqual([v.id for v in known.search("soltera shakira")[1]], ["yt:a"])
+            self.assertEqual(known.search("fan")[0], [])
+            self.assertEqual(Known(db).count(), {"videos": 4, "artists": 1})
             db.close()
 
 

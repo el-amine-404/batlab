@@ -24,6 +24,7 @@ catalog = Catalog(cache, http, settings)
 hotlist = HotList(db)
 catalog.hotlist = hotlist
 known = Known(db)
+catalog.known = known
 service_store = Integrations(db, "service", services.TYPES, describe_extra=services.describe_extra)
 notification_store = Integrations(db, "notification", notifications.TYPES, events=events.NAMES)
 notifier = notifications.Notifier(notification_store, http)
