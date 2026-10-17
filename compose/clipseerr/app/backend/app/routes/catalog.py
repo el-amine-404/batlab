@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Query
 
 from .. import schemas
-from ..catalog.models import ArtistPage, CategoryGroup, SearchResults, Shelf, VideoDetail
+from ..catalog.models import ArtistPage, CategoryGroup, SearchResults, Shelf, VideoDetail, Versions
 from ..context import catalog, requests, settings
 
 router = APIRouter(tags=["Catalog"])
@@ -22,7 +22,8 @@ async def home():
     return {"shelves": shelves}
 
 
-@router.get("/shelves/{shelf_id}", summary="One shelf, all of it", response_model=Shelf, responses=_404)
+@router.get("/shelves/{shelf_id}", summary="One shelf, all of it; \"releases\": what came out lately and "
+            "what is coming, newest first", response_model=Shelf, responses=_404)
 async def shelf(shelf_id: str):
     found = await catalog.shelf(shelf_id)
     found.items = _clean(found.items)
@@ -61,6 +62,15 @@ async def artist(artist_id: str):
             response_model=VideoDetail, responses=_404)
 async def video(video_id: str):
     return await catalog.video(video_id)
+
+
+@router.get("/videos/{video_id}/versions", summary="Other takes of a video's song: clean or explicit, "
+            "remixes, live, its official video", response_model=Versions, responses=_404)
+async def versions(video_id: str):
+    found = await catalog.versions(video_id)
+    found.videos = _clean(found.videos)
+    found.songs = _clean(found.songs)
+    return found
 
 
 @router.get("/videos/{video_id}/requests", summary="The newest request of each kind for one video",

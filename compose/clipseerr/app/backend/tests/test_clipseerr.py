@@ -77,6 +77,49 @@ class Matching(unittest.TestCase):
         self.assertEqual(match.best_video("Levitating", "Dua Lipa", 229, results)["videoId"], "omv")
 
 
+def _video(title, source="youtube", released=None, explicit=False):
+    from app.catalog.models import ArtistRef, Video
+
+    return Video(id=f"{source[:2]}:{title}", source=source, title=title, artist="Shakira",
+                 artists=[ArtistRef(name="Shakira")], released=released, explicit=explicit)
+
+
+class ArtistDates(unittest.TestCase):
+    def test_apple_dates_the_same_take_only(self):
+        from app.catalog.service import _with_apple
+
+        youtube = [_video("Hips Don't Lie (feat. Wyclef Jean)"), _video("The Making of 'Dai Dai'"),
+                   _video("Agua (Live from LMYNL World Tour)")]
+        apple = [_video("Hips Don't Lie", "apple", "2006-02-01"), _video("Dai Dai", "apple", "2026-05-23"),
+                 _video("AGUA", "apple", "2026-09-17"), _video("Hips Don't Lie", "apple", "2025-11-21")]
+        merged = _with_apple(youtube, apple)
+        self.assertEqual([v.released for v in merged[:3]], ["2006-02-01", None, None])
+        self.assertEqual([v.title for v in merged[3:]], ["Dai Dai", "AGUA"])
+
+
+class Versions(unittest.TestCase):
+    def test_labels(self):
+        from app.catalog.service import _label
+
+        self.assertEqual(_label("Gnarly (Clean Edit)", False), "Clean")
+        self.assertEqual(_label("Gnarly", True), "Explicit")
+        self.assertEqual(_label("Gnarly (Ice Spice Remix)", True), "Remix")
+        self.assertEqual(_label("Gnarly (Dance Practice)", False), "Dance Practice")
+        self.assertEqual(_label("Gnarly", False), "Original")
+
+    def test_same_song_same_artist_only(self):
+        from app.catalog.models import VideoDetail
+        from app.catalog.service import _versions
+
+        detail = VideoDetail(id="yt:mv", source="youtube", youtube_id="mv", title="Gnarly (Clean Edit)",
+                             artist="KATSEYE", artists=[])
+        results = [_song("Gnarly", "KATSEYE", 138, "explicit"), _song("Gnarly (Clean Edit)", "KATSEYE", 138, "clean"),
+                   _song("Gnarly", "Someone Else", 140, "cover"), _song("Gnarly Night", "KATSEYE", 140, "other")]
+        results[0]["isExplicit"] = True
+        found = _versions(results, "song", "Gnarly", detail)
+        self.assertEqual([(v.youtube_id, v.label) for v in found], [("explicit", "Explicit"), ("clean", "Clean")])
+
+
 class AurralFeed(unittest.TestCase):
     def entry(self, status, label, **more):
         return {"kind": "track_download", "jobId": "j", "status": status, "statusLabel": label, "source": "slskd",

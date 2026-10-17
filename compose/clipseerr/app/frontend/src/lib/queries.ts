@@ -30,6 +30,7 @@ export const keys = {
   search: (q: string) => ["search", q] as const,
   artist: (id: string) => ["artist", id] as const,
   video: (id: string) => ["video", id] as const,
+  versions: (id: string) => ["versions", id] as const,
   videoRequests: (id: string) => ["video-requests", id] as const,
   requests: (status: string, q: string) => ["requests", status, q] as const,
   integrations: (family: Family) => [family] as const,
@@ -41,6 +42,8 @@ export const keys = {
 export const useHome = () => useQuery({ queryKey: keys.home, queryFn: ({ signal }) => api.home(signal) });
 export const useShelf = (id: string) =>
   useQuery({ queryKey: keys.shelf(id), queryFn: ({ signal }) => api.shelf(id, signal) });
+/** What came out lately and what is coming, newest first (the shelf "releases"). */
+export const useReleases = () => useShelf("releases");
 export const useCategories = () =>
   useQuery({ queryKey: keys.categories, queryFn: ({ signal }) => api.categories(signal), staleTime: 30 * MINUTE });
 export const useCategory = (id: string) =>
@@ -56,6 +59,9 @@ export const useArtist = (id: string, enabled = true) =>
   useQuery({ queryKey: keys.artist(id), queryFn: ({ signal }) => api.artist(id, signal), enabled: enabled && !!id });
 export const useVideo = (id: string) =>
   useQuery({ queryKey: keys.video(id), queryFn: ({ signal }) => api.video(id, signal), staleTime: 60 * MINUTE });
+
+export const useVersions = (id: string, enabled = true) =>
+  useQuery({ queryKey: keys.versions(id), queryFn: ({ signal }) => api.versions(id, signal), enabled: enabled && !!id, staleTime: 60 * MINUTE });
 
 const anyActive = (requests: (Request | null | undefined)[]) =>
   requests.some((request) => request && ACTIVE.includes(request.status));

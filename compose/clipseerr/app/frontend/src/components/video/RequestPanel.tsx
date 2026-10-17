@@ -4,7 +4,7 @@ import { Link } from "react-router";
 import { Button } from "@/components/ui/button";
 import { ACTIVE, type Kind, type Request, type VideoDetail } from "@/lib/api";
 import { useAsk, useRequestAction, useStatus, useVideoRequests } from "@/lib/queries";
-import { cn } from "@/lib/utils";
+import { ago, cn, upcoming } from "@/lib/utils";
 
 import { StatusBadge } from "./StatusBadge";
 
@@ -73,10 +73,15 @@ function KindCard({ video, kind, request, chain }: { video: VideoDetail; kind: K
           </Button>
           <p className="text-[11px] text-muted-foreground">
             {unavailable
-              ? "Not on YouTube: there is no video file to get."
+              ? upcoming(video.released)
+                ? `Out ${ago(video.released)}: the video can be got once it is on YouTube.`
+                : "Not on YouTube: there is no video file to get."
               : noService
                 ? <>No service takes {kind} yet. <Link to="/settings/services" className="text-rose-300 underline-offset-2 hover:underline">Add one</Link>.</>
-                : <>Via {chain.join(" → ")}{chain.length > 1 ? ", in that order" : ""}.</>}
+                : <>
+                    {kind === "audio" && upcoming(video.released) && `Out ${ago(video.released)}: services may not find it before. `}
+                    Via {chain.join(" → ")}{chain.length > 1 ? ", in that order" : ""}.
+                  </>}
           </p>
         </div>
       )}

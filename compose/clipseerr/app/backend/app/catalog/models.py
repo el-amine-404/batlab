@@ -52,6 +52,19 @@ class VideoDetail(Video):
     description: str | None = None
 
 
+class Version(Video):
+    """Another take of a video's song: its clean or explicit cut, its official
+    video, a remix, a live one."""
+
+    kind: Literal["video", "song"] = Field(description="A music video, or the song (its official audio).")
+    label: str = Field(description='What sets it apart: "Clean", "Explicit", "Remix", "Live", "Original"…')
+
+
+class Versions(BaseModel):
+    videos: list[Version]
+    songs: list[Version]
+
+
 class Shelf(BaseModel):
     id: str
     title: str

@@ -1,5 +1,5 @@
-import { ChevronDown } from "lucide-react";
-import { useMemo, useState } from "react";
+import { CalendarClock, ChevronDown, ExternalLink, Film, Music2 } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 
 import { Failed } from "@/components/layout/States";
@@ -8,9 +8,9 @@ import { Player } from "@/components/video/Player";
 import { RequestPanel } from "@/components/video/RequestPanel";
 import { ShelfRow } from "@/components/video/ShelfRow";
 import { Thumb } from "@/components/video/Thumb";
-import type { Shelf, Video, VideoDetail } from "@/lib/api";
-import { prefetchArtist, queryClient, useArtist, useVideo } from "@/lib/queries";
-import { clock, cn, day } from "@/lib/utils";
+import type { Shelf, Version, Video, VideoDetail } from "@/lib/api";
+import { prefetchArtist, prefetchVideo, queryClient, useArtist, useVersions, useVideo } from "@/lib/queries";
+import { ago, clock, cn, day, upcoming } from "@/lib/utils";
 
 /** The video as a list already showed it: the page shows that at once, while its details load. */
 function listed(id: string): Video | undefined {
@@ -27,10 +27,16 @@ function listed(id: string): Video | undefined {
 }
 
 function Meta({ video }: { video: Video }) {
+  const soon = upcoming(video.released);
   const parts = [
     video.views && `${video.views} views`,
-    video.released && day(video.released),
-    video.duration && clock(video.duration),
+    video.released && (
+      <span title={video.released}>
+        {soon ? "Out " : ""}{day(video.released)} <span className={soon ? "text-rose-300" : "text-muted-foreground/70"}>({ago(video.released)})</span>
+      </span>
+    ),
+    // Before it is out, Apple's length is its preview's.
+    !soon && video.duration && clock(video.duration),
   ].filter(Boolean);
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm text-muted-foreground">
@@ -40,6 +46,7 @@ function Meta({ video }: { video: Video }) {
           {part}
         </span>
       ))}
+      {soon && <Badge variant="accent">Coming soon</Badge>}
       {video.genre && <Badge variant="muted">{video.genre}</Badge>}
       {video.explicit && <Badge variant="muted">Explicit</Badge>}
       {!video.official && <Badge variant="warning">Fan upload</Badge>}
@@ -63,6 +70,92 @@ function Artists({ video }: { video: Video }) {
         </span>
       ))}
     </span>
+  );
+}
+
+/** An Apple Music video YouTube doesn't have (yet): where the full one is. */
+function NotOnYouTube({ video }: { video: VideoDetail }) {
+  if (video.youtube_id) return null;
+  const soon = upcoming(video.released);
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-rose-400/20 bg-rose-400/5 p-4 sm:flex-row sm:items-center">
+      <CalendarClock className="size-5 shrink-0 text-rose-300" />
+      <p className="flex-1 text-sm text-muted-foreground">
+        {soon ? (
+          <>
+            <span className="font-medium text-foreground">Not out yet: it comes out {day(video.released)}, {ago(video.released)}.</span>{" "}
+            Until then there is only Apple's preview. clipseerr looks for the full video on YouTube again every few hours.
+          </>
+        ) : (
+          <>
+            <span className="font-medium text-foreground">YouTube doesn't have this video.</span>{" "}
+            The full one plays on Apple Music (with a subscription); here there is Apple's preview.
+          </>
+        )}
+      </p>
+      {video.links?.apple && (
+        <a href={video.links.apple} target="_blank" rel="noreferrer"
+           className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border px-3 text-sm font-medium hover:bg-accent">
+          Apple Music <ExternalLink className="size-3.5" />
+        </a>
+      )}
+    </div>
+  );
+}
+
+function VersionRow({ version, current }: { version: Version; current?: boolean }) {
+  const Icon = version.kind === "video" ? Film : Music2;
+  const timer = useRef<number | undefined>(undefined);
+  return (
+    <Link
+      to={`/watch/${version.id}`}
+      onPointerEnter={() => {
+        window.clearTimeout(timer.current);
+        timer.current = window.setTimeout(() => prefetchVideo(version.id), 120);
+      }}
+      onPointerLeave={() => window.clearTimeout(timer.current)}
+      className="group flex items-center gap-3 rounded-lg border border-border bg-card/60 p-2 pr-3 transition hover:border-rose-400/30 hover:bg-accent/60"
+    >
+      <div className="relative w-20 shrink-0 overflow-hidden rounded-md">
+        <Thumb src={version.thumbnail} youtubeId={version.kind === "video" ? version.youtube_id : undefined} />
+        <span className="absolute right-1 bottom-1 flex size-5 items-center justify-center rounded bg-black/70 text-white"><Icon className="size-3" /></span>
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">{version.original_title ?? version.title}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+          <Badge variant={version.label === "Clean" ? "success" : version.label === "Explicit" ? "warning" : "muted"}>{version.label}</Badge>
+          {version.explicit && version.label !== "Explicit" && <Badge variant="muted">Explicit</Badge>}
+          {current && <Badge variant="accent">The song here</Badge>}
+          {!!version.duration && <span className="text-xs text-muted-foreground">{clock(version.duration)}</span>}
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+/** The song's other takes: clean or explicit, the official video, remixes, live. */
+function OtherVersions({ video }: { video: VideoDetail }) {
+  const { data } = useVersions(video.id, !!video.youtube_id);
+  if (!data || (!data.videos.length && !data.songs.length)) return null;
+  return (
+    <section aria-labelledby="versions">
+      <h2 id="versions" className="mb-1 text-lg font-semibold tracking-tight">Other versions</h2>
+      <p className="mb-3 text-xs text-muted-foreground">The same song, another cut. Open one to get that one.</p>
+      <div className="grid gap-6 md:grid-cols-2">
+        {([["Videos", data.videos], ["Songs", data.songs]] as const).map(([title, list]) =>
+          list.length ? (
+            <div key={title}>
+              <p className="mb-2 text-xs font-semibold tracking-wider text-muted-foreground uppercase">{title}</p>
+              <div className="flex flex-col gap-2">
+                {list.map((version) => (
+                  <VersionRow key={version.id} version={version} current={version.youtube_id === video.audio?.youtube_id} />
+                ))}
+              </div>
+            </div>
+          ) : null,
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -112,6 +205,7 @@ export function WatchPage() {
             )}
             {video?.original_title && <p className="text-xs text-muted-foreground/70">Uploaded as “{video.original_title}”</p>}
           </div>
+          {data && <NotOnYouTube video={data} />}
           {data?.description && data.description.trim().length > 60 && (
             <div className="rounded-xl border border-border bg-card/60 p-4">
               <p className={cn("text-sm whitespace-pre-line text-muted-foreground", !open && "line-clamp-3")}>{data.description}</p>
@@ -131,6 +225,7 @@ export function WatchPage() {
           )}
         </aside>
       </div>
+      {data && <OtherVersions video={data} />}
       {data && <MoreFrom video={data} />}
     </div>
   );

@@ -2,8 +2,9 @@ import { Disc3 } from "lucide-react";
 import { Link } from "react-router";
 
 import { Empty, Failed, PageHeader } from "@/components/layout/States";
+import { ReleaseRail } from "@/components/video/Releases";
 import { ShelfRow, ShelfSkeleton } from "@/components/video/ShelfRow";
-import { useCategories, useHome } from "@/lib/queries";
+import { useCategories, useHome, useReleases } from "@/lib/queries";
 
 function GenreChips() {
   const { data } = useCategories();
@@ -35,27 +36,35 @@ function GenreChips() {
 
 export function DiscoverPage() {
   const { data, error, refetch, isPending } = useHome();
+  const releases = useReleases();
   return (
-    <>
-      <PageHeader eyebrow="Discover" title="The newest music videos" description="What came out, and what everyone watches. Open one to watch it, then get the song or the video." />
-      <GenreChips />
-      {isPending ? (
-        <div className="flex flex-col gap-10">
-          <ShelfSkeleton />
-          <ShelfSkeleton />
-          <ShelfSkeleton />
-        </div>
-      ) : error ? (
-        <Failed error={error} retry={() => void refetch()} />
-      ) : !data.shelves.length ? (
-        <Empty icon={<Disc3 />} title="Nothing to show yet">YouTube Music and Apple Music didn't answer. Try again in a minute.</Empty>
-      ) : (
-        <div className="flex flex-col gap-10">
-          {data.shelves.map((shelf, index) => (
-            <ShelfRow key={shelf.id} shelf={shelf} eager={index === 0} />
-          ))}
-        </div>
-      )}
-    </>
+    <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="min-w-0">
+        <PageHeader eyebrow="Discover" title="The newest music videos" description="What came out, and what everyone watches. Open one to watch it, then get the song or the video." />
+        <GenreChips />
+        {/* Below xl the releases are a list of their own, before the shelves. */}
+        <ReleaseRail items={releases.data?.items} isPending={releases.isPending} limit={12} className="mb-10 max-h-[26rem] xl:hidden" />
+        {isPending ? (
+          <div className="flex flex-col gap-10">
+            <ShelfSkeleton />
+            <ShelfSkeleton />
+            <ShelfSkeleton />
+          </div>
+        ) : error ? (
+          <Failed error={error} retry={() => void refetch()} />
+        ) : !data.shelves.length ? (
+          <Empty icon={<Disc3 />} title="Nothing to show yet">YouTube Music and Apple Music didn't answer. Try again in a minute.</Empty>
+        ) : (
+          <div className="flex flex-col gap-10">
+            {data.shelves.map((shelf, index) => (
+              <ShelfRow key={shelf.id} shelf={shelf} eager={index === 0} />
+            ))}
+          </div>
+        )}
+      </div>
+      <aside className="hidden xl:block">
+        <ReleaseRail items={releases.data?.items} isPending={releases.isPending} className="sticky top-24 max-h-[calc(100dvh-7rem)]" />
+      </aside>
+    </div>
   );
 }

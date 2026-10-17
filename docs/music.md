@@ -482,9 +482,18 @@ Jellyfin play. Its API reference is at `/api/docs` on the service.
 - **Browse.** Discover shows YouTube Music's new videos and, for the country
   in Settings, General, its Trending 20, daily top and top 100 video charts,
   and Apple Music's top music videos (newest first in "Just released").
-  Genres are YouTube's genre charts (only some countries have them: the US
-  has eight) and about 35 of Apple's. Search finds videos and artists; an
-  artist's page has all their videos. No account and no key: ytmusicapi
+  Beside them, *Latest releases* (also its own page, Releases): the last 30
+  days and what is about to come out, by day, from YouTube's new videos (each
+  dated by YouTube) and every Apple chart. Dates read "16 Oct 2026 ·
+  yesterday". Genres are YouTube's genre charts (only some countries have
+  them: the US has eight), about 35 of Apple's, and *Hot*: the official
+  videos of YouTube searches set in Settings, General (twerk, sexy,
+  uncensored… by default). Search finds videos and artists. An artist's page
+  joins YouTube Music's list (which stops at 150) with Apple's (dated), newest
+  first. A video's page lists its other versions: the clean or explicit cut,
+  the official video, remixes, live takes, as videos and as songs, each
+  requestable. An Apple video YouTube doesn't have yet says when it comes out
+  and links to Apple Music. No account and no key: ytmusicapi
   (pinned in `compose/versions.env`, followed by Renovate) and Apple's public
   feeds. Answers are kept in its database and refreshed in the background
   (the front page every 20 min), so a page opens from the cache in a few ms.

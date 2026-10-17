@@ -4,6 +4,7 @@ genres, cover art and a 30 s preview each. YouTube has the full video; an
 Apple entry finds it when it is opened (service.py)."""
 
 import httpx
+from batlab_common import titles
 
 from .models import ArtistRef, Category, Video
 
@@ -106,6 +107,21 @@ class Apple:
             if video:
                 return video
         return None
+
+    async def artist_videos(self, storefront: str, name: str) -> list[Video]:
+        """Every music video of the artist named so, newest first; [] when
+        Apple has no artist of that exact name."""
+        found = await self._json("https://itunes.apple.com/search",
+                                 {"term": name, "entity": "musicArtist", "limit": 5, "country": storefront})
+        wanted = titles.simple(name)
+        artist_id = next((a["artistId"] for a in found.get("results") or []
+                          if a.get("artistId") and titles.simple(a.get("artistName") or "") == wanted), None)
+        if not artist_id:
+            return []
+        found = await self._json("https://itunes.apple.com/lookup", {"id": artist_id, "entity": "musicVideo",
+                                                                     "limit": 200, "country": storefront})
+        videos = [video for video in map(_from_search, found.get("results") or []) if video]
+        return sorted(videos, key=lambda v: v.released or "", reverse=True)
 
     @staticmethod
     def categories() -> list[Category]:

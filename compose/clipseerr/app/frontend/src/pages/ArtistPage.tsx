@@ -1,4 +1,4 @@
-import { ArrowDownAZ, Flame } from "lucide-react";
+import { ArrowDownAZ, CalendarArrowDown, Flame } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useParams } from "react-router";
 
@@ -12,7 +12,7 @@ import { ArtistBubble } from "./SearchPage";
 export function ArtistPage() {
   const { id = "" } = useParams();
   const { data, error, refetch, isPending } = useArtist(id);
-  const [order, setOrder] = useState<"popular" | "az">("popular");
+  const [order, setOrder] = useState<"newest" | "popular" | "az">("newest");
   const [filter, setFilter] = useState("");
   const [more, setMore] = useState(false);
 
@@ -20,7 +20,10 @@ export function ArtistPage() {
     let list = data?.videos ?? [];
     const words = filter.trim().toLowerCase();
     if (words) list = list.filter((v) => `${v.title} ${v.artist}`.toLowerCase().includes(words));
-    return order === "az" ? [...list].sort((a, b) => a.title.localeCompare(b.title)) : list;
+    if (order === "az") return [...list].sort((a, b) => a.title.localeCompare(b.title));
+    // Newest first; the few without a date (a making-of, a live clip) after, as YouTube lists them.
+    if (order === "newest") return [...list].sort((a, b) => (b.released ?? "").localeCompare(a.released ?? ""));
+    return list;
   }, [data, order, filter]);
 
   if (error) return <Failed error={error} retry={() => void refetch()} />;
@@ -60,7 +63,7 @@ export function ArtistPage() {
           <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter"
                  className="h-9 w-36 rounded-lg border border-input bg-black/20 px-3 text-sm outline-none focus-visible:border-ring sm:w-48" />
           <div className="inline-flex rounded-lg border border-border p-0.5">
-            {([["popular", Flame, "As YouTube lists them"], ["az", ArrowDownAZ, "A to Z"]] as const).map(([value, Icon, label]) => (
+            {([["newest", CalendarArrowDown, "Newest first"], ["popular", Flame, "Most popular, as YouTube lists them"], ["az", ArrowDownAZ, "A to Z"]] as const).map(([value, Icon, label]) => (
               <button key={value} type="button" title={label} aria-label={label} aria-pressed={order === value}
                       onClick={() => setOrder(value)}
                       className={cn("flex size-8 items-center justify-center rounded-md text-muted-foreground", order === value && "bg-accent text-foreground")}>

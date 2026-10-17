@@ -32,6 +32,15 @@ STOREFRONTS = {
     "dk": "Denmark", "pt": "Portugal", "ie": "Ireland", "nz": "New Zealand", "ae": "United Arab Emirates",
     "sa": "Saudi Arabia", "eg": "Egypt", "za": "South Africa", "tr": "Turkey",
 }
+# The Hot category: YouTube searches whose official videos it lists.
+HOT_QUERIES = [
+    "twerk official music video",
+    "sexy official music video",
+    "uncensored official music video",
+    "perreo official video",
+    "dancehall official music video",
+    "afrobeats dance official video",
+]
 
 
 class Settings(BaseModel):
@@ -41,6 +50,7 @@ class Settings(BaseModel):
     attempt_timeout_hours: int = Field(ge=1, le=168, description="How long a service may take before the next "
                                                                  "one gets the request.")
     hide_explicit: bool = Field(description="Leave explicit videos out of the lists.")
+    hot_queries: list[str] = Field(description="The Hot category: YouTube searches, each giving its official videos.")
 
 
 class SettingsPatch(BaseModel):
@@ -51,6 +61,17 @@ class SettingsPatch(BaseModel):
     poll_seconds: int | None = Field(None, ge=5, le=600)
     attempt_timeout_hours: int | None = Field(None, ge=1, le=168)
     hide_explicit: bool | None = None
+    hot_queries: list[str] | None = Field(None, max_length=12)
+
+    @field_validator("hot_queries")
+    @classmethod
+    def _hot_queries(cls, value):
+        if value is None:
+            return value
+        queries = list(dict.fromkeys(" ".join(q.split())[:80] for q in value if q.strip()))
+        if not queries:
+            raise ValueError("Give the Hot category at least one search.")
+        return queries
 
     @field_validator("region")
     @classmethod
@@ -76,6 +97,7 @@ class SettingsStore:
             "poll_seconds": 15,
             "attempt_timeout_hours": 12,
             "hide_explicit": False,
+            "hot_queries": list(HOT_QUERIES),
         }
         self._value = self._load()
 

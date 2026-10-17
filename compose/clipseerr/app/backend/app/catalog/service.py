@@ -10,13 +10,14 @@ import time
 from collections.abc import Callable
 
 import httpx
+from batlab_common import titles
 
 from ..cache import Cache
 from ..problems import Problem
 from . import match, youtube
 from .apple import GENRES, Apple
-from .models import (ArtistPage, ArtistRef, AudioMatch, Category, CategoryGroup, SearchResults, Shelf, Video,
-                     VideoDetail)
+from .models import (ArtistPage, ArtistRef, AudioMatch, Category, CategoryGroup, SearchResults, Shelf, Version,
+                     Versions, Video, VideoDetail)
 
 log = logging.getLogger("clipseerr.catalog")
 
@@ -26,6 +27,10 @@ DAY = 86400
 SHELF_PREVIEW = 24
 # Apple's newest: released within this many days, from its top 200.
 RECENT_DAYS = 45
+# Latest releases: out within this many days, or coming out.
+RELEASE_DAYS = 30
+# Calls to one source at once, when a list needs many.
+FAN_OUT = 6
 
 _ID = re.compile(r"^(yt|am):([\w-]{1,64})$")
 _CHART_KINDS = (
@@ -46,6 +51,7 @@ class Catalog:
         self._cache = cache
         self._apple = Apple(http)
         self._settings = settings
+        self._gate = asyncio.Semaphore(FAN_OUT)
         # The last answer or failure of each source, for the status screen.
         self.health: dict[str, dict] = {}
 
@@ -98,9 +104,34 @@ class Catalog:
 
     async def _apple_top(self, genre: int | None = None) -> list[dict]:
         storefront = self.storefront
-        return await self._get("apple", f"am:top:{storefront}:{genre or 0}",
-                               lambda: _dump(self._apple.top(storefront, genre, limit=200 if not genre else 100)),
-                               fresh=2 * HOUR)
+
+        async def fetch():
+            async with self._gate:
+                return await _dump(self._apple.top(storefront, genre, limit=200 if not genre else 100))
+
+        return await self._get("apple", f"am:top:{storefront}:{genre or 0}", fetch, fresh=2 * HOUR)
+
+    async def _published(self, youtube_id: str) -> str | None:
+        """The day YouTube published a video; it never changes."""
+        region = self.region
+
+        async def fetch():
+            async with self._gate:
+                return (await youtube.song(region, youtube_id))["published"]
+
+        return await self._get("youtube", f"yt:published:{youtube_id}", fetch, fresh=365 * DAY, stale=365 * DAY)
+
+    async def _dated_new_videos(self) -> list[dict]:
+        """YouTube's new videos with the day each came out."""
+        items = await self._new_videos()
+        days = await asyncio.gather(*(self._published(i["youtube_id"]) for i in items if not i.get("released")),
+                                    return_exceptions=True)
+        missing = iter(days)
+        dated = []
+        for item in items:
+            released = item.get("released") or next(missing)
+            dated.append({**item, "released": released if isinstance(released, str) else None})
+        return dated
 
     # ---- shelves ----------------------------------------------------------------------------
 
@@ -137,6 +168,8 @@ class Catalog:
                            key=lambda i: i["released"], reverse=True)
             shelf = Shelf(id=shelf_id, title="Just released", subtitle="Charting on Apple Music, newest first",
                           source="apple", items=items, total=len(items))
+        elif shelf_id == "releases":
+            shelf = await self.releases()
         elif shelf_id == "am-top":
             items = await self._apple_top()
             shelf = Shelf(id=shelf_id, title="Top on Apple Music", subtitle=f"Music videos · {self.storefront.upper()}",
@@ -146,6 +179,61 @@ class Catalog:
         if limit:
             shelf.items = shelf.items[:limit]
         return shelf
+
+    async def releases(self) -> Shelf:
+        """What came out in the last RELEASE_DAYS days, and what is about to,
+        newest first: YouTube's new videos and every Apple chart, one entry a
+        song (YouTube's, which plays, before Apple's)."""
+        region, storefront = self.region, self.storefront
+
+        async def fetch():
+            cutoff = time.strftime("%Y-%m-%d", time.gmtime(time.time() - RELEASE_DAYS * DAY))
+            found = await asyncio.gather(self._dated_new_videos(), self._apple_top(),
+                                         *(self._apple_top(genre) for genre in GENRES), return_exceptions=True)
+            lists = [r for r in found if isinstance(r, list)]
+            if not lists:
+                raise next(r for r in found if isinstance(r, Exception))
+            seen: dict[tuple, dict] = {}
+            for item in (i for found_list in lists for i in found_list):
+                key = _song_key(item["title"], item["artist"])
+                if key in seen:
+                    if not seen[key].get("released"):
+                        seen[key]["released"] = item.get("released")
+                    continue
+                seen[key] = dict(item)
+            items = sorted((i for i in seen.values() if (i.get("released") or "") >= cutoff),
+                           key=lambda i: i["released"], reverse=True)
+            return Shelf(id="releases", title="Latest releases", subtitle="Out lately, and coming soon, newest first",
+                         source="apple", items=items, total=len(items)).model_dump()
+
+        return Shelf.model_validate(await self._cache.get(f"releases:{region}:{storefront}", fetch,
+                                                          fresh=30 * MIN, stale=DAY))
+
+    async def hot(self) -> Shelf:
+        """The Hot category: the official videos of the searches the settings
+        name, taken in turn from each."""
+        region, queries = self.region, self._settings()["hot_queries"]
+
+        async def search(query: str):
+            async def fetch():
+                async with self._gate:
+                    return await _dump(youtube.search_videos(region, query, limit=40))
+
+            return await self._get("youtube", f"yt:hot:{region}:{query.casefold()}", fetch, fresh=6 * HOUR,
+                                   stale=7 * DAY)
+
+        found = await asyncio.gather(*(search(q) for q in queries), return_exceptions=True)
+        lists = [[i for i in r if i.get("official")] for r in found if isinstance(r, list)]
+        if not lists and found:
+            raise next(r for r in found if isinstance(r, Exception))
+        seen, items = set(), []
+        for row in range(max((len(l) for l in lists), default=0)):
+            for found_list in lists:
+                if row < len(found_list) and found_list[row]["id"] not in seen:
+                    seen.add(found_list[row]["id"])
+                    items.append(found_list[row])
+        return Shelf(id="hot", title="Hot", subtitle="Twerk, sexy and uncensored videos · Settings → General "
+                     "changes what it searches", source="youtube", items=items, total=len(items))
 
     async def home(self) -> list[Shelf]:
         """Every shelf, with its first items; a source that fails leaves its
@@ -171,9 +259,13 @@ class Catalog:
             groups.append(CategoryGroup(title="YouTube charts", source="youtube",
                                         categories=sorted(items, key=lambda c: c.title)))
         groups.append(CategoryGroup(title="Apple Music", source="apple", categories=Apple.categories()))
-        return groups
+        picks = CategoryGroup(title="Picks", source="youtube",
+                              categories=[Category(id="hot", title="Hot", group="Picks", source="youtube")])
+        return [picks, *groups]
 
     async def category(self, category_id: str) -> Shelf:
+        if category_id == "hot":
+            return await self.hot()
         kind, _, value = category_id.partition(":")
         if kind == "am" and value.isdigit() and int(value) in GENRES:
             items = await self._apple_top(int(value))
@@ -216,10 +308,17 @@ class Catalog:
     async def artist(self, channel_id: str) -> ArtistPage:
         if not re.fullmatch(r"UC[\w-]{20,30}", channel_id):
             raise Problem(404, "No such artist.")
-        region = self.region
+        region, storefront = self.region, self.storefront
 
         async def fetch():
-            return (await youtube.artist(region, channel_id)).model_dump()
+            page = await youtube.artist(region, channel_id)
+            try:
+                apple = await self._apple.artist_videos(storefront, page.name)
+            except Exception as exc:
+                log.info("no Apple videos for %s: %r", page.name, exc)
+                apple = []
+            page.videos = _with_apple(page.videos, apple)
+            return page.model_dump()
 
         return ArtistPage.model_validate(await self._get("youtube", f"yt:artist:{region}:{channel_id}", fetch,
                                                          fresh=6 * HOUR))
@@ -267,8 +366,28 @@ class Catalog:
         kind, value = found.groups()
         fetch = (lambda: self._youtube_detail(value)) if kind == "yt" else (lambda: self._apple_detail(value))
         return VideoDetail.model_validate(await self._get("youtube" if kind == "yt" else "apple",
-                                                          f"video:{self.region}:{video_id}", fetch, fresh=3 * DAY,
+                                                          f"video:{self.region}:{video_id}", fetch,
+                                                          # Apple's may be out on YouTube soon.
+                                                          fresh=3 * DAY if kind == "yt" else 6 * HOUR,
                                                           stale=30 * DAY))
+
+    async def versions(self, video_id: str) -> Versions:
+        """The other takes of a video's song: its clean or explicit cut, the
+        official video of a lyric or a performance one, remixes, live ones;
+        as videos and as songs."""
+        detail = await self.video(video_id)
+        region = self.region
+
+        async def fetch():
+            base = _bare(detail.title)
+            query = f"{_credit_names(detail.artist)[0] if detail.artist else ''} {base}".strip()
+            videos, songs = await asyncio.gather(youtube.search_raw(region, query, "videos", limit=20),
+                                                 youtube.search_raw(region, query, "songs", limit=20))
+            return Versions(videos=_versions(videos, "video", base, detail), songs=_versions(songs, "song", base, detail)
+                            ).model_dump()
+
+        return Versions.model_validate(await self._get("youtube", f"yt:versions:{region}:{video_id}", fetch,
+                                                       fresh=3 * DAY, stale=30 * DAY))
 
     async def _youtube_detail(self, youtube_id: str, base: Video | None = None) -> dict:
         region = self.region
@@ -375,3 +494,84 @@ def _genre_name(title: str) -> str:
     name = re.sub(r"(?i)^top\s+\d+\s+", "", title or "")
     name = re.split(r"(?i)\s+music videos\b", name)[0]
     return name.strip() or title
+
+
+def _song_key(title: str, artist: str) -> tuple[str, str]:
+    """One song whoever lists it: its simple title and first artist."""
+    first = (_credit_names(match.channel_artist(artist)) or [artist])[0]
+    return titles.simple(_bare(title)), titles.simple(first)
+
+
+def _with_apple(videos: list[Video], apple: list[Video]) -> list[Video]:
+    """YouTube's videos, in its order, with Apple's release dates where Apple
+    has the same take; then the videos only Apple lists."""
+    left = list(apple)
+    for exact in (True, False):
+        for video in videos:
+            if video.released:
+                continue
+            # Exact first; then without brackets ("Bésame (Video Oficial)"),
+            # never a title inside another ("The Making of 'Dai Dai'").
+            hit = next((a for a in left if (titles.simple(a.title) == titles.simple(video.title) if exact
+                                            else titles.simple(_bare(a.title)) == titles.simple(_bare(video.title)))
+                        and titles.same_version(a.title, video.title)), None)
+            if hit:
+                video.released = hit.released
+                video.genre = video.genre or hit.genre
+                video.explicit = video.explicit or hit.explicit
+                left.remove(hit)
+    # Apple often lists a take twice (a re-release): one YouTube has is enough.
+    seen = {(titles.simple(_bare(v.title)), titles.version(v.title)) for v in videos}
+    only_apple = []
+    for video in left:
+        key = (titles.simple(_bare(video.title)), titles.version(video.title))
+        if key not in seen:
+            seen.add(key)
+            only_apple.append(video)
+    return [*videos, *only_apple]
+
+
+_BRACKETS = re.compile(r"\s*[\(\[][^\)\]]*[\)\]]")
+_CLEAN_WORDS = re.compile(r"(?i)\b(?:clean|censored|radio edit)\b")
+_EXPLICIT_WORDS = re.compile(r"(?i)\b(?:explicit|uncensored|dirty)\b")
+
+
+def _bare(title: str) -> str:
+    """The title without any bracket: "Gnarly (Clean Edit)" → "Gnarly"."""
+    return _BRACKETS.sub("", title or "").strip() or (title or "").strip()
+
+
+def _label(title: str, explicit: bool) -> str:
+    inside = " ".join(re.findall(r"[\(\[]([^\)\]]*)[\)\]]", title or ""))
+    if _CLEAN_WORDS.search(inside) and not re.search(r"(?i)uncensored", inside):
+        return "Clean"
+    taken = titles.version(title)
+    if taken:
+        return " · ".join(name.capitalize() for name in taken)
+    if explicit or _EXPLICIT_WORDS.search(inside):
+        return "Explicit"
+    inside = re.sub(r"(?i)\b(?:feat\.?|ft\.?|with)\b.*", "", inside).strip(" -")
+    return inside[:28].strip().title() if inside else "Original"
+
+
+def _versions(results: list[dict], kind: str, base: str, detail: VideoDetail) -> list[Version]:
+    wanted = titles.names(detail.artist) | titles.names(match.channel_artist(detail.artist))
+    found, seen = [], {detail.youtube_id}
+    for item in results:
+        video = youtube.to_video(item)
+        if not video or video.youtube_id in seen:
+            continue
+        if kind == "video" and not video.official:
+            continue
+        names = set().union(*(titles.names(match.channel_artist(a.name)) for a in video.artists)) | \
+            titles.names(video.artist)
+        if wanted and not names & wanted:
+            continue
+        if titles.simple(_bare(video.title)) != titles.simple(base):
+            continue
+        seen.add(video.youtube_id)
+        if kind == "song":
+            video.official = True
+            video.thumbnail = youtube._image(item.get("thumbnails"), 544) or video.thumbnail
+        found.append(Version(**video.model_dump(), kind=kind, label=_label(video.title, video.explicit)))
+    return found[:12]

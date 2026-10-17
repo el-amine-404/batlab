@@ -10,6 +10,8 @@ type Schemas = components["schemas"];
 export type Video = Schemas["Video"];
 export type VideoDetail = Schemas["VideoDetail"];
 export type Shelf = Schemas["Shelf"];
+export type Version = Schemas["Version"];
+export type Versions = Schemas["Versions"];
 export type CategoryGroup = Schemas["CategoryGroup"];
 export type ArtistPage = Schemas["ArtistPage"];
 export type ArtistSummary = Schemas["ArtistSummary"];
@@ -81,6 +83,7 @@ export const api = {
   search: (q: string, signal?: AbortSignal) => request<SearchResults>(`/search?${query({ q })}`, { signal }),
   artist: (id: string, signal?: AbortSignal) => request<ArtistPage>(`/artists/${encodeURIComponent(id)}`, { signal }),
   video: (id: string, signal?: AbortSignal) => request<VideoDetail>(`/videos/${encodeURIComponent(id)}`, { signal }),
+  versions: (id: string, signal?: AbortSignal) => request<Versions>(`/videos/${encodeURIComponent(id)}/versions`, { signal }),
   videoRequests: (id: string, signal?: AbortSignal) =>
     request<VideoRequests>(`/videos/${encodeURIComponent(id)}/requests`, { signal }),
 

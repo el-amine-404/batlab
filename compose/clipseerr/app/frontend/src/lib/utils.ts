@@ -56,6 +56,38 @@ export function day(date?: string | null): string {
   return parsed.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
+/** Whole days from today to a "YYYY-MM-DD" day, in the viewer's time zone: -1 yesterday, 6 in six days. */
+export function daysFrom(date: string, now = new Date()): number | null {
+  const [y, m, d] = date.split("-").map(Number);
+  if (!y || !m || !d) return null;
+  const then = Date.UTC(y, m - 1, d);
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((then - today) / 86_400_000);
+}
+
+/** "2026-10-16" → "yesterday", "3 days ago", "2 months ago", "1 year ago"; "in 6 days" when it's to come. */
+export function ago(date?: string | null, now = new Date()): string {
+  const days = date ? daysFrom(date, now) : null;
+  if (days === null) return "";
+  if (days === 0) return "today";
+  if (days === 1) return "tomorrow";
+  if (days === -1) return "yesterday";
+  const n = Math.abs(days);
+  const [count, unit] = n < 31 ? [n, "day"] : n < 365 ? [Math.floor(n / 30.44), "month"] : [Math.floor(n / 365.25), "year"];
+  const text = `${count} ${unit}${count === 1 ? "" : "s"}`;
+  return days > 0 ? `in ${text}` : `${text} ago`;
+}
+
+/** Comes out after today. */
+export function upcoming(date?: string | null): boolean {
+  return !!date && (daysFrom(date) ?? 0) > 0;
+}
+
+/** "16 Oct 2026 · yesterday". */
+export function dated(date?: string | null): string {
+  return date ? `${day(date)} · ${ago(date)}` : "";
+}
+
 /** The YouTube picture of a video at a size: mq 320×180, hq 480×360, sd 640×480, maxres 1280×720. */
 export function ytImage(id: string, size: "mq" | "hq" | "sd" | "maxres" = "mq"): string {
   return `https://i.ytimg.com/vi/${id}/${size === "maxres" ? "maxresdefault" : `${size}default`}.jpg`;

@@ -4,7 +4,7 @@ import { Link } from "react-router";
 
 import type { Video } from "@/lib/api";
 import { prefetchVideo } from "@/lib/queries";
-import { clock, cn, day } from "@/lib/utils";
+import { clock, cn, dated, upcoming } from "@/lib/utils";
 
 import { Thumb } from "./Thumb";
 import type { Requested } from "./useRequested";
@@ -41,7 +41,8 @@ export const VideoCard = memo(function VideoCard({ video, requested, className, 
     timer.current = window.setTimeout(() => prefetchVideo(video.id), 120);
   };
   const cool = () => window.clearTimeout(timer.current);
-  const meta = [video.views && `${video.views} views`, video.released && day(video.released)].filter(Boolean).join(" · ");
+  const meta = [video.views && `${video.views} views`, dated(video.released)].filter(Boolean).join(" · ");
+  const soon = upcoming(video.released);
 
   return (
     <Link
@@ -60,6 +61,11 @@ export const VideoCard = memo(function VideoCard({ video, requested, className, 
           <Play className="ml-0.5 size-5 fill-current" />
         </span>
         <div className="absolute top-2 left-2 flex gap-1">
+          {soon && (
+            <span className="rounded-md bg-rose-500/85 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white backdrop-blur-md">
+              SOON
+            </span>
+          )}
           {video.source === "apple" && (
             <span className="rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white/90 backdrop-blur-md">
               APPLE
@@ -77,7 +83,7 @@ export const VideoCard = memo(function VideoCard({ video, requested, className, 
           )}
         </div>
         <RequestedMark requested={requested} />
-        {!!video.duration && (
+        {!!video.duration && !soon && (
           <span className="absolute right-2 bottom-2 rounded-md bg-black/75 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-white">
             {clock(video.duration)}
           </span>

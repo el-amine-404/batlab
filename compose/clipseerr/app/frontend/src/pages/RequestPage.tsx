@@ -61,8 +61,17 @@ export function RequestPage() {
         </Link>
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium tracking-wider text-rose-300/90 uppercase">{data.kind === "audio" ? "Song" : "Video"} request</p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">{data.media.title}</h1>
-          <p className="text-muted-foreground">{data.media.artist}{data.media.album && ` · ${data.media.album}`}{data.media.year && ` · ${data.media.year}`}</p>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight">
+            <Link to={`/watch/${data.media.video_key}`} className="underline-offset-4 hover:text-rose-100 hover:underline">{data.media.title}</Link>
+          </h1>
+          <p className="text-muted-foreground">
+            {data.media.artist_id ? (
+              <Link to={`/artist/${data.media.artist_id}`} className="font-medium text-foreground/85 underline-offset-4 hover:text-rose-200 hover:underline">
+                {data.media.artist}
+              </Link>
+            ) : data.media.artist}
+            {data.media.album && ` · ${data.media.album}`}{data.media.year && ` · ${data.media.year}`}
+          </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <StatusBadge status={data.status} />
             {data.quality && <span className="text-sm font-medium">{data.quality}</span>}

@@ -28,7 +28,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** One shelf, all of it */
+        /** One shelf, all of it; "releases": what came out lately and what is coming, newest first */
         get: operations["shelf_api_v1_shelves__shelf_id__get"];
         put?: never;
         post?: never;
@@ -115,6 +115,23 @@ export interface paths {
         };
         /** One video: what it is, where it plays, its official audio */
         get: operations["video_api_v1_videos__video_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videos/{video_id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Other takes of a video's song: clean or explicit, remixes, live, its official video */
+        get: operations["versions_api_v1_videos__video_id__versions_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -934,7 +951,7 @@ export interface components {
             message: string | null;
             /**
              * Quality
-             * @description What it was got as: "FLAC 16-bit/44.1 kHz", "OPUS", "MP4 best".
+             * @description What it was got as: "FLAC", "OPUS", "MP4 best".
              */
             quality: string | null;
             /** Created At */
@@ -1017,6 +1034,11 @@ export interface components {
              * @description Leave explicit videos out of the lists.
              */
             hide_explicit: boolean;
+            /**
+             * Hot Queries
+             * @description The Hot category: YouTube searches, each giving its official videos.
+             */
+            hot_queries: string[];
             /** Regions */
             regions: components["schemas"]["Option"][];
             /** Storefronts */
@@ -1034,6 +1056,8 @@ export interface components {
             attempt_timeout_hours?: number | null;
             /** Hide Explicit */
             hide_explicit?: boolean | null;
+            /** Hot Queries */
+            hot_queries?: string[] | null;
         };
         /** Shelf */
         Shelf: {
@@ -1107,6 +1131,98 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /**
+         * Version
+         * @description Another take of a video's song: its clean or explicit cut, its official
+         *     video, a remix, a live one.
+         */
+        Version: {
+            /**
+             * Id
+             * @description "yt:<YouTube video id>" or "am:<Apple Music id>".
+             */
+            id: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "youtube" | "apple";
+            /**
+             * Youtube Id
+             * @description Known at once for YouTube; found when opened for Apple.
+             */
+            youtube_id?: string | null;
+            /**
+             * Title
+             * @description The song's name, without (Official Video) and the like.
+             */
+            title: string;
+            /**
+             * Original Title
+             * @description The upload's own title, when it differs.
+             */
+            original_title?: string | null;
+            /**
+             * Artist
+             * @description The credit, as one line.
+             */
+            artist: string;
+            /** Artists */
+            artists: components["schemas"]["ArtistRef"][];
+            /** Thumbnail */
+            thumbnail?: string | null;
+            /**
+             * Duration
+             * @description Seconds.
+             */
+            duration?: number | null;
+            /**
+             * Views
+             * @description As YouTube writes it: "1.2M".
+             */
+            views?: string | null;
+            /**
+             * Released
+             * @description YYYY-MM-DD.
+             */
+            released?: string | null;
+            /** Genre */
+            genre?: string | null;
+            /**
+             * Explicit
+             * @default false
+             */
+            explicit: boolean;
+            /**
+             * Official
+             * @description The artist's own video (YouTube's OMV), not a fan upload.
+             * @default true
+             */
+            official: boolean;
+            /**
+             * Preview Url
+             * @description A 30 s preview (Apple), playable without YouTube.
+             */
+            preview_url?: string | null;
+            /**
+             * Kind
+             * @description A music video, or the song (its official audio).
+             * @enum {string}
+             */
+            kind: "video" | "song";
+            /**
+             * Label
+             * @description What sets it apart: "Clean", "Explicit", "Remix", "Live", "Original"…
+             */
+            label: string;
+        };
+        /** Versions */
+        Versions: {
+            /** Videos */
+            videos: components["schemas"]["Version"][];
+            /** Songs */
+            songs: components["schemas"]["Version"][];
         };
         /** Video */
         Video: {
@@ -1573,6 +1689,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VideoDetail"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    versions_api_v1_videos__video_id__versions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                video_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Versions"];
                 };
             };
             /** @description Not Found */

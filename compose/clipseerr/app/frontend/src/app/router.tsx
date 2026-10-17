@@ -6,6 +6,7 @@ import { ArtistPage } from "@/pages/ArtistPage";
 import { DiscoverPage } from "@/pages/DiscoverPage";
 import { GenresPage } from "@/pages/GenresPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
+import { ReleasesPage } from "@/pages/ReleasesPage";
 import { RequestPage } from "@/pages/RequestPage";
 import { RequestsPage } from "@/pages/RequestsPage";
 import { SearchPage } from "@/pages/SearchPage";
@@ -23,6 +24,8 @@ export const router = createBrowserRouter([
     element: <Layout />,
     children: [
       { path: "/", element: <DiscoverPage /> },
+      { path: "/releases", element: <ReleasesPage /> },
+      { path: "/shelf/releases", element: <Navigate to="/releases" replace /> },
       { path: "/shelf/:id", element: <ShelfPage /> },
       { path: "/genres", element: <GenresPage /> },
       { path: "/genres/:id", element: <GenrePage /> },
