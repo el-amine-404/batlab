@@ -26,6 +26,14 @@ def _query(text: str, joined: str = " ") -> str | None:
     return joined.join(f'"{w}"*' for w in words[:8]) or None
 
 
+def _count(text: str | None) -> float:
+    """ "52.1M subscribers" → 52100000."""
+    found = re.match(r"([\d.]+)\s*([KMB]?)", text or "")
+    if not found:
+        return 0
+    return float(found.group(1)) * {"": 1, "K": 1e3, "M": 1e6, "B": 1e9}[found.group(2)]
+
+
 def _sign(*parts) -> str:
     return hashlib.sha1(json.dumps(parts, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
 
@@ -104,15 +112,26 @@ class Known:
                 videos.append(video)
             elif video.source == "youtube" and videos[at[key]].source != "youtube":
                 videos[at[key]] = video
-        videos = videos[:limit]
+        # The artists' own videos before the covers, karaoke and tutorials of the same words.
+        videos = sorted(videos, key=lambda v: not v.official)[:limit]
         artists = self._db.all(
             "SELECT a.id, a.name, a.thumbnail, a.subscribers FROM known_artist_search s "
             "JOIN known_artists a ON a.rowid = s.rowid WHERE known_artist_search MATCH ? "
             "ORDER BY bm25(known_artist_search) LIMIT 24", (_query(text, " OR "),))
         wanted = titles.simple(text)
-        # The artist named exactly first, then those with a picture (seen in a search or on their page).
-        ranked = sorted(artists, key=lambda a: (titles.simple(a["name"]) != wanted, not a["thumbnail"]))
+        # The artist named exactly first, then the most credited (on the videos known), the most
+        # followed: "shak" is Shakira before the channels named after her.
+        ranked = sorted(artists, key=lambda a: (titles.simple(a["name"]) != wanted, -self._credited(a["name"]),
+                                                -_count(a["subscribers"]), not a["thumbnail"]))
         return [ArtistSummary(**dict(row)) for row in ranked[:8]], videos
+
+    def _credited(self, name: str) -> int:
+        phrase = " ".join(_WORD.findall(name.casefold()))
+        if not phrase:
+            return 0
+        row = self._db.one("SELECT COUNT(*) AS n FROM known_search WHERE known_search MATCH ?",
+                           (f'artist : "{phrase}"',))
+        return row["n"] if row else 0
 
     def count(self) -> dict:
         videos = self._db.one("SELECT COUNT(*) AS n FROM known_videos")
