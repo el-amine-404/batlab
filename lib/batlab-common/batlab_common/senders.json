@@ -14,6 +14,8 @@
   "dubkeeper": {"name": "dub keeper", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/sonarr.png"},
   "updater": {"name": "updater on {host}", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/renovate.png"},
   "watchdog": {"name": "watchdog on {host}", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/debian-linux.png"},
+  "uptime": {"name": "uptime kuma", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/uptime-kuma.png",
+             "link": "http://uptimekuma.homelab.lan"},
   "netdata": {"name": "netdata on {host}", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/netdata.png",
               "link": "http://netdata.homelab.lan"}
 }

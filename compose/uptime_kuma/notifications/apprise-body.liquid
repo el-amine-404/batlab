@@ -1,0 +1,37 @@
+{%- comment -%}
+Uptime Kuma's webhook body for Apprise (compose/apprise), as the sender
+"uptime": one Discord card per change, the stripe saying down or back. Set
+on the "Apprise (alerts)" notification, Webhook, custom body; README.md.
+{%- endcomment -%}
+{%- assign hb = heartbeatJSON -%}
+{%- if hb == nil -%}
+  {%- assign kind = "info" -%}
+  {%- capture title -%}Test from Uptime Kuma{%- endcapture -%}
+  {%- capture body -%}**Address**  {{ hostnameOrURL }}{%- endcapture -%}
+{%- elsif hb.status == 0 -%}
+  {%- assign kind = "failure" -%}
+  {%- capture title -%}{{ name }} is down{%- endcapture -%}
+  {%- capture body -%}**Error**  {{ hb.msg }}
+**Address**  {{ hostnameOrURL }}{%- endcapture -%}
+{%- elsif hb.status == 1 -%}
+  {%- assign kind = "success" -%}
+  {%- capture title -%}{{ name }} is back{%- endcapture -%}
+  {%- capture down_for -%}
+    {%- if hb.lastDownTime -%}
+      {%- assign up_at = hb.time | date: "%s" | plus: 0 -%}
+      {%- assign down_at = hb.lastDownTime | date: "%s" | plus: 0 -%}
+      {%- assign secs = up_at | minus: down_at -%}
+      {%- if secs < 60 -%}{{ secs }} s
+      {%- elsif secs < 3600 -%}{{ secs | divided_by: 60 }} min
+      {%- else -%}{{ secs | divided_by: 3600 }} h {{ secs | modulo: 3600 | divided_by: 60 }} min{%- endif -%}
+    {%- endif -%}
+  {%- endcapture -%}
+  {%- capture body -%}{%- if down_for != "" -%}**Down for**  {{ down_for }}
+{% endif -%}**Ping**  {{ hb.ping | default: "-" }} ms
+**Address**  {{ hostnameOrURL }}{%- endcapture -%}
+{%- else -%}
+  {%- assign kind = "info" -%}
+  {%- capture title -%}{{ name }}: {{ status }}{%- endcapture -%}
+  {%- capture body -%}{{ hb.msg }}{%- endcapture -%}
+{%- endif -%}
+{"tag": "alerts", "type": {{ kind | json }}, "title": {{ title | json }}, "body": {{ body | json }}, "format": "markdown"}
