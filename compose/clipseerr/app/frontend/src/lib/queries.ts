@@ -81,6 +81,38 @@ export const useCredits = (id: string, enabled = true) =>
   useQuery({ queryKey: ["credits", id], queryFn: ({ signal }) => api.credits(id, signal), enabled: enabled && !!id, staleTime: 60 * MINUTE });
 export const useLyrics = (id: string, enabled = true) =>
   useQuery({ queryKey: ["lyrics", id], queryFn: ({ signal }) => api.lyrics(id, signal), enabled: enabled && !!id, staleTime: 60 * MINUTE });
+/*
+ * Views, for the cards whose list didn't carry them: the cards on screen ask
+ * within a moment of each other, and go out together, 48 a call.
+ */
+const VIEWS_BATCH = 48;
+let waiting = new Map<string, ((views: string | null) => void)[]>();
+let flushing: number | undefined;
+
+function flushViews() {
+  const batch = waiting;
+  waiting = new Map();
+  flushing = undefined;
+  const ids = [...batch.keys()];
+  for (let i = 0; i < ids.length; i += VIEWS_BATCH) {
+    const chunk = ids.slice(i, i + VIEWS_BATCH);
+    const settle = (found: Record<string, string>) => chunk.forEach((id) => batch.get(id)!.forEach((done) => done(found[id] ?? null)));
+    api.views(chunk).then((answer) => settle(answer.views), () => settle({}));
+  }
+}
+
+function viewsOf(youtubeId: string): Promise<string | null> {
+  return new Promise((done) => {
+    waiting.set(youtubeId, [...(waiting.get(youtubeId) ?? []), done]);
+    flushing ??= window.setTimeout(flushViews, 50);
+  });
+}
+
+/** A video's views, when its list didn't say: looked up once the card is shown. */
+export const useViews = (youtubeId: string | null | undefined, enabled: boolean) =>
+  useQuery({ queryKey: ["views", youtubeId], queryFn: () => viewsOf(youtubeId!), enabled: enabled && !!youtubeId,
+             staleTime: 60 * MINUTE, retry: false });
+
 export const useHotPicks = () => useQuery({ queryKey: ["hot", "picks"], queryFn: ({ signal }) => api.hotPicks(signal), staleTime: 0 });
 export const useHotArtists = () =>
   useQuery({ queryKey: ["hot", "artists"], queryFn: ({ signal }) => api.hotArtists(signal), staleTime: 10 * MINUTE });

@@ -78,11 +78,12 @@ class Matching(unittest.TestCase):
         self.assertEqual(match.best_video("Levitating", "Dua Lipa", 229, results)["videoId"], "omv")
 
 
-def _video(title, source="youtube", released=None, explicit=False):
+def _video(title, source="youtube", released=None, explicit=False, youtube_id=None):
     from app.catalog.models import ArtistRef, Video
 
     return Video(id=f"{source[:2]}:{title}", source=source, title=title, artist="Shakira",
-                 artists=[ArtistRef(name="Shakira")], released=released, explicit=explicit)
+                 artists=[ArtistRef(name="Shakira")], released=released, explicit=explicit,
+                 youtube_id=youtube_id)
 
 
 class ArtistDates(unittest.TestCase):
@@ -166,6 +167,40 @@ class HotFeeds(unittest.TestCase):
             db.close()
         self.assertEqual([(v["id"], v["title"], v["artist"], v["released"]) for v in found],
                          [("yt:fLCd0tXSLZU", "Mystika", "Ellize", "2026-10-16")])
+
+
+class Views(unittest.TestCase):
+    def test_views_are_looked_up_once_and_filled_in(self):
+        import httpx
+
+        from app.cache import Cache
+        from app.catalog import youtube
+        from app.catalog.service import Catalog
+
+        asked = []
+
+        async def song(region, youtube_id):
+            asked.append(youtube_id)
+            if youtube_id == "broken00000":
+                raise RuntimeError("no answer")
+            return {"views": 1_234_567}
+
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(youtube, "song", song):
+            db = Database(Path(folder) / "t.db")
+
+            async def run():
+                async with httpx.AsyncClient() as http:
+                    catalog = Catalog(Cache(db), http, lambda: {"region": "US"})
+                    first = await catalog.views(["aaaaaaaaaaa", "broken00000"])
+                    again = await catalog.views(["aaaaaaaaaaa"])
+                    listed = [_video("A", youtube_id="aaaaaaaaaaa"), _video("B", youtube_id="bbbbbbbbbbb")]
+                    catalog.known_views(listed)
+                    return first, again, [v.views for v in listed]
+
+            first, again, listed = asyncio.run(run())
+            db.close()
+        self.assertEqual((first, again, listed), ({"aaaaaaaaaaa": "1.2M"}, {"aaaaaaaaaaa": "1.2M"}, ["1.2M", None]))
+        self.assertEqual(asked, ["aaaaaaaaaaa", "broken00000"])
 
 
 class Credit(unittest.TestCase):

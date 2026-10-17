@@ -528,6 +528,29 @@ class Catalog:
             thumbnail=youtube._image(picked.get("thumbnails"), 544),
         )
 
+    # ---- how many watched ---------------------------------------------------------------------
+
+    async def views(self, youtube_ids: list[str]) -> dict[str, str]:
+        """Each video's views ("1.2M"), as YouTube counts them today; most lists
+        (charts, Apple's, Hot) don't carry them. A video YouTube didn't answer for is left out."""
+        region = self.region
+
+        async def one(youtube_id: str):
+            async def fetch():
+                async with self._gate:
+                    return youtube.short_count((await youtube.song(region, youtube_id))["views"])
+
+            return await self._get("youtube", f"yt:views:{youtube_id}", fetch, fresh=DAY, stale=30 * DAY)
+
+        counts = await asyncio.gather(*(one(i) for i in youtube_ids), return_exceptions=True)
+        return {i: count for i, count in zip(youtube_ids, counts) if isinstance(count, str)}
+
+    def known_views(self, videos: list[Video]) -> None:
+        """Fills in the views already looked up, without asking YouTube."""
+        for video in videos:
+            if not video.views and video.youtube_id:
+                video.views = self._cache.peek(f"yt:views:{video.youtube_id}")
+
     # ---- who made the song, and its words ---------------------------------------------------------
 
     async def credits(self, video_id: str) -> Credits:

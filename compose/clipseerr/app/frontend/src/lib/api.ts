@@ -93,6 +93,7 @@ export const api = {
   artist: (id: string, signal?: AbortSignal) => request<ArtistPage>(`/artists/${encodeURIComponent(id)}`, { signal }),
   video: (id: string, signal?: AbortSignal) => request<VideoDetail>(`/videos/${encodeURIComponent(id)}`, { signal }),
   versions: (id: string, signal?: AbortSignal) => request<Versions>(`/videos/${encodeURIComponent(id)}/versions`, { signal }),
+  views: (youtubeIds: string[]) => request<{ views: Record<string, string> }>(`/views?ids=${youtubeIds.join(",")}`),
   credits: (id: string, signal?: AbortSignal) => request<Credits>(`/videos/${encodeURIComponent(id)}/credits`, { signal }),
   lyrics: (id: string, signal?: AbortSignal) => request<Lyrics>(`/videos/${encodeURIComponent(id)}/lyrics`, { signal }),
   /** Where the lyrics download as a file. */

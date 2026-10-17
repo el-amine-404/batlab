@@ -23,6 +23,10 @@ class Problem(BaseModel):
     detail: str = Field(description="What went wrong, as a sentence a person can read.")
 
 
+class Views(BaseModel):
+    views: dict[str, str] = Field(description='YouTube video id → its views, as YouTube writes them: "1.2M".')
+
+
 class Home(BaseModel):
     shelves: list[Shelf]
 

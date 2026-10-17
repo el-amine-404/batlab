@@ -58,6 +58,11 @@ class Cache:
                      "ON CONFLICT (key) DO UPDATE SET value = excluded.value, fetched_at = excluded.fetched_at",
                      (key, json.dumps(value, ensure_ascii=False), now))
 
+    def peek(self, key: str) -> Any:
+        """What the cache holds for key, however old, without fetching: None when nothing."""
+        found = self._read(key)
+        return found[1] if found else None
+
     # ---- the one call ------------------------------------------------------------
 
     async def get(self, key: str, fetch: Callable[[], Awaitable[Any]], fresh: float, stale: float | None = None) -> Any:

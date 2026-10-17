@@ -3,7 +3,7 @@ import { useRef } from "react";
 import { Link } from "react-router";
 
 import type { Video } from "@/lib/api";
-import { prefetchVideo } from "@/lib/queries";
+import { prefetchVideo, useViews } from "@/lib/queries";
 import { ago, cn, day, daysFrom } from "@/lib/utils";
 
 import { Thumb } from "./Thumb";
@@ -27,6 +27,7 @@ export function byDay(items: Video[]): DayGroup[] {
 function Row({ video }: { video: Video }) {
   const timer = useRef<number | undefined>(undefined);
   const soon = (daysFrom(video.released ?? "") ?? 0) > 0;
+  const views = useViews(video.youtube_id, !video.views).data || video.views;
   return (
     <li>
       <Link
@@ -49,6 +50,7 @@ function Row({ video }: { video: Video }) {
           <p className="truncate text-xs text-muted-foreground">{video.artist}</p>
           <p className={cn("truncate text-[11px]", soon ? "text-rose-300" : "text-muted-foreground/70")} title={day(video.released)}>
             {soon ? `Out ${day(video.released)} · ${ago(video.released)}` : day(video.released)}
+            {views && ` · ${views} views`}
             {video.source === "apple" && <span className="text-muted-foreground/50"> · Apple</span>}
           </p>
         </div>

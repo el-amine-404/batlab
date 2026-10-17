@@ -1,3 +1,4 @@
+import re
 from typing import Literal
 from urllib.parse import quote
 
@@ -9,6 +10,7 @@ from ..context import catalog, library, requests, settings
 from ..problems import Problem
 
 router = APIRouter(tags=["Catalog"])
+_YOUTUBE_ID = re.compile(r"[\w-]{11}")
 _404 = {404: {"model": schemas.Problem}, 502: {"model": schemas.Problem}}
 
 
@@ -24,6 +26,7 @@ def _page(shelf: Shelf, limit: int, offset: int, source: str | None = None) -> S
     shelf.total = len(items)
     shelf.items = items[offset:offset + limit]
     library.mark(shelf.items)
+    catalog.known_views(shelf.items)
     return shelf
 
 
@@ -39,6 +42,7 @@ async def home():
     for shelf in shelves:
         shelf.items = _clean(shelf.items)
         library.mark(shelf.items)
+        catalog.known_views(shelf.items)
     return {"shelves": shelves}
 
 
@@ -67,6 +71,7 @@ async def search(q: str = Query("", max_length=200, description="Words of the ti
     found = await catalog.search(q)
     found.videos = _clean(found.videos)
     library.mark(found.videos)
+    catalog.known_views(found.videos)
     return found
 
 
@@ -76,6 +81,7 @@ async def artist(artist_id: str):
     found = await catalog.artist(artist_id)
     found.videos = _clean(found.videos)
     library.mark(found.videos)
+    catalog.known_views(found.videos)
     return found
 
 
@@ -94,7 +100,15 @@ async def versions(video_id: str):
     found.videos = _clean(found.videos)
     found.songs = _clean(found.songs)
     library.mark([*found.videos, *found.songs])
+    catalog.known_views([*found.videos, *found.songs])
     return found
+
+
+@router.get("/views", summary="How many watched each video: YouTube's count, for the lists that don't carry it",
+            response_model=schemas.Views, responses=_404)
+async def views(ids: str = Query(..., max_length=48 * 12, description="YouTube video ids, comma-separated (48 at most).")):
+    wanted = list(dict.fromkeys(i for i in ids.split(",") if _YOUTUBE_ID.fullmatch(i)))[:48]
+    return {"views": await catalog.views(wanted)}
 
 
 @router.get("/videos/{video_id}/credits", summary="Who made the song: performed, written, produced by…",

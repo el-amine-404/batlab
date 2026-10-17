@@ -140,6 +140,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/views": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How many watched each video: YouTube's count, for the lists that don't carry it */
+        get: operations["views_api_v1_views_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/videos/{video_id}/credits": {
         parameters: {
             query?: never;
@@ -1706,6 +1723,16 @@ export interface components {
             audio: components["schemas"]["Request"] | null;
             video: components["schemas"]["Request"] | null;
         };
+        /** Views */
+        Views: {
+            /**
+             * Views
+             * @description YouTube video id → its views, as YouTube writes them: "1.2M".
+             */
+            views: {
+                [key: string]: string;
+            };
+        };
     };
     responses: never;
     parameters: never;
@@ -2069,6 +2096,56 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Versions"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    views_api_v1_views_get: {
+        parameters: {
+            query: {
+                /** @description YouTube video ids, comma-separated (48 at most). */
+                ids: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Views"];
                 };
             };
             /** @description Not Found */

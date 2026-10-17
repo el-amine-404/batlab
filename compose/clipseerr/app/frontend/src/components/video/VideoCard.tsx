@@ -3,7 +3,7 @@ import { memo, useRef } from "react";
 import { Link } from "react-router";
 
 import type { Video } from "@/lib/api";
-import { prefetchVideo } from "@/lib/queries";
+import { prefetchVideo, useViews } from "@/lib/queries";
 import { clock, cn, dated, upcoming } from "@/lib/utils";
 
 import { Thumb } from "./Thumb";
@@ -51,7 +51,9 @@ export const VideoCard = memo(function VideoCard({ video, requested, className, 
     timer.current = window.setTimeout(() => prefetchVideo(video.id), 120);
   };
   const cool = () => window.clearTimeout(timer.current);
-  const meta = [video.views && `${video.views} views`, dated(video.released)].filter(Boolean).join(" · ");
+  const looked = useViews(video.youtube_id, !video.views).data;
+  const views = video.views || looked;
+  const meta = [views && `${views} views`, dated(video.released)].filter(Boolean).join(" · ");
   const soon = upcoming(video.released);
 
   return (
