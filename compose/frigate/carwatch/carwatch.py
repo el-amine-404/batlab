@@ -10,13 +10,17 @@ Frigate's latest frame of the street, the car boxed.
 Counting cars in a spot is not enough: Frigate looks for cars only where
 something moves, so after a restart a parked car stays unseen until someone
 walks past it, and would "arrive" then. Here a car first seen already in its
-spot has not arrived; it can only leave.
+spot has not arrived; it can only leave. Frigate also boxes part of a parked
+car at times, then all of it, and the box's bottom moves into or out of the
+spot: a car has to have moved CARWATCH_MOVE pixels (of the 960 wide frame)
+to arrive or leave.
 
 Messages go through Apprise (compose/apprise) to the "cameras" channel.
 Standard library and batlab_common (lib/batlab-common) only.
 """
 
 import json
+import math
 import os
 import select
 import socket
@@ -34,6 +38,7 @@ CAMERA = os.environ.get("CARWATCH_CAMERA", "camera_2")
 # zone=name pairs: "spot_1=Car 1,spot_2=Car 2".
 SPOTS = dict(pair.split("=", 1) for pair in
              os.environ.get("CARWATCH_SPOTS", "spot_1=Car 1,spot_2=Car 2").split(","))
+MOVE = int(os.environ.get("CARWATCH_MOVE", "150"))
 NOTIFY_URL = os.environ.get("CARWATCH_NOTIFY_URL", "")
 NOTIFY_TAG = os.environ.get("CARWATCH_NOTIFY_TAG", "cameras")
 KEEPALIVE = 60
@@ -139,6 +144,7 @@ def duration(seconds):
 class Watch:
     def __init__(self):
         self.first = {}    # car (Frigate's id) -> the spot it was first seen in, or None
+        self.start = {}    # car -> where it was first seen, or parked: (x, y) of its box's bottom
         self.parked = {}   # car -> the spot it is parked in
         self.arrived = {}  # car -> the spot it was told arriving in
         self.last = {}     # spot -> ("arrived" | "left", when), what was last told
@@ -152,17 +158,22 @@ class Watch:
             return
         car, when = after["id"], after.get("frame_time") or time.time()
         spot = self.spot(after.get("current_zones") or [])
+        x1, _, x2, y2 = after.get("box") or (0, 0, 0, 0)
+        here = ((x1 + x2) / 2, y2)
         self.first.setdefault(car, spot)
+        self.start.setdefault(car, here)
+        moved = math.dist(self.start[car], here) >= MOVE
         # A parked car Frigate had not seen is often found only as it starts
         # to move: first seen in a spot is as good as parked there.
         was = self.parked.get(car) or self.first[car]
-        if was and spot != was and not after.get("stationary"):
+        if was and spot != was and not after.get("stationary") and moved:
             self.parked.pop(car, None)
             self.first[car] = None
+            self.start[car] = here
             self.arrived.pop(car, None)
             self.tell(was, "left", car, when)
         elif (spot and self.first[car] != spot and self.arrived.get(car) != spot
-              and spot not in self.parked.values()):
+              and spot not in self.parked.values() and moved):
             # Driven in from the street, the spot empty (a car passing close
             # to a parked one is not arriving). Told once: a car manoeuvring
             # in and out of the spot before it parks says nothing more.
@@ -170,11 +181,12 @@ class Watch:
             self.tell(spot, "arrived", car, when)
         if spot and after.get("stationary") and car not in self.parked:
             self.parked[car] = spot
+            self.start[car] = here
             log(f"{SPOTS[spot]}: {car} parked")
         if message.get("type") == "end":
             # Gone from the picture: driven off (told above, as it left its
             # spot), or lost while parked, which says nothing.
-            for seen in (self.first, self.parked, self.arrived):
+            for seen in (self.first, self.start, self.parked, self.arrived):
                 seen.pop(car, None)
 
     def tell(self, spot, kind, car, when):
