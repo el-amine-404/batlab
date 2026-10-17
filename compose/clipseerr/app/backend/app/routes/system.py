@@ -3,12 +3,12 @@ from importlib.metadata import version
 
 from fastapi import APIRouter
 
-from .. import schemas
+from .. import __version__, schemas
 from ..context import cache, catalog, engine, requests, settings, started_at
 from ..settings import REGIONS, STOREFRONTS, SettingsPatch
 
 router = APIRouter(tags=["System"])
-VERSION = "1"
+VERSION = __version__
 
 
 def _settings_out() -> dict:

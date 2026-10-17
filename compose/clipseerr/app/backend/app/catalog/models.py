@@ -28,7 +28,8 @@ class Video(BaseModel):
     released: str | None = Field(None, description="YYYY-MM-DD.")
     genre: str | None = None
     explicit: bool = False
-    official: bool = Field(True, description="The artist's own video (YouTube's OMV), not a fan upload.")
+    official: bool = Field(True, description="The artist's own video (a label's upload, or one on the artist's "
+                                             "own channel), not a fan upload.")
     preview_url: str | None = Field(None, description="A 30 s preview (Apple), playable without YouTube.")
     library: list[Literal["audio", "video"]] = Field(
         default_factory=list, description="What the libraries (Settings, Libraries) have of it: its song, its video.")
@@ -49,6 +50,7 @@ class AudioMatch(BaseModel):
 
 class VideoDetail(Video):
     embeddable: bool = Field(True, description="YouTube lets other pages play it.")
+    uploader: str | None = Field(None, description="The YouTube channel that uploaded it, as it names itself.")
     audio: AudioMatch | None = Field(None, description="Its official audio, when one matches.")
     links: dict[str, str] = Field(default_factory=dict, description="youtube, youtube_music, apple.")
     description: str | None = None
@@ -74,6 +76,7 @@ class Shelf(BaseModel):
     source: Source
     items: list[Video]
     total: int = Field(description="Items the shelf has in all; items may hold only the first.")
+    updated_at: float | None = Field(None, description="When its oldest part was fetched from its source (Unix time).")
 
 
 class Category(BaseModel):
@@ -81,7 +84,8 @@ class Category(BaseModel):
     title: str
     group: str
     source: Source
-    image: str | None = None
+    image: str | None = Field(None, description="Its cover, when its source has one (YouTube's charts).")
+    images: list[str] = Field(default_factory=list, description="Pictures of its top videos, for one without a cover.")
 
 
 class CategoryGroup(BaseModel):
@@ -108,6 +112,8 @@ class SearchResults(BaseModel):
     query: str
     artists: list[ArtistSummary]
     videos: list[Video]
+    total: int = Field(0, description="Videos found in all; videos holds one page of them.")
+    offset: int = 0
 
 
 class Credit(BaseModel):
@@ -134,6 +140,8 @@ class Lyrics(BaseModel):
     plain: str | None = None
     instrumental: bool = False
     source: str | None = Field(None, description='"LRCLIB" or "YouTube Music (LyricFind)".')
+    language: str | None = Field(None, description='What they are sung in, when sure: "en", "el", "zh-cn".')
+    language_name: str | None = Field(None, description='The same in English: "Greek".')
 
 
 class HotArtist(BaseModel):

@@ -238,8 +238,27 @@ async def search_raw(region: str, query: str, kind: str, limit: int = 10) -> lis
     return await _call(region, "search", query, filter=kind, limit=limit)
 
 
+async def _bare_artist(region: str, channel_id: str) -> ArtistPage:
+    """A channel whose page ytmusicapi can't read: one with almost nothing on
+    YouTube Music comes in another layout (a single column, an "immersive"
+    header) and get_artist fails on it. Its name from that header, and its
+    videos from a search for it, kept only where it is the uploader."""
+    found = await asyncio.to_thread(lambda: _client(region)._send_request("browse", {"browseId": channel_id}))
+    header = next(iter((found.get("header") or {}).values()), {})
+    name = _text(header.get("title"))
+    if not name:
+        raise LookupError(f"{channel_id} is not an artist's page")
+    thumbnails = (((header.get("thumbnail") or {}).get("musicThumbnailRenderer") or {}).get("thumbnail")
+                  or {}).get("thumbnails")
+    videos = [v for v in await search_videos(region, name, limit=40) if any(a.id == channel_id for a in v.artists)]
+    return ArtistPage(id=channel_id, name=name, thumbnail=_image(thumbnails, 600), videos=videos)
+
+
 async def artist(region: str, channel_id: str) -> ArtistPage:
-    found = await _call(region, "get_artist", channel_id)
+    try:
+        found = await _call(region, "get_artist", channel_id)
+    except KeyError:
+        return await _bare_artist(region, channel_id)
     section = found.get("videos") or {}
     videos = to_videos(section.get("results") or [])
     browse = section.get("browseId") or ""

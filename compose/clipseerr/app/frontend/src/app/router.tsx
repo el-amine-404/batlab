@@ -10,7 +10,8 @@ import { ReleasesPage } from "@/pages/ReleasesPage";
 import { RequestPage } from "@/pages/RequestPage";
 import { RequestsPage } from "@/pages/RequestsPage";
 import { SearchPage } from "@/pages/SearchPage";
-import { GenrePage, ShelfPage } from "@/pages/ShelfPage";
+import { TagsPage } from "@/pages/TagsPage";
+import { GenrePage, HotArtistsPage, ShelfPage } from "@/pages/ShelfPage";
 import { WatchPage } from "@/pages/WatchPage";
 
 // Settings are opened now and then: their code loads when they are.
@@ -29,7 +30,9 @@ export const router = createBrowserRouter([
       { path: "/shelf/releases", element: <Navigate to="/releases" replace /> },
       { path: "/shelf/:id", element: <ShelfPage /> },
       { path: "/genres", element: <GenresPage /> },
+      { path: "/genres/hot/artists", element: <HotArtistsPage /> },
       { path: "/genres/:id", element: <GenrePage /> },
+      { path: "/tags", element: <TagsPage /> },
       { path: "/search", element: <SearchPage /> },
       { path: "/artist/:id", element: <ArtistPage /> },
       { path: "/watch/:id", element: <WatchPage /> },

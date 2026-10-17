@@ -3,7 +3,7 @@ import { Link, NavLink } from "react-router";
 
 import { BROWSE, type Entry, SETTINGS } from "@/app/navigation";
 import { Logo } from "@/components/Logo";
-import { useActiveCount } from "@/lib/queries";
+import { useActiveCount, useStatus } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
 const item =
@@ -30,6 +30,7 @@ function EntryLink({ entry, count }: { entry: Entry; count?: number }) {
 
 export function Sidebar({ onClose }: { onClose: () => void }) {
   const { data: active } = useActiveCount();
+  const { data: status } = useStatus();
   return (
     <div className="flex h-full flex-col pt-[env(safe-area-inset-top)]">
       <div className="flex h-16 items-center justify-between px-5">
@@ -58,12 +59,16 @@ export function Sidebar({ onClose }: { onClose: () => void }) {
             <EntryLink key={entry.path} entry={entry} />
           ))}
         </div>
+        <p className="mt-6 mb-1.5 px-3 text-[11px] font-medium tracking-wider text-muted-foreground/70 uppercase">Developers</p>
+        <a href="/api/docs" className={item}>
+          <Braces className="size-4 shrink-0" /> <span className="flex-1 truncate">API</span>
+        </a>
       </nav>
 
-      <div className="border-t border-border p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-        <a href="/api/docs" className={item}>
-          <Braces className="size-4" /> API
-        </a>
+      <div className="border-t border-border px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-xs text-muted-foreground/70">
+        <Link to="/settings/status" className="hover:text-foreground" title="Status, and the versions it runs">
+          clipseerr {status ? `v${status.version}` : ""}
+        </Link>
       </div>
     </div>
   );

@@ -23,8 +23,31 @@ class Problem(BaseModel):
     detail: str = Field(description="What went wrong, as a sentence a person can read.")
 
 
+class Tag(BaseModel):
+    id: str = Field(description='"explicit", "fan-upload", "apple", "soon", "in-library", "lang:<code>", "genre:<name>".')
+    label: str
+    hint: str = Field(description="What it means, in one line.")
+    count: int = 0
+
+
+class Tags(BaseModel):
+    tags: list[Tag]
+
+
+class LibraryFile(BaseModel):
+    kind: Literal["audio", "video"] = Field(description="The song, or the music video file.")
+    name: str = Field(description="The file's name, as the download gives it.")
+    size: int | None = Field(None, description="Bytes, when the library says.")
+    url: str = Field(description="Where to download it: valid while the library still holds the file.")
+
+
+class LibraryFiles(BaseModel):
+    files: list[LibraryFile]
+
+
 class Views(BaseModel):
     views: dict[str, str] = Field(description='YouTube video id → its views, as YouTube writes them: "1.2M".')
+    released: dict[str, str] = Field(default_factory=dict, description="YouTube video id → the day it came out.")
 
 
 class Home(BaseModel):

@@ -6,6 +6,7 @@ import { ACTIVE, type Kind, type Request, type VideoDetail } from "@/lib/api";
 import { useAsk, useRequestAction, useStatus, useVideoRequests } from "@/lib/queries";
 import { ago, cn, upcoming } from "@/lib/utils";
 
+import { Downloads } from "./Downloads";
 import { StatusBadge } from "./StatusBadge";
 
 const COPY: Record<Kind, { title: string; icon: typeof Music2; action: string; blurb: string }> = {
@@ -49,6 +50,7 @@ function KindCard({ video, kind, request, chain }: { video: VideoDetail; kind: K
             {request.quality && <span className="text-xs font-medium text-muted-foreground">{request.quality}</span>}
           </div>
           {request.message && <p className="text-xs text-muted-foreground">{request.message}</p>}
+          {request.status === "completed" && <Downloads videoId={video.id} kind={kind} />}
           {request.status === "downloading" && typeof attempt?.progress === "number" && (
             <div className="h-1.5 overflow-hidden rounded-full bg-secondary">
               <div className="h-full rounded-full bg-gradient-to-r from-rose-500 to-orange-300 transition-[width]" style={{ width: `${Math.round(attempt.progress * 100)}%` }} />
@@ -76,6 +78,7 @@ function KindCard({ video, kind, request, chain }: { video: VideoDetail; kind: K
           <p className="text-[11px] text-muted-foreground">
             {kind === "audio" ? "A library has this song already." : "This video's file is in a library already."}
           </p>
+          <Downloads videoId={video.id} kind={kind} />
           <Button size="sm" variant="ghost" className="self-start" onClick={() => ask.mutate(kind)} disabled={busy || unavailable || noService}>
             {ask.isPending ? <Loader2 className="animate-spin" /> : <RotateCw />} Get it again
           </Button>

@@ -66,6 +66,8 @@ SCHEMA = (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, thumbnail TEXT, subscribers TEXT,
         sign TEXT NOT NULL, seen_at REAL NOT NULL
     )""",
+    # The language a video's lyrics are in (catalog/language.py), once read.
+    "CREATE TABLE IF NOT EXISTS known_languages (video_id TEXT PRIMARY KEY, language TEXT NOT NULL)",
     *(statement
       for table, search, columns in (("known_videos", "known_search", ("title", "artist")),
                                      ("known_artists", "known_artist_search", ("name",)))

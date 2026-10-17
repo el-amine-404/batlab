@@ -2,6 +2,7 @@ import { CalendarClock } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Empty, Failed, PageHeader } from "@/components/layout/States";
+import { Updated } from "@/components/video/Updated";
 import { MoreLoader } from "@/components/video/MoreLoader";
 import { byDay } from "@/components/video/Releases";
 import { GridSkeleton, VideoGrid } from "@/components/video/VideoGrid";
@@ -29,7 +30,9 @@ export function ReleasesPage() {
         description={first ? (
           <>
             <span className="block">{first.subtitle}</span>
-            <span className="mt-0.5 block text-xs text-muted-foreground/70">{total} videos</span>
+            <span className="mt-0.5 block text-xs text-muted-foreground/70">
+              {total} videos{first.updated_at ? " · " : ""}<Updated at={first.updated_at} />
+            </span>
           </>
         ) : " "}
         actions={

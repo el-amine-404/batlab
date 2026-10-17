@@ -3,9 +3,12 @@ from typing import Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Query, Response
+from fastapi.responses import StreamingResponse
 
 from .. import schemas
-from ..catalog.models import ArtistPage, ArtistSummary, CategoryGroup, Credits, Lyrics, SearchResults, Shelf, VideoDetail, Versions
+from ..catalog.models import (ArtistPage, ArtistSummary, CategoryGroup, Credits, Lyrics, SearchResults, Shelf, Video,
+                              VideoDetail, Versions)
+from ..cache import tracking
 from ..context import catalog, known, library, requests, settings
 from ..problems import Problem
 
@@ -52,7 +55,10 @@ async def home():
             "and what is coming, newest first", response_model=Shelf, responses=_404)
 async def shelf(shelf_id: str, limit: int = _LIMIT, offset: int = _OFFSET,
                 source: Literal["youtube", "apple"] | None = _SOURCE):
-    return _page(await catalog.shelf(shelf_id), limit, offset, source)
+    with tracking() as reads:
+        found = await catalog.shelf(shelf_id)
+    found.updated_at = min(reads, default=None)
+    return _page(found, limit, offset, source)
 
 
 @router.get("/categories", summary="Genres to browse, by source", response_model=list[CategoryGroup],
@@ -65,14 +71,20 @@ async def categories():
             responses=_404)
 async def category(category_id: str, limit: int = _LIMIT, offset: int = _OFFSET,
                    source: Literal["youtube", "apple"] | None = _SOURCE):
-    return _page(await catalog.category(category_id), limit, offset, source)
+    with tracking() as reads:
+        found = await catalog.category(category_id)
+    found.updated_at = min(reads, default=None)
+    return _page(found, limit, offset, source)
 
 
 @router.get("/search", summary="Videos and artists by name", response_model=SearchResults, responses=_404)
-async def search(q: str = Query("", max_length=200, description="Words of the title or the artist.")):
+async def search(q: str = Query("", max_length=200, description="Words of the title or the artist."),
+                 limit: int = _LIMIT, offset: int = _OFFSET):
     found = await catalog.search(q)
     known.saw(found.videos, found.artists, list_id=f"search:{q.casefold()}")
     found.videos = _clean(found.videos)
+    found.total, found.offset = len(found.videos), offset
+    found.videos = found.videos[offset:offset + limit]
     library.mark(found.videos)
     catalog.known_views(found.videos)
     return found
@@ -104,6 +116,9 @@ async def artist(artist_id: str):
             response_model=VideoDetail, responses=_404)
 async def video(video_id: str):
     found = await catalog.video(video_id)
+    # What its page found out (its artists, whether it is the artist's own) is
+    # what its tags go by.
+    known.saw([Video.model_validate(found.model_dump())])
     library.mark([found])
     return found
 
@@ -119,11 +134,38 @@ async def versions(video_id: str):
     return found
 
 
-@router.get("/views", summary="How many watched each video: YouTube's count, for the lists that don't carry it",
+@router.get("/views", summary="How many watched each video, and when it came out: for the lists that don't say",
             response_model=schemas.Views, responses=_404)
 async def views(ids: str = Query(..., max_length=48 * 12, description="YouTube video ids, comma-separated (48 at most).")):
     wanted = list(dict.fromkeys(i for i in ids.split(",") if _YOUTUBE_ID.fullmatch(i)))[:48]
-    return {"views": await catalog.views(wanted)}
+    return await catalog.views(wanted)
+
+
+@router.get("/videos/{video_id}/files", summary="The video's files in the libraries (Settings, Libraries), "
+            "to download: its music video file, its song", response_model=schemas.LibraryFiles, responses=_404)
+async def video_files(video_id: str):
+    found = await catalog.video(video_id)
+    files = library.files(found.youtube_id, found.title, found.artist)
+    if found.audio:
+        files += [f for f in library.files(None, found.audio.title, found.audio.artist) if f not in files]
+    return {"files": [{"kind": f.kind, "name": f.name, "size": f.size, "url": f"/api/v1/files/{library.token(f)}"}
+                      for f in files]}
+
+
+@router.get("/files/{token}", summary="Download a file of a library, by the url /videos/{id}/files gave",
+            responses={404: {"model": schemas.Problem}, 200: {"content": {"application/octet-stream": {}}}})
+async def library_file(token: str):
+    file = library.by_token(token)
+    if not file:
+        raise Problem(404, "The library doesn't hold that file (any more).")
+    try:
+        chunks, size = await library.open(file)
+    except OSError as exc:
+        raise Problem(404, str(exc)) from exc
+    headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(file.name)}"}
+    if size:
+        headers["Content-Length"] = str(size)
+    return StreamingResponse(chunks, media_type="application/octet-stream", headers=headers)
 
 
 @router.get("/videos/{video_id}/credits", summary="Who made the song: performed, written, produced by…",

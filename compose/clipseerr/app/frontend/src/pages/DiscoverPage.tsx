@@ -43,7 +43,7 @@ export function DiscoverPage() {
         <PageHeader eyebrow="Discover" title="The newest music videos" description="What came out, and what everyone watches. Open one to watch it, then get the song or the video." />
         <GenreChips />
         {/* Below xl the releases are a list of their own, before the shelves. */}
-        <ReleaseRail items={releases.data?.items} total={releases.data?.total} isPending={releases.isPending} limit={12} className="mb-10 max-h-[26rem] xl:hidden" />
+        <ReleaseRail items={releases.data?.items} total={releases.data?.total} updatedAt={releases.data?.updated_at} isPending={releases.isPending} limit={12} className="mb-10 max-h-[26rem] xl:hidden" />
         {isPending ? (
           <div className="flex flex-col gap-10">
             <ShelfSkeleton />
@@ -63,7 +63,7 @@ export function DiscoverPage() {
         )}
       </div>
       <aside className="hidden xl:block">
-        <ReleaseRail items={releases.data?.items} total={releases.data?.total} isPending={releases.isPending} className="sticky top-24 max-h-[calc(100dvh-7rem)]" />
+        <ReleaseRail items={releases.data?.items} total={releases.data?.total} updatedAt={releases.data?.updated_at} isPending={releases.isPending} className="sticky top-24 max-h-[calc(100dvh-7rem)]" />
       </aside>
     </div>
   );

@@ -34,6 +34,9 @@ export type TestResult = Schemas["TestResult"];
 export type Settings = Schemas["SettingsOut"];
 export type SettingsPatch = Schemas["SettingsPatch"];
 export type SystemStatus = Schemas["SystemStatus"];
+export type Tag = Schemas["Tag"];
+export type LibraryFile = Schemas["LibraryFile"];
+export type Category = Schemas["Category"];
 
 /** Under way: a service has it, or one will get it. */
 export const ACTIVE: RequestStatus[] = ["queued", "sent", "downloading"];
@@ -89,12 +92,21 @@ export const api = {
   categories: (signal?: AbortSignal) => request<CategoryGroup[]>("/categories", { signal }),
   category: (id: string, page: Page = {}, signal?: AbortSignal) =>
     request<Shelf>(`/categories/${encodeURIComponent(id)}?${query({ limit: PAGE, offset: 0, ...page })}`, { signal }),
-  search: (q: string, signal?: AbortSignal) => request<SearchResults>(`/search?${query({ q })}`, { signal }),
+  search: (q: string, page: Page = {}, signal?: AbortSignal) =>
+    request<SearchResults>(`/search?${query({ q, limit: PAGE, offset: 0, ...page })}`, { signal }),
   quickSearch: (q: string, signal?: AbortSignal) => request<SearchResults>(`/search/quick?${query({ q })}`, { signal }),
   artist: (id: string, signal?: AbortSignal) => request<ArtistPage>(`/artists/${encodeURIComponent(id)}`, { signal }),
   video: (id: string, signal?: AbortSignal) => request<VideoDetail>(`/videos/${encodeURIComponent(id)}`, { signal }),
   versions: (id: string, signal?: AbortSignal) => request<Versions>(`/videos/${encodeURIComponent(id)}/versions`, { signal }),
-  views: (youtubeIds: string[]) => request<{ views: Record<string, string> }>(`/views?ids=${youtubeIds.join(",")}`),
+  views: (youtubeIds: string[]) =>
+    request<{ views: Record<string, string>; released?: Record<string, string> }>(`/views?ids=${youtubeIds.join(",")}`),
+  files: (id: string, signal?: AbortSignal) =>
+    request<{ files: LibraryFile[] }>(`/videos/${encodeURIComponent(id)}/files`, { signal }),
+  tags: (signal?: AbortSignal) => request<{ tags: Tag[] }>("/tags", { signal }),
+  tagged: (tags: string[], page: Page = {}, signal?: AbortSignal) =>
+    request<Shelf>(`/tags/videos?${new URLSearchParams([...tags.map((t) => ["tag", t]),
+                                                        ["limit", String(page.limit ?? PAGE)], ["offset", String(page.offset ?? 0)]])}`,
+                   { signal }),
   credits: (id: string, signal?: AbortSignal) => request<Credits>(`/videos/${encodeURIComponent(id)}/credits`, { signal }),
   lyrics: (id: string, signal?: AbortSignal) => request<Lyrics>(`/videos/${encodeURIComponent(id)}/lyrics`, { signal }),
   /** Where the lyrics download as a file. */

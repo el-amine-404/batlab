@@ -3,10 +3,12 @@ import { useRef } from "react";
 import { Link } from "react-router";
 
 import type { Video } from "@/lib/api";
-import { prefetchVideo, useViews } from "@/lib/queries";
+import { Marquee } from "@/components/ui/marquee";
+import { prefetchVideo, useFacts } from "@/lib/queries";
 import { ago, cn, day, daysFrom } from "@/lib/utils";
 
 import { Thumb } from "./Thumb";
+import { Updated } from "./Updated";
 
 export type DayGroup = { key: string; label: string; items: Video[] };
 
@@ -27,7 +29,8 @@ export function byDay(items: Video[]): DayGroup[] {
 function Row({ video }: { video: Video }) {
   const timer = useRef<number | undefined>(undefined);
   const soon = (daysFrom(video.released ?? "") ?? 0) > 0;
-  const views = useViews(video.youtube_id, !video.views).data || video.views;
+  const looked = useFacts(video.youtube_id, !video.views).data;
+  const views = video.views || looked?.views;
   return (
     <li>
       <Link
@@ -46,8 +49,8 @@ function Row({ video }: { video: Video }) {
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] leading-snug font-medium text-foreground/95">{video.title}</p>
-          <p className="truncate text-xs text-muted-foreground">{video.artist}</p>
+          <Marquee text={video.title} className="text-[13px] leading-snug font-medium text-foreground/95" />
+          <Marquee text={video.artist} className="text-xs text-muted-foreground" />
           <p className={cn("truncate text-[11px]", soon ? "text-rose-300" : "text-muted-foreground/70")} title={day(video.released)}>
             {soon ? `Out ${day(video.released)} · ${ago(video.released)}` : day(video.released)}
             {views && ` · ${views} views`}
@@ -60,9 +63,10 @@ function Row({ video }: { video: Video }) {
 }
 
 /** Discover's right column: the newest releases, by day, as a list that scrolls on its own. */
-export function ReleaseRail({ items, total, isPending, limit = 60, className }: {
+export function ReleaseRail({ items, total, updatedAt, isPending, limit = 60, className }: {
   items?: Video[];
   total?: number;
+  updatedAt?: number | null;
   isPending: boolean;
   limit?: number;
   className?: string;
@@ -71,9 +75,12 @@ export function ReleaseRail({ items, total, isPending, limit = 60, className }: 
   return (
     <section aria-labelledby="releases" className={cn("flex min-h-0 flex-col rounded-2xl border border-border bg-card/50", className)}>
       <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
-        <h2 id="releases" className="flex items-center gap-2 font-semibold tracking-tight">
-          <CalendarClock className="size-4 text-rose-300" /> Latest releases
-        </h2>
+        <div className="min-w-0">
+          <h2 id="releases" className="flex items-center gap-2 font-semibold tracking-tight">
+            <CalendarClock className="size-4 text-rose-300" /> Latest releases
+          </h2>
+          <Updated at={updatedAt} className="block truncate text-[11px] text-muted-foreground/70" />
+        </div>
         <Link to="/releases" className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-rose-300 hover:bg-accent">
           All {total || ""} <ArrowRight className="size-3" />
         </Link>

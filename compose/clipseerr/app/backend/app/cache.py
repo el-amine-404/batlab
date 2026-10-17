@@ -12,6 +12,8 @@ import json
 import logging
 import time
 from collections import OrderedDict
+from contextlib import contextmanager
+from contextvars import ContextVar
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -20,6 +22,32 @@ from .db import Database
 log = logging.getLogger("clipseerr.cache")
 
 MEMORY_ENTRIES = 2000
+
+
+# When what a request is answering with was fetched: tracking() collects it.
+_reads: ContextVar[list[float] | None] = ContextVar("cache_reads", default=None)
+# Only values kept fresh this long or less say how old a list is: a video's
+# release day, kept a year, would make every list look a year old.
+LIST_FRESHNESS = 6 * 3600
+
+
+def _note(fetched_at: float, fresh: float) -> None:
+    reads = _reads.get()
+    if reads is not None and fresh <= LIST_FRESHNESS:
+        reads.append(fetched_at)
+
+
+@contextmanager
+def tracking():
+    """with tracking() as reads: … : reads holds when each cached value the
+    block used was fetched, its own and its tasks' (they share the list); the
+    oldest is how old the answer is."""
+    reads: list[float] = []
+    token = _reads.set(reads)
+    try:
+        yield reads
+    finally:
+        _reads.reset(token)
 
 
 class Cache:
@@ -58,6 +86,11 @@ class Cache:
                      "ON CONFLICT (key) DO UPDATE SET value = excluded.value, fetched_at = excluded.fetched_at",
                      (key, json.dumps(value, ensure_ascii=False), now))
 
+    def put(self, key: str, value: Any) -> None:
+        """Stores value as just fetched: for what one call answered besides
+        what it was asked for."""
+        self._write(key, value)
+
     def peek(self, key: str) -> Any:
         """What the cache holds for key, however old, without fetching: None when nothing."""
         found = self._read(key)
@@ -72,15 +105,16 @@ class Cache:
         found = self._read(key)
         if found:
             age = time.time() - found[0]
-            if age < fresh:
+            if age < fresh or age < stale:
                 self.hits += 1
-                return found[1]
-            if age < stale:
-                self.hits += 1
-                self._refresh(key, fetch)
+                if age >= fresh:
+                    self._refresh(key, fetch)
+                _note(found[0], fresh)
                 return found[1]
         self.misses += 1
-        return await self._fetch(key, fetch)
+        value = await self._fetch(key, fetch)
+        _note(time.time(), fresh)
+        return value
 
     async def _fetch(self, key: str, fetch: Callable[[], Awaitable[Any]]) -> Any:
         running = self._inflight.get(key)

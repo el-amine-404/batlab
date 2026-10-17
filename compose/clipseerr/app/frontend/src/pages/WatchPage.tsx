@@ -10,6 +10,7 @@ import { ShelfRow } from "@/components/video/ShelfRow";
 import { Thumb } from "@/components/video/Thumb";
 import type { Shelf, Version, Video, VideoDetail } from "@/lib/api";
 import { CreditsPanel, LyricsPanel } from "@/components/video/SongInfo";
+import { TagBadge } from "@/components/video/TagBadge";
 import { prefetchArtist, prefetchVideo, queryClient, useArtist, useCredits, useHotPick, useHotPicks, useLyrics, useVersions,
          useVideo } from "@/lib/queries";
 import { ago, clock, cn, day, upcoming } from "@/lib/utils";
@@ -28,8 +29,11 @@ function listed(id: string): Video | undefined {
   return undefined;
 }
 
-function Meta({ video }: { video: Video }) {
+function Meta({ video }: { video: Video | VideoDetail }) {
   const soon = upcoming(video.released);
+  // The language its lyrics are in, once they are read (the lyrics panel asks for them anyway).
+  const { data: words } = useLyrics(video.id, !!video.youtube_id);
+  const uploader = "uploader" in video ? video.uploader : null;
   const parts = [
     video.views && `${video.views} views`,
     video.released && (
@@ -48,11 +52,15 @@ function Meta({ video }: { video: Video }) {
           {part}
         </span>
       ))}
-      {soon && <Badge variant="accent">Coming soon</Badge>}
-      {video.genre && <Badge variant="muted">{video.genre}</Badge>}
-      {video.explicit && <Badge variant="muted">Explicit</Badge>}
-      {!video.official && <Badge variant="warning">Fan upload</Badge>}
-      {video.source === "apple" && <Badge variant="apple">Apple Music</Badge>}
+      {soon && <TagBadge tag="soon" tone="accent" />}
+      {video.explicit && <TagBadge tag="explicit" compact />}
+      {words?.language && <TagBadge tag={`lang:${words.language}`} label={words.language_name ?? words.language} />}
+      {video.genre && <TagBadge tag={`genre:${video.genre}`} />}
+      {!video.official && (
+        <TagBadge tag="fan-upload" tone="warning"
+                  hint={uploader ? `Uploaded by ${uploader}, not by the artist or their label.` : undefined} />
+      )}
+      {video.source === "apple" && <TagBadge tag="apple" />}
     </div>
   );
 }
@@ -143,7 +151,7 @@ function VersionRow({ version, current }: { version: Version; current?: boolean 
         <p className="truncate text-sm font-medium">{version.original_title ?? version.title}</p>
         <div className="mt-1 flex flex-wrap items-center gap-1.5">
           <Badge variant={version.label === "Clean" ? "success" : version.label === "Explicit" ? "warning" : "muted"}>{version.label}</Badge>
-          {version.explicit && version.label !== "Explicit" && <Badge variant="muted">Explicit</Badge>}
+          {version.explicit && version.label !== "Explicit" && <TagBadge tag="explicit" compact />}
           {current && <Badge variant="accent">The song here</Badge>}
           {!!version.duration && <span className="text-xs text-muted-foreground">{clock(version.duration)}</span>}
         </div>

@@ -3,9 +3,11 @@ import { memo, useRef } from "react";
 import { Link } from "react-router";
 
 import type { Video } from "@/lib/api";
-import { prefetchVideo, useViews } from "@/lib/queries";
+import { Marquee } from "@/components/ui/marquee";
+import { prefetchVideo, useFacts } from "@/lib/queries";
 import { clock, cn, dated, upcoming } from "@/lib/utils";
 
+import { TagBadge } from "./TagBadge";
 import { Thumb } from "./Thumb";
 import type { Requested } from "./useRequested";
 
@@ -51,10 +53,11 @@ export const VideoCard = memo(function VideoCard({ video, requested, className, 
     timer.current = window.setTimeout(() => prefetchVideo(video.id), 120);
   };
   const cool = () => window.clearTimeout(timer.current);
-  const looked = useViews(video.youtube_id, !video.views).data;
-  const views = video.views || looked;
-  const meta = [views && `${views} views`, dated(video.released)].filter(Boolean).join(" · ");
-  const soon = upcoming(video.released);
+  const looked = useFacts(video.youtube_id, !video.views || !video.released).data;
+  const views = video.views || looked?.views;
+  const released = video.released || looked?.released;
+  const meta = [views && `${views} views`, dated(released)].filter(Boolean).join(" · ");
+  const soon = upcoming(released);
 
   return (
     <Link
@@ -73,26 +76,10 @@ export const VideoCard = memo(function VideoCard({ video, requested, className, 
           <Play className="ml-0.5 size-5 fill-current" />
         </span>
         <div className="absolute top-2 left-2 flex gap-1">
-          {soon && (
-            <span className="rounded-md bg-rose-500/85 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white backdrop-blur-md">
-              SOON
-            </span>
-          )}
-          {video.source === "apple" && (
-            <span className="rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white/90 backdrop-blur-md">
-              APPLE
-            </span>
-          )}
-          {video.explicit && (
-            <span className="rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white/90 backdrop-blur-md" title="Explicit">
-              E
-            </span>
-          )}
-          {!video.official && (
-            <span className="rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white/80 backdrop-blur-md">
-              Fan upload
-            </span>
-          )}
+          {soon && <TagBadge tag="soon" look="overlay" tone="accent" compact />}
+          {video.source === "apple" && <TagBadge tag="apple" look="overlay" compact />}
+          {video.explicit && <TagBadge tag="explicit" look="overlay" compact />}
+          {!video.official && <TagBadge tag="fan-upload" look="overlay" />}
         </div>
         <StatusMark video={video} requested={requested} />
         {!!video.duration && !soon && (
@@ -102,8 +89,8 @@ export const VideoCard = memo(function VideoCard({ video, requested, className, 
         )}
       </div>
       <div className="min-w-0 px-0.5">
-        <p className="line-clamp-2 text-sm leading-snug font-medium text-foreground/95 group-hover:text-foreground">{video.title}</p>
-        <p className="mt-0.5 truncate text-[13px] text-muted-foreground">{video.artist}</p>
+        <Marquee text={video.title} className="text-sm leading-snug font-medium text-foreground/95 group-hover:text-foreground" />
+        <Marquee text={video.artist} className="mt-0.5 text-[13px] text-muted-foreground" />
         {meta && <p className="truncate text-xs text-muted-foreground/70">{meta}</p>}
       </div>
     </Link>

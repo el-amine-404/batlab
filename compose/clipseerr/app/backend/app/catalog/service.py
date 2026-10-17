@@ -14,9 +14,9 @@ from collections.abc import Callable
 import httpx
 from batlab_common import titles
 
-from ..cache import Cache
+from ..cache import Cache, tracking
 from ..problems import Problem
-from . import lrclib, match, youtube
+from . import language, lrclib, match, youtube
 from .apple import GENRES, Apple
 from .models import (ArtistPage, ArtistRef, AudioMatch, Category, CategoryGroup, Credits, Lyrics, SearchResults, Shelf,
                      Version, Versions, Video, VideoDetail)
@@ -33,6 +33,8 @@ RECENT_DAYS = 45
 RELEASE_DAYS = 30
 # Calls to one source at once, when a list needs many.
 FAN_OUT = 6
+# Videos a search asks YouTube Music for (it answers 20 a call), shown a page at a time.
+SEARCH_VIDEOS = 100
 
 _ID = re.compile(r"^(yt|am):([\w-]{1,64})$")
 _CHART_KINDS = (
@@ -300,8 +302,16 @@ class Catalog:
     async def home(self) -> list[Shelf]:
         """Every shelf, with its first items; a source that fails leaves its
         shelves out rather than the page empty."""
-        ids = ["yt-new", *(i for i, _ in await self._chart_shelves()), "am-new", "am-top"]
-        results = await asyncio.gather(*(self.shelf(i, SHELF_PREVIEW) for i in ids), return_exceptions=True)
+        # Not "am-new": Apple's newest are on the page already, in the latest releases beside the shelves.
+        ids = ["yt-new", *(i for i, _ in await self._chart_shelves()), "am-top"]
+        async def one(shelf_id: str) -> Shelf:
+            # Each in its own task, so each its own age.
+            with tracking() as reads:
+                found = await self.shelf(shelf_id, SHELF_PREVIEW)
+            found.updated_at = min(reads, default=None)
+            return found
+
+        results = await asyncio.gather(*(one(i) for i in ids), return_exceptions=True)
         shelves = [r for r in results if isinstance(r, Shelf) and r.items]
         if not shelves and results and all(isinstance(r, Exception) for r in results):
             raise results[0]
@@ -320,9 +330,18 @@ class Catalog:
                               source="youtube", image=g.get("image")) for g in charts["genres"]]
             groups.append(CategoryGroup(title="YouTube charts", source="youtube",
                                         categories=sorted(items, key=lambda c: c.title)))
-        groups.append(CategoryGroup(title="Apple Music", source="apple", categories=Apple.categories()))
-        picks = CategoryGroup(title="Picks", source="youtube",
-                              categories=[Category(id="hot", title="Hot", group="Picks", source="youtube")])
+        apple = Apple.categories()
+        hot = Category(id="hot", title="Hot", group="Picks", source="youtube")
+        # Apple's genres and Hot have no cover: their top videos' pictures stand in.
+        found = await asyncio.gather(*(self._apple_top(int(c.id[3:])) for c in apple), self.hot(),
+                                     return_exceptions=True)
+        for category, items in zip([*apple, hot], found):
+            if isinstance(items, Shelf):
+                items = [v.model_dump() for v in items.items]
+            if isinstance(items, list):
+                category.images = [i["thumbnail"] for i in items if i.get("thumbnail")][:3]
+        groups.append(CategoryGroup(title="Apple Music", source="apple", categories=apple))
+        picks = CategoryGroup(title="Picks", source="youtube", categories=[hot])
         return [picks, *groups]
 
     async def category(self, category_id: str) -> Shelf:
@@ -349,7 +368,7 @@ class Catalog:
         key = query.casefold()
 
         async def fetch():
-            videos, artists = await asyncio.gather(youtube.search_videos(region, query),
+            videos, artists = await asyncio.gather(youtube.search_videos(region, query, limit=SEARCH_VIDEOS),
                                                    youtube.search_artists(region, query))
             # A search for an artist's name: their own videos first (YouTube's
             # video search favours fan uploads and live clips).
@@ -364,8 +383,10 @@ class Catalog:
             return {"query": query, "videos": [v.model_dump() for v in videos],
                     "artists": [a.model_dump() for a in artists]}
 
-        return SearchResults.model_validate(await self._get("youtube", f"yt:search:{region}:{key}", fetch,
-                                                            fresh=30 * MIN, stale=DAY))
+        found = SearchResults.model_validate(await self._get("youtube", f"yt:search2:{region}:{key}", fetch,
+                                                             fresh=30 * MIN, stale=DAY))
+        found.total = len(found.videos)
+        return found
 
     async def artist(self, channel_id: str) -> ArtistPage:
         if not re.fullmatch(r"UC[\w-]{20,30}", channel_id):
@@ -373,7 +394,10 @@ class Catalog:
         region, storefront = self.region, self.storefront
 
         async def fetch():
-            page = await youtube.artist(region, channel_id)
+            try:
+                page = await youtube.artist(region, channel_id)
+            except LookupError as exc:
+                raise Problem(404, "This channel has no page on YouTube Music.") from exc
             try:
                 apple = await self._apple.artist_videos(storefront, page.name)
             except Exception as exc:
@@ -428,8 +452,8 @@ class Catalog:
         kind, value = found.groups()
         fetch = (lambda: self._youtube_detail(value)) if kind == "yt" else (lambda: self._apple_detail(value))
         return VideoDetail.model_validate(await self._get("youtube" if kind == "yt" else "apple",
-                                                          # video2: every credited artist (_fuller_credit).
-                                                          f"video2:{self.region}:{video_id}", fetch,
+                                                          # video3: the artist's own channel's upload is official.
+                                                          f"video3:{self.region}:{video_id}", fetch,
                                                           # Apple's may be out on YouTube soon.
                                                           fresh=3 * DAY if kind == "yt" else 6 * HOUR,
                                                           stale=30 * DAY))
@@ -481,7 +505,8 @@ class Catalog:
             thumbnail=youtube.thumbnail(youtube_id),
             duration=song["seconds"] or video.duration,
             views=video.views or youtube.short_count(song["views"]),
-            official=song["kind"] in (None, youtube.OFFICIAL),
+            official=_official(song, video.artists),
+            uploader=song["author"] or None,
             embeddable=song["embeddable"],
             audio=audio,
             description=song["description"],
@@ -532,26 +557,42 @@ class Catalog:
 
     # ---- how many watched ---------------------------------------------------------------------
 
-    async def views(self, youtube_ids: list[str]) -> dict[str, str]:
-        """Each video's views ("1.2M"), as YouTube counts them today; most lists
-        (charts, Apple's, Hot) don't carry them. A video YouTube didn't answer for is left out."""
+    async def views(self, youtube_ids: list[str]) -> dict[str, dict[str, str]]:
+        """Each video's views ("1.2M"), as YouTube counts them today, and the
+        day it came out: most lists (charts, Apple's, Hot, searches) carry
+        neither. {"views": {id: …}, "released": {id: …}}; what YouTube didn't
+        answer for is left out."""
         region = self.region
 
         async def one(youtube_id: str):
             async def fetch():
                 async with self._gate:
-                    return youtube.short_count((await youtube.song(region, youtube_id))["views"])
+                    song = await youtube.song(region, youtube_id)
+                # The same answer has the day it came out, which never changes.
+                if song["published"]:
+                    self._cache.put(f"yt:published:{youtube_id}", song["published"])
+                return youtube.short_count(song["views"])
 
-            return await self._get("youtube", f"yt:views:{youtube_id}", fetch, fresh=DAY, stale=30 * DAY)
+            views = await self._get("youtube", f"yt:views:{youtube_id}", fetch, fresh=DAY, stale=30 * DAY)
+            return views, await self._published(youtube_id)
 
-        counts = await asyncio.gather(*(one(i) for i in youtube_ids), return_exceptions=True)
-        return {i: count for i, count in zip(youtube_ids, counts) if isinstance(count, str)}
+        found = await asyncio.gather(*(one(i) for i in youtube_ids), return_exceptions=True)
+        answer = {"views": {}, "released": {}}
+        for youtube_id, facts in zip(youtube_ids, found):
+            if isinstance(facts, tuple):
+                if facts[0]:
+                    answer["views"][youtube_id] = facts[0]
+                if facts[1]:
+                    answer["released"][youtube_id] = facts[1]
+        return answer
 
     def known_views(self, videos: list[Video]) -> None:
-        """Fills in the views already looked up, without asking YouTube."""
+        """Fills in the views and days already looked up, without asking YouTube."""
         for video in videos:
-            if not video.views and video.youtube_id:
+            if video.youtube_id and not video.views:
                 video.views = self._cache.peek(f"yt:views:{video.youtube_id}")
+            if video.youtube_id and not video.released:
+                video.released = self._cache.peek(f"yt:published:{video.youtube_id}")
 
     # ---- who made the song, and its words ---------------------------------------------------------
 
@@ -597,10 +638,18 @@ class Catalog:
                     log.info("YouTube Music lyrics failed for %s: %r", youtube_id, exc)
                     from_youtube = None
                 found = from_youtube or found
-            return Lyrics.model_validate(found or {}).model_dump()
+            words = Lyrics.model_validate(found or {})
+            text = words.plain or "\n".join(line.text for line in words.synced)
+            words.language = language.detect(text)
+            words.language_name = language.name(words.language)
+            return words.model_dump()
 
-        key = f"lyrics:{titles.simple(first)}:{titles.simple(title)}:{seconds or 0}"
-        return Lyrics.model_validate(await self._cache.get(key, fetch, fresh=7 * DAY, stale=90 * DAY))
+        # lyrics2: with the language they are in.
+        key = f"lyrics2:{titles.simple(first)}:{titles.simple(title)}:{seconds or 0}"
+        found = Lyrics.model_validate(await self._cache.get(key, fetch, fresh=7 * DAY, stale=90 * DAY))
+        if found.language and self.known:
+            self.known.set_language(video_id, found.language)
+        return found
 
     # ---- keeping the front page warm --------------------------------------------------------------
 
@@ -650,6 +699,16 @@ async def _watch_track(region: str, youtube_id: str) -> dict | None:
     if track and "duration_seconds" not in track:
         track["duration"] = track.get("length")
     return track
+
+
+def _official(song: dict, artists: list[ArtistRef]) -> bool:
+    """The artist's own video: YouTube's official music video type (a label's
+    upload), or uploaded by one of its artists' own channels, which YouTube
+    types as a user upload (aggelina's "KALSON SKISMENA" on her channel)."""
+    if song["kind"] in (None, youtube.OFFICIAL):
+        return True
+    channel = song.get("channel_id")
+    return bool(channel) and any(ref.id == channel for ref in artists)
 
 
 def _fuller_credit(current: str, *others: str | None) -> str:

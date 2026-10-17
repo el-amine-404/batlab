@@ -164,8 +164,42 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** How many watched each video: YouTube's count, for the lists that don't carry it */
+        /** How many watched each video, and when it came out: for the lists that don't say */
         get: operations["views_api_v1_views_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videos/{video_id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The video's files in the libraries (Settings, Libraries), to download: its music video file, its song */
+        get: operations["video_files_api_v1_videos__video_id__files_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/files/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download a file of a library, by the url /videos/{id}/files gave */
+        get: operations["library_file_api_v1_files__token__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -286,6 +320,40 @@ export interface paths {
         };
         /** Every artist Hot has shown, the most videos first */
         get: operations["artists_api_v1_hot_artists_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every tag a video can carry (a badge), with how many of the known videos carry it */
+        get: operations["all_tags_api_v1_tags_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tags/videos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The videos carrying every tag asked, a page at a time, the latest seen first */
+        get: operations["tagged_videos_api_v1_tags_videos_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -906,8 +974,16 @@ export interface components {
              * @enum {string}
              */
             source: "youtube" | "apple";
-            /** Image */
+            /**
+             * Image
+             * @description Its cover, when its source has one (YouTube's charts).
+             */
             image?: string | null;
+            /**
+             * Images
+             * @description Pictures of its top videos, for one without a cover.
+             */
+            images?: string[];
         };
         /** CategoryGroup */
         CategoryGroup: {
@@ -1141,6 +1217,35 @@ export interface components {
             /** Message */
             message: string;
         };
+        /** LibraryFile */
+        LibraryFile: {
+            /**
+             * Kind
+             * @description The song, or the music video file.
+             * @enum {string}
+             */
+            kind: "audio" | "video";
+            /**
+             * Name
+             * @description The file's name, as the download gives it.
+             */
+            name: string;
+            /**
+             * Size
+             * @description Bytes, when the library says.
+             */
+            size?: number | null;
+            /**
+             * Url
+             * @description Where to download it: valid while the library still holds the file.
+             */
+            url: string;
+        };
+        /** LibraryFiles */
+        LibraryFiles: {
+            /** Files */
+            files: components["schemas"]["LibraryFile"][];
+        };
         /** LyricLine */
         LyricLine: {
             /**
@@ -1170,6 +1275,16 @@ export interface components {
              * @description "LRCLIB" or "YouTube Music (LyricFind)".
              */
             source?: string | null;
+            /**
+             * Language
+             * @description What they are sung in, when sure: "en", "el", "zh-cn".
+             */
+            language?: string | null;
+            /**
+             * Language Name
+             * @description The same in English: "Greek".
+             */
+            language_name?: string | null;
         };
         /** Media */
         Media: {
@@ -1335,6 +1450,17 @@ export interface components {
             artists: components["schemas"]["ArtistSummary"][];
             /** Videos */
             videos: components["schemas"]["Video"][];
+            /**
+             * Total
+             * @description Videos found in all; videos holds one page of them.
+             * @default 0
+             */
+            total: number;
+            /**
+             * Offset
+             * @default 0
+             */
+            offset: number;
         };
         /** SettingsOut */
         SettingsOut: {
@@ -1415,6 +1541,11 @@ export interface components {
              * @description Items the shelf has in all; items may hold only the first.
              */
             total: number;
+            /**
+             * Updated At
+             * @description When its oldest part was fetched from its source (Unix time).
+             */
+            updated_at?: number | null;
         };
         /** SourceHealth */
         SourceHealth: {
@@ -1447,6 +1578,31 @@ export interface components {
             chain: components["schemas"]["Chain"];
             /** Last Round */
             last_round: number | null;
+        };
+        /** Tag */
+        Tag: {
+            /**
+             * Id
+             * @description "explicit", "fan-upload", "apple", "soon", "in-library", "lang:<code>", "genre:<name>".
+             */
+            id: string;
+            /** Label */
+            label: string;
+            /**
+             * Hint
+             * @description What it means, in one line.
+             */
+            hint: string;
+            /**
+             * Count
+             * @default 0
+             */
+            count: number;
+        };
+        /** Tags */
+        Tags: {
+            /** Tags */
+            tags: components["schemas"]["Tag"][];
         };
         /** TestResult */
         TestResult: {
@@ -1532,7 +1688,7 @@ export interface components {
             explicit: boolean;
             /**
              * Official
-             * @description The artist's own video (YouTube's OMV), not a fan upload.
+             * @description The artist's own video (a label's upload, or one on the artist's own channel), not a fan upload.
              * @default true
              */
             official: boolean;
@@ -1625,7 +1781,7 @@ export interface components {
             explicit: boolean;
             /**
              * Official
-             * @description The artist's own video (YouTube's OMV), not a fan upload.
+             * @description The artist's own video (a label's upload, or one on the artist's own channel), not a fan upload.
              * @default true
              */
             official: boolean;
@@ -1700,7 +1856,7 @@ export interface components {
             explicit: boolean;
             /**
              * Official
-             * @description The artist's own video (YouTube's OMV), not a fan upload.
+             * @description The artist's own video (a label's upload, or one on the artist's own channel), not a fan upload.
              * @default true
              */
             official: boolean;
@@ -1720,6 +1876,11 @@ export interface components {
              * @default true
              */
             embeddable: boolean;
+            /**
+             * Uploader
+             * @description The YouTube channel that uploaded it, as it names itself.
+             */
+            uploader?: string | null;
             /** @description Its official audio, when one matches. */
             audio?: components["schemas"]["AudioMatch"] | null;
             /**
@@ -1747,6 +1908,13 @@ export interface components {
              * @description YouTube video id → its views, as YouTube writes them: "1.2M".
              */
             views: {
+                [key: string]: string;
+            };
+            /**
+             * Released
+             * @description YouTube video id → the day it came out.
+             */
+            released?: {
                 [key: string]: string;
             };
         };
@@ -1952,6 +2120,10 @@ export interface operations {
             query?: {
                 /** @description Words of the title or the artist. */
                 q?: string;
+                /** @description Videos a page. */
+                limit?: number;
+                /** @description Videos to skip: the next page starts at offset + limit, until total. */
+                offset?: number;
             };
             header?: never;
             path?: never;
@@ -2222,6 +2394,96 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    video_files_api_v1_videos__video_id__files_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                video_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryFiles"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    library_file_api_v1_files__token__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "application/octet-stream": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -2519,6 +2781,69 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HotArtists"];
+                };
+            };
+        };
+    };
+    all_tags_api_v1_tags_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Tags"];
+                };
+            };
+        };
+    };
+    tagged_videos_api_v1_tags_videos_get: {
+        parameters: {
+            query: {
+                /** @description Tags, all of them: "explicit", "lang:el"… */
+                tag: string[];
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Shelf"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

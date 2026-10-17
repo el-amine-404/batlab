@@ -28,6 +28,18 @@ def song_key(title: str, artist: str) -> tuple[str, str]:
     return titles.simple(bare), titles.simple(first)
 
 
+@dataclass(frozen=True)
+class FileRef:
+    """One file a library holds, enough to hand it over: where it is in its
+    library (a path under a folder, a Navidrome song id), what to call it."""
+
+    library: str
+    kind: str  # "audio" or "video"
+    ref: str
+    name: str
+    size: int | None = None
+
+
 @dataclass
 class Snapshot:
     """What a library holds, as clipseerr matches it."""
@@ -37,28 +49,46 @@ class Snapshot:
     video_songs: set[tuple[str, str]] = field(default_factory=set)
     # Songs, by song_key().
     songs: set[tuple[str, str]] = field(default_factory=set)
+    # The files themselves, by ("yt", id), ("video", song_key) or ("song", song_key).
+    files: dict[tuple, list[FileRef]] = field(default_factory=dict)
 
-    def add_song(self, title: str, artist: str) -> None:
+    def _file(self, key: tuple, file: FileRef | None) -> None:
+        if file and file not in self.files.setdefault(key, []):
+            self.files[key].append(file)
+
+    def add_song(self, title: str, artist: str, file: FileRef | None = None) -> None:
         key = song_key(title, artist)
         if all(key):
             self.songs.add(key)
+            self._file(("song", *key), file)
 
-    def add_video(self, title: str, artist: str, youtube_id: str | None = None) -> None:
+    def add_video(self, title: str, artist: str, youtube_id: str | None = None, file: FileRef | None = None) -> None:
         if youtube_id:
             self.videos.add(youtube_id)
+            self._file(("yt", youtube_id), file)
         key = song_key(title, artist)
         if all(key):
             self.video_songs.add(key)
+            self._file(("video", *key), file)
 
     def merge(self, other: "Snapshot") -> None:
         self.videos |= other.videos
         self.video_songs |= other.video_songs
         self.songs |= other.songs
+        for key, files in other.files.items():
+            for file in files:
+                self._file(key, file)
 
 
 class LibraryType(IntegrationType):
-    async def read(self, http: httpx.AsyncClient, config: dict) -> Snapshot:
-        """Everything it holds; raises with a sentence when it can't."""
+    async def read(self, http: httpx.AsyncClient, config: dict, library: str = "") -> Snapshot:
+        """Everything it holds, its files under the library's id; raises with
+        a sentence when it can't."""
+        raise NotImplementedError
+
+    async def open(self, http: httpx.AsyncClient, config: dict, file: FileRef):
+        """(an async iterator of the file's bytes, its size or None); for a
+        download. Raises OSError when the file is gone."""
         raise NotImplementedError
 
     async def test(self, http: httpx.AsyncClient, config: dict) -> str:

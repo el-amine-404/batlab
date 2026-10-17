@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router";
 
 import { Failed, Loading } from "@/components/layout/States";
 import { Button } from "@/components/ui/button";
+import { Downloads } from "@/components/video/Downloads";
 import { StatusBadge } from "@/components/video/StatusBadge";
 import { Thumb } from "@/components/video/Thumb";
 import { ACTIVE, api, type Attempt } from "@/lib/api";
@@ -78,6 +79,9 @@ export function RequestPage() {
             <span className="text-xs text-muted-foreground">asked {timeAgo(data.created_at)}</span>
           </div>
           {data.message && <p className="mt-2 text-sm text-muted-foreground">{data.message}</p>}
+          {data.status === "completed" && (
+            <div className="mt-3 max-w-sm"><Downloads videoId={data.media.video_key} kind={data.kind} /></div>
+          )}
           <div className="mt-4"><RequestActions request={data} /></div>
         </div>
       </div>

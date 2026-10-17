@@ -16,7 +16,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import integrations, problems, seed
+from . import __version__, integrations, problems, seed
 from .context import (cache, catalog, conf, db, engine, http, library, library_store, notification_store, notifier,
                       service_store)
 from .routes import ROUTERS
@@ -68,7 +68,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="clipseerr",
-    version="1",
+    version=__version__,
     description=DESCRIPTION,
     docs_url=None,
     redoc_url=None,
@@ -83,6 +83,7 @@ app = FastAPI(
         {"name": "Hot", "description": "The Hot category's own picks, and the artists it has shown."},
         {"name": "Settings", "description": "What Settings, General changes."},
         {"name": "System", "description": "Health, versions, the cache."},
+        {"name": "Tags", "description": "What the badges say, and the videos that carry each."},
         {"name": "Hooks", "description": "Where services call back."},
     ],
     lifespan=lifespan,

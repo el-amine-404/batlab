@@ -183,7 +183,7 @@ class Views(unittest.TestCase):
             asked.append(youtube_id)
             if youtube_id == "broken00000":
                 raise RuntimeError("no answer")
-            return {"views": 1_234_567}
+            return {"views": 1_234_567, "published": "2026-10-01"}
 
         with tempfile.TemporaryDirectory() as folder, mock.patch.object(youtube, "song", song):
             db = Database(Path(folder) / "t.db")
@@ -195,11 +195,12 @@ class Views(unittest.TestCase):
                     again = await catalog.views(["aaaaaaaaaaa"])
                     listed = [_video("A", youtube_id="aaaaaaaaaaa"), _video("B", youtube_id="bbbbbbbbbbb")]
                     catalog.known_views(listed)
-                    return first, again, [v.views for v in listed]
+                    return first, again, [(v.views, v.released) for v in listed]
 
             first, again, listed = asyncio.run(run())
             db.close()
-        self.assertEqual((first, again, listed), ({"aaaaaaaaaaa": "1.2M"}, {"aaaaaaaaaaa": "1.2M"}, ["1.2M", None]))
+        both = {"views": {"aaaaaaaaaaa": "1.2M"}, "released": {"aaaaaaaaaaa": "2026-10-01"}}
+        self.assertEqual((first, again, listed), (both, both, [("1.2M", "2026-10-01"), (None, None)]))
         self.assertEqual(asked, ["aaaaaaaaaaa", "broken00000"])
 
 
@@ -234,6 +235,89 @@ class KnownSearch(unittest.TestCase):
             self.assertEqual(known.search("fan")[0], [])
             self.assertEqual(Known(db).count(), {"videos": 4, "artists": 1})
             db.close()
+
+
+class Official(unittest.TestCase):
+    def test_the_artists_own_channel_is_official(self):
+        from app.catalog.models import ArtistRef
+        from app.catalog.service import _official
+
+        artists = [ArtistRef(name="aggelina", id="UCanZ2RWpbgoz7VoDBlr6z1w")]
+        own = {"kind": "MUSIC_VIDEO_TYPE_UGC", "channel_id": "UCanZ2RWpbgoz7VoDBlr6z1w"}
+        fan = {"kind": "MUSIC_VIDEO_TYPE_UGC", "channel_id": "UCsomeoneelse0000000000"}
+        label = {"kind": "MUSIC_VIDEO_TYPE_OMV", "channel_id": "UCvevo000000000000000000"}
+        self.assertEqual([_official(s, artists) for s in (own, fan, label)], [True, False, True])
+
+
+class Tags(unittest.TestCase):
+    def test_a_video_carries_what_its_badges_say(self):
+        from app import tags
+
+        video = _video("Soltera", source="apple", released="2999-01-01", explicit=True)
+        video.official, video.genre = False, "Latin"
+        self.assertEqual(tags.tags_of(video, "es"),
+                         {"explicit", "fan-upload", "apple", "soon", "genre:Latin", "lang:es"})
+        self.assertEqual(tags.describe("lang:el")["label"], "Greek")
+        self.assertIsNone(tags.describe("lang:xx"))
+        self.assertIsNone(tags.describe("nonsense"))
+
+
+class Language(unittest.TestCase):
+    def test_lyrics_say_their_language_when_sure(self):
+        from app.catalog import language
+
+        greek = ("Θέλω να φορέσω κάτι που να μη σ' αρέσει, να μη σου αρέσω, να φύγεις μακριά. "
+                 "Κάθε βράδυ περιμένω στο παράθυρο, η πόλη κοιμάται και εγώ ακόμα σε σκέφτομαι, "
+                 "δεν ξέρω πώς να σε ξεχάσω, πες μου τι να κάνω τώρα.")
+        self.assertEqual(language.detect(greek), "el")
+        self.assertEqual(language.name("el"), "Greek")
+        self.assertIsNone(language.detect("Too short to tell"))
+
+
+class LibraryFiles(unittest.TestCase):
+    def test_files_are_found_and_only_those_handed_over(self):
+        from app.libraries.base import FileRef
+        from app.libraries.folder import Folder, scan
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "Tate McRae - Housewife [DPEodkHzH-s].mp4").write_bytes(b"video" * 10)
+            found = scan(root, "videos", library="lib1")
+            file = found.files[("yt", "DPEodkHzH-s")][0]
+            self.assertEqual((file.library, file.kind, file.size), ("lib1", "video", 50))
+            self.assertIn(file, found.files[("video", "housewife", "tatemcrae")])
+
+            async def read(ref):
+                chunks, size = await Folder().open(None, {"path": folder}, ref)
+                return b"".join([c async for c in chunks]), size
+
+            self.assertEqual(asyncio.run(read(file)), (b"video" * 10, 50))
+            outside = FileRef(library="lib1", kind="video", ref="../../etc/passwd", name="passwd")
+            with self.assertRaises(OSError):
+                asyncio.run(read(outside))
+
+
+class ListAge(unittest.TestCase):
+    def test_a_list_is_as_old_as_its_oldest_part(self):
+        from app.cache import Cache, tracking
+
+        with tempfile.TemporaryDirectory() as folder:
+            db = Database(Path(folder) / "t.db")
+            cache = Cache(db)
+
+            async def value():
+                return "x"
+
+            async def run():
+                with tracking() as reads:
+                    await cache.get("list", value, fresh=600)
+                    await cache.get("release-day", value, fresh=365 * 86400)
+                return reads
+
+            reads = asyncio.run(run())
+            db.close()
+        # The year-long release day doesn't count; the list does.
+        self.assertEqual(len(reads), 1)
 
 
 class Credit(unittest.TestCase):

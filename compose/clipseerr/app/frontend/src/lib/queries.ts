@@ -6,7 +6,7 @@
 import { keepPreviousData, QueryClient, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { ACTIVE, api, errorText, type Family, type Kind, PAGE, type Request, type Shelf } from "./api";
+import { ACTIVE, api, errorText, type Family, type Kind, PAGE, type Request, type SearchResults, type Shelf } from "./api";
 
 const MINUTE = 60_000;
 
@@ -63,10 +63,16 @@ export const useReleases = (limit = 60) =>
   useQuery({ queryKey: [...keys.shelf("releases"), limit], queryFn: ({ signal }) => api.shelf("releases", { limit }, signal) });
 export const useCategories = () =>
   useQuery({ queryKey: keys.categories, queryFn: ({ signal }) => api.categories(signal), staleTime: 30 * MINUTE });
+/** A search, a page of videos at a time (the artists come with the first). */
 export const useSearch = (q: string) =>
-  useQuery({
+  useInfiniteQuery({
     queryKey: keys.search(q),
-    queryFn: ({ signal }) => api.search(q, signal),
+    queryFn: ({ pageParam, signal }) => api.search(q, { limit: PAGE, offset: pageParam }, signal),
+    initialPageParam: 0,
+    getNextPageParam: (last: SearchResults, pages: SearchResults[]) => {
+      const loaded = pages.reduce((sum, page) => sum + page.videos.length, 0);
+      return last.videos.length && loaded < (last.total ?? 0) ? loaded : undefined;
+    },
     enabled: q.trim().length > 0,
     placeholderData: keepPreviousData,
   });
@@ -96,7 +102,8 @@ export const useLyrics = (id: string, enabled = true) =>
  * within a moment of each other, and go out together, 48 a call.
  */
 const VIEWS_BATCH = 48;
-let waiting = new Map<string, ((views: string | null) => void)[]>();
+export type Facts = { views: string | null; released: string | null };
+let waiting = new Map<string, ((facts: Facts) => void)[]>();
 let flushing: number | undefined;
 
 function flushViews() {
@@ -106,22 +113,41 @@ function flushViews() {
   const ids = [...batch.keys()];
   for (let i = 0; i < ids.length; i += VIEWS_BATCH) {
     const chunk = ids.slice(i, i + VIEWS_BATCH);
-    const settle = (found: Record<string, string>) => chunk.forEach((id) => batch.get(id)!.forEach((done) => done(found[id] ?? null)));
-    api.views(chunk).then((answer) => settle(answer.views), () => settle({}));
+    const settle = (views: Record<string, string>, released: Record<string, string> = {}) =>
+      chunk.forEach((id) => batch.get(id)!.forEach((done) => done({ views: views[id] ?? null, released: released[id] ?? null })));
+    api.views(chunk).then((answer) => settle(answer.views, answer.released), () => settle({}));
   }
 }
 
-function viewsOf(youtubeId: string): Promise<string | null> {
+function factsOf(youtubeId: string): Promise<Facts> {
   return new Promise((done) => {
     waiting.set(youtubeId, [...(waiting.get(youtubeId) ?? []), done]);
     flushing ??= window.setTimeout(flushViews, 50);
   });
 }
 
-/** A video's views, when its list didn't say: looked up once the card is shown. */
-export const useViews = (youtubeId: string | null | undefined, enabled: boolean) =>
-  useQuery({ queryKey: ["views", youtubeId], queryFn: () => viewsOf(youtubeId!), enabled: enabled && !!youtubeId,
+/** A video's views and the day it came out, when its list didn't say: looked up once the card is shown. */
+export const useFacts = (youtubeId: string | null | undefined, enabled: boolean) =>
+  useQuery({ queryKey: ["facts", youtubeId], queryFn: () => factsOf(youtubeId!), enabled: enabled && !!youtubeId,
              staleTime: 60 * MINUTE, retry: false });
+
+/** The video's files in the libraries, to download. */
+export const useFiles = (id: string, enabled = true) =>
+  useQuery({ queryKey: ["files", id], queryFn: ({ signal }) => api.files(id, signal), enabled: enabled && !!id, staleTime: MINUTE });
+export const useTags = () => useQuery({ queryKey: ["tags"], queryFn: ({ signal }) => api.tags(signal), staleTime: 5 * MINUTE });
+/** The videos carrying every tag, a page at a time. */
+export function useTagged(tags: string[]) {
+  return useInfiniteQuery({
+    queryKey: ["tagged", [...tags].sort().join("+")] as const,
+    queryFn: ({ pageParam, signal }) => api.tagged(tags, { limit: PAGE, offset: pageParam }, signal),
+    initialPageParam: 0,
+    getNextPageParam: (last: Shelf, pages: Shelf[]) => {
+      const loaded = pages.reduce((sum, page) => sum + page.items.length, 0);
+      return last.items.length && loaded < last.total ? loaded : undefined;
+    },
+    enabled: tags.length > 0,
+  });
+}
 
 export const useHotPicks = () => useQuery({ queryKey: ["hot", "picks"], queryFn: ({ signal }) => api.hotPicks(signal), staleTime: 0 });
 export const useHotArtists = () =>

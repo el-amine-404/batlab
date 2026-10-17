@@ -33,9 +33,16 @@ export function GenresPage() {
                     className={cn("group relative flex h-24 items-end overflow-hidden rounded-xl border border-white/5 p-3.5 transition hover:-translate-y-0.5 hover:shadow-xl sm:h-28")}
                     style={{ background: `linear-gradient(135deg, oklch(0.42 0.14 ${h}), oklch(0.22 0.06 ${h + 30}))` }}
                   >
-                    {category.image && (
+                    {category.image ? (
                       <img src={category.image} alt="" loading="lazy" decoding="async"
                            className="absolute -right-4 -bottom-4 size-24 rotate-12 rounded-lg object-cover opacity-70 shadow-xl transition group-hover:rotate-6 sm:size-28" />
+                    ) : (
+                      // No cover (Apple's genres, Hot): its top videos' pictures, fanned like one.
+                      category.images?.slice(0, 3).reverse().map((src, i, all) => (
+                        <img key={src} src={src} alt="" loading="lazy" decoding="async"
+                             style={{ right: `${-14 + (all.length - 1 - i) * 26}px`, transform: `rotate(${12 - (all.length - 1 - i) * 7}deg)` }}
+                             className="absolute -bottom-3 aspect-video w-24 rounded-md object-cover opacity-75 shadow-xl ring-1 ring-black/30 transition group-hover:opacity-90 sm:w-28" />
+                      ))
                     )}
                     <span className="relative text-[15px] leading-tight font-semibold text-white drop-shadow">{category.title}</span>
                   </Link>

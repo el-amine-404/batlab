@@ -13,6 +13,7 @@ import time
 from batlab_common import titles
 
 from .catalog.models import ArtistSummary, Video
+from .tags import tags_of
 from .db import Database
 
 _WORD = re.compile(r"\w+")
@@ -132,6 +133,21 @@ class Known:
         row = self._db.one("SELECT COUNT(*) AS n FROM known_search WHERE known_search MATCH ?",
                            (f'artist : "{phrase}"',))
         return row["n"] if row else 0
+
+    # ---- tags -----------------------------------------------------------------------------
+
+    def set_language(self, video_id: str, code: str) -> None:
+        self._db.run("INSERT INTO known_languages (video_id, language) VALUES (?, ?) "
+                     "ON CONFLICT (video_id) DO UPDATE SET language = excluded.language", (video_id, code))
+
+    def tagged(self) -> list[tuple[Video, set[str]]]:
+        """Every video known, with its tags (tags.py), the newest first."""
+        languages = {row["video_id"]: row["language"] for row in self._db.all("SELECT * FROM known_languages")}
+        found = []
+        for row in self._db.all("SELECT id, video FROM known_videos ORDER BY seen_at DESC"):
+            video = Video.model_validate_json(row["video"])
+            found.append((video, tags_of(video, languages.get(row["id"]))))
+        return found
 
     def count(self) -> dict:
         videos = self._db.one("SELECT COUNT(*) AS n FROM known_videos")

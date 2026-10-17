@@ -98,6 +98,47 @@
   scroll-snap-align: start;
 }
 
+/* A line too long for its card (components/ui/marquee.tsx): an ellipsis at
+   rest; while the card is hovered or focused it slides to its end, holds, and
+   comes back. */
+.marquee {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.marquee > span {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: top;
+}
+.group:is(:hover, :focus-visible) .marquee[data-overflow] > span {
+  max-width: none;
+  overflow: visible;
+  animation: marquee var(--marquee-time, 6s) ease-in-out 0.3s infinite;
+}
+@keyframes marquee {
+  0%,
+  12% {
+    transform: translateX(0);
+  }
+  62%,
+  82% {
+    transform: translateX(var(--marquee-shift));
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .group:is(:hover, :focus-visible) .marquee[data-overflow] > span {
+    max-width: 100%;
+    overflow: hidden;
+    animation: none;
+  }
+}
+
 /* Placeholder shimmer while a list loads. */
 .skeleton {
   background: linear-gradient(90deg, oklch(1 0 0 / 0.04), oklch(1 0 0 / 0.09), oklch(1 0 0 / 0.04));

@@ -1,45 +1,45 @@
-import { ChevronLeft, ChevronRight } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Apple, CalendarDays, CalendarClock, Flame, ListMusic, type LucideIcon, Sparkles, TrendingUp, Trophy } from "lucide-react";
 import { Link } from "react-router";
 
+import { RailArrows, useRail } from "@/components/ui/rail";
 import type { Shelf } from "@/lib/api";
 
+import { Updated } from "./Updated";
 import { useRequested } from "./useRequested";
 import { CardSkeleton, VideoCard } from "./VideoCard";
 
 const CARD = "w-[72vw] max-w-[300px] shrink-0 sm:w-[260px] lg:w-[280px]";
 
+/** Which list a shelf is, at a glance: YouTube's new videos and charts, Apple's, the releases. */
+export function shelfIcon(shelf: Pick<Shelf, "id" | "title">): LucideIcon {
+  if (shelf.id === "yt-new") return Sparkles;
+  if (shelf.id === "releases") return CalendarClock;
+  if (shelf.id === "hot") return Flame;
+  if (shelf.id.startsWith("am-")) return Apple;
+  if (/^trending/i.test(shelf.title)) return TrendingUp;
+  if (/^daily/i.test(shelf.title)) return CalendarDays;
+  if (/^top/i.test(shelf.title)) return Trophy;
+  return ListMusic;
+}
+
 /** A shelf as a row that scrolls sideways, with arrows on wide screens. */
 export function ShelfRow({ shelf, eager = false }: { shelf: Shelf; eager?: boolean }) {
-  const rail = useRef<HTMLDivElement>(null);
+  const rail = useRail(shelf.items.length);
   const requested = useRequested();
-  const [edges, setEdges] = useState({ start: true, end: false });
-
-  const measure = useCallback(() => {
-    const el = rail.current;
-    if (!el) return;
-    setEdges({ start: el.scrollLeft < 8, end: el.scrollLeft + el.clientWidth >= el.scrollWidth - 8 });
-  }, []);
-
-  useEffect(() => {
-    measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
-  }, [measure, shelf.items.length]);
-
-  const scroll = (direction: 1 | -1) => {
-    const el = rail.current;
-    if (el) el.scrollBy({ left: direction * el.clientWidth * 0.85, behavior: "smooth" });
-  };
+  const Icon = shelfIcon(shelf);
 
   return (
     <section className="group/shelf" aria-labelledby={`shelf-${shelf.id}`}>
       <div className="mb-3 flex items-end justify-between gap-4">
         <div className="min-w-0">
-          <h2 id={`shelf-${shelf.id}`} className="truncate text-lg font-semibold tracking-tight">
-            {shelf.title}
+          <h2 id={`shelf-${shelf.id}`} className="flex items-center gap-2 truncate text-lg font-semibold tracking-tight">
+            <Icon className="size-4 shrink-0 text-rose-300" aria-hidden /> {shelf.title}
           </h2>
-          {shelf.subtitle && <p className="truncate text-xs text-muted-foreground">{shelf.subtitle}</p>}
+          <p className="truncate text-xs text-muted-foreground">
+            {shelf.subtitle}
+            {shelf.subtitle && shelf.updated_at ? " · " : ""}
+            <Updated at={shelf.updated_at} />
+          </p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {shelf.total > shelf.items.length && (
@@ -47,17 +47,10 @@ export function ShelfRow({ shelf, eager = false }: { shelf: Shelf; eager?: boole
               See all {shelf.total}
             </Link>
           )}
-          <button type="button" onClick={() => scroll(-1)} disabled={edges.start} aria-label="Scroll back"
-                  className="hidden size-8 items-center justify-center rounded-full border border-border text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-30 sm:flex">
-            <ChevronLeft className="size-4" />
-          </button>
-          <button type="button" onClick={() => scroll(1)} disabled={edges.end} aria-label="Scroll on"
-                  className="hidden size-8 items-center justify-center rounded-full border border-border text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-30 sm:flex">
-            <ChevronRight className="size-4" />
-          </button>
+          <RailArrows rail={rail} />
         </div>
       </div>
-      <div ref={rail} onScroll={measure} className="rail -mx-4 flex gap-4 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0">
+      <div ref={rail.ref} onScroll={rail.measure} className="rail -mx-4 flex gap-4 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0">
         {shelf.items.map((video, index) => (
           <VideoCard key={video.id} video={video} className={CARD} requested={requested.get(video.id)} eager={eager && index < 4} />
         ))}
