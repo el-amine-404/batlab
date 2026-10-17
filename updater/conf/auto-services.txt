@@ -23,3 +23,8 @@ netalertx
 isponsorblocktv
 metube
 songdrop
+# Built here: rebuilt when a pin they are built from or their code changes.
+clipseerr
+clipfeed
+musicguard
+tv-remote

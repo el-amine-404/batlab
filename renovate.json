@@ -117,7 +117,12 @@
         "!ghcr.io/dmunozv04/isponsorblocktv",
         "!alexta69/metube",
         "!spotdl/spotify-downloader",
-        "!yt-dlp"
+        "!yt-dlp",
+        "!python",
+        "!rust",
+        "!node",
+        "!ytmusicapi",
+        "!songrec"
       ],
       "groupName": "weekly minor and patch updates",
       "schedule": [
@@ -152,6 +157,36 @@
       "matchUpdateTypes": [
         "minor",
         "patch"
+      ],
+      "automerge": true,
+      "automergeType": "branch",
+      "ignoreTests": true
+    },
+    {
+      "description": "What the apps built here (clipseerr, clipfeed, musicguard, tv-remote, songdrop) are made of: the build stages' Rust and Node, and the Python libraries and crates they pin, merge their minor and patch updates straight into main; the nightly updater rebuilds the apps from them, its health check and rollback the test",
+      "matchPackageNames": [
+        "rust",
+        "node",
+        "ytmusicapi",
+        "songrec"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ],
+      "automerge": true,
+      "automergeType": "branch",
+      "ignoreTests": true
+    },
+    {
+      "description": "The apps' Python base image: a new digest (Debian's security fixes, ffmpeg's among them) or patch release merges on its own; a new Python minor (3.13 to 3.14) waits for a human, since the apps run on it",
+      "matchPackageNames": [
+        "python"
+      ],
+      "matchUpdateTypes": [
+        "patch",
+        "digest"
       ],
       "automerge": true,
       "automergeType": "branch",

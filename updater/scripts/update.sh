@@ -57,6 +57,18 @@ remember() {
   echo "$1" >>"$STATE_DIR/$2"
 }
 
+# What a locally built image was last built from (build_fingerprint), per
+# service: the image name stays the same when only a pin or the code changes.
+built_from() {
+  cat "$STATE_DIR/built/$1" 2>/dev/null || true
+}
+
+record_build() {
+  [[ "$DRY_RUN" == "1" ]] && return 0
+  install -d -m 700 "$STATE_DIR/built"
+  echo "$2" >"$STATE_DIR/built/$1"
+}
+
 sync_repository() {
   if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
     echo "Working tree has local changes; not pulling." >&2
@@ -94,26 +106,44 @@ wait_until_healthy() {
 }
 
 update_service() {
-  local stack="$1" service="$2" container="$3" old_image="$4" new_image="$5" built="$6"
-  local compose_file="compose/$stack/docker-compose.yml" reason override
-  local fetch=(pull --quiet)
-  # A locally built image (music-links' songdrop) is rebuilt from the new pins;
-  # there is nothing to pull. Not --quiet: with it, Compose refuses the
-  # build's network.host entitlement ("additional privileges requested").
-  [[ "$built" == "yes" ]] && fetch=(build)
+  local stack="$1" service="$2" container="$3" old_image="$4" new_image="$5" built="$6" key="$7"
+  local compose_file="compose/$stack/docker-compose.yml" reason override old_id new_id
+  local fetch=(pull --quiet) start=(up -d --no-deps) previous="$old_image" keep="$old_image"
+  # A locally built image is rebuilt from the new pins and code; there is
+  # nothing to pull. Not --quiet: with it, Compose refuses the build's
+  # network.host entitlement ("additional privileges requested"). Started
+  # with --no-build (pull_policy: build would build it a second time) and
+  # recreated whatever Compose thinks: the image name is often the same.
+  [[ "$built" == "yes" ]] && fetch=(build) start=(up -d --no-deps --no-build --force-recreate)
 
   echo "Updating $service: $old_image -> $new_image"
   if [[ "$DRY_RUN" == "1" ]]; then
     return 0
   fi
 
-  if docker compose "${ENV_ARGS[@]}" -f "$compose_file" "${fetch[@]}" "$service" &&
-    docker compose "${ENV_ARGS[@]}" -f "$compose_file" up -d --no-deps "$service" &&
-    reason="$(wait_until_healthy "$container")"; then
-    notify updates "🟢 Updated $service" success \
-      "Image" "$new_image" "Previous" "$old_image"
-    docker image rm "$old_image" >/dev/null 2>&1 || true
-    return 0
+  old_id="$(docker inspect -f '{{.Image}}' "$container")"
+  if [[ "$built" == "yes" ]]; then
+    # The rebuild may take the old image's name: the old build is kept under
+    # another one, to roll back to.
+    keep="local/batlab-rollback:$service"
+    docker tag "$old_id" "$keep" 2>/dev/null || keep="$old_image"
+    previous="$old_image (${old_id:7:12})"
+  fi
+
+  if docker compose "${ENV_ARGS[@]}" -f "$compose_file" "${fetch[@]}" "$service"; then
+    new_id="$(docker image inspect -f '{{.Id}}' "$new_image" 2>/dev/null || true)"
+    if docker compose "${ENV_ARGS[@]}" -f "$compose_file" "${start[@]}" "$service" &&
+      reason="$(wait_until_healthy "$container")"; then
+      notify updates "🟢 Updated $service" success \
+        "Image" "$new_image${new_id:+ (${new_id:7:12})}" "Previous" "$previous"
+      # The old image goes once nothing runs it (Docker's containerd store
+      # would delete it from under a running container).
+      if [[ "$(docker inspect -f '{{.Image}}' "$container")" != "$old_id" ]]; then
+        [[ "$keep" == "$new_image" ]] || docker image rm "$keep" >/dev/null 2>&1 || true
+        [[ "$built" == "yes" ]] && docker image rm "$old_id" >/dev/null 2>&1 || true
+      fi
+      return 0
+    fi
   fi
 
   reason="${reason:-pull or recreate failed}"
@@ -121,18 +151,44 @@ update_service() {
   override="$(mktemp --suffix=.yml)"
   # pull_policy: the old image is still here; a built service would otherwise
   # be rebuilt from the new pins under the old name.
-  printf 'services:\n  %s:\n    image: %s\n    pull_policy: missing\n' "$service" "$old_image" >"$override"
+  printf 'services:\n  %s:\n    image: %s\n    pull_policy: missing\n' "$service" "$keep" >"$override"
   local rollback="rolled back"
   docker compose "${ENV_ARGS[@]}" -f "$compose_file" -f "$override" up -d --no-deps "$service" &&
     wait_until_healthy "$container" >/dev/null || rollback="ROLLBACK FAILED, check it now"
   rm -f "$override"
 
-  remember "$service $new_image" failed
+  [[ "$built" == "yes" ]] && docker tag "$keep" "$old_image" >/dev/null 2>&1 || true
+  remember "$key" failed
   notify alerts "🔴 Update failed: $service" failure \
-    "Tried" "$new_image" "Reason" "$reason" "Result" "$rollback to $old_image" \
+    "Tried" "$new_image" "Reason" "$reason" "Result" "$rollback to $previous" \
     "Logs" "docker logs --tail 50 $container"
   return 1
 }
+
+# Each service of a `docker compose config --format json` on stdin, one line
+# each: name, container, image, built (yes/no) and, for a built one, the
+# fingerprint of what it is built from: its build settings (the pins arrive as
+# build args) and the git trees of its contexts, so a new pin or new code
+# changes it. Run from the repository's root.
+readonly BUILD_FINGERPRINT='
+import hashlib, json, os, subprocess, sys
+
+def tree(path):
+    rel = os.path.relpath(path)
+    found = subprocess.run(["git", "rev-parse", "HEAD:" + ("" if rel == "." else rel)],
+                           capture_output=True, text=True)
+    return found.stdout.strip() or "untracked:" + rel
+
+for name, svc in json.load(sys.stdin)["services"].items():
+    build, fingerprint = svc.get("build"), ""
+    if build:
+        contexts = {"": build.get("context", ".")} | (build.get("additional_contexts") or {})
+        made_of = {k: v for k, v in build.items() if k not in ("context", "additional_contexts")}
+        made_of["trees"] = {k: tree(v) for k, v in sorted(contexts.items())}
+        fingerprint = hashlib.sha256(json.dumps(made_of, sort_keys=True).encode()).hexdigest()[:16]
+    print(name, svc.get("container_name", name), svc.get("image", ""),
+          "yes" if build else "no", fingerprint, sep="\t")
+'
 
 main() {
   exec 9>"$STATE_DIR/lock"
@@ -156,35 +212,47 @@ main() {
     if [[ -f "$host_stacks" ]] && ! grep -vE '^\s*(#|$)' "$host_stacks" | grep -qxF "$stack"; then
       continue
     fi
-    while IFS=$'\t' read -r service container desired built; do
-      local running_image state
+    while IFS=$'\t' read -r service container desired built fingerprint; do
+      local running_image state recorded key
       state="$(docker inspect -f '{{.State.Status}}' "$container" 2>/dev/null || echo missing)"
       [[ "$state" == "running" ]] || continue
       running_image="$(docker inspect -f '{{.Config.Image}}' "$container")"
       checked=$((checked + 1))
-      [[ "$running_image" == "$desired" ]] && continue
+      key="$service $desired"
+      if [[ "$built" == "yes" ]]; then
+        # Built here: the same image name may hide new pins (a base image's
+        # digest, which brings Debian's newest ffmpeg) or new code.
+        key="$service $desired $fingerprint"
+        recorded="$(built_from "$service")"
+        if [[ "$running_image" == "$desired" ]]; then
+          # First sight: what runs was built from this checkout (make up).
+          [[ -n "$recorded" ]] || { record_build "$service" "$fingerprint"; continue; }
+          [[ "$recorded" == "$fingerprint" ]] && continue
+        fi
+      elif [[ "$running_image" == "$desired" ]]; then
+        continue
+      fi
       changed=$((changed + 1))
 
       if printf '%s\n' "${allowed[@]}" | grep -qxF "$service"; then
-        if seen "$service $desired" failed; then
+        if seen "$key" failed; then
           echo "Skipping $service: $desired already failed once"
           continue
         fi
-        update_service "$stack" "$service" "$container" "$running_image" "$desired" "$built" || failures=$((failures + 1))
-      elif ! seen "$service $desired" pending; then
+        if update_service "$stack" "$service" "$container" "$running_image" "$desired" "$built" "$key"; then
+          [[ "$built" == "yes" ]] && record_build "$service" "$fingerprint"
+        else
+          failures=$((failures + 1))
+        fi
+      elif ! seen "$key" pending; then
         echo "Manual update pending for $service: $running_image -> $desired"
-        remember "$service $desired" pending
+        remember "$key" pending
         notify updates "⚪ Manual update waiting: $service" info \
-          "Running" "$running_image" "In git" "$desired" \
+          "Running" "$running_image" "In git" "$desired${fingerprint:+ (new pins or code)}" \
           "Apply" "make up STACK=$stack SERVICE=$service"
       fi
     done < <(docker compose "${ENV_ARGS[@]}" -f "$stack_file" config --format json 2>/dev/null |
-      python3 -c '
-import json, sys
-for name, svc in json.load(sys.stdin)["services"].items():
-    print(name, svc.get("container_name", name), svc.get("image", ""),
-          "yes" if "build" in svc else "no", sep="\t")
-')
+      python3 -c "$BUILD_FINGERPRINT")
   done
 
   echo "Checked $checked running service(s): $changed differ from the checkout, $failures failed."

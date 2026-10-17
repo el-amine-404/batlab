@@ -13,8 +13,16 @@ Two pieces keep those pins current without hand-editing:
   says, and recreates the services listed in `conf/auto-services.txt`. It waits
   for the healthcheck, rolls back to the previous image if the new one does not
   come up, and removes the old image once the new one is healthy. A service
-  built locally (songdrop) is rebuilt instead of pulled; its image tag names the
-  pins it is built from, so a bumped pin shows up as a different image.
+  built locally (songdrop, clipseerr, clipfeed, musicguard, tv-remote) is
+  rebuilt instead of pulled whenever its *build fingerprint* changes: its build
+  settings, with the pins from `compose/versions.env` they pass as build args,
+  and the git trees of its build contexts. A new base image digest (Debian's
+  security fixes, ffmpeg's among them), a new yt-dlp, spotDL, ytmusicapi or
+  SongRec, or a commit to the app's code is a new build, even when the image's
+  name stays the same. The fingerprint each was last built from is kept in
+  the state directory (`built/<service>`); the first night after
+  installation records what runs. A rebuild is always recreated, the previous
+  build kept as `local/batlab-rollback:<service>` until the new one is healthy.
 
 ```
 Renovate ─── automerge? ──▶ main ── nightly git pull ──▶ running image differs?
@@ -36,7 +44,8 @@ lands. The updater refuses to pull over local changes and says so in `#alerts`.
 
 A service updates itself only when it appears in **both** places:
 
-1. the automerge `packageRules` entry in `renovate.json` (by image name), and
+1. an automerge `packageRules` entry in `renovate.json` (by image name; for an
+   app built here, the pins it is built from), and
 2. `conf/auto-services.txt` (by compose service name).
 
 Leave DNS, the reverse proxy, the VPN, databases, and anything with schema
