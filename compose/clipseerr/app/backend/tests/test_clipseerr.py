@@ -168,6 +168,16 @@ class HotFeeds(unittest.TestCase):
                          [("yt:fLCd0tXSLZU", "Mystika", "Ellize", "2026-10-16")])
 
 
+class Credit(unittest.TestCase):
+    def test_the_fullest_credit_of_the_same_artists(self):
+        from app.catalog.service import _fuller_credit
+
+        self.assertEqual(_fuller_credit("bludnymph", "Jayelle & bludnymph", "Jayelle & bludnymph"),
+                         "Jayelle & bludnymph")
+        # Another song's credit, however long, is not this one's.
+        self.assertEqual(_fuller_credit("Tate McRae", None, "Luna Rae & Someone"), "Tate McRae")
+
+
 class Libraries(unittest.TestCase):
     def test_a_folder_of_music_videos(self):
         from app.libraries.folder import scan

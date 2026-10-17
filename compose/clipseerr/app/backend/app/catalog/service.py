@@ -426,7 +426,8 @@ class Catalog:
         kind, value = found.groups()
         fetch = (lambda: self._youtube_detail(value)) if kind == "yt" else (lambda: self._apple_detail(value))
         return VideoDetail.model_validate(await self._get("youtube" if kind == "yt" else "apple",
-                                                          f"video:{self.region}:{video_id}", fetch,
+                                                          # video2: every credited artist (_fuller_credit).
+                                                          f"video2:{self.region}:{video_id}", fetch,
                                                           # Apple's may be out on YouTube soon.
                                                           fresh=3 * DAY if kind == "yt" else 6 * HOUR,
                                                           stale=30 * DAY))
@@ -461,6 +462,17 @@ class Catalog:
                                         artists=[ArtistRef(name=match.channel_artist(song["author"]))])
         video.artists = await self._artists_of(video, listed)
         audio = await self._audio_for(video.title, video.artist, song["seconds"])
+        # YouTube Music lists some videos under one of their artists only: the
+        # upload's title ("Jayelle & bludnymph - …") or the song may name them all.
+        full = _fuller_credit(video.artist, match.clean(song["title"], song["author"])[1],
+                              audio.artist if audio else None)
+        if full != video.artist:
+            known = {titles.simple(ref.name): ref for ref in video.artists if ref.id}
+            names = _credit_names(full)
+            missing = [n for n in names if titles.simple(n) not in known]
+            new = dict(zip(map(titles.simple, missing), await self._resolve_refs(missing)))
+            video.artist = " & ".join(names)
+            video.artists = [known.get(titles.simple(n)) or new.get(titles.simple(n)) or ArtistRef(name=n) for n in names]
         detail = VideoDetail(
             **video.model_dump(exclude={"youtube_id", "thumbnail", "duration", "views", "official"}),
             youtube_id=youtube_id,
@@ -611,6 +623,18 @@ async def _watch_track(region: str, youtube_id: str) -> dict | None:
     if track and "duration_seconds" not in track:
         track["duration"] = track.get("length")
     return track
+
+
+def _fuller_credit(current: str, *others: str | None) -> str:
+    """The credit naming the most artists, among the current one and others
+    that share an artist with it (another credit is another song)."""
+    have = titles.names(current)
+    best, count = current, len(have)
+    for other in others:
+        names = titles.names(other or "")
+        if names & have and len(names) > count:
+            best, count = other, len(names)
+    return best
 
 
 def _credit_names(credit: str) -> list[str]:
