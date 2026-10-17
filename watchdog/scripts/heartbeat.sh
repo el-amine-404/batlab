@@ -85,11 +85,23 @@ run_check "journald" journald_answers
 
 install -d -m 750 "$STATE_DIR"
 
+# While the disk answers, remember what it is: a card about it once it's gone names it.
+if [[ -n "$WATCHDOG_DATA_ROOT" && " ${failures[*]} " != *" data disk "* ]]; then
+  data_disk_seen || true
+fi
+
 # A Discord card on the first failed run and on the first good one after it, so
 # a failure reaches the channel even if healthchecks.io is not set to notify.
 if ((${#failures[@]})) && [[ ! -e "$FAILING_FILE" ]]; then
   printf '%s\n' "${failures[@]}" >"$FAILING_FILE"
-  watchdog_notify "Self-test failing" failure "Failed" "$(printf '%s\n' "${failures[@]}")"
+  if [[ " ${failures[*]} " == *" data disk "* ]]; then
+    watchdog_notify "Self-test failing" failure "Failed" "$(printf '%s\n' "${failures[@]}")" \
+      "Disk" "$(data_disk_label)" "Log" "$(code_block "$(data_disk_log)")" \
+      "Fix" "the data guard stops the disk's containers after ${WATCHDOG_DISK_HUNG_AFTER:-2} failed runs; revive-data-disk.sh takes it from there"
+  else
+    watchdog_notify "Self-test failing" failure "Failed" "$(printf '%s\n' "${failures[@]}")" \
+      "Fix" "journalctl -u batlab-watchdog-heartbeat -n 30"
+  fi
 elif ((${#failures[@]} == 0)) && [[ -e "$FAILING_FILE" ]]; then
   watchdog_notify "Self-test passing again" success "Was failing" "$(<"$FAILING_FILE")"
   rm -f "$FAILING_FILE"

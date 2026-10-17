@@ -18,6 +18,7 @@ export type HotArtist = Schemas["HotArtist"];
 export type CategoryGroup = Schemas["CategoryGroup"];
 export type ArtistPage = Schemas["ArtistPage"];
 export type ArtistSummary = Schemas["ArtistSummary"];
+export type ArtistRef = Schemas["ArtistRef"];
 export type SearchResults = Schemas["SearchResults"];
 export type Request = Schemas["Request"];
 export type RequestStatus = Request["status"];
@@ -37,6 +38,8 @@ export type SystemStatus = Schemas["SystemStatus"];
 export type Tag = Schemas["Tag"];
 export type LibraryFile = Schemas["LibraryFile"];
 export type Category = Schemas["Category"];
+export type AlbumPage = Schemas["AlbumPage"];
+export type AlbumSummary = Schemas["AlbumSummary"];
 
 /** Under way: a service has it, or one will get it. */
 export const ACTIVE: RequestStatus[] = ["queued", "sent", "downloading"];
@@ -80,6 +83,7 @@ const query = (params: Record<string, string | number>) =>
 
 /** Videos a page of a shelf or a genre: two or three screens of cards. */
 export const PAGE = 48;
+export type TagSort = "seen" | "newest" | "views" | "title";
 export type Page = { limit?: number; offset?: number; source?: "youtube" | "apple" };
 
 /** Services and notifications have the same routes. */
@@ -95,6 +99,7 @@ export const api = {
   search: (q: string, page: Page = {}, signal?: AbortSignal) =>
     request<SearchResults>(`/search?${query({ q, limit: PAGE, offset: 0, ...page })}`, { signal }),
   quickSearch: (q: string, signal?: AbortSignal) => request<SearchResults>(`/search/quick?${query({ q })}`, { signal }),
+  album: (id: string, signal?: AbortSignal) => request<AlbumPage>(`/albums/${encodeURIComponent(id)}`, { signal }),
   artist: (id: string, signal?: AbortSignal) => request<ArtistPage>(`/artists/${encodeURIComponent(id)}`, { signal }),
   video: (id: string, signal?: AbortSignal) => request<VideoDetail>(`/videos/${encodeURIComponent(id)}`, { signal }),
   versions: (id: string, signal?: AbortSignal) => request<Versions>(`/videos/${encodeURIComponent(id)}/versions`, { signal }),
@@ -103,8 +108,8 @@ export const api = {
   files: (id: string, signal?: AbortSignal) =>
     request<{ files: LibraryFile[] }>(`/videos/${encodeURIComponent(id)}/files`, { signal }),
   tags: (signal?: AbortSignal) => request<{ tags: Tag[] }>("/tags", { signal }),
-  tagged: (tags: string[], page: Page = {}, signal?: AbortSignal) =>
-    request<Shelf>(`/tags/videos?${new URLSearchParams([...tags.map((t) => ["tag", t]),
+  tagged: (tags: string[], sort: TagSort, page: Page = {}, signal?: AbortSignal) =>
+    request<Shelf>(`/tags/videos?${new URLSearchParams([...tags.map((t) => ["tag", t]), ["sort", sort],
                                                         ["limit", String(page.limit ?? PAGE)], ["offset", String(page.offset ?? 0)]])}`,
                    { signal }),
   credits: (id: string, signal?: AbortSignal) => request<Credits>(`/videos/${encodeURIComponent(id)}/credits`, { signal }),

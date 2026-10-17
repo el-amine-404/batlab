@@ -12,6 +12,8 @@ load_watchdog_config
 
 readonly STATE_DIR="/var/lib/batlab-watchdog"
 readonly STOPPED_FILE="$STATE_DIR/stopped-containers"
+# When the disk went: "back" and "revived" cards say for how long.
+readonly DOWN_FILE="$STATE_DIR/data-disk-down"
 
 # name, restart policy, running, whether the last start failed; only for
 # containers bind-mounting something under the data root.
@@ -28,9 +30,15 @@ stop_data_containers() {
   echo "$reason; stopping: ${names:-none}"
   # Before stopping: a container stuck on a hung disk can keep docker stop
   # waiting, and the card must go out regardless.
+  install -d -m 750 "$STATE_DIR"
+  [[ -e "$DOWN_FILE" ]] || date +%s >"$DOWN_FILE"
   watchdog_notify "Data disk unavailable" failure \
+    "Disk" "$(data_disk_label)" \
+    "Mount" "\`$WATCHDOG_DATA_ROOT\`" \
     "Why" "$reason" \
-    "Stopped" "${names:+${names// /, }}"
+    "Stopped" "${names:+${names// /, }}" \
+    "Log" "$(code_block "$(data_disk_log)")" \
+    "Fix" "revive-data-disk.sh tries every 2 min (clears the mount, power-cycles the USB port); a replug if that fails"
 
   if [[ -n "$names" ]]; then
     install -d -m 750 "$STATE_DIR"
@@ -62,7 +70,13 @@ start_data_containers() {
   # shellcheck disable=SC2086
   docker start $names >/dev/null
   echo "started: $names"
+  local down=""
+  [[ -r "$DOWN_FILE" ]] && down="$(since "$(<"$DOWN_FILE")")"
+  rm -f "$DOWN_FILE"
   watchdog_notify "Data disk back" success \
+    "Disk" "$(data_disk_label)" \
+    "Mount" "\`$WATCHDOG_DATA_ROOT\`" \
+    "Down for" "${down:-unknown}" \
     "Restarted" "${names// /, }"
 }
 

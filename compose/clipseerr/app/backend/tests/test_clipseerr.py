@@ -247,6 +247,12 @@ class Official(unittest.TestCase):
         fan = {"kind": "MUSIC_VIDEO_TYPE_UGC", "channel_id": "UCsomeoneelse0000000000"}
         label = {"kind": "MUSIC_VIDEO_TYPE_OMV", "channel_id": "UCvevo000000000000000000"}
         self.assertEqual([_official(s, artists) for s in (own, fan, label)], [True, False, True])
+        # Her other channel, a VEVO one, an album's track: the artist's own too. A fan's is not.
+        other = {"kind": "MUSIC_VIDEO_TYPE_UGC", "channel_id": "UCother00000000000000000", "author": "aggelina"}
+        vevo = {"kind": "MUSIC_VIDEO_TYPE_UGC", "channel_id": "UCvevo", "author": "aggelinaVEVO"}
+        track = {"kind": "MUSIC_VIDEO_TYPE_ATV", "channel_id": "UCtopic"}
+        fan["author"] = "Greek Music Fan"
+        self.assertEqual([_official(s, artists) for s in (other, vevo, track, fan)], [True, True, True, False])
 
 
 class Tags(unittest.TestCase):

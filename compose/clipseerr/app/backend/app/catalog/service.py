@@ -18,7 +18,7 @@ from ..cache import Cache, tracking
 from ..problems import Problem
 from . import language, lrclib, match, youtube
 from .apple import GENRES, Apple
-from .models import (ArtistPage, ArtistRef, AudioMatch, Category, CategoryGroup, Credits, Lyrics, SearchResults, Shelf,
+from .models import (AlbumPage, ArtistPage, ArtistRef, AudioMatch, Category, CategoryGroup, Credits, Lyrics, SearchResults, Shelf,
                      Version, Versions, Video, VideoDetail)
 
 log = logging.getLogger("clipseerr.catalog")
@@ -33,6 +33,8 @@ RECENT_DAYS = 45
 RELEASE_DAYS = 30
 # Calls to one source at once, when a list needs many.
 FAN_OUT = 6
+# Seconds the genres wait for a list's pictures before answering without them.
+COVER_WAIT = 1.5
 # Videos a search asks YouTube Music for (it answers 20 a call), shown a page at a time.
 SEARCH_VIDEOS = 100
 
@@ -332,14 +334,21 @@ class Catalog:
                                         categories=sorted(items, key=lambda c: c.title)))
         apple = Apple.categories()
         hot = Category(id="hot", title="Hot", group="Picks", source="youtube")
-        # Apple's genres and Hot have no cover: their top videos' pictures stand in.
-        found = await asyncio.gather(*(self._apple_top(int(c.id[3:])) for c in apple), self.hot(),
-                                     return_exceptions=True)
-        for category, items in zip([*apple, hot], found):
+        # Apple's genres and Hot have no cover: their top videos' pictures stand
+        # in. The page doesn't wait for a list not fetched yet: it gets its
+        # pictures the next time, the fetch going on meanwhile.
+        tasks = [asyncio.ensure_future(t) for t in (*(self._apple_top(int(c.id[3:])) for c in apple), self.hot())]
+        for task in tasks:
+            # One that finishes after the answer, failed, is logged by the source's health, not as "never retrieved".
+            task.add_done_callback(lambda t: t.cancelled() or t.exception())
+        await asyncio.wait(tasks, timeout=COVER_WAIT)
+        for category, task in zip([*apple, hot], tasks):
+            if not task.done() or task.cancelled() or task.exception():
+                continue
+            items = task.result()
             if isinstance(items, Shelf):
                 items = [v.model_dump() for v in items.items]
-            if isinstance(items, list):
-                category.images = [i["thumbnail"] for i in items if i.get("thumbnail")][:3]
+            category.images = [_small(i["thumbnail"]) for i in items if i.get("thumbnail")][:3]
         groups.append(CategoryGroup(title="Apple Music", source="apple", categories=apple))
         picks = CategoryGroup(title="Picks", source="youtube", categories=[hot])
         return [picks, *groups]
@@ -409,6 +418,17 @@ class Catalog:
         return ArtistPage.model_validate(await self._get("youtube", f"yt:artist:{region}:{channel_id}", fetch,
                                                          fresh=6 * HOUR))
 
+    async def album(self, album_id: str) -> AlbumPage:
+        if not re.fullmatch(r"MPRE[\w-]{6,60}", album_id):
+            raise Problem(404, "No such album.")
+        region = self.region
+
+        async def fetch():
+            return (await youtube.album(region, album_id)).model_dump()
+
+        return AlbumPage.model_validate(await self._get("youtube", f"yt:album:{region}:{album_id}", fetch,
+                                                        fresh=7 * DAY, stale=90 * DAY))
+
     async def artist_by_name(self, name: str) -> dict | None:
         """{"id", "name"}: the YouTube Music artist named so, for Apple's
         credits and VEVO channels ("OliviaRodrigoVEVO")."""
@@ -452,8 +472,8 @@ class Catalog:
         kind, value = found.groups()
         fetch = (lambda: self._youtube_detail(value)) if kind == "yt" else (lambda: self._apple_detail(value))
         return VideoDetail.model_validate(await self._get("youtube" if kind == "yt" else "apple",
-                                                          # video3: the artist's own channel's upload is official.
-                                                          f"video3:{self.region}:{video_id}", fetch,
+                                                          # video4: the uploader named as an artist, and album tracks, are official.
+                                                          f"video4:{self.region}:{video_id}", fetch,
                                                           # Apple's may be out on YouTube soon.
                                                           fresh=3 * DAY if kind == "yt" else 6 * HOUR,
                                                           stale=30 * DAY))
@@ -550,6 +570,7 @@ class Catalog:
             title=picked.get("title") or title,
             artist=" & ".join(a["name"] for a in picked.get("artists") or [] if a.get("name")) or artist,
             album=album.get("name") if isinstance(album, dict) else None,
+            album_id=album.get("id") if isinstance(album, dict) else None,
             year=picked.get("year"),
             duration=picked.get("duration_seconds"),
             thumbnail=youtube._image(picked.get("thumbnails"), 544),
@@ -611,8 +632,15 @@ class Catalog:
 
         if not ids:
             return Credits(credits=[])
-        return Credits.model_validate(await self._get("youtube", f"yt:credits:{ids[0]}", fetch, fresh=30 * DAY,
-                                                      stale=90 * DAY))
+        found = Credits.model_validate(await self._get("youtube", f"yt:credits:{ids[0]}", fetch, fresh=30 * DAY,
+                                                       stale=90 * DAY))
+        # Each name to its YouTube Music page when it has one (a writer or a
+        # producer often hasn't): the page links them.
+        names = list(dict.fromkeys(n for credit in found.credits for n in credit.names))
+        refs = dict(zip(names, await self._resolve_refs(names)))
+        for credit in found.credits:
+            credit.people = [refs.get(n) or ArtistRef(name=n) for n in credit.names]
+        return found
 
     async def lyrics(self, video_id: str) -> Lyrics:
         """The song's words: LRCLIB's (timed when it has them), else YouTube
@@ -701,14 +729,25 @@ async def _watch_track(region: str, youtube_id: str) -> dict | None:
     return track
 
 
+def _small(image: str) -> str:
+    """Apple's picture at 320×180, a quarter of the 640×360 its lists give: for a tile."""
+    return re.sub(r"/\d+x\d+bb\.jpg$", "/320x180bb.jpg", image)
+
+
 def _official(song: dict, artists: list[ArtistRef]) -> bool:
     """The artist's own video: YouTube's official music video type (a label's
     upload), or uploaded by one of its artists' own channels, which YouTube
     types as a user upload (aggelina's "KALSON SKISMENA" on her channel)."""
-    if song["kind"] in (None, youtube.OFFICIAL):
+    if song["kind"] in (None, *youtube.OFFICIAL_KINDS):
         return True
     channel = song.get("channel_id")
-    return bool(channel) and any(ref.id == channel for ref in artists)
+    if channel and any(ref.id == channel for ref in artists):
+        return True
+    # An artist may have two channels (aggelina's artist page and the channel
+    # she uploads on): the uploader named as one of the artists, or as their
+    # "VEVO" or "- Topic" channel, is still the artist.
+    uploader = titles.simple(match.channel_artist(song.get("author") or ""))
+    return bool(uploader) and any(titles.simple(ref.name) == uploader for ref in artists)
 
 
 def _fuller_credit(current: str, *others: str | None) -> str:

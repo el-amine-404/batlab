@@ -13,10 +13,13 @@ import threading
 from ytmusicapi import YTMusic
 
 from .match import channel_artist, clean
-from .models import ArtistPage, ArtistRef, ArtistSummary, Video
+from .models import AlbumPage, AlbumSummary, ArtistPage, ArtistRef, ArtistSummary, Track, Video
 
 LANGUAGE = "en"
 OFFICIAL = "MUSIC_VIDEO_TYPE_OMV"
+# The artist's own, whatever its type: an official video, an "art track" (the
+# song with its cover, as an album lists it), the label's audio upload.
+OFFICIAL_KINDS = (OFFICIAL, "MUSIC_VIDEO_TYPE_ATV", "MUSIC_VIDEO_TYPE_OFFICIAL_SOURCE_MUSIC")
 _local = threading.local()
 
 
@@ -283,7 +286,31 @@ async def artist(region: str, channel_id: str) -> ArtistPage:
         views=found.get("views"),
         videos=videos,
         related=related[:12],
+        albums=_albums(found),
     )
+
+
+def _albums(found: dict) -> list[AlbumSummary]:
+    """An artist's albums, then singles and EPs, each newest first, as its page shows them."""
+    albums = []
+    for section, kind in (("albums", "Album"), ("singles", "Single")):
+        items = [AlbumSummary(id=r["browseId"], title=r.get("title") or "", year=str(r.get("year") or "") or None,
+                              kind=r.get("type") or kind, thumbnail=_image(r.get("thumbnails"), 300))
+                 for r in (found.get(section) or {}).get("results") or [] if r.get("browseId")]
+        albums += sorted(items, key=lambda a: a.year or "", reverse=True)
+    return albums
+
+
+async def album(region: str, browse_id: str) -> AlbumPage:
+    found = await _call(region, "get_album", browse_id)
+    tracks = [Track(number=t.get("trackNumber"), title=t.get("title") or "", youtube_id=t.get("videoId"),
+                    artists=[ArtistRef(name=a.get("name") or "", id=a.get("id")) for a in t.get("artists") or []],
+                    duration=t.get("duration_seconds"), explicit=bool(t.get("isExplicit")))
+              for t in found.get("tracks") or []]
+    return AlbumPage(id=browse_id, title=found.get("title") or "", year=str(found.get("year") or "") or None,
+                     kind=found.get("type") or "Album", thumbnail=_image(found.get("thumbnails"), 600),
+                     artists=[ArtistRef(name=a.get("name") or "", id=a.get("id")) for a in found.get("artists") or []],
+                     description=found.get("description"), tracks=tracks, duration=found.get("duration_seconds"))
 
 
 async def song(region: str, video_id: str) -> dict:

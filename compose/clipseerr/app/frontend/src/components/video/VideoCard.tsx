@@ -7,6 +7,7 @@ import { Marquee } from "@/components/ui/marquee";
 import { prefetchVideo, useFacts } from "@/lib/queries";
 import { clock, cn, dated, upcoming } from "@/lib/utils";
 
+import { useHoverPreview } from "./HoverPreview";
 import { TagBadge } from "./TagBadge";
 import { Thumb } from "./Thumb";
 import type { Requested } from "./useRequested";
@@ -58,21 +59,24 @@ export const VideoCard = memo(function VideoCard({ video, requested, className, 
   const released = video.released || looked?.released;
   const meta = [views && `${views} views`, dated(released)].filter(Boolean).join(" · ");
   const soon = upcoming(released);
+  const { handlers, preview, playing } = useHoverPreview(video);
 
   return (
     <Link
       to={`/watch/${video.id}`}
-      onPointerEnter={warm}
-      onPointerLeave={cool}
+      {...handlers}
+      onPointerEnter={(event) => { warm(); handlers.onPointerEnter?.(event); }}
+      onPointerLeave={(event) => { cool(); handlers.onPointerLeave?.(event); }}
       onFocus={warm}
-      onTouchStart={() => prefetchVideo(video.id)}
+      onTouchStart={() => { prefetchVideo(video.id); handlers.onTouchStart?.(); }}
       className={cn("group flex min-w-0 flex-col gap-2.5 rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring", className)}
     >
       <div className="relative overflow-hidden rounded-xl ring-1 ring-white/5">
         <Thumb src={video.thumbnail} youtubeId={video.youtube_id} alt="" eager={eager}
                className="transition-transform duration-300 group-hover:scale-[1.03]" />
+        {preview}
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
-        <span className="pointer-events-none absolute top-1/2 left-1/2 flex size-11 -translate-x-1/2 -translate-y-1/2 scale-90 items-center justify-center rounded-full bg-white/90 text-black opacity-0 shadow-xl transition-all group-hover:scale-100 group-hover:opacity-100">
+        <span className={cn(playing && "hidden", "pointer-events-none absolute top-1/2 left-1/2 flex size-11 -translate-x-1/2 -translate-y-1/2 scale-90 items-center justify-center rounded-full bg-white/90 text-black opacity-0 shadow-xl transition-all group-hover:scale-100 group-hover:opacity-100")}>
           <Play className="ml-0.5 size-5 fill-current" />
         </span>
         <div className="absolute top-2 left-2 flex gap-1">

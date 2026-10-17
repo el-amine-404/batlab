@@ -12,7 +12,9 @@ on the "Apprise (alerts)" notification, Webhook, custom body; README.md.
   {%- assign kind = "failure" -%}
   {%- capture title -%}{{ name }} is down{%- endcapture -%}
   {%- capture body -%}**Error**  {{ hb.msg }}
-**Address**  {{ hostnameOrURL }}{%- endcapture -%}
+**Since**  {{ hb.time | slice: 11, 5 }} UTC
+**Address**  {{ hostnameOrURL }}
+**Check**  {{ monitorJSON.type | default: "-" }}, every {{ monitorJSON.interval | default: "?" }} s{%- endcapture -%}
 {%- elsif hb.status == 1 -%}
   {%- assign kind = "success" -%}
   {%- capture title -%}{{ name }} is back{%- endcapture -%}

@@ -43,6 +43,7 @@ class AudioMatch(BaseModel):
     title: str
     artist: str
     album: str | None = None
+    album_id: str | None = Field(None, description="Its album on YouTube Music: opens /albums/{id}.")
     year: str | None = None
     duration: int | None = None
     thumbnail: str | None = None
@@ -101,10 +102,35 @@ class ArtistSummary(BaseModel):
     subscribers: str | None = None
 
 
+class AlbumSummary(BaseModel):
+    id: str = Field(description="YouTube Music's album id: opens /albums/{id}.")
+    title: str
+    year: str | None = None
+    kind: str = Field("Album", description='"Album", "Single" or "EP".')
+    thumbnail: str | None = None
+
+
+class Track(BaseModel):
+    number: int | None = None
+    title: str
+    youtube_id: str | None = Field(None, description="The track on YouTube Music: opens /watch/yt:{id}.")
+    artists: list[ArtistRef]
+    duration: int | None = Field(None, description="Seconds.")
+    explicit: bool = False
+
+
+class AlbumPage(AlbumSummary):
+    artists: list[ArtistRef]
+    description: str | None = None
+    tracks: list[Track]
+    duration: int | None = Field(None, description="Seconds, every track.")
+
+
 class ArtistPage(ArtistSummary):
     description: str | None = None
     views: str | None = None
     videos: list[Video]
+    albums: list[AlbumSummary] = Field(default_factory=list, description="Albums, then singles and EPs, newest first.")
     related: list[ArtistSummary] = Field(default_factory=list)
 
 
@@ -119,6 +145,8 @@ class SearchResults(BaseModel):
 class Credit(BaseModel):
     role: str = Field(description='"Performed by", "Written by", "Produced by"…, as YouTube Music says.')
     names: list[str]
+    people: list[ArtistRef] = Field(default_factory=list,
+                                    description="The same names, each with its YouTube Music page when it has one.")
 
 
 class Credits(BaseModel):

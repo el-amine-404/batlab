@@ -1,4 +1,4 @@
-import { CalendarClock, Check, ChevronDown, ExternalLink, Film, Flame, Music2 } from "lucide-react";
+import { CalendarClock, Check, ChevronDown, ExternalLink, Film, Flame, MicVocal, Music2 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 
@@ -11,7 +11,7 @@ import { Thumb } from "@/components/video/Thumb";
 import type { Shelf, Version, Video, VideoDetail } from "@/lib/api";
 import { CreditsPanel, LyricsPanel } from "@/components/video/SongInfo";
 import { TagBadge } from "@/components/video/TagBadge";
-import { prefetchArtist, prefetchVideo, queryClient, useArtist, useCredits, useHotPick, useHotPicks, useLyrics, useVersions,
+import { prefetchArtist, prefetchVideo, queryClient, useAlbum, useArtist, useCredits, useHotPick, useHotPicks, useLyrics, useVersions,
          useVideo } from "@/lib/queries";
 import { ago, clock, cn, day, upcoming } from "@/lib/utils";
 
@@ -45,13 +45,17 @@ function Meta({ video }: { video: Video | VideoDetail }) {
     !soon && video.duration && clock(video.duration),
   ].filter(Boolean);
   return (
-    <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm text-muted-foreground">
-      {parts.map((part, i) => (
-        <span key={i} className="flex items-center gap-2">
-          {i > 0 && <span aria-hidden className="text-muted-foreground/40">·</span>}
-          {part}
-        </span>
-      ))}
+    <div className="flex flex-col gap-2">
+      {/* The facts on one line, what it is (its tags) on the next. */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+        {parts.map((part, i) => (
+          <span key={i} className="flex items-center gap-2">
+            {i > 0 && <span aria-hidden className="text-muted-foreground/40">·</span>}
+            {part}
+          </span>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5 empty:hidden">
       {soon && <TagBadge tag="soon" tone="accent" />}
       {video.explicit && <TagBadge tag="explicit" compact />}
       {words?.language && <TagBadge tag={`lang:${words.language}`} label={words.language_name ?? words.language} />}
@@ -61,22 +65,57 @@ function Meta({ video }: { video: Video | VideoDetail }) {
                   hint={uploader ? `Uploaded by ${uploader}, not by the artist or their label.` : undefined} />
       )}
       {video.source === "apple" && <TagBadge tag="apple" />}
+      </div>
     </div>
   );
 }
 
+/**
+ * Where the song is, in words: "The song KALSON SKISMENA, released as a
+ * single (2026) · 2:57", or "track 3 of Album (2025)". The track opens its
+ * page, the album its own.
+ */
+function TheSong({ audio }: { audio: NonNullable<VideoDetail["audio"]> }) {
+  const { data: album } = useAlbum(audio.album_id);
+  const number = album?.tracks.find((t) => t.youtube_id === audio.youtube_id)?.number;
+  const single = album && album.tracks.length === 1;
+  const albumLink = audio.album_id ? (
+    <Link to={`/album/${audio.album_id}`} className="text-foreground/85 underline-offset-4 hover:text-rose-200 hover:underline">
+      {album?.title ?? audio.album}
+    </Link>
+  ) : audio.album;
+  const year = album?.year ?? audio.year;
+  return (
+    <p className="flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
+      <Music2 className="size-3.5 shrink-0" aria-hidden />
+      The song
+      <Link to={`/watch/yt:${audio.youtube_id}`} className="font-medium text-foreground/85 underline-offset-4 hover:text-rose-200 hover:underline">
+        {audio.title}
+      </Link>
+      {audio.album && (single ? (
+        <span>, released as a single{year && ` (${year})`}</span>
+      ) : (
+        <span>, {number ? `track ${number} of` : "from"} {albumLink}{year && ` (${album?.kind?.toLowerCase() ?? "album"}, ${year})`}</span>
+      ))}
+      {audio.duration && <span>· {clock(audio.duration)}</span>}
+    </p>
+  );
+}
+
 function Artists({ video }: { video: Video }) {
-  const linked = video.artists.filter((a) => a.id);
-  if (!linked.length) return <span>{video.artist}</span>;
+  const artists = video.artists.length ? video.artists : [{ name: video.artist, id: null }];
   return (
     <span className="flex flex-wrap items-center gap-x-1">
-      {linked.map((artist, i) => (
-        <span key={artist.id} className="flex items-center gap-1">
+      <MicVocal className="mr-0.5 size-4 shrink-0 text-muted-foreground" aria-label="Artist" />
+      {artists.map((artist, i) => (
+        <span key={`${artist.name}-${i}`} className="flex items-center gap-1">
           {i > 0 && <span className="text-muted-foreground">&</span>}
-          <Link to={`/artist/${artist.id}`} onPointerEnter={() => prefetchArtist(artist.id!)}
-                className="font-medium text-foreground/90 underline-offset-4 hover:text-rose-200 hover:underline">
-            {artist.name}
-          </Link>
+          {artist.id ? (
+            <Link to={`/artist/${artist.id}`} onPointerEnter={() => prefetchArtist(artist.id!)}
+                  className="font-medium text-foreground/90 underline-offset-4 hover:text-rose-200 hover:underline">
+              {artist.name}
+            </Link>
+          ) : <span className="font-medium text-foreground/90">{artist.name}</span>}
         </span>
       ))}
     </span>
@@ -231,13 +270,7 @@ export function WatchPage() {
             <div className="text-[15px]">{video ? <Artists video={data ?? video} /> : <span className="skeleton inline-block h-4 w-40 rounded" />}</div>
             {video && <Meta video={data ?? video} />}
             {data && <div className="mt-1 flex flex-wrap gap-2"><HotButton video={data} /></div>}
-            {data?.audio && (
-              <p className="text-xs text-muted-foreground">
-                The song: <span className="text-foreground/80">{data.audio.title}</span>
-                {data.audio.album && <> · from <span className="text-foreground/80">{data.audio.album}</span></>}
-                {data.audio.duration && <> · {clock(data.audio.duration)}</>}
-              </p>
-            )}
+            {data?.audio && <TheSong audio={data.audio} />}
             {video?.original_title && <p className="text-xs text-muted-foreground/70">Uploaded as “{video.original_title}”</p>}
           </div>
           {data && <NotOnYouTube video={data} />}

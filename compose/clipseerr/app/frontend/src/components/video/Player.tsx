@@ -5,6 +5,8 @@ import type { VideoDetail } from "@/lib/api";
 import { listen, playback } from "@/lib/playback";
 import { cn } from "@/lib/utils";
 
+import { BrandIcon, SITE_NAMES } from "@/components/ui/brand";
+
 import { Thumb } from "./Thumb";
 
 type Mode = "video" | "audio" | "preview";
@@ -119,8 +121,9 @@ export function Player({ video }: { video: VideoDetail }) {
           {Object.entries(video.links ?? {}).map(([name, href]) => (
             <a key={name} href={href} target="_blank" rel="noreferrer"
                className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground">
-              {name === "youtube" ? "YouTube" : name === "youtube_music" ? "YouTube Music" : "Apple Music"}
-              <ExternalLink className="size-3" />
+              <BrandIcon name={name} className="size-4" />
+              {SITE_NAMES[name] ?? name}
+              <ExternalLink className="size-3 opacity-60" />
             </a>
           ))}
         </div>

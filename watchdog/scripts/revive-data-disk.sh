@@ -36,6 +36,7 @@ readonly ROOT="$WATCHDOG_DATA_ROOT"
 readonly STATE_DIR="/var/lib/batlab-watchdog"
 readonly STATE_FILE="$STATE_DIR/revive"
 readonly DISK_FAILS_FILE="$STATE_DIR/data-disk-failures"
+readonly DOWN_FILE="$STATE_DIR/data-disk-down"
 readonly RETRY_SECONDS=$((${WATCHDOG_REVIVE_RETRY_MINUTES:-10} * 60))
 # The USB 2 side of the connector the disk hangs on, as sysfs names it.
 readonly USB2_PORT="${WATCHDOG_DATA_USB_PORT:-}"
@@ -148,9 +149,15 @@ usb3_peer() {
 }
 
 back() {
-  local how="$1"
+  local how="$1" down=""
   echo "Data disk back: $how"
-  watchdog_notify "Data disk revived" success "How" "$how" "Tries" "$attempts"
+  [[ -r "$DOWN_FILE" ]] && down="$(since "$(<"$DOWN_FILE")")"
+  watchdog_notify "Data disk revived" success \
+    "Disk" "$(data_disk_label)" \
+    "Mount" "\`$ROOT\`" \
+    "How" "$how" \
+    "Down for" "${down:-unknown}" \
+    "Tries" "$attempts"
   attempts=0 last=0 asked=0
   save
 }
@@ -205,7 +212,13 @@ else
 fi
 
 if ((!asked)); then
+  local problem="off the USB bus: the system doesn't see it"
+  mounted && problem="mounted, but not answering reads"
   watchdog_notify "Data disk needs a replug" failure \
+    "Disk" "$(data_disk_label)" \
+    "Mount" "\`$ROOT\`" \
+    "Problem" "$problem" \
+    "Log" "$(code_block "$(data_disk_log 60)")" \
     "Tried" "clearing the mount, mounting, power-cycling its USB port$([[ "${WATCHDOG_REVIVE_USB3_FALLBACK:-1}" == 1 ]] && echo ", USB 3")" \
     "Do" "unplug the enclosure's USB and power, wait 10 s, plug both back" \
     "Next try" "in ${WATCHDOG_REVIVE_RETRY_MINUTES:-10} min, then every ${WATCHDOG_REVIVE_RETRY_MINUTES:-10} min"

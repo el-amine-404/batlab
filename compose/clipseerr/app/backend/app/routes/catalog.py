@@ -6,7 +6,7 @@ from fastapi import APIRouter, Query, Response
 from fastapi.responses import StreamingResponse
 
 from .. import schemas
-from ..catalog.models import (ArtistPage, ArtistSummary, CategoryGroup, Credits, Lyrics, SearchResults, Shelf, Video,
+from ..catalog.models import (AlbumPage, ArtistPage, ArtistSummary, CategoryGroup, Credits, Lyrics, SearchResults, Shelf, Video,
                               VideoDetail, Versions)
 from ..cache import tracking
 from ..context import catalog, known, library, requests, settings
@@ -110,6 +110,12 @@ async def artist(artist_id: str):
     library.mark(found.videos)
     catalog.known_views(found.videos)
     return found
+
+
+@router.get("/albums/{album_id}", summary="An album, single or EP on YouTube Music, with its tracks",
+            response_model=AlbumPage, responses=_404)
+async def album(album_id: str):
+    return await catalog.album(album_id)
 
 
 @router.get("/videos/{video_id}", summary="One video: what it is, where it plays, its official audio",

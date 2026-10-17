@@ -123,6 +123,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/albums/{album_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** An album, single or EP on YouTube Music, with its tracks */
+        get: operations["album_api_v1_albums__album_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/videos/{video_id}": {
         parameters: {
             query?: never;
@@ -860,6 +877,57 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AlbumPage */
+        AlbumPage: {
+            /**
+             * Id
+             * @description YouTube Music's album id: opens /albums/{id}.
+             */
+            id: string;
+            /** Title */
+            title: string;
+            /** Year */
+            year?: string | null;
+            /**
+             * Kind
+             * @description "Album", "Single" or "EP".
+             * @default Album
+             */
+            kind: string;
+            /** Thumbnail */
+            thumbnail?: string | null;
+            /** Artists */
+            artists: components["schemas"]["ArtistRef"][];
+            /** Description */
+            description?: string | null;
+            /** Tracks */
+            tracks: components["schemas"]["Track"][];
+            /**
+             * Duration
+             * @description Seconds, every track.
+             */
+            duration?: number | null;
+        };
+        /** AlbumSummary */
+        AlbumSummary: {
+            /**
+             * Id
+             * @description YouTube Music's album id: opens /albums/{id}.
+             */
+            id: string;
+            /** Title */
+            title: string;
+            /** Year */
+            year?: string | null;
+            /**
+             * Kind
+             * @description "Album", "Single" or "EP".
+             * @default Album
+             */
+            kind: string;
+            /** Thumbnail */
+            thumbnail?: string | null;
+        };
         /** ArtistPage */
         ArtistPage: {
             /** Id */
@@ -876,6 +944,11 @@ export interface components {
             views?: string | null;
             /** Videos */
             videos: components["schemas"]["Video"][];
+            /**
+             * Albums
+             * @description Albums, then singles and EPs, newest first.
+             */
+            albums?: components["schemas"]["AlbumSummary"][];
             /** Related */
             related?: components["schemas"]["ArtistSummary"][];
         };
@@ -951,6 +1024,11 @@ export interface components {
             artist: string;
             /** Album */
             album?: string | null;
+            /**
+             * Album Id
+             * @description Its album on YouTube Music: opens /albums/{id}.
+             */
+            album_id?: string | null;
             /** Year */
             year?: string | null;
             /** Duration */
@@ -1016,6 +1094,11 @@ export interface components {
             role: string;
             /** Names */
             names: string[];
+            /**
+             * People
+             * @description The same names, each with its YouTube Music page when it has one.
+             */
+            people?: components["schemas"]["ArtistRef"][];
         };
         /**
          * Credits
@@ -1610,6 +1693,30 @@ export interface components {
             ok: boolean;
             /** Message */
             message: string;
+        };
+        /** Track */
+        Track: {
+            /** Number */
+            number?: number | null;
+            /** Title */
+            title: string;
+            /**
+             * Youtube Id
+             * @description The track on YouTube Music: opens /watch/yt:{id}.
+             */
+            youtube_id?: string | null;
+            /** Artists */
+            artists: components["schemas"]["ArtistRef"][];
+            /**
+             * Duration
+             * @description Seconds.
+             */
+            duration?: number | null;
+            /**
+             * Explicit
+             * @default false
+             */
+            explicit: boolean;
         };
         /** ValidationError */
         ValidationError: {
@@ -2250,6 +2357,55 @@ export interface operations {
             };
         };
     };
+    album_api_v1_albums__album_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                album_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlbumPage"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     video_api_v1_videos__video_id__get: {
         parameters: {
             query?: never;
@@ -2810,6 +2966,8 @@ export interface operations {
             query: {
                 /** @description Tags, all of them: "explicit", "lang:el"… */
                 tag: string[];
+                /** @description Latest seen by clipseerr, newest out, most viewed, or A to Z. */
+                sort?: "seen" | "newest" | "views" | "title";
                 limit?: number;
                 offset?: number;
             };

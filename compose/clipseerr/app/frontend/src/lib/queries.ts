@@ -6,7 +6,7 @@
 import { keepPreviousData, QueryClient, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { ACTIVE, api, errorText, type Family, type Kind, PAGE, type Request, type SearchResults, type Shelf } from "./api";
+import { ACTIVE, api, errorText, type Family, type Kind, PAGE, type Request, type SearchResults, type Shelf, type TagSort } from "./api";
 
 const MINUTE = 60_000;
 
@@ -85,6 +85,8 @@ export const useQuickSearch = (q: string) =>
     placeholderData: keepPreviousData,
     staleTime: 0,
   });
+export const useAlbum = (id: string | null | undefined, enabled = true) =>
+  useQuery({ queryKey: ["album", id], queryFn: ({ signal }) => api.album(id!, signal), enabled: enabled && !!id, staleTime: 60 * MINUTE });
 export const useArtist = (id: string, enabled = true) =>
   useQuery({ queryKey: keys.artist(id), queryFn: ({ signal }) => api.artist(id, signal), enabled: enabled && !!id });
 export const useVideo = (id: string) =>
@@ -136,10 +138,10 @@ export const useFiles = (id: string, enabled = true) =>
   useQuery({ queryKey: ["files", id], queryFn: ({ signal }) => api.files(id, signal), enabled: enabled && !!id, staleTime: MINUTE });
 export const useTags = () => useQuery({ queryKey: ["tags"], queryFn: ({ signal }) => api.tags(signal), staleTime: 5 * MINUTE });
 /** The videos carrying every tag, a page at a time. */
-export function useTagged(tags: string[]) {
+export function useTagged(tags: string[], sort: TagSort) {
   return useInfiniteQuery({
-    queryKey: ["tagged", [...tags].sort().join("+")] as const,
-    queryFn: ({ pageParam, signal }) => api.tagged(tags, { limit: PAGE, offset: pageParam }, signal),
+    queryKey: ["tagged", [...tags].sort().join("+"), sort] as const,
+    queryFn: ({ pageParam, signal }) => api.tagged(tags, sort, { limit: PAGE, offset: pageParam }, signal),
     initialPageParam: 0,
     getNextPageParam: (last: Shelf, pages: Shelf[]) => {
       const loaded = pages.reduce((sum, page) => sum + page.items.length, 0);

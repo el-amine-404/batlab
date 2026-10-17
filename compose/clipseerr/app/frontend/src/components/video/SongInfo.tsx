@@ -1,4 +1,5 @@
-import { Download, FileText, Mic2 } from "lucide-react";
+import { AudioWaveform, Download, FileText, type LucideIcon, Mic2, MicVocal, Music, PenLine, SlidersVertical, Users } from "lucide-react";
+import { Link } from "react-router";
 import { useEffect, useMemo, useRef } from "react";
 
 import { api, type VideoDetail } from "@/lib/api";
@@ -99,6 +100,19 @@ export function LyricsPanel({ video }: { video: VideoDetail }) {
   );
 }
 
+const ROLES: [RegExp, LucideIcon][] = [
+  [/perform|vocal|sing|feat/i, MicVocal],
+  [/writ|lyric/i, PenLine],
+  [/compos/i, Music],
+  [/produc/i, SlidersVertical],
+  [/mix|master|engineer/i, AudioWaveform],
+];
+
+function RoleIcon({ role }: { role: string }) {
+  const Icon = ROLES.find(([pattern]) => pattern.test(role))?.[1] ?? Users;
+  return <Icon className="size-3.5" aria-hidden />;
+}
+
 /** Who made the song, as YouTube Music credits it. */
 export function CreditsPanel({ video }: { video: VideoDetail }) {
   const { data, isPending } = useCredits(video.id, !!(video.youtube_id || video.audio));
@@ -119,10 +133,17 @@ export function CreditsPanel({ video }: { video: VideoDetail }) {
             <dl className="flex flex-col gap-3">
               {data.credits.map((credit) => (
                 <div key={credit.role}>
-                  <dt className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{credit.role}</dt>
+                  <dt className="flex items-center gap-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                    <RoleIcon role={credit.role} /> {credit.role}
+                  </dt>
                   <dd className="mt-1 flex flex-wrap gap-1.5">
-                    {credit.names.map((name) => (
-                      <span key={name} className="rounded-full border border-border bg-secondary/60 px-2.5 py-0.5 text-sm">{name}</span>
+                    {(credit.people?.length ? credit.people : credit.names.map((name) => ({ name, id: null }))).map((person) => (
+                      // Their page when YouTube Music has one; else what a search finds of their work.
+                      <Link key={person.name} to={person.id ? `/artist/${person.id}` : `/search?q=${encodeURIComponent(person.name)}`}
+                            title={person.id ? `${person.name}: their page` : `Search for ${person.name}`}
+                            className="rounded-full border border-border bg-secondary/60 px-2.5 py-0.5 text-sm transition hover:border-rose-400/40 hover:bg-accent">
+                        {person.name}
+                      </Link>
                     ))}
                   </dd>
                 </div>

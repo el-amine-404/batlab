@@ -3,12 +3,32 @@ import { useMemo, useState } from "react";
 import { useParams } from "react-router";
 
 import { Failed } from "@/components/layout/States";
+import { RailArrows, useRail } from "@/components/ui/rail";
+import { AlbumCard } from "@/components/video/AlbumCard";
 import { MoreLoader, useReveal } from "@/components/video/MoreLoader";
 import { GridSkeleton, VideoGrid } from "@/components/video/VideoGrid";
+import type { AlbumSummary } from "@/lib/api";
 import { useArtist } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
-import { ArtistBubble } from "./SearchPage";
+import { ArtistRail } from "./SearchPage";
+
+function Albums({ albums }: { albums: AlbumSummary[] }) {
+  const rail = useRail(albums.length);
+  return (
+    <section className="mb-10">
+      <div className="mb-3 flex items-end justify-between gap-4">
+        <h2 className="text-lg font-semibold tracking-tight">
+          Albums and singles <span className="text-sm font-normal text-muted-foreground">· {albums.length}</span>
+        </h2>
+        <div className="flex shrink-0 items-center gap-1"><RailArrows rail={rail} /></div>
+      </div>
+      <div ref={rail.ref} onScroll={rail.measure} className="rail -mx-4 flex gap-4 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0">
+        {albums.map((album) => <AlbumCard key={album.id} album={album} className="w-36 shrink-0 sm:w-44" />)}
+      </div>
+    </section>
+  );
+}
 
 export function ArtistPage() {
   const { id = "" } = useParams();
@@ -60,6 +80,8 @@ export function ArtistPage() {
         )}
       </div>
 
+      {!!data?.albums?.length && <Albums albums={data.albums} />}
+
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-semibold tracking-tight">Videos</h2>
         <div className="flex items-center gap-2">
@@ -84,14 +106,7 @@ export function ArtistPage() {
       )}
 
       {!!data?.related?.length && (
-        <section className="mt-12">
-          <h2 className="mb-2 text-lg font-semibold tracking-tight">Fans also like</h2>
-          <div className="rail -mx-4 flex gap-2 overflow-x-auto px-4 sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0">
-            {data.related?.map((artist) => (
-              <ArtistBubble key={artist.id} artist={artist} />
-            ))}
-          </div>
-        </section>
+        <div className="mt-12"><ArtistRail title="Fans also like" artists={data.related} /></div>
       )}
     </>
   );

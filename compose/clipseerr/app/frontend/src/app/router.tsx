@@ -2,6 +2,7 @@ import { lazy } from "react";
 import { createBrowserRouter, Navigate } from "react-router";
 
 import { Layout } from "@/components/layout/Layout";
+import { AlbumPage } from "@/pages/AlbumPage";
 import { ArtistPage } from "@/pages/ArtistPage";
 import { DiscoverPage } from "@/pages/DiscoverPage";
 import { GenresPage } from "@/pages/GenresPage";
@@ -35,6 +36,7 @@ export const router = createBrowserRouter([
       { path: "/tags", element: <TagsPage /> },
       { path: "/search", element: <SearchPage /> },
       { path: "/artist/:id", element: <ArtistPage /> },
+      { path: "/album/:id", element: <AlbumPage /> },
       { path: "/watch/:id", element: <WatchPage /> },
       { path: "/requests", element: <RequestsPage /> },
       { path: "/requests/:id", element: <RequestPage /> },
