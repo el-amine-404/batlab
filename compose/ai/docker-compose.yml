@@ -67,6 +67,10 @@ services:
       - LLM_LANGUAGE=${PAPERLESS_GPT_LANGUAGE}
     volumes:
       - ${CONFIGS_ROOT}/ai/conf/prompts:/app/prompts
+      # Its settings and the history of what it changed in Paperless, kept
+      # across a recreate (it warns at start from v0.30 when they are not).
+      - ${VOLUMES_ROOT}/paperless-gpt/config:/app/config
+      - ${VOLUMES_ROOT}/paperless-gpt/db:/app/db
       - /etc/localtime:/etc/localtime:ro
     ports:
       - ${HOST_LOOPBACK_IP}:${PAPERLESS_GPT_HTTP_PORT}:8080
