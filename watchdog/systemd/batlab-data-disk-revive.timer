@@ -3,7 +3,9 @@ Description=Check every two minutes that the data disk is back, and bring it bac
 
 [Timer]
 OnBootSec=90s
-OnUnitInactiveSec=2min
+# From each run's start, whether it succeeded or failed: OnUnitInactiveSec never
+# fires again after a failed run, and a failed run is exactly when to retry.
+OnUnitActiveSec=2min
 Unit=batlab-data-disk-revive.service
 
 [Install]
