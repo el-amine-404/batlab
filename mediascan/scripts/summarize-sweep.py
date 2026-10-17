@@ -1,8 +1,18 @@
 #!/usr/bin/env python3
-"""Summarize the sweep's current JSONL reports for a bounded notification."""
+"""Summarize the sweep's current JSONL reports for a bounded notification.
+
+Every verdict has a class: a threat (the file has no business in the library;
+sweep.sh quarantines it), an integrity problem (the file is damaged or is not
+what it claims), or a quality note (a short clip, a silent track, a low
+bitrate). conf/accepted.txt names the places where a quality note is expected,
+a disc's menus in a release's Extras, and those stop failing the sweep. They
+are still in the reports and still counted here. A threat or an integrity
+verdict can never be accepted: the file says so and the sweep refuses it.
+"""
 
 import argparse
 from collections import Counter, defaultdict
+import fnmatch
 import json
 from pathlib import Path
 
@@ -11,6 +21,37 @@ CHECKS = {"types": "File types", "media": "Video", "subtitles": "Subtitles",
           "clamav": "ClamAV", "yara": "YARA", "virustotal": "VirusTotal"}
 URGENT = {"MALWARE", "EXECUTABLE", "SCRIPT", "ARCHIVE", "ACTIVE_CONTENT", "EMBEDDED",
           "BINARY", "NOT_SUBTITLE", "ATTACHMENT", "NOT_VIDEO", "DANGEROUS_NAME"}
+# What a file can be and still be what it claims: the only verdicts accepted.txt may name.
+QUALITY = {"SHORT", "NO_AUDIO", "BITRATE", "RESOLUTION", "CODEC", "COVER_ART_ONLY"}
+
+
+def severity(code):
+    return "threat" if code in URGENT else "quality" if code in QUALITY else "integrity"
+
+
+def load_accepted(path):
+    """[(glob, verdicts)] from accepted.txt: "<glob> <VERDICT>..." per line,
+    matched against the whole path, case ignored. A line naming anything but a
+    quality verdict is refused, and the sweep fails until it is fixed."""
+    rules = []
+    if not path:
+        return rules
+    for number, raw in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        glob, *codes = line.split()
+        refused = [c for c in codes if c not in QUALITY]
+        if not codes or refused or not glob.startswith("/"):
+            raise ValueError(f"accepted.txt line {number}: only an absolute glob and quality verdicts "
+                             f"({', '.join(sorted(QUALITY))}) may be accepted, not {' '.join(refused) or 'nothing'}")
+        rules.append((glob.lower(), frozenset(codes)))
+    return rules
+
+
+def accepted_codes(path, rules):
+    lowered = path.lower()
+    return frozenset().union(*(codes for glob, codes in rules if fnmatch.fnmatchcase(lowered, glob)))
 
 
 def compact(text, limit):
@@ -39,7 +80,7 @@ def short_path(path):
     return compact(str(path), 165)
 
 
-def summarize(report_dir, statuses, quarantine="report-only", quarantine_status=0, limit=1750):
+def summarize(report_dir, statuses, quarantine="report-only", quarantine_status=0, limit=1750, accepted=None):
     files = defaultdict(set)
     reasons = Counter()
     checks, errors = [], []
@@ -80,17 +121,28 @@ def summarize(report_dir, statuses, quarantine="report-only", quarantine_status=
             suffix = f", {unknown} unknown" if unknown else ""
             checks.append(f"{label}: {len(flagged)}/{count} flagged{suffix}")
 
+    try:
+        rules = load_accepted(accepted)
+    except (OSError, ValueError) as error:
+        rules = []
+        errors.append(f"accepted list: {compact(error, 200)}")
+    # A file whose every verdict is accepted where it lies is counted, not raised.
+    waved = {path for path, problems in files.items()
+             if {p.partition(":")[0] for p in problems} <= accepted_codes(path, rules)}
+    for path in waved:
+        del files[path]
+
     for problems in files.values():
         reasons.update({p.partition(":")[0] for p in problems})
+    classes = Counter(max((severity(p.partition(":")[0]) for p in problems),
+                          key=("quality", "integrity", "threat").index) for problems in files.values())
     scopes = Counter(scope(path) for path in files)
     lines = [f"{len(files)} files flagged; {len(errors)} check/report errors."]
+    lines.append(f"Threats {classes['threat']}; integrity {classes['integrity']}; quality {classes['quality']}; "
+                 f"accepted {len(waved)} (conf/accepted.txt).")
     if reasons:
         lines.append("Reasons (can overlap): " + "; ".join(f"{key} {n}" for key, n in reasons.most_common()))
         lines.append("Location: " + "; ".join(f"{key} {n}" for key, n in scopes.items()))
-    if files and all(scope(path) == "torrent extras" and
-                     all(p.partition(":")[0] in {"SHORT", "NO_AUDIO", "BITRATE"} for p in problems)
-                     for path, problems in files.items()):
-        lines.append("Extras only: these thresholds also flag legitimate menus, silent galleries and short clips.")
     if errors:
         lines.append("Errors: " + compact("; ".join(errors), 300))
 
@@ -100,9 +152,10 @@ def summarize(report_dir, statuses, quarantine="report-only", quarantine_status=
         eligible = sum(any(p.partition(":")[0] in URGENT for p in problems) for problems in files.values())
         lines.append(f"Quarantine: {eligible} eligible; mode={quarantine}.")
     footer = "\nChecks: " + "; ".join(checks) + f"\nReports: {report_dir}/*.jsonl"
-    # Prioritize security findings, then library files. Keep counts and report
+    # Threats first, then damage, then quality notes; library files before downloads. Keep counts and report
     # location even when filenames are long or many files were flagged.
-    ordered = sorted(files, key=lambda p: (not any(x.partition(":")[0] in URGENT for x in files[p]),
+    rank = {"threat": 0, "integrity": 1, "quality": 2}
+    ordered = sorted(files, key=lambda p: (min(rank[severity(x.partition(":")[0])] for x in files[p]),
                                           scope(p) != "library", p))
     shown = 0
     for path in ordered:
@@ -125,9 +178,10 @@ def main():
     parser.add_argument("--check", action="append", default=[], metavar="NAME=EXIT_OR_SKIPPED")
     parser.add_argument("--quarantine", choices=("enabled", "report-only"), default="report-only")
     parser.add_argument("--quarantine-status", type=int, default=0)
+    parser.add_argument("--accepted", help="accepted.txt: quality verdicts expected in given places")
     args = parser.parse_args()
     text, failed = summarize(args.report_dir, dict(value.split("=", 1) for value in args.check),
-                             args.quarantine, args.quarantine_status)
+                             args.quarantine, args.quarantine_status, accepted=args.accepted)
     print(text)
     return int(failed)
 

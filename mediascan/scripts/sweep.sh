@@ -41,7 +41,9 @@ run_check() {
   : >"$report"
   "$@" || status=$?
   summary_arguments+=(--check "$key=$status")
-  if ((status)); then
+  # 1 means findings, which the summary weighs (some are accepted where they
+  # lie, see conf/accepted.txt); anything else means the check itself failed.
+  if ((status > 1)); then
     flagged=1
   fi
 }
@@ -113,7 +115,8 @@ fi
 
 echo
 if ! summary="$(python3 "$SCRIPT_DIR/summarize-sweep.py" --report-dir "$MEDIASCAN_REPORT_DIR" \
-  "${summary_arguments[@]}" --quarantine-status "$quarantine_status")"; then
+  "${summary_arguments[@]}" --quarantine-status "$quarantine_status" \
+  --accepted "$MEDIASCAN_DIR/conf/accepted.txt")"; then
   flagged=1
 fi
 if [[ -z "$summary" ]]; then

@@ -10,7 +10,7 @@ as JSON reports and, optionally, moved into quarantine. Nothing is ever deleted.
 | --- | --- | --- |
 | `verify-types.py` | 142 s for 4.7k files | executables, scripts, archives, and extensions whose content does not match |
 | `verify-media.py` | 32 s for 160 files | containers that are not video, or that contradict their filename |
-| `verify-subtitles.py` | 1 s for 98 files | subtitles carrying markup that can fetch or execute |
+| `verify-subtitles.py` | 1 s for 98 files | subtitles and lyrics (`.lrc`) carrying markup that can fetch or execute, or that are not timed text at all |
 | `scan-clamav.sh` | minutes, incremental | known malware in files clamd will actually read |
 | `scan-virustotal.py` | one lookup per new carrier | files other people have already reported as malicious |
 | `scan-yara.sh` | optional, off unless rules are set | matches against your own YARA rules |
@@ -164,6 +164,51 @@ report after one pass.
 
 Installing `mkvtoolnix-cli` would make this far cheaper — `mkvextract` seeks to
 the attachment instead of reading up to it — but it is not currently used.
+
+## Lyrics are timed lines and nothing else
+
+musicguard writes a song's lyrics beside it as `.lrc` (LRCLIB's timed text).
+`verify-types.py` holds them to `text/plain`, stricter than other text, and
+`verify-subtitles.py` reads every line: each must be a timed line,
+`[01:02.34] words`, or a tag, `[ar: Artist]`. Anything else is `NOT_LYRICS`,
+none at all is `NO_CUES`, a NUL byte is `BINARY` and markup that can fetch or
+execute is `ACTIVE_CONTENT`, the last two quarantined like a subtitle's. On
+lab2 all 374 lyrics files pass, the largest 8 KB, under a 256 KB ceiling.
+
+## A finding's weight, and the ones expected where they are
+
+`summarize-sweep.py` gives every verdict a class. A **threat** is a file with no
+business in the library, the verdicts `sweep.sh` quarantines. **Integrity** is
+a file that is damaged or is not what it claims: `UNREADABLE`, `MISMATCH`,
+`NOT_LYRICS`, a failed decode. **Quality** is the rest, a file that is what it
+says but unusual: `SHORT`, `NO_AUDIO`, `BITRATE`, `RESOLUTION`, `CODEC`,
+`COVER_ART_ONLY`. The notification counts each class and lists threats first.
+
+Some quality notes are expected in a given place, and a sweep that reports them
+every night teaches you to stop reading it. `conf/accepted.txt` names those
+places, a disc's menus in a release's `Extras`, and the verdicts expected
+there. A file whose every verdict is accepted where it lies is counted as
+accepted instead of failing the sweep. It stays in the reports, and every other
+check (types, ClamAV, VirusTotal, embedded parts) still reads it.
+
+Only quality verdicts can be accepted. A line naming a threat or an integrity
+verdict is refused, and the sweep fails until it is fixed, so the list can
+never wave a payload through. `selftest.py` proves both halves.
+
+## A decode is judged by the decoder
+
+`deep-verify.py` decodes into ffmpeg's null muxer, which refuses two frames
+with the same timestamp. Matroska allows them, and a remux's rounding or a
+decoder's output often has them: eleven Attack on Titan episodes on lab2 failed
+the sample decode that way, and a sample of one decodes all 240 of its frames
+with `-err_detect explode -xerror`, which stops at the first decoder error. Those complaints are now a `TIMESTAMPS` note in the
+report (`notes`), not a failure. Everything else ffmpeg prints at error level,
+the decoder's and the demuxer's own messages, still fails the file, and a
+sample must now actually yield a frame: a decode that "passes" without a
+picture proves nothing. The demux pass reads every track (`-map 0`), not only
+the ones ffmpeg would pick by default. `selftest.py` builds a file with
+repeated timestamps (must stay clean, with its note) and one with bit rot
+through its middle (must be flagged).
 
 ## Quarantine and hardlinks
 

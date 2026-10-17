@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Check that subtitle files are plain timed text and carry no active content."""
+"""Check that subtitle and lyrics files are plain timed text and carry no active content."""
 
 import argparse
 import json
@@ -9,12 +9,14 @@ import re
 import sys
 from dataclasses import dataclass, field, asdict
 
-TEXT_SUFFIXES = frozenset((".srt", ".ass", ".ssa", ".vtt", ".sbv", ".smi", ".ttml"))
+TEXT_SUFFIXES = frozenset((".srt", ".ass", ".ssa", ".vtt", ".sbv", ".smi", ".ttml", ".lrc"))
 BINARY_SUFFIXES = frozenset((".sub", ".idx"))
 
 MAX_TEXT_BYTES = 1_048_576
 MAX_BINARY_BYTES = 26_214_400
 MAX_CUES = 200_000
+# A song's timed lyrics are a few kilobytes; the largest in the library is 8 KB.
+MAX_LYRICS_BYTES = 262_144
 
 # Players render a small amount of markup in subtitles. Styling is expected;
 # anything that can fetch or execute is not.
@@ -33,6 +35,13 @@ ASS_EMBEDDED = re.compile(rb"^\s*\[(Fonts|Graphics)\]", re.IGNORECASE | re.MULTI
 SRT_TIMING = re.compile(rb"\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}\s*-->\s*\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}")
 VTT_TIMING = re.compile(rb"\d{1,2}:\d{2}[:.]\d{2}[.,]\d{1,3}\s*-->")
 ASS_DIALOGUE = re.compile(rb"^\s*(Dialogue|Format)\s*:", re.IGNORECASE | re.MULTILINE)
+
+# Lyrics (.lrc, written by musicguard from LRCLIB) are nothing but timed lines,
+# "[01:02.34] words", and tags, "[ar: Artist]". Every line must be one or the
+# other: there is no styling to excuse anything else.
+LRC_TIMED = re.compile(r"^(\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\])+[^\x00-\x08\x0b-\x1f\x7f]*$")
+LRC_TAG = re.compile(r"^\[(?:ar|ti|al|au|by|offset|length|re|ve|tool|la|lang|id|#)\s*:[^\]\x00-\x1f]*\]$",
+                     re.IGNORECASE)
 
 HTML_DOCUMENT = re.compile(rb"^\s*(<!DOCTYPE\s+html|<html\b)", re.IGNORECASE)
 
@@ -66,8 +75,9 @@ def verify(path):
             finding.problems.append(f"OVERSIZE: {finding.size} bytes exceeds {MAX_BINARY_BYTES}")
         return finding
 
-    if finding.size > MAX_TEXT_BYTES:
-        finding.problems.append(f"OVERSIZE: {finding.size} bytes exceeds {MAX_TEXT_BYTES}")
+    limit = MAX_LYRICS_BYTES if suffix == ".lrc" else MAX_TEXT_BYTES
+    if finding.size > limit:
+        finding.problems.append(f"OVERSIZE: {finding.size} bytes exceeds {limit}")
         return finding
 
     with open(path, "rb") as handle:
@@ -96,6 +106,13 @@ def verify(path):
         finding.cues = len(ASS_DIALOGUE.findall(data))
     elif suffix == ".vtt":
         finding.cues = len(VTT_TIMING.findall(data))
+    elif suffix == ".lrc":
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        finding.cues = sum(bool(LRC_TIMED.match(line)) for line in lines)
+        stray = [line for line in lines if not LRC_TIMED.match(line) and not LRC_TAG.match(line)]
+        if stray:
+            finding.problems.append(f"NOT_LYRICS: {len(stray)} line(s) neither timed lyrics nor a tag, "
+                                    f"first {stray[0][:60]!r}")
     else:
         finding.cues = len(SRT_TIMING.findall(data))
 

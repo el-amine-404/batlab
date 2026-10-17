@@ -61,6 +61,8 @@ EXPECTED_PREFIX = {
     "audio": ("audio/", "application/ogg"),
     "image": ("image/",),
     "text": ("text/", "application/json", "application/xml", "application/x-subrip"),
+    # Timed lyrics are plain text and nothing else; verify-subtitles.py reads every line.
+    "lyrics": ("text/plain",),
     "document": ("application/pdf", "text/", "application/epub+zip", "application/x-mobipocket-ebook"),
 }
 
@@ -71,6 +73,7 @@ for family, suffixes in (
     ("image", (".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif", ".dng", ".tif", ".tiff", ".bmp", ".avif")),
     ("text", (".srt", ".ass", ".ssa", ".vtt", ".nfo", ".txt", ".md", ".json", ".xml", ".yml", ".yaml", ".log", ".cue")),
     ("document", (".pdf", ".epub", ".mobi", ".azw3")),
+    ("lyrics", (".lrc",)),
 ):
     for suffix in suffixes:
         EXTENSION_FAMILY[suffix] = family

@@ -37,12 +37,13 @@ fi
 # --remove-all this only clears locks whose process is gone or that went stale.
 restic unlock
 
-restic backup \
+# --retry-lock: the weekly check may be reading the repository (check.sh).
+restic backup --retry-lock 2h \
   --tag automated \
   --exclude-file "$RESTIC_DIR/conf/excludes.txt" \
   "${paths[@]}"
 
-restic forget --prune \
+restic forget --prune --retry-lock 2h \
   --keep-daily "${RESTIC_KEEP_DAILY:-7}" \
   --keep-weekly "${RESTIC_KEEP_WEEKLY:-4}" \
   --keep-monthly "${RESTIC_KEEP_MONTHLY:-12}" \

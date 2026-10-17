@@ -11,4 +11,7 @@ load_restic_config
 require_command restic
 
 restic unlock
-restic check --read-data-subset="${RESTIC_CHECK_SUBSET:-1/7}"
+# The nightly backup holds the repository's lock while it runs, and both timers
+# catch up together after a reboot (Persistent=true): wait for it rather than
+# fail the week's check.
+restic check --retry-lock 2h --read-data-subset="${RESTIC_CHECK_SUBSET:-1/7}"

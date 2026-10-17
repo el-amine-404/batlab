@@ -5,6 +5,7 @@
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -18,12 +19,22 @@ VIDEO_SUFFIXES = frozenset(
 # download parses correctly at the head and fails only at the end.
 SAMPLE_POINTS = (0.05, 0.50, 0.95)
 
+# The check writes to ffmpeg's null muxer, which refuses two frames or packets
+# with the same timestamp. That is a complaint about the file's timing (often a
+# remux's rounding, or frames the decoder hands back with equal timestamps), not
+# about its data: every frame still decodes. It is kept as a note; anything
+# else ffmpeg prints at error level, the decoder's and the demuxer's own
+# messages, is still a failure.
+MUXER_TIMESTAMPS = re.compile(
+    r"^\[null @ 0x[0-9a-f]+\] Application provided invalid, non monotonically increasing dts to muxer")
+
 
 @dataclass
 class Finding:
     path: str
     checks: list = field(default_factory=list)
     problems: list = field(default_factory=list)
+    notes: list = field(default_factory=list)
     seconds: float = 0.0
 
 
@@ -38,43 +49,67 @@ def duration_of(path):
         return 0.0
 
 
+@dataclass
+class Run:
+    errors: list
+    notes: list
+    frames: int
+
+
 def run_ffmpeg(arguments, timeout):
+    """ffmpeg's error-level messages, split into failures and timestamp notes,
+    and how many frames it got through (its progress report)."""
     try:
         completed = subprocess.run(
-            ("ffmpeg", "-nostdin", "-v", "error", *arguments, "-f", "null", "-"),
+            ("ffmpeg", "-nostdin", "-v", "error", "-nostats", "-progress", "pipe:1", *arguments, "-f", "null", "-"),
             capture_output=True, timeout=timeout, check=False,
         )
     except subprocess.TimeoutExpired:
-        return f"timed out after {timeout}s"
-    message = completed.stderr.decode("utf-8", "replace").strip()
-    if completed.returncode != 0 and not message:
-        message = f"ffmpeg exited {completed.returncode}"
-    return message or None
+        return Run([f"timed out after {timeout}s"], [], 0)
+    lines = [line for line in completed.stderr.decode("utf-8", "replace").splitlines() if line.strip()]
+    errors = [line for line in lines if not MUXER_TIMESTAMPS.match(line)]
+    notes = [line for line in lines if MUXER_TIMESTAMPS.match(line)]
+    if completed.returncode != 0 and not errors:
+        errors.append(f"ffmpeg exited {completed.returncode}")
+    progress = re.findall(rb"^frame=(\d+)$", completed.stdout, re.MULTILINE)
+    return Run(errors, notes, int(progress[-1]) if progress else 0)
+
+
+def timestamp_note(where, run):
+    return f"TIMESTAMPS: {where}: {len(run.notes)} repeated timestamp(s) at the null muxer, data intact"
 
 
 def sample_decode(path, sample_seconds, timeout):
-    problems = []
+    """(problems, notes) for three short decodes through the file."""
+    problems, notes = [], []
     duration = duration_of(path)
     if duration <= 0:
-        return ["SAMPLE: could not read duration"]
+        return ["SAMPLE: could not read duration"], notes
 
     for point in SAMPLE_POINTS:
         offset = max(0.0, min(duration - sample_seconds, duration * point))
         # 0:V:0 is the first video stream that is not an attached picture.
         # Decoding cover art instead of the feature passes in a fraction of a
         # second and proves nothing about the film.
-        error = run_ffmpeg(
+        run = run_ffmpeg(
             ("-ss", f"{offset:.2f}", "-i", path, "-t", str(sample_seconds), "-map", "0:V:0"),
             timeout,
         )
-        if error:
-            problems.append(f"SAMPLE: decode failed at {offset:.0f}s of {duration:.0f}s: {error.splitlines()[-1]}")
-    return problems
+        where = f"{offset:.0f}s of {duration:.0f}s"
+        if run.errors:
+            problems.append(f"SAMPLE: decode failed at {where}: {run.errors[-1]}")
+        elif run.frames == 0:
+            # A decode that "succeeds" without producing a picture proves nothing.
+            problems.append(f"SAMPLE: no frame decoded at {where}")
+        if run.notes:
+            notes.append(timestamp_note(f"sample at {where}", run))
+    return problems, notes
 
 
 def full_demux(path, timeout):
-    error = run_ffmpeg(("-i", path, "-c", "copy"), timeout)
-    return [f"DEMUX: {error.splitlines()[-1]}"] if error else []
+    run = run_ffmpeg(("-i", path, "-map", "0", "-c", "copy"), timeout)
+    problems = [f"DEMUX: {run.errors[-1]}"] if run.errors else []
+    return problems, [timestamp_note("demux", run)] if run.notes else []
 
 
 def walk(roots, excludes):
@@ -174,9 +209,11 @@ def main():
         finding = findings.setdefault(path, Finding(path=path))
         began = time.monotonic()
         if kind == "sample":
-            finding.problems.extend(sample_decode(path, arguments.sample_seconds, arguments.timeout))
+            problems, notes = sample_decode(path, arguments.sample_seconds, arguments.timeout)
         else:
-            finding.problems.extend(full_demux(path, arguments.timeout))
+            problems, notes = full_demux(path, arguments.timeout)
+        finding.problems.extend(problems)
+        finding.notes.extend(notes)
         finding.checks.append(kind)
         finding.seconds += time.monotonic() - began
 
@@ -184,6 +221,8 @@ def main():
         print(f"{status} [{kind}] {path} ({finding.seconds:.0f}s)")
         for problem in finding.problems:
             print(f"       {problem}")
+        for note in notes:
+            print(f"       note: {note}")
 
     results = list(findings.values())
     flagged = [f for f in results if f.problems]

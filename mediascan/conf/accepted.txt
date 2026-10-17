@@ -1,0 +1,14 @@
+# Quality verdicts expected in given places: summarize-sweep.py counts them as
+# accepted instead of failing the sweep every night. They are still in the
+# reports, and every other check (types, ClamAV, VirusTotal, what containers
+# carry) still reads these files.
+#
+# One rule per line: an absolute glob, matched against the whole path with case
+# ignored ("*" also crosses "/"), then the verdicts accepted there. Only quality
+# verdicts can be named (SHORT NO_AUDIO BITRATE RESOLUTION CODEC
+# COVER_ART_ONLY); a threat or an integrity verdict is refused, and the sweep
+# fails until the line is fixed.
+
+# A disc's menus, galleries and trailers ride along in a release's Extras:
+# seconds long, often silent, sometimes a still image.
+/mnt/storage/data/torrents/*/extras/*  SHORT NO_AUDIO BITRATE COVER_ART_ONLY
