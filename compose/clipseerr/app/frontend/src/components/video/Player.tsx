@@ -35,6 +35,12 @@ export function Player({ video }: { video: VideoDetail }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [video.id]);
 
+  // The details came: the video may turn out not to play elsewhere, or a song to be found.
+  useEffect(() => {
+    if (mode && !modes.includes(mode)) setMode(modes[0] ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modes.join()]);
+
   const choose = (next: Mode) => {
     setMode(next);
     setPlaying(true);

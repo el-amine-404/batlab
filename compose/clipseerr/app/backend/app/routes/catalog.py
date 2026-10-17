@@ -5,8 +5,8 @@ from urllib.parse import quote
 from fastapi import APIRouter, Query, Response
 
 from .. import schemas
-from ..catalog.models import ArtistPage, CategoryGroup, Credits, Lyrics, SearchResults, Shelf, VideoDetail, Versions
-from ..context import catalog, library, requests, settings
+from ..catalog.models import ArtistPage, ArtistSummary, CategoryGroup, Credits, Lyrics, SearchResults, Shelf, VideoDetail, Versions
+from ..context import catalog, known, library, requests, settings
 from ..problems import Problem
 
 router = APIRouter(tags=["Catalog"])
@@ -22,6 +22,7 @@ def _clean(items: list) -> list:
 def _page(shelf: Shelf, limit: int, offset: int, source: str | None = None) -> Shelf:
     """One page of a shelf; total counts all of it (after _clean, and of one
     source when asked)."""
+    known.saw(shelf.items, list_id=shelf.id)
     items = [v for v in _clean(shelf.items) if not source or v.source == source]
     shelf.total = len(items)
     shelf.items = items[offset:offset + limit]
@@ -40,6 +41,7 @@ _SOURCE = Query(None, description="Only the videos from YouTube, or from Apple M
 async def home():
     shelves = await catalog.home()
     for shelf in shelves:
+        known.saw(shelf.items, list_id=f"home:{shelf.id}")
         shelf.items = _clean(shelf.items)
         library.mark(shelf.items)
         catalog.known_views(shelf.items)
@@ -69,16 +71,29 @@ async def category(category_id: str, limit: int = _LIMIT, offset: int = _OFFSET,
 @router.get("/search", summary="Videos and artists by name", response_model=SearchResults, responses=_404)
 async def search(q: str = Query("", max_length=200, description="Words of the title or the artist.")):
     found = await catalog.search(q)
+    known.saw(found.videos, found.artists, list_id=f"search:{q.casefold()}")
     found.videos = _clean(found.videos)
     library.mark(found.videos)
     catalog.known_views(found.videos)
     return found
 
 
+@router.get("/search/quick", summary="Videos and artists by name, among those clipseerr has shown: answers at once "
+            "(the full search asks YouTube Music)", response_model=SearchResults)
+def quick_search(q: str = Query("", max_length=200, description="Words of the title or the artist; each may be cut short.")):
+    artists, videos = known.search(q)
+    videos = _clean(videos)
+    library.mark(videos)
+    catalog.known_views(videos)
+    return {"query": q.strip(), "artists": artists, "videos": videos}
+
+
 @router.get("/artists/{artist_id}", summary="An artist (YouTube Music channel) and their videos",
             response_model=ArtistPage, responses=_404)
 async def artist(artist_id: str):
     found = await catalog.artist(artist_id)
+    known.saw(found.videos, [ArtistSummary(id=found.id, name=found.name, thumbnail=found.thumbnail,
+                                           subscribers=found.subscribers), *found.related], list_id=f"artist:{found.id}")
     found.videos = _clean(found.videos)
     library.mark(found.videos)
     catalog.known_views(found.videos)

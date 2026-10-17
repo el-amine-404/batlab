@@ -90,6 +90,7 @@ export const api = {
   category: (id: string, page: Page = {}, signal?: AbortSignal) =>
     request<Shelf>(`/categories/${encodeURIComponent(id)}?${query({ limit: PAGE, offset: 0, ...page })}`, { signal }),
   search: (q: string, signal?: AbortSignal) => request<SearchResults>(`/search?${query({ q })}`, { signal }),
+  quickSearch: (q: string, signal?: AbortSignal) => request<SearchResults>(`/search/quick?${query({ q })}`, { signal }),
   artist: (id: string, signal?: AbortSignal) => request<ArtistPage>(`/artists/${encodeURIComponent(id)}`, { signal }),
   video: (id: string, signal?: AbortSignal) => request<VideoDetail>(`/videos/${encodeURIComponent(id)}`, { signal }),
   versions: (id: string, signal?: AbortSignal) => request<Versions>(`/videos/${encodeURIComponent(id)}/versions`, { signal }),

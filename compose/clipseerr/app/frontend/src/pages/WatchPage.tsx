@@ -10,7 +10,8 @@ import { ShelfRow } from "@/components/video/ShelfRow";
 import { Thumb } from "@/components/video/Thumb";
 import type { Shelf, Version, Video, VideoDetail } from "@/lib/api";
 import { CreditsPanel, LyricsPanel } from "@/components/video/SongInfo";
-import { prefetchArtist, prefetchVideo, queryClient, useArtist, useHotPick, useHotPicks, useVersions, useVideo } from "@/lib/queries";
+import { prefetchArtist, prefetchVideo, queryClient, useArtist, useCredits, useHotPick, useHotPicks, useLyrics, useVersions,
+         useVideo } from "@/lib/queries";
 import { ago, clock, cn, day, upcoming } from "@/lib/utils";
 
 /** The video as a list already showed it: the page shows that at once, while its details load. */
@@ -193,6 +194,13 @@ export function WatchPage() {
   const { data, error, refetch } = useVideo(id);
   const preview = useMemo(() => (data ? undefined : listed(id)), [data, id]);
   const video = data ?? preview;
+  // A YouTube video plays at once, from what its card knew; the details (its song, its links) follow.
+  const playable: VideoDetail | undefined = data ?? (preview?.youtube_id ? { ...preview, embeddable: true, links: {} } : undefined);
+  // The rest of the page is asked for now, beside the details, not after them.
+  const youtube = id.startsWith("yt:");
+  useLyrics(id, youtube);
+  useCredits(id, youtube);
+  useVersions(id, youtube);
   const [open, setOpen] = useState(false);
 
   if (error && !video) return <Failed error={error} retry={() => void refetch()} />;
@@ -201,8 +209,8 @@ export function WatchPage() {
     <div className="flex flex-col gap-10">
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px] xl:gap-8">
         <div className="flex min-w-0 flex-col gap-5">
-          {data ? (
-            <Player video={data} />
+          {playable ? (
+            <Player video={playable} />
           ) : (
             <div className="overflow-hidden rounded-2xl ring-1 ring-white/10">
               <Thumb src={video?.thumbnail} youtubeId={video?.youtube_id} size="maxres" eager />
@@ -244,10 +252,10 @@ export function WatchPage() {
           )}
         </aside>
       </div>
-      {data && (data.youtube_id || data.audio) && (
+      {playable && (playable.youtube_id || playable.audio) && (
         <div className="grid gap-4 md:grid-cols-2">
-          <LyricsPanel video={data} />
-          <CreditsPanel video={data} />
+          <LyricsPanel video={playable} />
+          <CreditsPanel video={playable} />
         </div>
       )}
       {data && <OtherVersions video={data} />}

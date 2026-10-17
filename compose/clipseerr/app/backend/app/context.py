@@ -9,6 +9,7 @@ from .catalog.service import Catalog
 from .db import Database
 from .hotlist import HotList
 from .integrations import Integrations
+from .known import Known
 from .settings import SettingsStore
 from .tracker.engine import Engine
 from .tracker.store import Requests
@@ -22,6 +23,7 @@ cache = Cache(db)
 catalog = Catalog(cache, http, settings)
 hotlist = HotList(db)
 catalog.hotlist = hotlist
+known = Known(db)
 service_store = Integrations(db, "service", services.TYPES, describe_extra=services.describe_extra)
 notification_store = Integrations(db, "notification", notifications.TYPES, events=events.NAMES)
 notifier = notifications.Notifier(notification_store, http)

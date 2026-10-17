@@ -28,6 +28,7 @@ export const keys = {
   categories: ["categories"] as const,
   category: (id: string) => ["category", id] as const,
   search: (q: string) => ["search", q] as const,
+  quickSearch: (q: string) => ["search", "quick", q] as const,
   artist: (id: string) => ["artist", id] as const,
   video: (id: string) => ["video", id] as const,
   versions: (id: string) => ["versions", id] as const,
@@ -68,6 +69,15 @@ export const useSearch = (q: string) =>
     queryFn: ({ signal }) => api.search(q, signal),
     enabled: q.trim().length > 0,
     placeholderData: keepPreviousData,
+  });
+/** The same search among the videos clipseerr has shown: answers at once, while YouTube Music's takes a second. */
+export const useQuickSearch = (q: string) =>
+  useQuery({
+    queryKey: keys.quickSearch(q),
+    queryFn: ({ signal }) => api.quickSearch(q, signal),
+    enabled: q.trim().length > 0,
+    placeholderData: keepPreviousData,
+    staleTime: 0,
   });
 export const useArtist = (id: string, enabled = true) =>
   useQuery({ queryKey: keys.artist(id), queryFn: ({ signal }) => api.artist(id, signal), enabled: enabled && !!id });

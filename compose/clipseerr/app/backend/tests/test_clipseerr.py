@@ -203,6 +203,34 @@ class Views(unittest.TestCase):
         self.assertEqual(asked, ["aaaaaaaaaaa", "broken00000"])
 
 
+class KnownSearch(unittest.TestCase):
+    def test_what_was_shown_is_found_by_the_start_of_its_words(self):
+        from app.catalog.models import ArtistRef, ArtistSummary, Video
+        from app.known import Known
+
+        def video(vid, title, artist, artist_id=None):
+            return Video(id=f"yt:{vid}", source="youtube", youtube_id=vid, title=title, artist=artist,
+                         artists=[ArtistRef(name=artist, id=artist_id)])
+
+        with tempfile.TemporaryDirectory() as folder:
+            db = Database(Path(folder) / "t.db")
+            known = Known(db)
+            known.saw([video("a", "Soltera", "Shakira", "UCshak"), video("b", "Café con Ron", "Bad Bunny")],
+                      [ArtistSummary(id="UCshak", name="Shakira", thumbnail="pic")], list_id="hot")
+            # Seen again in a list, the credit alone doesn't take the picture away.
+            known.saw([video("a", "Soltera", "Shakira", "UCshak")])
+            artists, videos = known.search("shak sol")
+            self.assertEqual(([(a.name, a.thumbnail) for a in artists], [v.title for v in videos]),
+                             ([("Shakira", "pic")], ["Soltera"]))
+            self.assertEqual([v.title for v in known.search("cafe")[1]], ["Café con Ron"])
+            self.assertEqual(known.search('"OR*'), ([], []))
+            # A title changed: the index follows.
+            known.saw([video("b", "Cafe con Ron (Remix)", "Bad Bunny")])
+            self.assertEqual([v.title for v in known.search("remix")[1]], ["Cafe con Ron (Remix)"])
+            self.assertEqual(Known(db).count(), {"videos": 2, "artists": 1})
+            db.close()
+
+
 class Credit(unittest.TestCase):
     def test_the_fullest_credit_of_the_same_artists(self):
         from app.catalog.service import _fuller_credit

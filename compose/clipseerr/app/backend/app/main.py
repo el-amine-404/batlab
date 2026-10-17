@@ -45,6 +45,7 @@ async def _housekeeping() -> None:
     while True:
         await catalog.warm()
         cache.prune(CACHE_KEEP)
+        db.tidy()
         await asyncio.sleep(WARM_EVERY)
 
 
