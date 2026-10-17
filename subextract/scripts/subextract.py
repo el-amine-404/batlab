@@ -725,7 +725,7 @@ def notify(env_file: Path, written: list[str], refused: list[str], replaced: lis
     try:
         post(keeper.env_value(env_file, "DISCORD_WEBHOOK_DOWNLOADS"), "📝 Subtitles added", 3066993,
              [("written", written)], footer)
-        post(keeper.env_value(env_file, "DISCORD_WEBHOOK_DOWNLOAD_ISSUES"), "🟠 Subtitles need a look", 15105570,
+        post(keeper.env_value(env_file, "DISCORD_WEBHOOK_DOWNLOAD_ISSUES"), "Subtitles need a look", 15105570,
              [("refused", refused), ("replaced after failed verification", replaced), ("errors", errors)], footer)
     except (urllib.error.URLError, OSError) as error:
         print(f"Discord was not told: {error}", file=sys.stderr)

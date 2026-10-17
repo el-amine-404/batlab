@@ -459,7 +459,7 @@ def notify(webhook: str, kept: list[str], manual: list[str]) -> None:
             "copy it in by hand, or restore the old file from `/data/recycle`.\n\n" + apprise.fields_text(fields))
     try:
         apprise.deliver("dubkeeper", "download-issues",
-                        "🔊 Upgrades checked for lost audio and subtitles" if not manual else "🟠 An upgrade lost audio",
+                        "Upgrades checked for lost audio and subtitles" if not manual else "An upgrade lost audio",
                         body, "warning" if manual else "success",
                         fallback=webhook if webhook.startswith("http") else None)
     except apprise.NotSent as error:

@@ -28,10 +28,9 @@ stop_data_containers() {
   echo "$reason; stopping: ${names:-none}"
   # Before stopping: a container stuck on a hung disk can keep docker stop
   # waiting, and the card must go out regardless.
-  watchdog_notify "🔴 Data disk unavailable" failure \
-    "Mount" "\`$WATCHDOG_DATA_ROOT\`" \
-    "Reason" "$reason" \
-    "Stopping" "${names// /, }"
+  watchdog_notify "Data disk unavailable" failure \
+    "Why" "$reason" \
+    "Stopped" "${names:+${names// /, }}"
 
   if [[ -n "$names" ]]; then
     install -d -m 750 "$STATE_DIR"
@@ -63,9 +62,8 @@ start_data_containers() {
   # shellcheck disable=SC2086
   docker start $names >/dev/null
   echo "started: $names"
-  watchdog_notify "🟢 Data disk back" success \
-    "Mount" "\`$WATCHDOG_DATA_ROOT\`" \
-    "Started" "${names// /, }"
+  watchdog_notify "Data disk back" success \
+    "Restarted" "${names// /, }"
 }
 
 case "${1:-}" in

@@ -30,8 +30,9 @@ MAX_BODY = 3800  # Discord's limit for one message's text, less a margin
 # Apprise from the host (compose/apprise publishes it on the loopback).
 HOST_BASE = "http://127.0.0.1:8011/notify"
 SENDERS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "senders.json")
-# The colours batlab's Discord cards had before Apprise, for the fallback.
-COLOURS = {"info": 9807270, "success": 3066993, "warning": 15105570, "failure": 15158332}
+# Apprise's colours for each kind, so a card sent straight to Discord when
+# Apprise is down looks like one sent through it.
+COLOURS = {"info": 0x3AA3E3, "success": 0x3AA337, "warning": 0xCACF29, "failure": 0xA32037}
 
 
 class NotSent(RuntimeError):
@@ -94,8 +95,17 @@ def sender(key, host=None):
 
 
 def fields_text(fields):
-    """Markdown for (name, value) pairs: the name in bold over its value."""
-    return "\n\n".join(f"**{name}**\n{(value or '-')[:1000]}" for name, value in fields)
+    """Markdown for (name, value) pairs, one line each: "**Name**  value". A
+    value of several lines starts on the line under its name.
+
+    The card's stripe already says how it went, so a title is what happened in
+    plain words ("Data disk unavailable", "Updated jellyfin"): no emoji, and
+    nothing a field repeats."""
+    lines = []
+    for name, value in fields:
+        value = (value or "-").strip()[:1000]
+        lines.append(f"**{name}**\n{value}" if "\n" in value else f"**{name}**  {value}")
+    return "\n".join(lines)
 
 
 def discord(webhook, key, title, body, kind="info", timeout=15):

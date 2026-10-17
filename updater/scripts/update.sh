@@ -72,13 +72,13 @@ record_build() {
 sync_repository() {
   if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
     echo "Working tree has local changes; not pulling." >&2
-    notify alerts "🔴 Updater skipped: repository not clean" failure \
+    notify alerts "Updater skipped: repository not clean" failure \
       "Fix" "cd ~/batlab && git status"
     exit 1
   fi
   git fetch --quiet origin "$BRANCH"
   if ! git merge --ff-only --quiet "origin/$BRANCH"; then
-    notify alerts "🔴 Updater skipped: cannot fast-forward" failure \
+    notify alerts "Updater skipped: cannot fast-forward" failure \
       "Fix" "cd ~/batlab && git status && git pull"
     exit 1
   fi
@@ -134,7 +134,7 @@ update_service() {
     new_id="$(docker image inspect -f '{{.Id}}' "$new_image" 2>/dev/null || true)"
     if docker compose "${ENV_ARGS[@]}" -f "$compose_file" "${start[@]}" "$service" &&
       reason="$(wait_until_healthy "$container")"; then
-      notify updates "🟢 Updated $service" success \
+      notify updates "Updated $service" success \
         "Image" "$new_image${new_id:+ (${new_id:7:12})}" "Previous" "$previous"
       # The old image goes once nothing runs it (Docker's containerd store
       # would delete it from under a running container).
@@ -159,7 +159,7 @@ update_service() {
 
   [[ "$built" == "yes" ]] && docker tag "$keep" "$old_image" >/dev/null 2>&1 || true
   remember "$key" failed
-  notify alerts "🔴 Update failed: $service" failure \
+  notify alerts "Update failed: $service" failure \
     "Tried" "$new_image" "Reason" "$reason" "Result" "$rollback to $previous" \
     "Logs" "docker logs --tail 50 $container"
   return 1
@@ -247,7 +247,7 @@ main() {
       elif ! seen "$key" pending; then
         echo "Manual update pending for $service: $running_image -> $desired"
         remember "$key" pending
-        notify updates "⚪ Manual update waiting: $service" info \
+        notify updates "Manual update waiting: $service" info \
           "Running" "$running_image" "In git" "$desired${fingerprint:+ (new pins or code)}" \
           "Apply" "make up STACK=$stack SERVICE=$service"
       fi

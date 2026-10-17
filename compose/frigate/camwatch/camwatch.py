@@ -110,7 +110,7 @@ def main():
                 continue
             if key in announced:
                 label = "Frigate" if key == "frigate" else friendly.get(key, key)
-                notify(f"🟢 {label} is back", "success", [("Was dark for", duration(now - since[key]))])
+                notify(f"{label} is back", "success", [("Was dark for", duration(now - since[key]))])
                 log(f"{key} back after {duration(now - since[key])}")
             since.pop(key)
             announced.pop(key, None)
@@ -120,7 +120,7 @@ def main():
             friendly = names() or friendly
             labels = ["Frigate (its API does not answer)" if k == "frigate" else friendly.get(k, k) for k in due]
             reminder = all(k in announced for k in due)
-            title = ("🔴 Still dark: " if reminder else "🔴 Cameras dark: ") + ", ".join(labels)
+            title = ("Still dark: " if reminder else "Cameras dark: ") + ", ".join(labels)
             longest = max(now - since[k] for k in due)
             notify(title, "failure", [("For", duration(longest)), ("Why", diagnose()),
                                 ("Fix", "docs/cameras.md, \"The DVR's address\"")])

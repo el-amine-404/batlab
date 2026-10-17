@@ -89,9 +89,9 @@ install -d -m 750 "$STATE_DIR"
 # a failure reaches the channel even if healthchecks.io is not set to notify.
 if ((${#failures[@]})) && [[ ! -e "$FAILING_FILE" ]]; then
   printf '%s\n' "${failures[@]}" >"$FAILING_FILE"
-  watchdog_notify "🔴 Self-test failing" failure "Failed" "$(printf '%s\n' "${failures[@]}")"
+  watchdog_notify "Self-test failing" failure "Failed" "$(printf '%s\n' "${failures[@]}")"
 elif ((${#failures[@]} == 0)) && [[ -e "$FAILING_FILE" ]]; then
-  watchdog_notify "🟢 Self-test passing again" success "Was failing" "$(<"$FAILING_FILE")"
+  watchdog_notify "Self-test passing again" success "Was failing" "$(<"$FAILING_FILE")"
   rm -f "$FAILING_FILE"
 fi
 

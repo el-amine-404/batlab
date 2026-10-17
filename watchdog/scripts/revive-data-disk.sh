@@ -150,8 +150,7 @@ usb3_peer() {
 back() {
   local how="$1"
   echo "Data disk back: $how"
-  watchdog_notify "🟢 Data disk revived" success \
-    "Mount" "\`$ROOT\`" "How" "$how" "Attempts" "$attempts"
+  watchdog_notify "Data disk revived" success "How" "$how" "Tries" "$attempts"
   attempts=0 last=0 asked=0
   save
 }
@@ -206,10 +205,10 @@ else
 fi
 
 if ((!asked)); then
-  watchdog_notify "🔴 Data disk needs a hand" failure \
-    "Mount" "\`$ROOT\`" \
+  watchdog_notify "Data disk needs a replug" failure \
     "Tried" "clearing the mount, mounting, power-cycling its USB port$([[ "${WATCHDOG_REVIVE_USB3_FALLBACK:-1}" == 1 ]] && echo ", USB 3")" \
-    "Do" "unplug and replug the enclosure (power and USB); it is tried again every ${WATCHDOG_REVIVE_RETRY_MINUTES:-10} min"
+    "Do" "unplug the enclosure's USB and power, wait 10 s, plug both back" \
+    "Next try" "in ${WATCHDOG_REVIVE_RETRY_MINUTES:-10} min, then every ${WATCHDOG_REVIVE_RETRY_MINUTES:-10} min"
   asked=1
   save
 fi

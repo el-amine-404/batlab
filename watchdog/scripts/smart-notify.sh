@@ -27,15 +27,15 @@ fi
 
 case "$failure" in
   EmailTest)
-    title="⚪ SMART test message"
+    title="SMART test message"
     kind=info
     ;;
   Temperature | Usage | SelfTest | ErrorCount | CurrentPendingSector | OfflineUncorrectableSector)
-    title="🟠 SMART warning: $failure"
+    title="SMART warning: $failure"
     kind=warning
     ;;
   *)
-    title="🔴 Disk problem: $failure"
+    title="Disk problem: $failure"
     kind=failure
     ;;
 esac

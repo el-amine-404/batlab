@@ -195,10 +195,10 @@ notify_discord() {
   local webhook="${IMPORT_DISCORD_WEBHOOK:-$(sed -n 's/^DISCORD_WEBHOOK_ALERTS=//p' "$REPO_DIR/compose/.env" 2>/dev/null | tail -n 1)}"
   [[ "$webhook" == http* ]] || return 0
   case "$status" in
-    0) title="🟢 Import of $DRIVE finished" color=3066993 result="${OUTCOME:-done}" ;;
-    2) title="🔴 Import of $DRIVE: verification failed" color=15158332 result="$OUTCOME" ;;
-    130) title="🟠 Import of $DRIVE interrupted" color=15105570 result="re-run the same command to resume" ;;
-    *) title="🔴 Import of $DRIVE failed" color=15158332 result="${FAILURE:-exit $status}" ;;
+    0) title="Import of $DRIVE finished" color=3066993 result="${OUTCOME:-done}" ;;
+    2) title="Import of $DRIVE: verification failed" color=15158332 result="$OUTCOME" ;;
+    130) title="Import of $DRIVE interrupted" color=15105570 result="re-run the same command to resume" ;;
+    *) title="Import of $DRIVE failed" color=15158332 result="${FAILURE:-exit $status}" ;;
   esac
   local elapsed=$((SECONDS - STARTED)) payload
   payload="$(python3 -c '

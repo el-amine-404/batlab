@@ -371,7 +371,7 @@ def notify(webhook: str, problems: list[Problem]) -> None:
         "username": "import audit",
         "avatar_url": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/sonarr.png",
         "embeds": [{
-            "title": "🟠 Imports need a look",
+            "title": "Imports need a look",
             "description": "Wrong or left behind: Sonarr/Radarr → Wanted → Manual Import, mapping each file by its "
                            "name. Duplicate: Activity → Queue → ✕ on the one to remove, remove from client, "
                            "no blocklist.",
