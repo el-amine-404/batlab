@@ -83,12 +83,18 @@ everything; Frigate is the alarm and the index.
   little off. A car is in a spot when the bottom middle of its box is
   inside. Move them in Settings > Masks / Zones if a car is parked where its
   zone does not reach.
-- **carwatch** (`compose/frigate/carwatch`) reads Frigate's events on the
-  broker and posts "Clio 4 left" and "Clio 4 is back" (with how long it was
-  away, or parked, and Frigate's latest frame of the street, the cars boxed)
-  to Apprise's `cameras` channel the moment Frigate sees it. A car that
-  drives into an empty spot has arrived; one parked there that drives out
-  has left. A car that pulls out and parks again is told as both. Frigate
+- **carwatch** (`compose/frigate/carwatch`, in Frigate's image for its
+  OpenCV and ffmpeg) reads Frigate's events on the broker and posts to
+  Apprise's `cameras` channel the moment Frigate sees a car arrive or leave:
+  "Clio 4 left" or "Clio 4 is back", how long it was parked or away, a
+  close-up of the car cut from the 4K stream and Frigate's frame of the
+  street. About 45 s later a second message says which way it went ("went
+  left/right", the side of the picture it was last seen on; "came from" for
+  one arriving) with the clip, 5 s before to 15 s after, re-encoded to
+  1280 px H.264 for Discord. A car that drives into an empty spot has
+  arrived; one parked there that drives out has left; either must move a
+  car length (`CARWATCH_MOVE`), so a box that jumps on a parked car says
+  nothing. A car that pulls out and parks again is told as both. Frigate
   looks for cars only where something moves, so after a restart a parked
   car can stay unseen until someone walks past it: such a car is not
   "back", and it is told when it leaves. Another car parked in a spot is

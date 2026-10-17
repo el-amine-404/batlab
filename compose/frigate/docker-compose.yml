@@ -155,17 +155,17 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Tells Discord, with a picture of the street, when the Clio 4 or the Ford
-  # leaves its spot, and when it is back (carwatch/carwatch.py), from
-  # Frigate's events on the broker.
+  # Tells Discord when the Clio 4 or the Ford leaves its spot, and when it is
+  # back, with a close-up, a picture of the street, which way it went and the
+  # clip (carwatch/carwatch.py), from Frigate's events on the broker.
   carwatch:
-    # The same Python image as camwatch.
-    image: ${IMAGE_CAMWATCH}:${TAG_CAMWATCH}
+    # Frigate's image, already here, for its OpenCV and ffmpeg.
+    image: ${IMAGE_FRIGATE}:${TAG_FRIGATE}
     container_name: carwatch
     restart: unless-stopped
     depends_on:
       - mosquitto
-    command: ["python", "/app/carwatch.py"]
+    entrypoint: ["python3", "/app/carwatch.py"]
     user: "10001:10001"
     volumes:
       - ${CONFIGS_ROOT}/frigate/carwatch/carwatch.py:/app/carwatch.py:ro
@@ -177,21 +177,26 @@ services:
       - PYTHONPATH=/opt/batlab-common
       # The zones of camera_2 in config.yml, and who parks there.
       - CARWATCH_SPOTS=spot_1=Clio 4,spot_2=Ford
+      # How the two sides of the picture are named in "went …".
+      - CARWATCH_WAYS=left=left,right=right
       - CARWATCH_NOTIFY_URL=http://apprise:8000/notify/carwatch
-    # mqtt for the broker; home_server for Frigate's pictures and Apprise.
+    # mqtt for the broker; home_server for Frigate's pictures and clips, and
+    # Apprise.
     networks:
       - home_server
       - mqtt
     healthcheck:
-      test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/heartbeat') > 300)"]
+      test: ["CMD", "python3", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/heartbeat') > 300)"]
       interval: 60s
       timeout: 5s
       start_period: 120s
       retries: 3
-    mem_limit: 64m
+    # A 4K frame and a 4K clip re-encoded, a few times a day.
+    mem_limit: 768m
+    cpus: 3
     read_only: true
     tmpfs:
-      - /tmp
+      - /tmp:size=256m
     cap_drop:
       - ALL
     security_opt:

@@ -64,7 +64,7 @@ end up. The senders, and the name and avatar each shows on Discord, are in
 | `downloads` | musicguard, subtranslate | "Ready to play: Artist – Album", once Navidrome has it; subtitles translated by AI, or replaced by human ones |
 | `download-issues` | musicguard, songdrop, vpnguard, dubkeeper | files quarantined, suspect, flagged or held; songs missing after a download, back, or given up; VPN reconnects; upgrades that lost audio |
 | `requests` | clipseerr | a song or a music video asked for, got, or not found by any service |
-| `cameras` | camwatch, carwatch | a camera dark, and back; the Clio 4 or the Ford left its spot, or is back, with a picture |
+| `cameras` | camwatch, carwatch | a camera dark, and back; the Clio 4 or the Ford left its spot, or is back, with a close-up, the street, the way it went and the clip |
 | `alerts` | Netdata, NetAlertX, watchdog (data disk, self-test, SMART), mediascan, updater (failures) | something is wrong with the machine or the network |
 | `updates` | updater, Diun | a service updated, a manual update waiting, a new image |
 
@@ -214,8 +214,9 @@ the service.
 `compose/frigate/carwatch`. No page.
 
 - **Job**: says when a car leaves its parking spot on the street camera, and
-  when it is back, with a picture of the street.
-- **Alone**: needs Frigate's events on MQTT and a zone per spot.
+  when it is back, with a close-up, the street, which way it went and the
+  clip.
+- **Alone**: needs Frigate's events on MQTT, its API and go2rtc, and a zone per spot.
 - **Plugs in through**: its messages (Apprise, `cameras`).
 
 ### tv-remote: TV remote
