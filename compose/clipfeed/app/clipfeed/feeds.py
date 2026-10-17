@@ -8,16 +8,18 @@ once with YouTube Music (verify.py)."""
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import time
 from contextlib import suppress
+from dataclasses import dataclass, field
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from . import verify
 from .db import Database
-from .sources import Post, Reddit, Refused
+from .sources import Post, Reddit, Refused, domain_of
 
 log = logging.getLogger("clipfeed")
 
@@ -72,27 +74,87 @@ def _feed(row) -> dict:
     }
 
 
-ITEM_SQL = """SELECT p.*, v.verdict, v.kind, v.title AS video_title, v.artist, v.duration, v.published, v.song_id,
-    v.checked_at FROM posts p LEFT JOIN videos v ON v.youtube_id = p.youtube_id"""
+ITEM_SQL = """SELECT e.*, v.verdict, v.kind AS video_kind, v.title AS video_title, v.artist, v.duration,
+    v.published, v.song_id, v.checked_at FROM entries e LEFT JOIN videos v ON v.youtube_id = e.youtube_id"""
 
 
 def _item(row) -> dict:
+    video = None
+    if row["youtube_id"]:
+        video = {
+            "youtube_id": row["youtube_id"],
+            "url": f"https://www.youtube.com/watch?v={row['youtube_id']}",
+            "verdict": row["verdict"] or "unchecked",
+            "kind": row["video_kind"],
+            "title": row["video_title"],
+            "artist": row["artist"],
+            "duration": row["duration"],
+            "published": row["published"],
+            "song_id": row["song_id"],
+            "checked_at": row["checked_at"],
+        }
     return {
-        "id": f"{row['feed']}:{row['youtube_id']}",
+        "id": f"{row['feed']}:{row['post_id']}",
         "feed": row["feed"],
-        "youtube_id": row["youtube_id"],
-        "url": f"https://www.youtube.com/watch?v={row['youtube_id']}",
-        "verdict": row["verdict"] or "unchecked",
-        "kind": row["kind"],
-        "title": row["video_title"],
-        "artist": row["artist"],
-        "duration": row["duration"],
-        "published": row["published"],
-        "song_id": row["song_id"],
-        "checked_at": row["checked_at"],
-        "post": {"id": row["post_id"], "title": row["title"], "url": row["url"], "author": row["author"],
-                 "posted_at": row["posted_at"]},
+        "post_id": row["post_id"],
+        "title": row["title"],
+        "url": row["url"],
+        "author": row["author"],
+        "posted_at": row["posted_at"],
+        "link": {"url": row["link"], "kind": row["kind"], "domain": row["domain"]},
+        "youtube_ids": json.loads(row["youtube_ids"]),
+        "video": video,
     }
+
+
+@dataclass
+class Filters:
+    """What GET …/items narrows to; empty lists mean all."""
+
+    feeds: list[str] = field(default_factory=list)
+    links: list[str] = field(default_factory=list)
+    verdicts: list[str] = field(default_factory=list)
+    domains: list[str] = field(default_factory=list)
+    words: str = ""
+    author: str = ""
+    since: float | None = None
+    until: float | None = None
+    # One item a video: the first post that linked it (posts without a video stay).
+    unique: bool = False
+
+    def sql(self) -> tuple[str, list]:
+        where, params = [], []
+
+        def any_of(column: str, values: list[str]):
+            where.append(f"{column} IN ({','.join('?' * len(values))})")
+            params.extend(values)
+
+        if self.feeds:
+            any_of("e.feed", self.feeds)
+        if self.links:
+            any_of("e.kind", self.links)
+        if self.verdicts:
+            # Only posts with a video have a verdict.
+            any_of("CASE WHEN e.youtube_id IS NULL THEN NULL ELSE COALESCE(v.verdict, 'unchecked') END", self.verdicts)
+        if self.domains:
+            any_of("e.domain", [d.casefold().removeprefix("www.") for d in self.domains])
+        for word in self.words.split():
+            where.append("(e.title LIKE ? ESCAPE '\\' OR v.title LIKE ? ESCAPE '\\' OR v.artist LIKE ? ESCAPE '\\')")
+            like = "%" + re.sub(r"([%_\\])", r"\\\1", word) + "%"
+            params.extend([like, like, like])
+        if self.author:
+            where.append("e.author = ? COLLATE NOCASE")
+            params.append(self.author)
+        if self.since is not None:
+            where.append("e.posted_at >= ?")
+            params.append(self.since)
+        if self.until is not None:
+            where.append("e.posted_at < ?")
+            params.append(self.until)
+        if self.unique:
+            where.append("(e.youtube_id IS NULL OR e.posted_at = (SELECT MIN(f.posted_at) FROM entries f "
+                         "WHERE f.feed = e.feed AND f.youtube_id = e.youtube_id))")
+        return (f" WHERE {' AND '.join(where)}" if where else ""), params
 
 
 class Feeds:
@@ -114,10 +176,11 @@ class Feeds:
         return self._counted(_feed(row))
 
     def _counted(self, feed: dict) -> dict:
-        row = self._db.one("SELECT COUNT(*) AS n, SUM(v.verdict = 'official') AS official, "
-                           "SUM(v.verdict = 'likely') AS likely FROM posts p "
-                           "LEFT JOIN videos v ON v.youtube_id = p.youtube_id WHERE p.feed = ?", (feed["slug"],))
-        return {**feed, "items": row["n"], "official": row["official"] or 0, "likely": row["likely"] or 0}
+        row = self._db.one("SELECT COUNT(*) AS n, COUNT(e.youtube_id) AS videos, SUM(v.verdict = 'official') AS "
+                           "official, SUM(v.verdict = 'likely') AS likely FROM entries e "
+                           "LEFT JOIN videos v ON v.youtube_id = e.youtube_id WHERE e.feed = ?", (feed["slug"],))
+        return {**feed, "items": row["n"], "videos": row["videos"], "official": row["official"] or 0,
+                "likely": row["likely"] or 0}
 
     def create(self, body: FeedIn) -> dict:
         slug = body.slug or _slugify(body.title)
@@ -139,13 +202,13 @@ class Feeds:
                      (body.title, body.target, int(body.enabled), body.poll_minutes, slug))
         if moved:
             # Another subreddit: what the old one found isn't this feed's.
-            self._db.run("DELETE FROM posts WHERE feed = ?", (slug,))
+            self._db.run("DELETE FROM entries WHERE feed = ?", (slug,))
         self._wake.set()
         return self.get(slug)
 
     def delete(self, slug: str) -> None:
         self.get(slug)
-        self._db.run("DELETE FROM posts WHERE feed = ?", (slug,))
+        self._db.run("DELETE FROM entries WHERE feed = ?", (slug,))
         self._db.run("DELETE FROM feeds WHERE slug = ?", (slug,))
 
     def refresh(self, slug: str) -> dict:
@@ -156,20 +219,13 @@ class Feeds:
 
     # ---- what they found --------------------------------------------------------------
 
-    def items(self, slugs: list[str], verdicts: list[str], sort: str, limit: int, offset: int) -> tuple[list[dict], int]:
-        for slug in slugs:
+    def items(self, filters: Filters, sort: str, limit: int, offset: int) -> tuple[list[dict], int]:
+        for slug in filters.feeds:
             self.get(slug)
-        where, params = [], []
-        if slugs:
-            where.append(f"p.feed IN ({','.join('?' * len(slugs))})")
-            params += slugs
-        if verdicts:
-            where.append(f"COALESCE(v.verdict, 'unchecked') IN ({','.join('?' * len(verdicts))})")
-            params += verdicts
-        clause = f" WHERE {' AND '.join(where)}" if where else ""
-        order = ("COALESCE(v.published, date(p.posted_at, 'unixepoch')) DESC, p.posted_at DESC"
-                 if sort == "published" else "p.posted_at DESC")
-        total = self._db.one(f"SELECT COUNT(*) AS n FROM posts p LEFT JOIN videos v ON v.youtube_id = p.youtube_id"
+        clause, params = filters.sql()
+        order = ("COALESCE(v.published, date(e.posted_at, 'unixepoch')) DESC, e.posted_at DESC"
+                 if sort == "published" else "e.posted_at DESC")
+        total = self._db.one(f"SELECT COUNT(*) AS n FROM entries e LEFT JOIN videos v ON v.youtube_id = e.youtube_id"
                              f"{clause}", tuple(params))["n"]
         rows = self._db.all(f"{ITEM_SQL}{clause} ORDER BY {order} LIMIT ? OFFSET ?", (*params, limit, offset))
         return [_item(r) for r in rows], total
@@ -177,15 +233,11 @@ class Feeds:
     def _add(self, slug: str, posts: list[Post]) -> int:
         added, now = 0, time.time()
         for post in posts:
-            for youtube_id in post.videos:
-                added += self._db.run(
-                    "INSERT INTO posts (feed, youtube_id, post_id, title, url, author, posted_at, found_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (feed, youtube_id) DO UPDATE SET "
-                    # The first post that linked it is the one kept.
-                    "post_id = excluded.post_id, title = excluded.title, url = excluded.url, "
-                    "author = excluded.author, posted_at = excluded.posted_at "
-                    "WHERE excluded.posted_at < posts.posted_at",
-                    (slug, youtube_id, post.id, post.title[:300], post.url, post.author, post.posted_at, now))
+            added += self._db.run(
+                "INSERT OR IGNORE INTO entries (feed, post_id, title, url, author, posted_at, link, kind, domain, "
+                "youtube_id, youtube_ids, found_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (slug, post.id, post.title[:300], post.url, post.author, post.posted_at, post.link, post.kind,
+                 domain_of(post.link), post.videos[0] if post.videos else None, json.dumps(post.videos), now))
         return added
 
     # ---- the poller --------------------------------------------------------------------
@@ -218,7 +270,7 @@ class Feeds:
         try:
             if not row["backfilled"]:
                 count = await self._backfill(slug, target)
-                notes.append(f"{count} videos from PullPush's history")
+                notes.append(f"{count} posts from PullPush's history")
             try:
                 posts = await self._reddit.newest(target)
                 notes.append(f"{self._add(slug, posts)} new of Reddit's last {len(posts)} posts")
@@ -252,9 +304,10 @@ class Feeds:
         ones checked under older rules or long ago."""
         now = time.time()
         rows = self._db.all(
-            "SELECT p.youtube_id FROM posts p LEFT JOIN videos v ON v.youtube_id = p.youtube_id "
-            "WHERE v.youtube_id IS NULL OR v.rules < ? OR v.checked_at < CASE v.verdict WHEN 'official' "
-            "THEN ? ELSE ? END GROUP BY p.youtube_id ORDER BY v.youtube_id IS NOT NULL, MAX(p.posted_at) DESC LIMIT ?",
+            "SELECT e.youtube_id FROM entries e LEFT JOIN videos v ON v.youtube_id = e.youtube_id "
+            "WHERE e.youtube_id IS NOT NULL AND (v.youtube_id IS NULL OR v.rules < ? OR v.checked_at < CASE "
+            "v.verdict WHEN 'official' THEN ? ELSE ? END) GROUP BY e.youtube_id "
+            "ORDER BY v.youtube_id IS NOT NULL, MAX(e.posted_at) DESC LIMIT ?",
             (verify.RULES, now - RECHECK_DAYS["official"] * 86400, now - RECHECK_DAYS["other"] * 86400,
              CHECKS_PER_ROUND))
         gate = asyncio.Semaphore(CHECKS_AT_ONCE)

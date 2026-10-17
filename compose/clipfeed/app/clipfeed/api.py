@@ -9,7 +9,7 @@ from typing import Literal
 from xml.sax.saxutils import escape
 
 import httpx
-from fastapi import APIRouter, FastAPI, Query, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
@@ -17,8 +17,8 @@ from pydantic import BaseModel, Field
 from . import VERSION
 from .config import load
 from .db import Database
-from .feeds import Conflict, FeedIn, Feeds, NotFound
-from .sources import Reddit
+from .feeds import Conflict, FeedIn, Feeds, Filters, NotFound
+from .sources import KINDS, Reddit
 
 log = logging.getLogger("clipfeed")
 
@@ -28,15 +28,18 @@ http = httpx.AsyncClient()
 feeds = Feeds(db, Reddit(http, conf.user_agent))
 
 Verdict = Literal["official", "likely", "unofficial", "unavailable", "unchecked"]
+LinkKind = Literal[KINDS]
 
 DESCRIPTION = """\
-What music video communities post, as feeds a program can read: every
-YouTube link a subreddit's posts carry, checked with YouTube Music (is it the
-artist's video, the song, or an upload of a released song?), newest first.
+What communities post, as feeds a program can read: every post of a
+subreddit, newest first, with what it links to; a YouTube video is checked
+with YouTube Music (the artist's video, the song, or an upload of a released
+song?).
 
-Read `GET /api/v1/feeds/{slug}/items?verdict=official` (JSON) or
-`/api/v1/feeds/{slug}/atom` (any feed reader). Make and change feeds with the
-`Feeds` routes. No account and no key: Reddit's public feed, PullPush's
+Everything comes out unless asked otherwise: narrow with the parameters, e.g.
+`GET /api/v1/feeds/{slug}/items?link=youtube&verdict=official&verdict=likely`
+(JSON) or the same on `/atom` (any feed reader). Make and change feeds with
+the `Feeds` routes. No account and no key: Reddit's public feed, PullPush's
 archive, YouTube Music. Errors answer `{"detail": "<sentence>"}`. Times are
 Unix seconds; days are YYYY-MM-DD.
 """
@@ -61,7 +64,8 @@ class Feed(BaseModel):
     link: str
     last: LastPoll | None
     next_at: float | None
-    items: int = Field(description="Videos it found.")
+    items: int = Field(description="Posts it found.")
+    videos: int = Field(description="Of which carry a YouTube video.")
     official: int = Field(description="Of which official (real songs).")
     likely: int = Field(description="Of which likely: official videos of songs YouTube Music doesn't have.")
 
@@ -70,24 +74,20 @@ class FeedList(BaseModel):
     feeds: list[Feed]
 
 
-class Post(BaseModel):
-    id: str
-    title: str
-    url: str
-    author: str | None
-    posted_at: float
+class Link(BaseModel):
+    url: str | None = Field(description="What the post links to; none for a text post.")
+    kind: LinkKind = Field(description="youtube (it carries a YouTube video), reddit_video, image, gallery, "
+                                       "text (no link), other.")
+    domain: str | None
 
 
-class Item(BaseModel):
-    id: str = Field(description='"<feed>:<YouTube id>".')
-    feed: str
+class Video(BaseModel):
     youtube_id: str
     url: str
     verdict: Verdict = Field(description="official: the artist's video, the song, or an upload of a released "
-                                         "song; likely: an upload YouTube Music doesn't know as a song whose title says it is "
-                                         "the official video; unofficial: nothing says it is a released song; "
-                                         "unavailable: gone; "
-                                         "unchecked: not asked yet.")
+                                         "song; likely: an upload YouTube Music doesn't know as a song whose title "
+                                         "says it is the official video; unofficial: nothing says it is a released "
+                                         "song; unavailable: gone; unchecked: not asked yet.")
     kind: Literal["music_video", "song", "upload"] | None = Field(description="What YouTube Music calls it.")
     title: str | None = Field(description="The song's title, as far as YouTube says.")
     artist: str | None
@@ -95,7 +95,19 @@ class Item(BaseModel):
     published: str | None = Field(description="The day YouTube published it.")
     song_id: str | None = Field(description="An upload's song on YouTube Music, when one matched.")
     checked_at: float | None
-    post: Post = Field(description="The first post that linked it.")
+
+
+class Item(BaseModel):
+    id: str = Field(description='"<feed>:<post id>".')
+    feed: str
+    post_id: str
+    title: str = Field(description="The post's title.")
+    url: str = Field(description="The post on Reddit.")
+    author: str | None
+    posted_at: float
+    link: Link
+    youtube_ids: list[str] = Field(description="Every YouTube video it carries; video is the first.")
+    video: Video | None = Field(description="Its YouTube video, checked; none when it has none.")
 
 
 class ItemList(BaseModel):
@@ -173,47 +185,65 @@ def health():
 
 # ---- items -------------------------------------------------------------------------------
 
-def _items(slugs: list[str], verdict: list[Verdict], sort: str, limit: int, offset: int) -> dict:
-    items, total = feeds.items(slugs, list(verdict), sort, limit, offset)
+def filters(
+    link: list[LinkKind] = Query([], description="Only posts linking to these; repeat for several."),
+    verdict: list[Verdict] = Query([], description="Only posts whose video got these (posts without a video "
+                                                    "drop out); repeat for several."),
+    domain: list[str] = Query([], description='Only links to these sites ("youtu.be", "v.redd.it").'),
+    q: str = Query("", max_length=200, description="Words of the post's title, or of its song's title or artist."),
+    author: str = Query("", max_length=40, description="Only this Redditor's posts."),
+    since: float | None = Query(None, description="Posted at or after (Unix seconds)."),
+    until: float | None = Query(None, description="Posted before (Unix seconds)."),
+    unique: bool = Query(False, description="One item a video: the first post that linked it."),
+) -> Filters:
+    """Every filter; left out, everything comes out."""
+    return Filters(links=list(link), verdicts=list(verdict), domains=domain, words=q, author=author, since=since,
+                   until=until, unique=unique)
+
+
+_SORT = Query("posted", description="posted: when the post was made; published: when YouTube published its "
+                                    "video (posts without one by their own day).")
+
+
+@api.get("/items", tags=["Items"], summary="Every feed's posts, newest first", response_model=ItemList,
+         responses=_errors)
+def all_items(found: Filters = Depends(filters), sort: Literal["posted", "published"] = _SORT,
+              feed: list[str] = Query([], description="Only these feeds (slugs)."),
+              limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0)):
+    found.feeds = list(feed)
+    items, total = feeds.items(found, sort, limit, offset)
     return {"items": items, "total": total}
 
 
-_VERDICT = Query([], description="Only these; repeat it for several. Left out: all.")
-_SORT = Query("posted", description="posted: when the post was made; published: when YouTube published the video.")
-
-
-@api.get("/items", tags=["Items"], summary="Every feed's items, newest first", response_model=ItemList,
+@api.get("/feeds/{slug}/items", tags=["Items"], summary="One feed's posts, newest first", response_model=ItemList,
          responses=_errors)
-def all_items(verdict: list[Verdict] = _VERDICT, sort: Literal["posted", "published"] = _SORT,
-              feed: list[str] = Query([], description="Only these feeds (slugs)."),
-              limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0)):
-    return _items(feed, verdict, sort, limit, offset)
-
-
-@api.get("/feeds/{slug}/items", tags=["Items"], summary="One feed's items, newest first", response_model=ItemList,
-         responses=_errors)
-def feed_items(slug: str, verdict: list[Verdict] = _VERDICT, sort: Literal["posted", "published"] = _SORT,
+def feed_items(slug: str, found: Filters = Depends(filters), sort: Literal["posted", "published"] = _SORT,
                limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0)):
-    return _items([slug], verdict, sort, limit, offset)
+    found.feeds = [slug]
+    items, total = feeds.items(found, sort, limit, offset)
+    return {"items": items, "total": total}
 
 
 def _when(seconds: float) -> str:
     return datetime.fromtimestamp(seconds, timezone.utc).isoformat(timespec="seconds")
 
 
-@api.get("/feeds/{slug}/atom", tags=["Items"], summary="One feed as Atom, for any feed reader (official and likely)",
+@api.get("/feeds/{slug}/atom", tags=["Items"], summary="One feed as Atom, for any feed reader (same filters)",
          response_class=Response, responses={200: {"content": {"application/atom+xml": {}}}, **_errors})
-def feed_atom(slug: str, request: Request, limit: int = Query(50, ge=1, le=200)):
+def feed_atom(slug: str, request: Request, found: Filters = Depends(filters), limit: int = Query(50, ge=1, le=200)):
     feed = feeds.get(slug)
-    items, _total = feeds.items([slug], ["official", "likely"], "posted", limit, 0)
-    updated = max((i["post"]["posted_at"] for i in items), default=time.time())
+    found.feeds = [slug]
+    items, _total = feeds.items(found, "posted", limit, 0)
+    updated = max((i["posted_at"] for i in items), default=time.time())
     entries = []
     for item in items:
-        name = f"{item['artist']} – {item['title']}" if item["artist"] and item["title"] else item["post"]["title"]
+        video = item["video"] or {}
+        name = f"{video['artist']} – {video['title']}" if video.get("artist") and video.get("title") else item["title"]
+        href = video.get("url") or item["link"]["url"] or item["url"]
         entries.append(
             f"<entry><id>urn:clipfeed:{escape(item['id'])}</id><title>{escape(name)}</title>"
-            f"<link href=\"{escape(item['url'])}\"/><updated>{_when(item['post']['posted_at'])}</updated>"
-            f"<summary>{escape(item['post']['title'])} (r/{escape(feed['target'])})</summary></entry>")
+            f"<link href=\"{escape(href)}\"/><updated>{_when(item['posted_at'])}</updated>"
+            f"<summary>{escape(item['title'])} (r/{escape(feed['target'])}, {item['link']['kind']})</summary></entry>")
     body = (f'<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom">'
             f"<id>urn:clipfeed:{escape(slug)}</id><title>{escape(feed['title'])}</title>"
             f'<link rel="self" href="{escape(str(request.url))}"/><updated>{_when(updated)}</updated>'

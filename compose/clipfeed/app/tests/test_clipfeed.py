@@ -12,8 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from clipfeed import verify  # noqa: E402
 from clipfeed.db import Database  # noqa: E402
-from clipfeed.feeds import FeedIn, Feeds  # noqa: E402
-from clipfeed.sources import Post, Refused, parse_atom, parse_pullpush, youtube_ids  # noqa: E402
+from clipfeed.feeds import FeedIn, Feeds, Filters  # noqa: E402
+from clipfeed.sources import Post, Refused, link_kind, parse_atom, parse_pullpush, youtube_ids  # noqa: E402
 
 ATOM = """<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom">
 <entry><author><name>/u/someone</name></author><content type="html">&lt;a href=&quot;https://youtu.be/fLCd0tXSLZU?si=x&quot;&gt;[link]&lt;/a&gt;</content>
@@ -21,6 +21,8 @@ ATOM = """<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2
 <title>Ellize - Mystika - Official Music Video</title></entry>
 <entry><content type="html">&lt;a href=&quot;https://v.redd.it/x&quot;&gt;[link]&lt;/a&gt;</content><id>t3_def</id>
 <link href="https://www.reddit.com/r/X/comments/def/t/"/><published>2026-10-17T06:00:00+00:00</published><title>M</title></entry>
+<entry><content type="html">&lt;a href=&quot;https://www.reddit.com/r/X/comments/ghi/t/&quot;&gt;[link]&lt;/a&gt;</content><id>t3_ghi</id>
+<link href="https://www.reddit.com/r/X/comments/ghi/t/"/><published>2026-10-17T05:00:00+00:00</published><title>Talk</title></entry>
 </feed>"""
 
 
@@ -37,8 +39,14 @@ class Links(unittest.TestCase):
 class Sources(unittest.TestCase):
     def test_reddit_atom(self):
         posts = parse_atom(ATOM)
-        self.assertEqual([(p.id, p.author, p.videos) for p in posts],
-                         [("abc", "someone", ["fLCd0tXSLZU"]), ("def", None, [])])
+        self.assertEqual([(p.id, p.author, p.videos, p.kind) for p in posts],
+                         [("abc", "someone", ["fLCd0tXSLZU"], "youtube"), ("def", None, [], "reddit_video"),
+                          ("ghi", None, [], "text")])
+
+    def test_link_kinds(self):
+        self.assertEqual([link_kind(url, []) for url in ("https://i.redd.it/a.jpeg", "https://www.reddit.com/gallery/x",
+                                                         "https://example.com/a.png", "https://soundcloud.com/x", None)],
+                         ["image", "gallery", "image", "other", "text"])
 
     def test_pullpush(self):
         posts = parse_pullpush({"data": [{"id": "abc", "title": "A &amp; B", "url": "https://youtu.be/fLCd0tXSLZU",
@@ -81,9 +89,10 @@ class FakeReddit:
         return self.pages.pop(0) if self.pages else []
 
 
-def _post(post_id, posted_at, *videos):
+def _post(post_id, posted_at, *videos, link=None):
     return Post(id=post_id, title=post_id, url=f"https://www.reddit.com/{post_id}", author=None,
-                posted_at=posted_at, videos=list(videos))
+                posted_at=posted_at, videos=list(videos),
+                link=link or (f"https://youtu.be/{videos[0]}" if videos else None))
 
 
 class FeedTests(unittest.TestCase):
@@ -101,15 +110,23 @@ class FeedTests(unittest.TestCase):
     def poll(self):
         asyncio.run(self.feeds.poll(self.db.one("SELECT * FROM feeds")))
 
-    def test_history_then_news_one_row_a_video(self):
-        self.reddit.pages = [[_post("old", 100, "aaaaaaaaaaa"), _post("older", 50, "bbbbbbbbbbb")]]
+    def ids(self, **filters):
+        items, total = self.feeds.items(Filters(**filters), "posted", 10, 0)
+        self.assertEqual(total, len(items))
+        return [i["post_id"] for i in items]
+
+    def test_everything_unless_filtered(self):
+        self.reddit.pages = [[_post("old", 100, "aaaaaaaaaaa"), _post("clip", 60, link="https://v.redd.it/x"),
+                              _post("talk", 50)]]
         self.reddit.newest_posts = [_post("new", 200, "ccccccccccc"), _post("repost", 300, "aaaaaaaaaaa")]
         self.poll()
-        items, total = self.feeds.items(["sexy-music-videos"], [], "posted", 10, 0)
-        self.assertEqual(total, 3)
-        # The first post that linked a video is the one kept.
-        self.assertEqual([(i["youtube_id"], i["post"]["id"]) for i in items],
-                         [("ccccccccccc", "new"), ("aaaaaaaaaaa", "old"), ("bbbbbbbbbbb", "older")])
+        self.assertEqual(self.ids(), ["repost", "new", "old", "clip", "talk"])
+        self.assertEqual(self.ids(links=["reddit_video", "text"]), ["clip", "talk"])
+        self.assertEqual(self.ids(domains=["v.redd.it"]), ["clip"])
+        # One item a video: the first post that linked it.
+        self.assertEqual(self.ids(links=["youtube"], unique=True), ["new", "old"])
+        self.assertEqual(self.ids(words="talk"), ["talk"])
+        self.assertEqual(self.ids(since=100, until=300), ["new", "old"])
         self.assertEqual(self.feeds.get("sexy-music-videos")["target"], "SexyMusicVideos")
 
     def test_pullpush_stands_in_when_reddit_refuses(self):
@@ -130,8 +147,10 @@ class FeedTests(unittest.TestCase):
             self.assertEqual(asyncio.run(self.feeds.check_videos()), 2)
             # Checked under today's rules: nothing to do.
             self.assertEqual(asyncio.run(self.feeds.check_videos()), 0)
-        items, total = self.feeds.items([], ["official"], "published", 10, 0)
-        self.assertEqual((total, items[0]["artist"], items[0]["published"]), (1, "Artist", "2026-10-01"))
+        items, total = self.feeds.items(Filters(verdicts=["official"]), "published", 10, 0)
+        self.assertEqual((total, items[0]["video"]["artist"], items[0]["video"]["published"]),
+                         (1, "Artist", "2026-10-01"))
+        self.assertEqual(self.ids(verdicts=["unofficial", "unchecked"]), ["b"])
 
 
 if __name__ == "__main__":

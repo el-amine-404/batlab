@@ -159,15 +159,15 @@ the service.
 
 `compose/clipfeed`, `clipfeed.homelab.lan`. API reference: `/api/docs`.
 
-- **Job**: what subreddits post, as feeds: every YouTube link, checked to be
-  a real song (YouTube Music), newest first.
+- **Job**: what subreddits post, as feeds: every post, newest first, with
+  what it links to; YouTube videos checked to be real songs (YouTube Music).
 - **Alone**: needs nothing else; Reddit, PullPush and YouTube Music without
   a key.
 - **Plugs in through**: its API (`/api/v1`: items as JSON, feeds to make and
   change) and Atom feeds. clipseerr's Hot category reads it.
 - **Owns**: `$VOLUMES_ROOT/clipfeed` (one SQLite database).
-- **Not its job**: downloading, or deciding what to show (its readers filter
-  by verdict).
+- **Not its job**: downloading, or deciding what to show: it answers
+  everything, and its readers filter (link kind, verdict, domain, words…).
 
 ### musicguard: inbox → checked library
 

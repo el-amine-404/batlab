@@ -254,24 +254,25 @@ class Catalog:
 
     async def _feed(self, url: str) -> list[dict]:
         """A feed's videos: a clipfeed items URL (or any app answering
-        {"items": [{"youtube_id", "title", "artist", "published", "duration",
-        "verdict"}]}); the real songs only (official or likely)."""
+        {"items": [{"title", "video": {"youtube_id", "verdict", "title",
+        "artist", "published", "duration"}}]}); the real songs only (official
+        or likely), whatever else the feed holds."""
         response = await self._http.get(url, timeout=httpx.Timeout(15.0, connect=5.0))
         response.raise_for_status()
         videos = []
         for item in (response.json() or {}).get("items") or []:
-            youtube_id = item.get("youtube_id")
+            video = item.get("video") or {}
+            youtube_id = video.get("youtube_id")
             if not youtube_id or not re.fullmatch(r"[\w-]{11}", youtube_id):
                 continue
-            if item.get("verdict", "official") not in ("official", "likely"):
+            if video.get("verdict") not in ("official", "likely"):
                 continue
-            artist = item.get("artist") or "Unknown artist"
-            title = item.get("title") or (item.get("post") or {}).get("title") or ""
-            title, credit = match.clean(title, artist)
+            artist = video.get("artist") or "Unknown artist"
+            title, credit = match.clean(video.get("title") or item.get("title") or "", artist)
             videos.append(Video(id=f"yt:{youtube_id}", source="youtube", youtube_id=youtube_id, title=title,
                                 artist=credit or artist, artists=[ArtistRef(name=n) for n in _credit_names(credit or artist)],
-                                thumbnail=youtube.thumbnail(youtube_id), duration=item.get("duration"),
-                                released=item.get("published"), official=True).model_dump())
+                                thumbnail=youtube.thumbnail(youtube_id), duration=video.get("duration"),
+                                released=video.get("published"), official=True).model_dump())
         return videos
 
     async def _date(self, items: list[dict]) -> None:

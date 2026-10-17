@@ -558,17 +558,19 @@ which source fails; a newer ytmusicapi (Renovate) is usually the fix.
 ### clipfeed (subreddits as feeds)
 
 `compose/clipfeed`, `clipfeed.homelab.lan` (its API reference opens there).
-It turns a community's posts into a feed a program can read: every YouTube
-link a subreddit's posts carry, checked with YouTube Music, newest first.
-clipseerr's Hot category reads `r/SexyMusicVideos` from it; any app can.
+It turns a community's posts into a feed a program can read: every post of a
+subreddit, newest first, with what it links to (`link.kind`: youtube,
+reddit_video, image, gallery, text, other); a YouTube video is checked with
+YouTube Music. It keeps and answers everything; its readers choose with
+parameters. clipseerr's Hot category reads `r/SexyMusicVideos`' real songs
+from it; any app can.
 
 - **Reading.** Every feed is read every 30 min (`poll_minutes`): Reddit's own
   Atom feed of the newest 100 posts (Reddit refuses its JSON without a login,
   and answers 429 to an address that asks too often, so calls are 10 s apart,
   and a refused feed waits longer before the next try), and PullPush's
   archive when Reddit refuses. A new feed first takes its last 500 posts from
-  PullPush (a few days behind Reddit). A video posted twice keeps its first
-  post.
+  PullPush (a few days behind Reddit).
 - **Checking.** Each video once, with YouTube Music: *official* when it is the
   artist's video or the song, or an upload of a song YouTube Music has under
   the same title and artist (`song_id`); *likely* when YouTube Music doesn't
@@ -576,11 +578,18 @@ clipseerr's Hot category reads `r/SexyMusicVideos` from it; any app can.
   is the official video and not a cover, lyric video, reaction, live take or
   freestyle; *unofficial* otherwise; *unavailable* when gone. Verdicts are
   checked again after 7 days (30 for official ones), and all of them when the
-  rules change (`verify.RULES`). On r/SexyMusicVideos' first 496 videos: 415
-  official, 19 likely, 13 unofficial, 49 gone.
-- **API.** `GET /api/v1/feeds/{slug}/items?verdict=official&verdict=likely`
-  (`sort=posted` or `published`, `limit`, `offset`), `GET /api/v1/items` for
-  every feed, `GET /api/v1/feeds/{slug}/atom` for a feed reader. Feeds are
+  rules change (`verify.RULES`). On r/SexyMusicVideos' first 547 posts: 512
+  with a YouTube video (424 official, 19 likely), 16 Reddit videos, 16 text
+  posts, a few images and links elsewhere.
+- **API.** `GET /api/v1/feeds/{slug}/items` answers every post; the
+  parameters narrow it, and repeat for several values: `link` (the kinds
+  above), `verdict` (only posts with a video), `domain` (`youtu.be`,
+  `v.redd.it`), `q` (words of the title, the song or the artist), `author`,
+  `since` and `until` (Unix seconds), `unique=true` (one item a video: its
+  first post), `sort=posted|published`, `limit`, `offset`. Hot reads
+  `?link=youtube&verdict=official&verdict=likely&unique=true`.
+  `GET /api/v1/items` is every feed at once (`feed=` to choose), and
+  `GET /api/v1/feeds/{slug}/atom` the same for a feed reader. Feeds are
   made and changed with `POST/PUT/DELETE /api/v1/feeds`, read now with
   `POST /api/v1/feeds/{slug}/refresh`; `CLIPFEED_FEEDS`
   (`slug=reddit:Subreddit,…`) makes them on the first start only.

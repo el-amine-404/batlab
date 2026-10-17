@@ -15,6 +15,7 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -23,6 +24,32 @@ SPACING = 10.0
 ATOM = "{http://www.w3.org/2005/Atom}"
 # A video's id in any link to it; Shorts are clips, not music videos.
 YOUTUBE = re.compile(r"(?:youtube\.com/(?:watch\?(?:[^\"'\s<>]*?&(?:amp;)?)?v=|embed/|live/)|youtu\.be/)([\w-]{11})(?![\w-])")
+
+
+# What a post links to (Post.kind), for readers to filter on.
+KINDS = ("youtube", "reddit_video", "image", "gallery", "text", "other")
+_IMAGE = re.compile(r"(?i)\.(?:jpe?g|png|gif|gifv|webp)(?:\?|$)")
+_ANCHOR = re.compile(r'<a href="([^"]+)">\[link\]</a>')
+
+
+def link_kind(link: str | None, videos: list[str]) -> str:
+    """youtube when the post carries a YouTube video, else what its link is."""
+    if videos:
+        return "youtube"
+    if not link:
+        return "text"
+    host = urlsplit(link).netloc.casefold().removeprefix("www.")
+    if host == "v.redd.it":
+        return "reddit_video"
+    if host in ("i.redd.it", "i.imgur.com", "preview.redd.it") or _IMAGE.search(link):
+        return "image"
+    if host.endswith("reddit.com") and "/gallery/" in link:
+        return "gallery"
+    return "other"
+
+
+def domain_of(link: str | None) -> str | None:
+    return urlsplit(link).netloc.casefold().removeprefix("www.") or None if link else None
 
 
 class Refused(Exception):
@@ -41,6 +68,12 @@ class Post:
     author: str | None
     posted_at: float
     videos: list[str] = field(default_factory=list)
+    # What it links to; None for a text post.
+    link: str | None = None
+
+    @property
+    def kind(self) -> str:
+        return link_kind(self.link, self.videos)
 
 
 def youtube_ids(text: str) -> list[str]:
@@ -66,9 +99,14 @@ def parse_atom(body: str) -> list[Post]:
             continue
         author = entry.findtext(f"{ATOM}author/{ATOM}name")
         content = entry.findtext(f"{ATOM}content") or ""
+        permalink = link.get("href", "")
+        # "[link]" is what the post links to; a text post's links to itself.
+        target = _ANCHOR.search(content)
+        target = html.unescape(target.group(1)) if target else None
         posts.append(Post(id=post_id, title=html.unescape(entry.findtext(f"{ATOM}title") or "").strip(),
-                          url=link.get("href", ""), author=(author or "").removeprefix("/u/") or None,
-                          posted_at=_iso(published), videos=youtube_ids(content)))
+                          url=permalink, author=(author or "").removeprefix("/u/") or None,
+                          posted_at=_iso(published), videos=youtube_ids(content),
+                          link=None if not target or target.rstrip("/") == permalink.rstrip("/") else target))
     return posts
 
 
@@ -79,9 +117,11 @@ def parse_pullpush(data: dict) -> list[Post]:
             continue
         links = " ".join(str(item.get(key) or "") for key in ("url", "url_overridden_by_dest", "selftext"))
         permalink = item.get("permalink") or f"/comments/{item['id']}/"
+        target = item.get("url_overridden_by_dest") or item.get("url")
         posts.append(Post(id=item["id"], title=html.unescape(item.get("title") or "").strip(),
                           url=f"https://www.reddit.com{permalink}", author=item.get("author"),
-                          posted_at=float(item["created_utc"]), videos=youtube_ids(links)))
+                          posted_at=float(item["created_utc"]), videos=youtube_ids(links),
+                          link=None if item.get("is_self") or not target or "/comments/" in target else target))
     return posts
 
 

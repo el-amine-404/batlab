@@ -128,10 +128,13 @@ class HotFeeds(unittest.TestCase):
         from app.catalog.service import Catalog
 
         body = {"items": [
-            {"youtube_id": "fLCd0tXSLZU", "verdict": "likely", "title": "Mystika", "artist": "Ellize",
-             "published": "2026-10-16", "duration": 180},
-            {"youtube_id": "bbbbbbbbbbb", "verdict": "unofficial", "title": "Crush (Cover)", "artist": "Fan"},
-            {"youtube_id": "not-an-id", "verdict": "official"}]}
+            {"title": "Ellize - Mystika - Official Music Video",
+             "video": {"youtube_id": "fLCd0tXSLZU", "verdict": "likely", "title": "Mystika", "artist": "Ellize",
+                       "published": "2026-10-16", "duration": 180}},
+            {"title": "Crush", "video": {"youtube_id": "bbbbbbbbbbb", "verdict": "unofficial", "title": "Crush (Cover)",
+                                         "artist": "Fan"}},
+            {"title": "A clip", "video": None},
+            {"title": "x", "video": {"youtube_id": "not-an-id", "verdict": "official"}}]}
         transport = httpx.MockTransport(lambda request: httpx.Response(200, json=body))
         with tempfile.TemporaryDirectory() as folder:
             db = Database(Path(folder) / "t.db")
