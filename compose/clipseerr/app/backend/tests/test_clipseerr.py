@@ -84,7 +84,7 @@ class AurralFeed(unittest.TestCase):
 
     def test_states(self):
         self.assertEqual(from_activity(self.entry("pending", "Queued")).state, "sent")
-        self.assertEqual(from_activity(self.entry("processing", "Searching")).message, "Searching from Soulseek.")
+        self.assertEqual(from_activity(self.entry("processing", "Searching")).message, "Searching Soulseek.")
         self.assertEqual(from_activity(self.entry("processing", "Downloading")).state, "downloading")
         self.assertEqual(from_activity(self.entry("blocked", "Review")).state, "sent")
         failed = from_activity(self.entry("failed", "Failed", subtitle="No match on Soulseek"))

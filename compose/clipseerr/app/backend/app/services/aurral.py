@@ -23,7 +23,8 @@ def from_activity(entry: dict) -> Update:
     """Where a track job is, from its entry in Aurral's activity feed."""
     status, label = entry.get("status"), entry.get("statusLabel") or ""
     source = entry.get("source")
-    via = f" from {'Soulseek' if source == 'slskd' else source}" if source else ""
+    where = ("Soulseek" if source == "slskd" else source) if source else ""
+    via = f" from {where}" if where else ""
     if status == "completed":
         return Update("completed", "Already had it; Aurral reused the file." if label == "Reused"
                       else f"Downloaded by Aurral{via}.", quality=_file_kind(entry.get("sourceFilename")))
@@ -34,7 +35,7 @@ def from_activity(entry: dict) -> Update:
     if label in ("Downloading", "Moving"):
         return Update("downloading", f"{label}{via}.")
     if status == "processing":
-        return Update("sent", f"Searching{via}.")
+        return Update("sent", f"Searching {where}." if where else "Searching.")
     return Update("sent", "Waiting in Aurral's queue.")
 
 

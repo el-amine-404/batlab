@@ -24,6 +24,11 @@ class Metube(ServiceType):
         Field("quality", "Quality", "select", default="best",
               choices=tuple(Choice(v, l) for v, l in (("best", "Best"), ("2160", "2160p"), ("1440", "1440p"),
                                                        ("1080", "1080p"), ("720", "720p")))),
+        Field("codec", "Video codec", "select", default="auto",
+              help="Auto takes YouTube's best (often AV1, up to 4K). H.264 plays on every TV and phone without "
+                   "Jellyfin converting it, but YouTube has it up to 1080p only.",
+              choices=(Choice("auto", "Auto (best quality)"), Choice("h264", "H.264 (plays everywhere)"),
+                       Choice("h265", "H.265 / HEVC"), Choice("vp9", "VP9"), Choice("av1", "AV1"))),
         Field("format", "Format", "select", default="mp4",
               help="MP4 plays everywhere, Jellyfin included; Auto keeps what YouTube sends (often WebM).",
               choices=(Choice("mp4", "MP4"), Choice("any", "Auto"))),
@@ -43,6 +48,8 @@ class Metube(ServiceType):
         body = {"url": url, "download_type": "audio" if audio else "video", "auto_start": True,
                 "quality": "best" if audio else config.get("quality", "best"),
                 "format": "m4a" if audio else config.get("format", "mp4")}
+        if not audio:
+            body["codec"] = config.get("codec", "auto")
         if config.get("folder"):
             body["folder"] = config["folder"]
         found = (await outbound.call(ctx.http, "POST", f"{config['base_url']}/add", json=body)).json()
