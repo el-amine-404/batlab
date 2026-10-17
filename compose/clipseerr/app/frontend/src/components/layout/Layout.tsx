@@ -1,6 +1,6 @@
 import { Menu } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
-import { Link, Outlet, useLocation } from "react-router";
+import { Link, Outlet, ScrollRestoration, useLocation } from "react-router";
 import { Toaster } from "sonner";
 
 import { Logo } from "@/components/Logo";
@@ -16,10 +16,7 @@ export function Layout() {
   const { pathname } = useLocation();
   const settings = pathname.startsWith("/settings");
 
-  useEffect(() => {
-    setOpen(false);
-    window.scrollTo(0, 0);
-  }, [pathname]);
+  useEffect(() => setOpen(false), [pathname]);
 
   return (
     <>
@@ -62,6 +59,8 @@ export function Layout() {
         </main>
       </div>
       <Toaster theme="dark" position="bottom-right" richColors closeButton />
+      {/* Back finds a long list where it was left (its pages are cached); a new page opens at the top. */}
+      <ScrollRestoration />
     </>
   );
 }

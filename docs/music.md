@@ -483,10 +483,13 @@ Jellyfin play. Its API reference is at `/api/docs` on the service.
   in Settings, General, its Trending 20, daily top and top 100 video charts,
   and Apple Music's top music videos (newest first in "Just released").
   Beside them, *Latest releases* (also its own page, Releases): the last 30
-  days and what is about to come out, by day, from YouTube's new videos (each
-  dated by YouTube) and every Apple chart. Dates read "16 Oct 2026 ·
+  days and what is about to come out, by day, from everything clipseerr
+  reads: YouTube Music's "New music videos" page (about 90 a country), Hot
+  (below) and every Apple chart, each video dated. No free source lists every
+  release, so a video none of them carries is missing. Dates read "16 Oct 2026 ·
   yesterday". Genres are YouTube's genre charts (only some countries have
-  them: the US has eight), about 35 of Apple's, and *Hot*, newest first:
+  them: the US has eight), about 35 of Apple's, and *Hot* (sexy, twerk and
+  uncensored music videos), newest first:
   the real songs clipfeed found on r/SexyMusicVideos (below) and the official
   videos of YouTube searches (twerk, sexy, uncensored… by default), both set
   in Settings, General. Search finds videos and artists. An artist's page
@@ -494,7 +497,10 @@ Jellyfin play. Its API reference is at `/api/docs` on the service.
   first. A video's page lists its other versions: the clean or explicit cut,
   the official video, remixes, live takes, as videos and as songs, each
   requestable. An Apple video YouTube doesn't have yet says when it comes out
-  and links to Apple Music. No account and no key: ytmusicapi
+  and links to Apple Music. Long lists (a shelf, a genre, Hot, Releases)
+  come 48 at a time (`limit`, `offset`, `total` on the API): the next page
+  loads about two screens before the end, and Back finds the list where it
+  was left. An artist's videos come at once and are drawn 48 at a time. No account and no key: ytmusicapi
   (pinned in `compose/versions.env`, followed by Renovate) and Apple's public
   feeds. Answers are kept in its database and refreshed in the background
   (the front page every 20 min), so a page opens from the cache in a few ms.

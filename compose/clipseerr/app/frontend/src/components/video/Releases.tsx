@@ -58,8 +58,9 @@ function Row({ video }: { video: Video }) {
 }
 
 /** Discover's right column: the newest releases, by day, as a list that scrolls on its own. */
-export function ReleaseRail({ items, isPending, limit = 60, className }: {
+export function ReleaseRail({ items, total, isPending, limit = 60, className }: {
   items?: Video[];
+  total?: number;
   isPending: boolean;
   limit?: number;
   className?: string;
@@ -72,7 +73,7 @@ export function ReleaseRail({ items, isPending, limit = 60, className }: {
           <CalendarClock className="size-4 text-rose-300" /> Latest releases
         </h2>
         <Link to="/releases" className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-rose-300 hover:bg-accent">
-          All {items?.length ? items.length : ""} <ArrowRight className="size-3" />
+          All {total || ""} <ArrowRight className="size-3" />
         </Link>
       </div>
       <div className="rail min-h-0 flex-1 overflow-y-auto px-2 py-2">

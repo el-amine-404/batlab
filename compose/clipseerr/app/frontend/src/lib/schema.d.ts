@@ -28,7 +28,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** One shelf, all of it; "releases": what came out lately and what is coming, newest first */
+        /** One shelf, a page at a time; "releases": what came out lately and what is coming, newest first */
         get: operations["shelf_api_v1_shelves__shelf_id__get"];
         put?: never;
         post?: never;
@@ -62,7 +62,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The videos of a genre */
+        /** The videos of a genre, a page at a time */
         get: operations["category_api_v1_categories__category_id__get"];
         put?: never;
         post?: never;
@@ -1445,7 +1445,12 @@ export interface operations {
     };
     shelf_api_v1_shelves__shelf_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Videos a page. */
+                limit?: number;
+                /** @description Videos to skip: the next page starts at offset + limit, until total. */
+                offset?: number;
+            };
             header?: never;
             path: {
                 shelf_id: string;
@@ -1532,7 +1537,12 @@ export interface operations {
     };
     category_api_v1_categories__category_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Videos a page. */
+                limit?: number;
+                /** @description Videos to skip: the next page starts at offset + limit, until total. */
+                offset?: number;
+            };
             header?: never;
             path: {
                 category_id: string;

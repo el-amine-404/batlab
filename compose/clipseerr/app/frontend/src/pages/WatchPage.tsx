@@ -15,9 +15,9 @@ import { ago, clock, cn, day, upcoming } from "@/lib/utils";
 /** The video as a list already showed it: the page shows that at once, while its details load. */
 function listed(id: string): Video | undefined {
   for (const query of queryClient.getQueryCache().getAll()) {
-    const data = query.state.data as { shelves?: Shelf[]; items?: Video[]; videos?: Video[] } | undefined;
+    const data = query.state.data as { shelves?: Shelf[]; items?: Video[]; videos?: Video[]; pages?: Shelf[] } | undefined;
     if (!data || typeof data !== "object") continue;
-    const lists = [...(data.shelves?.map((s) => s.items) ?? []), data.items, data.videos];
+    const lists = [...(data.shelves?.map((s) => s.items) ?? []), ...(data.pages?.map((p) => p.items) ?? []), data.items, data.videos];
     for (const list of lists) {
       const found = Array.isArray(list) ? list.find((v) => v?.id === id) : undefined;
       if (found) return found;

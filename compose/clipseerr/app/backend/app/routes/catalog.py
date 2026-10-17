@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, Query
 
 from .. import schemas
@@ -13,6 +15,20 @@ def _clean(items: list) -> list:
     return [v for v in items if not v.explicit] if settings()["hide_explicit"] else items
 
 
+def _page(shelf: Shelf, limit: int, offset: int, source: str | None = None) -> Shelf:
+    """One page of a shelf; total counts all of it (after _clean, and of one
+    source when asked)."""
+    items = [v for v in _clean(shelf.items) if not source or v.source == source]
+    shelf.total = len(items)
+    shelf.items = items[offset:offset + limit]
+    return shelf
+
+
+_LIMIT = Query(48, ge=1, le=500, description="Videos a page.")
+_OFFSET = Query(0, ge=0, description="Videos to skip: the next page starts at offset + limit, until total.")
+_SOURCE = Query(None, description="Only the videos from YouTube, or from Apple Music.")
+
+
 @router.get("/home", summary="The front page: the newest videos and the charts, each with its first items",
             response_model=schemas.Home, responses=_404)
 async def home():
@@ -22,12 +38,11 @@ async def home():
     return {"shelves": shelves}
 
 
-@router.get("/shelves/{shelf_id}", summary="One shelf, all of it; \"releases\": what came out lately and "
-            "what is coming, newest first", response_model=Shelf, responses=_404)
-async def shelf(shelf_id: str):
-    found = await catalog.shelf(shelf_id)
-    found.items = _clean(found.items)
-    return found
+@router.get("/shelves/{shelf_id}", summary="One shelf, a page at a time; \"releases\": what came out lately "
+            "and what is coming, newest first", response_model=Shelf, responses=_404)
+async def shelf(shelf_id: str, limit: int = _LIMIT, offset: int = _OFFSET,
+                source: Literal["youtube", "apple"] | None = _SOURCE):
+    return _page(await catalog.shelf(shelf_id), limit, offset, source)
 
 
 @router.get("/categories", summary="Genres to browse, by source", response_model=list[CategoryGroup],
@@ -36,11 +51,11 @@ async def categories():
     return await catalog.categories()
 
 
-@router.get("/categories/{category_id}", summary="The videos of a genre", response_model=Shelf, responses=_404)
-async def category(category_id: str):
-    found = await catalog.category(category_id)
-    found.items = _clean(found.items)
-    return found
+@router.get("/categories/{category_id}", summary="The videos of a genre, a page at a time", response_model=Shelf,
+            responses=_404)
+async def category(category_id: str, limit: int = _LIMIT, offset: int = _OFFSET,
+                   source: Literal["youtube", "apple"] | None = _SOURCE):
+    return _page(await catalog.category(category_id), limit, offset, source)
 
 
 @router.get("/search", summary="Videos and artists by name", response_model=SearchResults, responses=_404)

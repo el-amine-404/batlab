@@ -72,14 +72,20 @@ const json = (method: string, body: unknown): RequestInit => ({ method, body: JS
 const query = (params: Record<string, string | number>) =>
   new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString();
 
+/** Videos a page of a shelf or a genre: two or three screens of cards. */
+export const PAGE = 48;
+export type Page = { limit?: number; offset?: number; source?: "youtube" | "apple" };
+
 /** Services and notifications have the same routes. */
 export type Family = "services" | "notifications";
 
 export const api = {
   home: (signal?: AbortSignal) => request<{ shelves: Shelf[] }>("/home", { signal }),
-  shelf: (id: string, signal?: AbortSignal) => request<Shelf>(`/shelves/${encodeURIComponent(id)}`, { signal }),
+  shelf: (id: string, page: Page = {}, signal?: AbortSignal) =>
+    request<Shelf>(`/shelves/${encodeURIComponent(id)}?${query({ limit: PAGE, offset: 0, ...page })}`, { signal }),
   categories: (signal?: AbortSignal) => request<CategoryGroup[]>("/categories", { signal }),
-  category: (id: string, signal?: AbortSignal) => request<Shelf>(`/categories/${encodeURIComponent(id)}`, { signal }),
+  category: (id: string, page: Page = {}, signal?: AbortSignal) =>
+    request<Shelf>(`/categories/${encodeURIComponent(id)}?${query({ limit: PAGE, offset: 0, ...page })}`, { signal }),
   search: (q: string, signal?: AbortSignal) => request<SearchResults>(`/search?${query({ q })}`, { signal }),
   artist: (id: string, signal?: AbortSignal) => request<ArtistPage>(`/artists/${encodeURIComponent(id)}`, { signal }),
   video: (id: string, signal?: AbortSignal) => request<VideoDetail>(`/videos/${encodeURIComponent(id)}`, { signal }),

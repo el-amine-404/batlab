@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -118,6 +119,23 @@ class Versions(unittest.TestCase):
         results[0]["isExplicit"] = True
         found = _versions(results, "song", "Gnarly", detail)
         self.assertEqual([(v.youtube_id, v.label) for v in found], [("explicit", "Explicit"), ("clean", "Clean")])
+
+
+class Pages(unittest.TestCase):
+    def test_pages_count_what_is_shown(self):
+        from app.catalog.models import Shelf
+
+        # The routes module opens clipseerr's database: a throwaway one.
+        os.environ.setdefault("CLIPSEERR_STATE", tempfile.mkdtemp())
+        import importlib
+
+        routes = importlib.import_module("app.routes.catalog")
+
+        shelf = Shelf(id="s", title="S", source="youtube", items=[_video(f"v{i}", explicit=i % 2 == 0)
+                                                                    for i in range(10)], total=10)
+        with mock.patch.object(routes, "settings", lambda: {"hide_explicit": True}):
+            page = routes._page(shelf, limit=3, offset=3)
+        self.assertEqual((page.total, [v.title for v in page.items]), (5, ["v7", "v9"]))
 
 
 class HotFeeds(unittest.TestCase):

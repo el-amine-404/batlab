@@ -126,7 +126,59 @@ def to_videos(items: list[dict]) -> list[Video]:
 
 # ---- what the catalog asks ------------------------------------------------------------
 
+def _text(runs: dict | None) -> str:
+    return "".join(run.get("text", "") for run in (runs or {}).get("runs") or [])
+
+
+def _two_row_items(found) -> list[dict]:
+    """Every musicTwoRowItemRenderer of a browse answer."""
+    items, stack = [], [found]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            if "musicTwoRowItemRenderer" in node:
+                items.append(node["musicTwoRowItemRenderer"])
+            else:
+                stack.extend(reversed(list(node.values())))
+        elif isinstance(node, list):
+            stack.extend(reversed(node))
+    return items
+
+
+def _from_two_row(item: dict) -> dict | None:
+    """A video of YouTube Music's "New music videos" page, as its other
+    lists give one (to_video)."""
+    watch = (item.get("navigationEndpoint") or {}).get("watchEndpoint") or {}
+    if not watch.get("videoId"):
+        return None
+    runs = (item.get("subtitle") or {}).get("runs") or []
+    channel = runs[0] if runs else {}
+    browse = (channel.get("navigationEndpoint") or {}).get("browseEndpoint") or {}
+    page = (((browse.get("browseEndpointContextSupportedConfigs") or {}).get("browseEndpointContextMusicConfig")
+             or {}).get("pageType"))
+    views = next((r["text"].removesuffix(" views") for r in runs[1:] if r.get("text", "").endswith(" views")), None)
+    video_type = ((watch.get("watchEndpointMusicSupportedConfigs") or {}).get("watchEndpointMusicConfig")
+                  or {}).get("musicVideoType")
+    return {"videoId": watch["videoId"], "title": _text(item.get("title")),
+            # A user channel isn't an artist page; the video's page finds the artist.
+            "artists": [{"name": channel.get("text", ""),
+                         "id": browse.get("browseId") if page == "MUSIC_PAGE_TYPE_ARTIST" else None}],
+            "views": views, "videoType": video_type or OFFICIAL}
+
+
 async def new_videos(region: str) -> list[Video]:
+    """YouTube Music's "New music videos" page (about 90), else the few its
+    Explore page shows."""
+    def browse():
+        return _client(region)._send_request("browse", {"browseId": "FEmusic_new_releases_videos"})
+
+    try:
+        found = await asyncio.to_thread(browse)
+        videos = to_videos([v for v in map(_from_two_row, _two_row_items(found)) if v])
+        if videos:
+            return videos
+    except Exception:
+        pass
     explore = await _call(region, "get_explore")
     return to_videos(explore.get("new_videos") or [])
 

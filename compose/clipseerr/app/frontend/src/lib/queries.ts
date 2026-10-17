@@ -3,10 +3,10 @@
  * between screens, a screen opened twice shows at once, and a video is fetched
  * while the pointer is still on its card (prefetchVideo).
  */
-import { keepPreviousData, QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, QueryClient, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { ACTIVE, api, errorText, type Family, type Kind, type Request } from "./api";
+import { ACTIVE, api, errorText, type Family, type Kind, PAGE, type Request, type Shelf } from "./api";
 
 const MINUTE = 60_000;
 
@@ -40,14 +40,28 @@ export const keys = {
 };
 
 export const useHome = () => useQuery({ queryKey: keys.home, queryFn: ({ signal }) => api.home(signal) });
-export const useShelf = (id: string) =>
-  useQuery({ queryKey: keys.shelf(id), queryFn: ({ signal }) => api.shelf(id, signal) });
+/**
+ * A shelf or a genre, a page at a time: the next page loads when it is
+ * asked for (useInfiniteList), and pages stay cached, so going back finds the
+ * list as it was left.
+ */
+export function useShelfPages(kind: "shelf" | "category", id: string, source?: "youtube" | "apple") {
+  return useInfiniteQuery({
+    queryKey: [kind, id, "pages", source ?? "all"] as const,
+    queryFn: ({ pageParam, signal }) =>
+      (kind === "shelf" ? api.shelf : api.category)(id, { limit: PAGE, offset: pageParam, ...(source && { source }) }, signal),
+    initialPageParam: 0,
+    getNextPageParam: (last: Shelf, pages: Shelf[]) => {
+      const loaded = pages.reduce((sum, page) => sum + page.items.length, 0);
+      return last.items.length && loaded < last.total ? loaded : undefined;
+    },
+  });
+}
 /** What came out lately and what is coming, newest first (the shelf "releases"). */
-export const useReleases = () => useShelf("releases");
+export const useReleases = (limit = 60) =>
+  useQuery({ queryKey: [...keys.shelf("releases"), limit], queryFn: ({ signal }) => api.shelf("releases", { limit }, signal) });
 export const useCategories = () =>
   useQuery({ queryKey: keys.categories, queryFn: ({ signal }) => api.categories(signal), staleTime: 30 * MINUTE });
-export const useCategory = (id: string) =>
-  useQuery({ queryKey: keys.category(id), queryFn: ({ signal }) => api.category(id, signal) });
 export const useSearch = (q: string) =>
   useQuery({
     queryKey: keys.search(q),

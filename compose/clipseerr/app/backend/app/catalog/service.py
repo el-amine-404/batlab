@@ -185,13 +185,18 @@ class Catalog:
 
     async def releases(self) -> Shelf:
         """What came out in the last RELEASE_DAYS days, and what is about to,
-        newest first: YouTube's new videos and every Apple chart, one entry a
-        song (YouTube's, which plays, before Apple's)."""
+        newest first, from everything clipseerr reads: YouTube Music's new
+        videos, Hot (its feeds and searches) and every Apple chart; one entry
+        a song (YouTube's, which plays, before Apple's). No free source lists
+        every release: a video none of them carries is missing."""
         region, storefront = self.region, self.storefront
 
         async def fetch():
             cutoff = time.strftime("%Y-%m-%d", time.gmtime(time.time() - RELEASE_DAYS * DAY))
-            found = await asyncio.gather(self._dated_new_videos(), self._apple_top(),
+            async def hot_items():
+                return [v.model_dump() for v in (await self.hot()).items]
+
+            found = await asyncio.gather(self._dated_new_videos(), hot_items(), self._apple_top(),
                                          *(self._apple_top(genre) for genre in GENRES), return_exceptions=True)
             lists = [r for r in found if isinstance(r, list)]
             if not lists:
@@ -206,7 +211,8 @@ class Catalog:
                 seen[key] = dict(item)
             items = sorted((i for i in seen.values() if (i.get("released") or "") >= cutoff),
                            key=lambda i: i["released"], reverse=True)
-            return Shelf(id="releases", title="Latest releases", subtitle="Out lately, and coming soon, newest first",
+            return Shelf(id="releases", title="Latest releases",
+                         subtitle="Music videos out in the last 30 days, and the ones coming soon, newest first.",
                          source="apple", items=items, total=len(items)).model_dump()
 
         return Shelf.model_validate(await self._cache.get(f"releases:{region}:{storefront}", fetch,
@@ -246,9 +252,8 @@ class Catalog:
                     items.append(item)
             await self._date(items)
             items.sort(key=lambda i: i.get("released") or "", reverse=True)
-            sources = [*(_feed_name(url) for url in feeds), f"{len(queries)} YouTube searches"]
-            return Shelf(id="hot", title="Hot", subtitle=f"Newest first · {', '.join(sources)} · Settings → General "
-                         "changes them", source="youtube", items=items, total=len(items)).model_dump()
+            return Shelf(id="hot", title="Hot", subtitle="Sexy, twerk and uncensored music videos, newest first.",
+                         source="youtube", items=items, total=len(items)).model_dump()
 
         return Shelf.model_validate(await self._cache.get(key, fetch, fresh=30 * MIN, stale=DAY))
 
@@ -511,6 +516,7 @@ class Catalog:
             await self.home()
             await self.categories()
             await self.hot()
+            await self.releases()
         except Exception as exc:
             log.warning("warming the catalog failed: %r", exc)
 
@@ -543,12 +549,6 @@ def _genre_name(title: str) -> str:
     name = re.sub(r"(?i)^top\s+\d+\s+", "", title or "")
     name = re.split(r"(?i)\s+music videos\b", name)[0]
     return name.strip() or title
-
-
-def _feed_name(url: str) -> str:
-    """ "http://clipfeed:8830/api/v1/feeds/sexymusicvideos/items?…" → "sexymusicvideos"."""
-    found = re.search(r"/feeds/([^/?#]+)", url)
-    return found.group(1) if found else httpx.URL(url).host
 
 
 def _song_key(title: str, artist: str) -> tuple[str, str]:

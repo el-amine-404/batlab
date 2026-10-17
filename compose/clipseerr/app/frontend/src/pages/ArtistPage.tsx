@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { useParams } from "react-router";
 
 import { Failed } from "@/components/layout/States";
+import { MoreLoader, useReveal } from "@/components/video/MoreLoader";
 import { GridSkeleton, VideoGrid } from "@/components/video/VideoGrid";
 import { useArtist } from "@/lib/queries";
 import { cn } from "@/lib/utils";
@@ -25,6 +26,8 @@ export function ArtistPage() {
     if (order === "newest") return [...list].sort((a, b) => (b.released ?? "").localeCompare(a.released ?? ""));
     return list;
   }, [data, order, filter]);
+
+  const reveal = useReveal(videos.length, 48, `${id}|${order}|${filter}`);
 
   if (error) return <Failed error={error} retry={() => void refetch()} />;
   return (
@@ -73,7 +76,12 @@ export function ArtistPage() {
           </div>
         </div>
       </div>
-      {isPending ? <GridSkeleton /> : <VideoGrid videos={videos} />}
+      {isPending ? <GridSkeleton /> : (
+        <>
+          <VideoGrid videos={videos.slice(0, reveal.count)} />
+          <MoreLoader shown={reveal.count} total={videos.length} hasMore={reveal.hasMore} loading={false} load={reveal.more} />
+        </>
+      )}
 
       {!!data?.related?.length && (
         <section className="mt-12">
