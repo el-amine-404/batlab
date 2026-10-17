@@ -177,6 +177,9 @@ services:
       - PYTHONPATH=/opt/batlab-common
       # The zones of camera_2 in config.yml, and who parks there.
       - CARWATCH_SPOTS=spot_1=Clio 4,spot_2=Ford
+      # Cars with no spot of their own, by the sub label Frigate's classifier
+      # gives them (Settings > Classification, docs/cameras.md).
+      - CARWATCH_FOLLOW=sandero=Sandero
       # How the two sides of the picture are named in "went …".
       - CARWATCH_WAYS=left=left,right=right
       - CARWATCH_NOTIFY_URL=http://apprise:8000/notify/carwatch

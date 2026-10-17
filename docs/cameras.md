@@ -99,6 +99,18 @@ everything; Frigate is the alarm and the index.
   car can stay unseen until someone walks past it: such a car is not
   "back", and it is told when it leaves. Another car parked in a spot is
   taken for its usual car. `docker logs carwatch` shows each move.
+- **The Sandero** parks anywhere, so it has no zone: Frigate's object
+  classifier tells it from the other cars. Each car Frigate follows is
+  cropped from the frame and given up to 16 guesses; when 60% agree (at least
+  3) above the threshold, the car gets the sub label `sandero`. carwatch
+  posts "Sandero parked" when a car with that label stops after driving in,
+  wherever it is, and "Sandero left" when it drives a car length away, with
+  the same pictures, way and clip. Set up in Settings > Classification > new
+  object model: name it `cars`, objects `car`, type sub label, classes
+  `sandero` and `none` (exact names: `CARWATCH_FOLLOW` matches the class).
+  The wizard offers 24 street car snapshots to sort; train, then keep
+  sorting the guesses under Recent classifications, by day and by night,
+  until it is right. Snapshots are kept 7 days for this.
 - **Someone at the cars**: the street camera also detects people. The zone
   `near_cars` (around both spots) counts a person only after 30 s there
   (`loitering_time`); carwatch then posts "Someone at the cars" with a

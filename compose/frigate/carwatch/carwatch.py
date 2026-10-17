@@ -10,6 +10,11 @@ car from the 4K stream. Once the recording is written, a second message says
 which way the car went (or came from) and holds the clip, made small enough
 for Discord to play.
 
+A car with no spot of its own (the Sandero) is known by its look instead:
+Frigate's classifier (Settings > Classification) gives it a sub label, here
+CARWATCH_FOLLOW's. It is told parked wherever it stops after driving in, and
+gone when it drives a car length away from there.
+
 It also says when someone stays at the cars: Frigate puts a person in the
 CARWATCH_PEOPLE_ZONE only after its loitering time there (30 s). Then the
 same: a close-up and the street at once, the clip after.
@@ -61,6 +66,9 @@ WAYS = dict(pair.split("=", 1) for pair in
             os.environ.get("CARWATCH_WAYS", "left=left,right=right").split(","))
 # Seconds of the clip before and after the moment told.
 BEFORE, AFTER = 5, 15
+# sub_label=name pairs of the cars followed wherever they park.
+FOLLOW = dict(pair.split("=", 1) for pair in
+              os.environ.get("CARWATCH_FOLLOW", "sandero=Sandero").split(",") if pair)
 PEOPLE_ZONE = os.environ.get("CARWATCH_PEOPLE_ZONE", "near_cars")
 # At most one "someone at the cars" in that many seconds: a family loading
 # the boot for ten minutes is told once.
@@ -223,6 +231,7 @@ class Watch:
         self.last = {}     # spot -> ("arrived" | "left", when), what was last told
         self.origin = {}   # car -> where it was first seen; kept after it ends, until told
         self.seen = {}     # car -> where it was last seen; the same
+        self.stopped = {}  # followed car -> where it is parked
         self.people = set()  # the people told as staying at the cars
         self.people_told = float("-inf")
 
@@ -247,6 +256,7 @@ class Watch:
         self.seen[car] = here
         box = after.get("box") or (0, 0, 0, 0)
         moved = math.dist(self.start[car], here) >= MOVE
+        self.follow(after, car, when, here, box)
         # A parked car Frigate had not seen is often found only as it starts
         # to move: first seen in a spot is as good as parked there.
         was = self.parked.get(car) or self.first[car]
@@ -255,14 +265,14 @@ class Watch:
             self.first[car] = None
             self.start[car] = here
             self.arrived.pop(car, None)
-            self.tell(was, "left", car, when, box)
+            self.tell(was, SPOTS[was], "left", car, when, box)
         elif (spot and self.first[car] != spot and self.arrived.get(car) != spot
               and spot not in self.parked.values() and moved):
             # Driven in from the street, the spot empty (a car passing close
             # to a parked one is not arriving). Told once: a car manoeuvring
             # in and out of the spot before it parks says nothing more.
             self.arrived[car] = spot
-            self.tell(spot, "arrived", car, when, box)
+            self.tell(spot, SPOTS[spot], "arrived", car, when, box)
         if spot and after.get("stationary") and car not in self.parked:
             self.parked[car] = spot
             self.start[car] = here
@@ -270,7 +280,7 @@ class Watch:
         if message.get("type") == "end":
             # Gone from the picture: driven off (told above, as it left its
             # spot), or lost while parked, which says nothing.
-            for seen in (self.first, self.start, self.parked, self.arrived):
+            for seen in (self.first, self.start, self.parked, self.arrived, self.stopped):
                 seen.pop(car, None)
 
     def person(self, message, after):
@@ -314,34 +324,54 @@ class Watch:
             time.sleep(20)
         return None
 
-    def tell(self, spot, kind, car, when, box):
-        before = self.last.get(spot)
-        self.last[spot] = (kind, when)
+    def follow(self, after, car, when, here, box):
+        """The cars known by their sub label, wherever they park."""
+        label = after.get("sub_label")
+        label = label[0] if isinstance(label, (list, tuple)) and label else label
+        if label not in FOLLOW:
+            return
+        name = FOLLOW[label]
+        if after.get("stationary") and car not in self.stopped:
+            self.stopped[car] = here
+            # Parked after driving in; found already parked says nothing.
+            if math.dist(self.origin[car], here) >= MOVE:
+                self.tell(label, name, "parked", car, when, box)
+            else:
+                log(f"{name}: found parked ({car})")
+        elif (car in self.stopped and not after.get("stationary")
+              and math.dist(self.stopped[car], here) >= MOVE):
+            self.stopped.pop(car)
+            self.tell(label, name, "left", car, when, box)
+
+    def tell(self, key, name, kind, car, when, box):
+        """kind: "arrived" (in its spot), "parked" (anywhere) or "left"."""
+        before = self.last.get(key)
+        self.last[key] = (kind, when)
         # Off the MQTT loop: the clip waits for the recording, and the next car
         # must not wait for it.
-        threading.Thread(target=self.report, args=(spot, kind, car, when, box, before), daemon=True).start()
+        threading.Thread(target=self.report, args=(key, name, kind, car, when, box, before),
+                         daemon=True).start()
 
-    def report(self, spot, kind, car, when, box, before):
-        name, at = SPOTS[spot], datetime.fromtimestamp(when).strftime("%H:%M:%S")
-        title = f"{name} left" if kind == "left" else f"{name} is back"
+    def report(self, key, name, kind, car, when, box, before):
+        at = datetime.fromtimestamp(when).strftime("%H:%M:%S")
+        title = {"left": f"{name} left", "arrived": f"{name} is back", "parked": f"{name} parked"}[kind]
         line = at
-        if before and before[0] != kind:
-            line += f" · {'away' if kind == 'arrived' else 'parked'} {duration(when - before[1])}"
-        near = self.near(box)
+        if before and (before[0] == "left") != (kind == "left"):
+            line += f" · {'parked' if kind == 'left' else 'away'} {duration(when - before[1])}"
         notify(f"***{title}***\n{line}", "info" if kind == "left" else "success",
-               [(f"{spot}.jpg", near), ("street.jpg", picture())])
+               [(f"{key}.jpg", self.near(box)), ("street.jpg", picture())])
         log(f"told: {name} {kind} at {at} ({car})")
 
         video = self.later_clip(when - BEFORE, when + AFTER)
         where = (self.seen if kind == "left" else self.origin).get(car)
         way = WAYS["left" if where and where[0] < WIDTH / 2 else "right"] if where else None
         if kind == "left":
-            words = f"***{name} went {way}***" if way else f"***{name} left***"
+            words = f"***{name} went {way}***" if way else f"***{title}***"
         else:
-            words = f"***{name} came from the {way}***" if way else f"***{name} is back***"
-        notify(f"{words}\n{at}" + ("" if video else " · no clip"), "info", [(f"{spot}.mp4", video)])
+            words = f"***{name} came from the {way}***" if way else f"***{title}***"
+        notify(f"{words}\n{at}" + ("" if video else " · no clip"), "info", [(f"{key}.mp4", video)])
         log(f"told: {name} {kind} {way}, clip {len(video or b'')} bytes")
-        if car not in self.parked and car not in self.first:
+        if car not in self.parked and car not in self.first and car not in self.stopped:
             self.origin.pop(car, None)
             self.seen.pop(car, None)
 
