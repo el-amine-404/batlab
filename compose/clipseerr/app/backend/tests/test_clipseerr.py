@@ -13,7 +13,7 @@ from app.catalog import match  # noqa: E402
 from app.db import Database  # noqa: E402
 from app.integrations import Integrations, Invalid  # noqa: E402
 from app.services import TYPES, Update  # noqa: E402
-from app.services.aurral import quality  # noqa: E402
+from app.services.aurral import from_activity  # noqa: E402
 from app.tracker.engine import Engine  # noqa: E402
 from app.tracker.store import Requests  # noqa: E402
 
@@ -77,12 +77,22 @@ class Matching(unittest.TestCase):
         self.assertEqual(match.best_video("Levitating", "Dua Lipa", 229, results)["videoId"], "omv")
 
 
-class Quality(unittest.TestCase):
-    def test_aurral_quality(self):
-        self.assertEqual(quality({"qualityFormat": "flac", "qualityBitDepth": 16, "qualitySampleRate": 44100}),
-                         "FLAC 16-bit/44.1 kHz")
-        self.assertEqual(quality({"qualityFormat": "mp3", "qualityBitrateKbps": 320}), "MP3 320 kbps")
-        self.assertIsNone(quality({}))
+class AurralFeed(unittest.TestCase):
+    def entry(self, status, label, **more):
+        return {"kind": "track_download", "jobId": "j", "status": status, "statusLabel": label, "source": "slskd",
+                **more}
+
+    def test_states(self):
+        self.assertEqual(from_activity(self.entry("pending", "Queued")).state, "sent")
+        self.assertEqual(from_activity(self.entry("processing", "Searching")).message, "Searching from Soulseek.")
+        self.assertEqual(from_activity(self.entry("processing", "Downloading")).state, "downloading")
+        self.assertEqual(from_activity(self.entry("blocked", "Review")).state, "sent")
+        failed = from_activity(self.entry("failed", "Failed", subtitle="No match on Soulseek"))
+        self.assertEqual((failed.state, failed.message), ("failed", "No match on Soulseek"))
+
+    def test_quality_from_the_file(self):
+        done = from_activity(self.entry("completed", "Downloaded", sourceFilename="Artist/01 - Song.flac"))
+        self.assertEqual((done.state, done.quality), ("completed", "FLAC"))
 
 
 # ---- the engine, with services that answer as told ------------------------------------------

@@ -66,7 +66,7 @@ class Request(BaseModel):
     round: int
     attempts: list[Attempt]
     message: str | None
-    quality: str | None = Field(description='What it was got as: "FLAC 16-bit/44.1 kHz", "OPUS", "MP4 best".')
+    quality: str | None = Field(description='What it was got as: "FLAC", "OPUS", "MP4 best".')
     created_at: float
     updated_at: float
     finished_at: float | None

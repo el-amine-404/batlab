@@ -2,24 +2,40 @@
 when someone shares it), then with its own yt-dlp; into music-aurral, which
 musicguard checks. The best audio this stack can get for one song."""
 
+import time
+
 from .. import outbound
 from ..integrations import Field
 from .base import Context, ServiceType, Update
 
-_STATES = {"pending": "sent", "downloading": "downloading", "done": "completed", "failed": "failed"}
+# Aurral's activity feed (/api/requests) is where it tells about track jobs:
+# its own job list only shows playlist flows.
+_FOUND_LATE = 15 * 60  # seconds a new job may take to show in the feed
 
 
-def quality(job: dict) -> str | None:
-    """ "FLAC 24-bit/96 kHz", "MP3 320 kbps"…, from what Aurral measured."""
-    kind = (job.get("qualityFormat") or "").upper()
-    if not kind:
-        return None
-    if job.get("qualityBitDepth") and job.get("qualitySampleRate"):
-        rate = job["qualitySampleRate"] / 1000
-        return f"{kind} {job['qualityBitDepth']}-bit/{rate:g} kHz"
-    if job.get("qualityBitrateKbps"):
-        return f"{kind} {round(job['qualityBitrateKbps'])} kbps"
-    return kind
+def _file_kind(name: str | None) -> str | None:
+    """ "Housewife.flac" → "FLAC"."""
+    ext = (name or "").rpartition(".")[2]
+    return ext.upper() if ext and ext != name and len(ext) <= 5 else None
+
+
+def from_activity(entry: dict) -> Update:
+    """Where a track job is, from its entry in Aurral's activity feed."""
+    status, label = entry.get("status"), entry.get("statusLabel") or ""
+    source = entry.get("source")
+    via = f" from {'Soulseek' if source == 'slskd' else source}" if source else ""
+    if status == "completed":
+        return Update("completed", "Already had it; Aurral reused the file." if label == "Reused"
+                      else f"Downloaded by Aurral{via}.", quality=_file_kind(entry.get("sourceFilename")))
+    if status == "failed":
+        return Update("failed", entry.get("subtitle") or "Aurral couldn't find it.")
+    if status == "blocked":
+        return Update("sent", "Aurral holds it for review (Aurral, Requests).")
+    if label in ("Downloading", "Moving"):
+        return Update("downloading", f"{label}{via}.")
+    if status == "processing":
+        return Update("sent", f"Searching{via}.")
+    return Update("sent", "Waiting in Aurral's queue.")
 
 
 class Aurral(ServiceType):
@@ -61,24 +77,20 @@ class Aurral(ServiceType):
                       else "Aurral was already getting it.", external_id=str(found["jobId"]))
 
     async def poll(self, ctx: Context, request: dict, attempt: dict, config: dict) -> Update:
-        async def jobs():
-            response = await outbound.call(ctx.http, "GET", f"{config['base_url']}/api/playlists/jobs",
+        async def activity():
+            response = await outbound.call(ctx.http, "GET", f"{config['base_url']}/api/requests",
                                            headers=self._headers(config))
-            return {str(job.get("id")): job for job in response.json() if isinstance(job, dict)}
+            found = response.json()
+            entries = found if isinstance(found, list) else found.get("requests") or []
+            return {str(e.get("jobId")): e for e in entries
+                    if isinstance(e, dict) and e.get("kind") == "track_download" and e.get("jobId")}
 
-        job = (await ctx.once(f"aurral:{config['base_url']}", jobs)).get(attempt["external_id"])
-        if not job:
-            return Update("failed", "Aurral no longer has this request.")
-        state = _STATES.get(job.get("status"), "sent")
-        source = job.get("downloadSource") or job.get("downloadClient")
-        if state == "completed":
-            return Update("completed", f"Downloaded by Aurral{f' from {source}' if source else ''}.",
-                          quality=quality(job))
-        if state == "failed":
-            return Update("failed", job.get("error") or "Aurral couldn't find it.")
-        if state == "downloading":
-            return Update("downloading", f"Downloading{f' from {source}' if source else ''}.")
-        return Update("sent", "Searching." if job.get("startedAt") else "Waiting in Aurral's queue.")
+        entry = (await ctx.once(f"aurral:{config['base_url']}", activity)).get(attempt["external_id"])
+        if entry:
+            return from_activity(entry)
+        if time.time() - attempt["started_at"] < _FOUND_LATE:
+            return Update("sent", attempt.get("message") or "Waiting in Aurral's queue.")
+        return Update("failed", "Aurral no longer lists this request.")
 
     async def test(self, ctx: Context, config: dict) -> str:
         await outbound.call(ctx.http, "GET", f"{config['base_url']}/api/playlists/status",

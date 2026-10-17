@@ -505,7 +505,7 @@ Jellyfin play. Its API reference is at `/api/docs` on the service.
 - **Follow.** Every 15 s (Settings, General) it asks each service where its
   requests are, once per service a round; songdrop also calls back. The
   Requests screen shows each request, the services it went through and the
-  quality it arrived in (Aurral: "FLAC 16-bit/44.1 kHz"). Retry asks every
+  format it arrived in (FLAC, OPUS, MP4). Retry asks every
   service again from the first.
 - **Tell.** Each request made, done and failed goes to Discord's
   `#requests` through Apprise (sender `clipseerr`), with a link to it.
