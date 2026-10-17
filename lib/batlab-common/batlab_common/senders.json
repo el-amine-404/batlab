@@ -3,6 +3,7 @@
   "batlab": {"name": "batlab"},
   "musicguard": {"name": "musicguard"},
   "songdrop": {"name": "songdrop"},
+  "clipseerr": {"name": "clipseerr", "link": "http://clipseerr.homelab.lan"},
   "camwatch": {"name": "camwatch"},
   "diun": {"name": "diun", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/diun.png"},
   "netalertx": {"name": "netalertx"},

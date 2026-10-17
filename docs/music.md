@@ -12,6 +12,9 @@ it on the way. Set up on 2026-10-11.
                                      musicguard: check, strip, tag, lyrics, file
                                                                       ▼
                                                   Navidrome (three libraries)
+
+ music video (clipseerr) ─┬─ the song ──▶ Aurral (track), else songdrop ──▶ (as above)
+                          └─ the video ──▶ metube-videos ──▶ media/music-videos ──▶ Jellyfin
 ```
 
 ## Where everything lives
@@ -22,6 +25,7 @@ it on the way. Set up on 2026-10-11.
 | `media/music-aurral` | single tracks, playlists and flows requested in Aurral | Aurral | `/data/media/music-aurral` |
 | `media/music-extras` | songs from pasted links | musicguard | `/music-extras` |
 | `inbox/music/{songdrop,metube,spotdl}` | link downloads waiting to be checked | songdrop, MeTube, spotDL | never |
+| `media/music-videos` | video files asked for in clipseerr, `Artist/Title [id].mp4` | metube-videos | never (Jellyfin's Music Videos library) |
 | `soulseek/{incomplete,complete}` | slskd downloads before Lidarr or Aurral import them | slskd | never |
 | `.quarantine/musicguard/<date>/` | everything musicguard refused or retired, with a `.why.json` beside it; deleted 30 days after that date (`MUSICGUARD_QUARANTINE_DAYS`, 0 keeps it) | musicguard | never |
 
@@ -467,6 +471,79 @@ are not followed by Renovate; yt-dlp, spotDL and Node are, through `compose/vers
 Both are LAN-only (Caddy `localSubnets`) and have no login, like Seerr's
 request page. YouTube audio is lossy (about 130-160 kbps Opus); for an album
 you care about, request it in Aurral instead, which goes through Lidarr.
+
+## clipseerr (music videos)
+
+`clipseerr.homelab.lan`, built here (`compose/clipseerr`): the newest music
+videos to browse, watch and ask for, the way Seerr does for films. It only
+asks and follows; the apps below download, musicguard checks, Navidrome and
+Jellyfin play. Its API reference is at `/api/docs` on the service.
+
+- **Browse.** Discover shows YouTube Music's new videos and, for the country
+  in Settings, General, its Trending 20, daily top and top 100 video charts,
+  and Apple Music's top music videos (newest first in "Just released").
+  Genres are YouTube's genre charts (only some countries have them: the US
+  has eight) and about 35 of Apple's. Search finds videos and artists; an
+  artist's page has all their videos. No account and no key: ytmusicapi
+  (pinned in `compose/versions.env`, followed by Renovate) and Apple's public
+  feeds. Answers are kept in its database and refreshed in the background
+  (the front page every 20 min), so a page opens from the cache in a few ms.
+- **Watch.** The video, or the song alone (its official audio on YouTube
+  Music, found by title, artist and length: a video often runs longer than
+  its song), or Apple's 30 s preview. Nothing loads from YouTube until play
+  is pressed. Some videos refuse to play on other pages; they link to YouTube.
+- **Ask.** *The song*: to the first service in Settings, Services that takes
+  audio, then the next when it fails or takes longer than the attempt timeout
+  (12 h): **Aurral** (a track request: Soulseek first, so lossless when
+  someone shares it, then its own yt-dlp), then **songdrop** (YouTube Music's
+  audio, about 130-160 kbps Opus). Both deliver into folders musicguard
+  checks. Aurral answering "already in the library" ends the request at once.
+  *The video*: to **metube-videos**, a MeTube of its own (`music-links`) that
+  writes MP4s at the best quality into `media/music-videos`, tags and cover
+  embedded, never into musicguard's inbox. Asking twice for the same thing
+  answers the first request.
+- **Follow.** Every 15 s (Settings, General) it asks each service where its
+  requests are, once per service a round; songdrop also calls back. The
+  Requests screen shows each request, the services it went through and the
+  quality it arrived in (Aurral: "FLAC 16-bit/44.1 kHz"). Retry asks every
+  service again from the first.
+- **Tell.** Each request made, done and failed goes to Discord's
+  `#requests` through Apprise (sender `clipseerr`), with a link to it.
+- **Plug in.** Services and notifications are types with a form (Settings);
+  a new app is one module in `app/services/` or `app/notifications/`. Any app
+  without a type takes requests through a *Webhook* service: the request as
+  JSON, and its progress back through `POST /api/v1/requests/{id}/report`.
+  Settings, services and notifications are all in the API too.
+
+Set up once:
+
+| Setting | Where | Value |
+| --- | --- | --- |
+| Aurral's API key | `compose/.env`, `AURRAL_API_KEY` (first start), else Settings, Services, Aurral | Aurral: Settings, General, API key |
+| Jellyfin's Music Videos library | Jellyfin, Dashboard, Libraries | type Music Videos, folder `/data/media/music-videos` |
+| Country and Apple store | Settings, General | YouTube `US`, Apple `us` by default (`CLIPSEERR_REGION`, `CLIPSEERR_STOREFRONT`) |
+
+What it keeps: `$VOLUMES_ROOT/clipseerr/clipseerr.db` (SQLite, mode 600:
+requests, services with Aurral's key, notifications, settings, the catalog
+cache). The environment's services and notification are made on the first
+start only; after that the Settings screens own them.
+
+```bash
+# tests, in the image
+docker run --rm --network none --entrypoint /opt/clipseerr/.venv/bin/python \
+  -v "$PWD/compose/clipseerr/app/backend/tests:/opt/clipseerr/tests:ro" -w /opt/clipseerr \
+  -e CLIPSEERR_STATE=/tmp/s local/batlab-clipseerr:ytmusicapi-<version> -m unittest discover -s tests
+# after changing requirements.in
+docker run --rm -v "$PWD/compose/clipseerr/app/backend:/w" -w /w \
+  ghcr.io/astral-sh/uv:0.13.0-python3.14-trixie-slim \
+  uv pip compile requirements.in --generate-hashes --python-version 3.13 \
+  --python-platform x86_64-unknown-linux-gnu --no-header -o requirements.txt
+# after changing app/schemas.py: the page's types, from a running clipseerr
+cd compose/clipseerr/app/frontend && CLIPSEERR_OPENAPI=http://clipseerr.homelab.lan/api/v1/openapi.json npm run gen:api
+```
+
+When YouTube changes and the lists come back empty, Settings, Status says
+which source fails; a newer ytmusicapi (Renovate) is usually the fix.
 
 ## Aurral
 

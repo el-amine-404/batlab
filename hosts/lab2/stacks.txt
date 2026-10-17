@@ -6,6 +6,7 @@ apprise
 arr
 aurral
 caddy
+clipseerr
 diun
 dozzle
 feishin

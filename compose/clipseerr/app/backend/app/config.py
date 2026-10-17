@@ -1,0 +1,69 @@
+"""What the environment says (compose/clipseerr/docker-compose.yml). It gives
+the first values only: what the Settings screens change is kept in the
+database (settings.py) and wins over them."""
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
+
+def _int(name: str, default: int, minimum: int = 1) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise SystemExit(f"{name} must be a whole number, not {raw!r}") from exc
+    if value < minimum:
+        raise SystemExit(f"{name} must be at least {minimum}")
+    return value
+
+
+def _text(name: str) -> str:
+    return os.environ.get(name, "").strip()
+
+
+@dataclass(frozen=True)
+class Config:
+    port: int
+    # The database: requests, services, notifications, settings and the cache.
+    state_dir: Path
+    static_dir: Path
+    # The page's address, for links in messages.
+    public_url: str
+    # Where the services that call back (songdrop) reach clipseerr.
+    internal_url: str
+    # First values of the settings (settings.py).
+    region: str
+    storefront: str
+    # Made on the first start only, when given (seed.py).
+    apprise_url: str
+    apprise_tag: str
+    aurral_url: str
+    aurral_api_key: str
+    songdrop_url: str
+    metube_url: str
+
+    @property
+    def database(self) -> Path:
+        return self.state_dir / "clipseerr.db"
+
+
+def load() -> Config:
+    port = _int("CLIPSEERR_PORT", 8820)
+    return Config(
+        port=port,
+        state_dir=Path(os.environ.get("CLIPSEERR_STATE", "/state")),
+        static_dir=Path(os.environ.get("CLIPSEERR_STATIC", "/opt/clipseerr/static")),
+        public_url=_text("CLIPSEERR_PUBLIC_URL").rstrip("/"),
+        internal_url=(_text("CLIPSEERR_INTERNAL_URL") or f"http://clipseerr:{port}").rstrip("/"),
+        region=(_text("CLIPSEERR_REGION") or "US").upper(),
+        storefront=(_text("CLIPSEERR_STOREFRONT") or "us").lower(),
+        apprise_url=_text("CLIPSEERR_APPRISE_URL"),
+        apprise_tag=_text("CLIPSEERR_APPRISE_TAG"),
+        aurral_url=_text("CLIPSEERR_AURRAL_URL"),
+        aurral_api_key=_text("CLIPSEERR_AURRAL_API_KEY"),
+        songdrop_url=_text("CLIPSEERR_SONGDROP_URL"),
+        metube_url=_text("CLIPSEERR_METUBE_URL"),
+    )

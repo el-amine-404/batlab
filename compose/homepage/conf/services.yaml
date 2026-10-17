@@ -108,6 +108,12 @@
         description: Paste a Spotify or YouTube link, get the song
         siteMonitor: http://songdrop:8810/api/v1/health
         statusStyle: "dot"
+    - clipseerr:
+        icon: mdi-music-box-multiple
+        href: http://clipseerr.homelab.lan
+        description: The newest music videos; ask for the song or the video
+        siteMonitor: http://clipseerr:8820/api/v1/health
+        statusStyle: "dot"
 
 - Library:
     - Sonarr:

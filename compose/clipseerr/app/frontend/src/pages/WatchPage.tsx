@@ -1,0 +1,137 @@
+import { ChevronDown } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Link, useParams } from "react-router";
+
+import { Failed } from "@/components/layout/States";
+import { Badge } from "@/components/ui/badge";
+import { Player } from "@/components/video/Player";
+import { RequestPanel } from "@/components/video/RequestPanel";
+import { ShelfRow } from "@/components/video/ShelfRow";
+import { Thumb } from "@/components/video/Thumb";
+import type { Shelf, Video, VideoDetail } from "@/lib/api";
+import { prefetchArtist, queryClient, useArtist, useVideo } from "@/lib/queries";
+import { clock, cn, day } from "@/lib/utils";
+
+/** The video as a list already showed it: the page shows that at once, while its details load. */
+function listed(id: string): Video | undefined {
+  for (const query of queryClient.getQueryCache().getAll()) {
+    const data = query.state.data as { shelves?: Shelf[]; items?: Video[]; videos?: Video[] } | undefined;
+    if (!data || typeof data !== "object") continue;
+    const lists = [...(data.shelves?.map((s) => s.items) ?? []), data.items, data.videos];
+    for (const list of lists) {
+      const found = Array.isArray(list) ? list.find((v) => v?.id === id) : undefined;
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
+function Meta({ video }: { video: Video }) {
+  const parts = [
+    video.views && `${video.views} views`,
+    video.released && day(video.released),
+    video.duration && clock(video.duration),
+  ].filter(Boolean);
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm text-muted-foreground">
+      {parts.map((part, i) => (
+        <span key={i} className="flex items-center gap-2">
+          {i > 0 && <span aria-hidden className="text-muted-foreground/40">·</span>}
+          {part}
+        </span>
+      ))}
+      {video.genre && <Badge variant="muted">{video.genre}</Badge>}
+      {video.explicit && <Badge variant="muted">Explicit</Badge>}
+      {!video.official && <Badge variant="warning">Fan upload</Badge>}
+      {video.source === "apple" && <Badge variant="apple">Apple Music</Badge>}
+    </div>
+  );
+}
+
+function Artists({ video }: { video: Video }) {
+  const linked = video.artists.filter((a) => a.id);
+  if (!linked.length) return <span>{video.artist}</span>;
+  return (
+    <span className="flex flex-wrap items-center gap-x-1">
+      {linked.map((artist, i) => (
+        <span key={artist.id} className="flex items-center gap-1">
+          {i > 0 && <span className="text-muted-foreground">&</span>}
+          <Link to={`/artist/${artist.id}`} onPointerEnter={() => prefetchArtist(artist.id!)}
+                className="font-medium text-foreground/90 underline-offset-4 hover:text-rose-200 hover:underline">
+            {artist.name}
+          </Link>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function MoreFrom({ video }: { video: VideoDetail }) {
+  const artistId = video.artists.find((a) => a.id)?.id ?? "";
+  const { data } = useArtist(artistId, !!artistId);
+  const shelf = useMemo<Shelf | null>(() => {
+    if (!data) return null;
+    const items = data.videos.filter((v) => v.youtube_id !== video.youtube_id).slice(0, 20);
+    return items.length ? { id: `artist-${data.id}`, title: `More from ${data.name}`, source: "youtube", items, total: items.length } : null;
+  }, [data, video.youtube_id]);
+  return shelf ? <ShelfRow shelf={shelf} /> : null;
+}
+
+export function WatchPage() {
+  const { id = "" } = useParams();
+  const { data, error, refetch } = useVideo(id);
+  const preview = useMemo(() => (data ? undefined : listed(id)), [data, id]);
+  const video = data ?? preview;
+  const [open, setOpen] = useState(false);
+
+  if (error && !video) return <Failed error={error} retry={() => void refetch()} />;
+
+  return (
+    <div className="flex flex-col gap-10">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px] xl:gap-8">
+        <div className="flex min-w-0 flex-col gap-5">
+          {data ? (
+            <Player video={data} />
+          ) : (
+            <div className="overflow-hidden rounded-2xl ring-1 ring-white/10">
+              <Thumb src={video?.thumbnail} youtubeId={video?.youtube_id} size="maxres" eager />
+            </div>
+          )}
+          <div className="flex flex-col gap-2">
+            <h1 className="text-2xl leading-tight font-semibold tracking-tight sm:text-3xl">
+              {video?.title ?? <span className="skeleton inline-block h-8 w-72 rounded" />}
+            </h1>
+            <div className="text-[15px]">{video ? <Artists video={data ?? video} /> : <span className="skeleton inline-block h-4 w-40 rounded" />}</div>
+            {video && <Meta video={data ?? video} />}
+            {data?.audio && (
+              <p className="text-xs text-muted-foreground">
+                The song: <span className="text-foreground/80">{data.audio.title}</span>
+                {data.audio.album && <> · from <span className="text-foreground/80">{data.audio.album}</span></>}
+                {data.audio.duration && <> · {clock(data.audio.duration)}</>}
+              </p>
+            )}
+            {video?.original_title && <p className="text-xs text-muted-foreground/70">Uploaded as “{video.original_title}”</p>}
+          </div>
+          {data?.description && data.description.trim().length > 60 && (
+            <div className="rounded-xl border border-border bg-card/60 p-4">
+              <p className={cn("text-sm whitespace-pre-line text-muted-foreground", !open && "line-clamp-3")}>{data.description}</p>
+              <button type="button" onClick={() => setOpen(!open)} className="mt-2 flex items-center gap-1 text-xs font-medium text-rose-300">
+                {open ? "Less" : "More"} <ChevronDown className={cn("size-3.5 transition", open && "rotate-180")} />
+              </button>
+            </div>
+          )}
+        </div>
+
+        <aside className="lg:sticky lg:top-24 lg:self-start">
+          {data ? <RequestPanel video={data} /> : error ? <Failed error={error} retry={() => void refetch()} /> : (
+            <div className="flex flex-col gap-3">
+              <div className="skeleton h-40 rounded-xl" />
+              <div className="skeleton h-40 rounded-xl" />
+            </div>
+          )}
+        </aside>
+      </div>
+      {data && <MoreFrom video={data} />}
+    </div>
+  );
+}

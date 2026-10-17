@@ -46,6 +46,46 @@ services:
       - FOWNER
     mem_limit: 1g
 
+  # The music videos library (docs/music.md): video files asked for in
+  # clipseerr (compose/clipseerr), best quality as MP4, one folder per artist,
+  # with tags and the cover embedded, into media/music-videos, which Jellyfin
+  # shows. A MeTube of its own so that videos never reach musicguard's inbox.
+  # No page: clipseerr drives it through its API, on home_server only.
+  metube-videos:
+    image: ${IMAGE_METUBE}:${TAG_METUBE}
+    container_name: metube-videos
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - UMASK=022
+      - TZ=${TZ}
+      - PORT=8081
+      - DOWNLOAD_DIR=/downloads
+      - STATE_DIR=/state
+      - TEMP_DIR=/state/tmp
+      - CUSTOM_DIRS=false
+      - CLEAR_COMPLETED_AFTER=604800
+      - OUTPUT_TEMPLATE=%(artist,uploader)s/%(title)s [%(id)s].%(ext)s
+      - 'YTDL_OPTIONS={"writethumbnail": true, "postprocessors": [{"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"}, {"key": "FFmpegMetadata", "add_metadata": true}, {"key": "EmbedThumbnail"}]}'
+      - ALLOW_YTDL_OPTIONS_OVERRIDES=false
+    volumes:
+      - ${VOLUMES_ROOT}/metube-videos:/state
+      - ${DATA_ROOT}/media/music-videos:/downloads
+    networks:
+      - home_server
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+      - FOWNER
+    mem_limit: 1g
+
   # Paste a link, get the song (compose/music-links/songdrop, docs/music.md):
   # Spotify links through spotDL, any other site yt-dlp knows through yt-dlp,
   # into the inbox like MeTube, and downloadable for a day. It replaced

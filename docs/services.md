@@ -63,6 +63,7 @@ end up. The senders, and the name and avatar each shows on Discord, are in
 | --- | --- | --- |
 | `downloads` | musicguard, subtranslate | "Ready to play: Artist – Album", once Navidrome has it; subtitles translated by AI, or replaced by human ones |
 | `download-issues` | musicguard, songdrop, vpnguard, dubkeeper | files quarantined, suspect, flagged or held; songs missing after a download, back, or given up; VPN reconnects; upgrades that lost audio |
+| `requests` | clipseerr | a song or a music video asked for, got, or not found by any service |
 | `cameras` | camwatch | a camera dark, and back |
 | `alerts` | Netdata, NetAlertX, watchdog (data disk, self-test, SMART), mediascan, updater (failures) | something is wrong with the machine or the network |
 | `updates` | updater, Diun | a service updated, a manual update waiting, a new image |
@@ -106,6 +107,7 @@ Event names are `<thing>.<what happened>`:
 | Source | Events |
 | --- | --- |
 | songdrop | `job.incomplete` (songs missing after a download), `song.recovered`, `song.gave_up`, `job.finished` |
+| clipseerr | `request.created`, `request.completed`, `request.failed` (`data.request`: the request, as its API gives it) |
 
 ## Shared code
 
@@ -137,6 +139,21 @@ service itself.
 - **Owns**: `$VOLUMES_ROOT/songdrop/jobs` (jobs, settings, connections, cookies).
 - **Not its job**: naming and tagging songs, lyrics, filing into a library
   (musicguard and Stanzarr).
+
+### clipseerr: music videos → requests
+
+`compose/clipseerr`, `clipseerr.homelab.lan`. API reference: `/api/docs` on
+the service.
+
+- **Job**: what there is (the newest music videos, charts, genres, search,
+  artists), and what was asked for: a song or a video, handed to the
+  services in order, followed, and announced.
+- **Alone**: browse and watch with no service at all; requests wait for one.
+- **Plugs in through**: its services (Aurral, songdrop, MeTube, or any app
+  through a Webhook), its notifications (Apprise, Discord, Webhook), its API
+  (`/api/v1`: requests, the catalog, settings).
+- **Owns**: `$VOLUMES_ROOT/clipseerr` (one SQLite database).
+- **Not its job**: downloading, checking or filing anything.
 
 ### musicguard: inbox → checked library
 

@@ -1,0 +1,77 @@
+name: ${CLIPSEERR_PROJECT_NAME:-clipseerr}
+# Browse the newest music videos and ask for the song or the video, like Seerr
+# for music videos (docs/music.md). It only asks and follows: Aurral, songdrop
+# and MeTube (music-links) download, musicguard checks, Navidrome and Jellyfin
+# play. Each request is announced on Discord's #requests through Apprise.
+#
+# The catalog is YouTube Music and Apple Music, without an account or a key.
+# Services, notifications and settings live in its database and are changed
+# on its Settings screens or through its API (/api/docs); the variables below
+# make them on the first start only.
+services:
+  clipseerr:
+    # The tag names the ytmusicapi pin: a bumped pin is a different image,
+    # which `make up` builds.
+    image: local/batlab-clipseerr:ytmusicapi-${VERSION_YTMUSICAPI}
+    build:
+      context: ./app
+      additional_contexts:
+        common: ../../lib/batlab-common
+      network: host
+      args:
+        BASE_IMAGE: ${IMAGE_CLIPSEERR_BASE}:${TAG_CLIPSEERR_BASE}
+        NODE_IMAGE: ${IMAGE_CLIPSEERR_NODE}:${TAG_CLIPSEERR_NODE}
+        YTMUSICAPI_VERSION: ${VERSION_YTMUSICAPI}
+    # Rebuild on every `make up`, so code changes are always deployed.
+    pull_policy: build
+    container_name: clipseerr
+    user: "${PUID}:${PGID}"
+    environment:
+      - TZ=${TZ}
+      - CLIPSEERR_PORT=8820
+      - CLIPSEERR_PUBLIC_URL=http://clipseerr.homelab.lan
+      - CLIPSEERR_INTERNAL_URL=http://clipseerr:8820
+      # First values; Settings, General changes them.
+      - CLIPSEERR_REGION=${CLIPSEERR_REGION:-US}
+      - CLIPSEERR_STOREFRONT=${CLIPSEERR_STOREFRONT:-us}
+      # The first services, in the order they are asked: songs from Aurral
+      # (Soulseek first: lossless when shared), else songdrop (YouTube Music,
+      # lossy); videos from MeTube's music videos instance.
+      - CLIPSEERR_AURRAL_URL=http://aurral:${AURRAL_HTTP_PORT:-3001}
+      - CLIPSEERR_AURRAL_API_KEY=${AURRAL_API_KEY:-}
+      - CLIPSEERR_SONGDROP_URL=http://songdrop:${SONGDROP_HTTP_PORT:-8810}
+      - CLIPSEERR_METUBE_URL=http://metube-videos:8081
+      # The first notification: Discord's #requests, through Apprise.
+      - CLIPSEERR_APPRISE_URL=http://apprise:8000/notify/clipseerr
+      - CLIPSEERR_APPRISE_TAG=requests
+    volumes:
+      # The database: requests, services (with Aurral's API key), settings, cache.
+      - ${VOLUMES_ROOT}/clipseerr:/state
+    tmpfs:
+      - /tmp
+    read_only: true
+    healthcheck:
+      test: ["CMD", "/opt/clipseerr/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8820/api/v1/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - home_server
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 512m
+    pids_limit: 128
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  home_server:
+    external: true
+    name: home_server

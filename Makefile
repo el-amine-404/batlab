@@ -224,6 +224,8 @@ setup: check-env
 		$(VOLUMES_ROOT)/slskd \
 		$(VOLUMES_ROOT)/soularr \
 		$(VOLUMES_ROOT)/metube \
+		$(VOLUMES_ROOT)/metube-videos \
+		$(VOLUMES_ROOT)/clipseerr \
 		$(VOLUMES_ROOT)/musicguard
 
 	@echo "==> Creating data directories..."
@@ -239,6 +241,7 @@ setup: check-env
 		$(DATA_ROOT)/media/music \
 		$(DATA_ROOT)/media/music-aurral \
 		$(DATA_ROOT)/media/music-extras \
+		$(DATA_ROOT)/media/music-videos \
 		$(DATA_ROOT)/inbox/music/metube \
 		$(DATA_ROOT)/inbox/music/spotdl \
 		$(DATA_ROOT)/inbox/music/songdrop \
@@ -286,10 +289,13 @@ setup: check-env
 		$(VOLUMES_ROOT)/slskd \
 		$(VOLUMES_ROOT)/soularr \
 		$(VOLUMES_ROOT)/metube \
+		$(VOLUMES_ROOT)/metube-videos \
+		$(VOLUMES_ROOT)/clipseerr \
 		$(VOLUMES_ROOT)/musicguard \
 		$(DATA_ROOT)/media/music \
 		$(DATA_ROOT)/media/music-aurral \
 		$(DATA_ROOT)/media/music-extras \
+		$(DATA_ROOT)/media/music-videos \
 		$(DATA_ROOT)/inbox \
 		$(DATA_ROOT)/soulseek \
 		$(DATA_ROOT)/.quarantine/musicguard
