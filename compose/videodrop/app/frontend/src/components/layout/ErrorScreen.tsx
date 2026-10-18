@@ -59,7 +59,8 @@ export function ErrorScreen({ error, kind = kindOf(error), retry, message, class
       <p className="mt-2 max-w-md text-sm text-muted-foreground">{meta.text}</p>
       {said && <p className="mt-3 max-w-md rounded-lg border border-border bg-card px-3 py-2 text-sm">{said}</p>}
       <div className="mt-6 flex flex-wrap justify-center gap-2">
-        {retry && <Button onClick={retry}><RotateCw /> Try again</Button>}
+        {/* Asking again for what isn't there gives the same answer. */}
+        {retry && kind !== "not-found" && <Button onClick={retry}><RotateCw /> Try again</Button>}
         {!retry && kind !== "not-found" && <Button onClick={() => window.location.reload()}><RotateCw /> Reload</Button>}
         <Button variant="secondary" asChild><Link to="/"><Home /> Downloads</Link></Button>
         {children}
