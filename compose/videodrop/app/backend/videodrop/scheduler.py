@@ -29,7 +29,7 @@ from .config import Config
 from .events import Event
 from .jobs import JobStore
 from .loops import call_on
-from .options import to_output_template
+from .options import Section, to_output_template
 from .settings import Settings
 
 log = logging.getLogger("videodrop.scheduler")
@@ -84,6 +84,13 @@ def _whole(value) -> int | None:
     return round(number) if number is not None else None
 
 
+def section_of(row) -> Section | None:
+    if not row["section"]:
+        return None
+    start, end = json.loads(row["section"])
+    return Section(start=start, end=end)
+
+
 def backoff(attempt: int) -> float:
     """1 min, 5 min, 25 min…, 6 h at most."""
     return min(MAX_BACKOFF, 60 * 5 ** max(0, attempt - 1))
@@ -104,6 +111,12 @@ class Scheduler:
         self._loop: asyncio.AbstractEventLoop | None = None
         self.disk_low = False
         self.free_bytes: int | None = None
+        self._finished: list[Callable[[str], None]] = []
+
+    def on_finished(self, listener: Callable[[str], None]) -> None:
+        """listener(job_id) once a job has finished with files (from a thread
+        of the event loop: it must return at once)."""
+        self._finished.append(listener)
 
     # ---- what the API and the store see -------------------------------------------------
 
@@ -218,7 +231,8 @@ class Scheduler:
                 "url": row["url"],
                 "work_dir": str(work),
                 "options": json.loads(row["options"]),
-                "output": to_output_template(row["template"]),
+                "output": to_output_template(row["template"], section_of(row)),
+                "section": json.loads(row["section"]) if row["section"] else None,
                 "rate_limit": settings.rate_limit_mib * 1024 ** 2 or None,
                 "max_filesize": settings.max_filesize_gb * 1024 ** 3 or None,
                 "cookies": cookies.copy_for(self._config.state_dir, work),
@@ -276,7 +290,8 @@ class Scheduler:
         self._jobs.update(run.job_id, fingerprint=fingerprint)
         earlier = None
         if fingerprint and not row["again"]:
-            earlier = self._jobs.reusable(fingerprint, row["options"], row["folder"], row["template"], row["id"])
+            earlier = self._jobs.reusable(fingerprint, row["options"], row["folder"], row["template"], row["section"],
+                                          row["id"])
         run.reused = earlier["id"] if earlier else None
         with suppress(ConnectionError, BrokenPipeError):
             run.process.stdin.write(json.dumps({"reuse": run.reused}).encode() + b"\n")
@@ -396,6 +411,11 @@ class Scheduler:
             note = f"{failed} of the videos failed; the last: {run.errors[-1]}" if failed else None
             self._jobs.update(run.job_id, status="finished", stage=None, progress={}, error=note, finished_at=now)
             self._tell(run.job_id, "finished")
+            for listener in self._finished:
+                try:
+                    listener(run.job_id)
+                except Exception:
+                    log.exception("after download %s", run.job_id)
             return
         reason = run.errors[-1] if run.errors else "The download failed without saying why."
         reason = re.sub(r"^ERROR:\s*", "", reason)

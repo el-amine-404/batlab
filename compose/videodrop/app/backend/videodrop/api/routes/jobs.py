@@ -4,10 +4,10 @@ import mimetypes
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Query, Request, Response
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from ...broker import TooMany
-from ...domain import FINAL, STATUSES, NotFound, Status
+from ...domain import FINAL, STATUSES, Invalid, NotFound, Status
 from ...jobs import MAX_PAGE, JobIn, JobQuery
 from .. import schemas
 from ..deps import Base, Ctx
@@ -153,12 +153,72 @@ def get_file(job_id: str, index: int, ctx: Ctx,
              inline: bool = Query(False, description="To play in the browser rather than save.")):
     """The file itself. Range requests work (resume a download, seek in a
     player); the ETag and Last-Modified let a client skip what it has."""
-    ctx.jobs.row(job_id)  # 404 when there's no such job
-    for file in ctx.jobs.files(job_id):
-        if file["position"] == index and file["removed_at"] is None:
-            path = ctx.jobs.file_path(file)
-            if path.is_file():
-                media = mimetypes.guess_type(file["name"])[0] or "application/octet-stream"
-                return FileResponse(path, media_type=media, filename=file["name"],
-                                    content_disposition_type="inline" if inline else "attachment")
-    return JSONResponse({"detail": "That file isn't there any more."}, status_code=404)
+    file, path = ctx.jobs.available(job_id, index)
+    media = mimetypes.guess_type(file["name"])[0] or "application/octet-stream"
+    return FileResponse(path, media_type=media, filename=file["name"],
+                        content_disposition_type="inline" if inline else "attachment")
+
+
+def _video(ctx, job_id: str, index: int):
+    file, path = ctx.jobs.available(job_id, index)
+    if file["kind"] != "video":
+        raise NotFound("That file isn't a video.")
+    return file, path
+
+
+@router.get("/{job_id}/files/{index}/details", summary="A video file's details and pictures",
+            response_model=schemas.FileDetails, responses=_PROBLEMS)
+def file_details(job_id: str, index: int, ctx: Ctx, base: Base):
+    """As ffprobe reads it: its codecs, bitrates, tracks and chapters; and
+    the addresses of its pictures (a gallery, a storyboard for a seek bar)
+    and of its subtitle tracks as WebVTT. The pictures are made the first
+    time they are asked for, or right after the download: a few seconds."""
+    file, path = _video(ctx, job_id, index)
+    try:
+        details = ctx.previews.details(path)
+    except ValueError as exc:
+        raise Invalid(f"The file can't be read: {exc}") from None
+    here = f"{base}/api/v1/jobs/{job_id}/files/{index}"
+    board = details["storyboard"]
+    return {
+        **details, "name": file["name"], "size": path.stat().st_size,
+        "frames": [{"time": at, "url": f"{here}/frames/{n}.jpg"} for n, at in enumerate(details["frames"])],
+        "storyboard": {**board, "url": f"{here}/storyboard.jpg"} if board else None,
+        "subtitles": [{**{k: v for k, v in track.items() if k != "text"},
+                       "url": f"{here}/subtitles/{track['index']}.vtt" if track["text"] else None}
+                      for track in details["subtitles"]],
+    }
+
+
+_PICTURE = {200: {"content": {"image/jpeg": {}}}, 404: {"model": schemas.Problem}}
+
+
+@router.get("/{job_id}/files/{index}/frames/{n}.jpg", summary="One of a video's gallery pictures",
+            response_class=FileResponse, responses=_PICTURE)
+def file_frame(job_id: str, index: int, n: int, ctx: Ctx):
+    _, path = _video(ctx, job_id, index)
+    found = ctx.previews.frame(path, n)
+    if not found:
+        raise NotFound("There's no such picture.")
+    return FileResponse(found, media_type="image/jpeg")
+
+
+@router.get("/{job_id}/files/{index}/storyboard.jpg", summary="A video's storyboard",
+            response_class=FileResponse, responses=_PICTURE)
+def file_storyboard(job_id: str, index: int, ctx: Ctx):
+    """Small pictures of the whole video in one image (details.storyboard says how to read it)."""
+    _, path = _video(ctx, job_id, index)
+    found = ctx.previews.storyboard(path)
+    if not found:
+        raise NotFound("This video has no storyboard.")
+    return FileResponse(found, media_type="image/jpeg")
+
+
+@router.get("/{job_id}/files/{index}/subtitles/{n}.vtt", summary="A video's subtitle track, as WebVTT",
+            response_class=FileResponse, responses={200: {"content": {"text/vtt": {}}}, 404: {"model": schemas.Problem}})
+def file_subtitles(job_id: str, index: int, n: int, ctx: Ctx):
+    _, path = _video(ctx, job_id, index)
+    found = ctx.previews.subtitles(path, n)
+    if not found:
+        raise NotFound("There's no such text subtitle track.")
+    return FileResponse(found, media_type="text/vtt; charset=utf-8")

@@ -79,7 +79,9 @@ def embed_subtitles(video: Path, srt: Path, title: str) -> None:
     out = video.with_name(f".{video.stem}.lyrics{video.suffix}")
     existing = sum(1 for s in probe(video).get("streams") or [] if s.get("codec_type") == "subtitle")
     command = ["ffmpeg", "-v", "error", "-y", "-i", str(video), "-i", str(srt), "-map", "0", "-map", "1",
+               # mkv keeps a track's name as its title, mp4 as its handler's name.
                "-c", "copy", f"-c:s:{existing}", codec, f"-metadata:s:s:{existing}", f"title={title}",
+               f"-metadata:s:s:{existing}", f"handler_name={title}",
                f"-metadata:s:s:{existing}", "language=und", str(out)]
     answer = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
     if answer.returncode != 0 or not out.is_file():

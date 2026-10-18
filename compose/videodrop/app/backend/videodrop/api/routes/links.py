@@ -28,5 +28,5 @@ async def probe_link(body: schemas.ProbeIn, ctx: Ctx):
     format the options pick with its size and bitrate, the subtitles there
     are, and where the file would land. Two at a time at most; an answer is
     kept 10 minutes. 422 with the site's reason when it can't be read."""
-    return await ctx.probe(body.url, body.destination, body.options)
+    return await ctx.probe(body.url, body.destination, body.options, body.section)
 

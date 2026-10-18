@@ -18,8 +18,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from . import links
 from .db import Database
-from .domain import ACTIVE, FINAL, Conflict, NotFound, Status
-from .options import OptionsPatch, VideoOptions
+from .domain import ACTIVE, FINAL, Conflict, Invalid, NotFound, Status
+from .options import OptionsPatch, Section, VideoOptions
 
 CALLBACK_EVENTS = ("started", "progress", "finished", "failed", "cancelled")
 DEFAULT_CALLBACK_EVENTS = ("started", "finished", "failed", "cancelled")
@@ -51,6 +51,10 @@ class JobIn(BaseModel):
     options: OptionsPatch = Field(default_factory=OptionsPatch,
                                   description="Options of its own; the destination's, then the settings', fill in "
                                               "the rest.")
+    section: Section | None = Field(None, description="Only this part of the video, cut at the keyframes "
+                                                      "around it (no re-encoding: it may start a few seconds "
+                                                      "early). Its times end the file's name. Not for a "
+                                                      "playlist.")
     priority: int = Field(0, ge=-10, le=10, description="Higher goes first among queued jobs; then oldest first.")
     again: bool = Field(False, description="Download it even when an earlier download got the same file: the site "
                                            "serves the same video (its fingerprint), with the same options, to the "
@@ -118,8 +122,14 @@ class JobQuery:
         return (" WHERE " + " AND ".join(clauses)) if clauses else "", tuple(params)
 
 
-def dedupe_key(url: str, destination: str | None, options: VideoOptions) -> str:
-    raw = json.dumps([links.canonical(url), destination or "", options.model_dump()], sort_keys=True)
+def section_text(section: Section | None) -> str | None:
+    """A section as the jobs table keeps it (compared as text)."""
+    return json.dumps([section.start, section.end]) if section else None
+
+
+def dedupe_key(url: str, destination: str | None, options: VideoOptions, section: Section | None = None) -> str:
+    raw = json.dumps([links.canonical(url), destination or "", options.model_dump(), section_text(section)],
+                     sort_keys=True)
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -157,6 +167,20 @@ class JobStore:
     def file_path(self, row: sqlite3.Row) -> Path:
         base = self._held if row["root"] == "held" else self._root
         return base / row["path"]
+
+    def available(self, job_id: str, index: int) -> tuple[sqlite3.Row, Path]:
+        """A job's file n, still there; raises NotFound."""
+        self.row(job_id)
+        file = self._db.one("SELECT * FROM files WHERE job_id = ? AND position = ? AND removed_at IS NULL",
+                            (job_id, index))
+        path = self.file_path(file) if file else None
+        if not path or not path.is_file():
+            raise NotFound("That file isn't there any more.")
+        return file, path
+
+    def every_file(self) -> list[Path]:
+        """Every file a job has, still there or not."""
+        return [self.file_path(row) for row in self._db.all("SELECT * FROM files WHERE removed_at IS NULL")]
 
     def public(self, row: sqlite3.Row, base_url: str | None = None) -> dict:
         """The job as the API answers it. base_url: how the caller reaches
@@ -201,6 +225,7 @@ class JobStore:
             "fingerprint": row["fingerprint"],
             "reused_from": row["reused_from"],
             "song": json.loads(row["song"]) if row["song"] else None,
+            "section": dict(zip(("start", "end"), json.loads(row["section"]))) if row["section"] else None,
             "attempts": row["attempts"],
             "retry_at": row["retry_at"],
             "files": files,
@@ -235,7 +260,9 @@ class JobStore:
         running, and False."""
         url = links.check(body.url)
         slug = destination["slug"] if destination else None
-        key = dedupe_key(url, slug, options)
+        if body.section and options.playlist:
+            raise Invalid("A section is a part of one video, not of a playlist: turn the playlist option off.")
+        key = dedupe_key(url, slug, options, body.section)
         same = self._db.one(f"SELECT * FROM jobs WHERE dedupe_key = ? AND status IN ({','.join('?' * len(ACTIVE))}) "
                             "ORDER BY created_at LIMIT 1", (key, *ACTIVE))
         if same:
@@ -245,13 +272,13 @@ class JobStore:
         events = body.callback_events if body.callback_events is not None else list(DEFAULT_CALLBACK_EVENTS)
         self._db.run(
             "INSERT INTO jobs (id, url, site, dedupe_key, destination, folder, template, options, priority, client, "
-            "status, callback_url, callback_secret, callback_events, base_url, song, again, created_at, "
-            "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?)",
+            "status, callback_url, callback_secret, callback_events, base_url, song, again, section, created_at, "
+            "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (job_id, url, links.site_of(url), key, slug, destination["folder"] if destination else None, template,
              json.dumps(options.model_dump()), body.priority, body.client, body.callback_url, body.callback_secret,
              json.dumps([e for e in CALLBACK_EVENTS if e in events]), base_url,
              body.song.model_dump_json() if body.song else None,
-             int(body.again), now, now))
+             int(body.again), section_text(body.section), now, now))
         self._touch(job_id)
         return self.row(job_id), True
 
@@ -310,12 +337,13 @@ class JobStore:
         self._db.transaction(work)
 
     def reusable(self, fingerprint: str, options: str, folder: str | None, template: str,
-                 exclude: str | None = None) -> sqlite3.Row | None:
+                 section: str | None = None, exclude: str | None = None) -> sqlite3.Row | None:
         """The newest finished job that got the same file: the same
-        fingerprint, options and place, every file still there."""
+        fingerprint, options, section and place, every file still there."""
         rows = self._db.all("SELECT * FROM jobs WHERE fingerprint = ? AND status = 'finished' AND options = ? AND "
-                            "folder IS ? AND template = ? AND id IS NOT ? ORDER BY finished_at DESC LIMIT 5",
-                            (fingerprint, options, folder, template, exclude))
+                            "folder IS ? AND template = ? AND section IS ? AND id IS NOT ? "
+                            "ORDER BY finished_at DESC LIMIT 5",
+                            (fingerprint, options, folder, template, section, exclude))
         for row in rows:
             files = self.files(row["id"])
             if files and all(f["removed_at"] is None and self.file_path(f).is_file() for f in files):

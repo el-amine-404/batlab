@@ -22,11 +22,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi.testclient import TestClient  # noqa: E402
 
 from videodrop import config as config_module  # noqa: E402
-from videodrop import checks, links, lyrics, placement  # noqa: E402
+from videodrop import checks, links, lyrics, placement, previews  # noqa: E402
 from videodrop.api.app import create_app  # noqa: E402
 from videodrop.callbacks import sign  # noqa: E402
 from videodrop.domain import Invalid  # noqa: E402
-from videodrop.options import DEFAULTS, check_template, resolve, to_output_template  # noqa: E402
+from videodrop.options import DEFAULTS, Section, check_template, resolve, safe_path, to_output_template  # noqa: E402
 from videodrop.scheduler import TRANSIENT, backoff  # noqa: E402
 from videodrop.services import build  # noqa: E402
 from videodrop.runner import StepWatch  # noqa: E402
@@ -65,6 +65,62 @@ class Options(unittest.TestCase):
         webm = params(resolve({"container": "webm"}), "x", Path("/w"))
         self.assertFalse(webm["writethumbnail"])
         self.assertNotIn("merge_output_format", params(resolve({"container": "original"}), "x", Path("/w")))
+
+
+class SafeNames(unittest.TestCase):
+    def test_no_character_a_disk_or_a_player_trips_on(self):
+        cases = {
+            # yt-dlp's look-alikes for the characters a name can't hold
+            "c4s/Fat Drops\uff1a Female [xhV0I89].mp4": "c4s/Fat Drops - Female [xhV0I89].mp4",
+            "AC\u29f8DC/Live at 12\uff1a30 \uff5c Paris \uff02best\uff02\uff1f [x].mkv": "AC-DC/Live at 12-30 - Paris 'best' [x].mkv",
+            "a/..hidden\u200b [a].mp4": "a/hidden [a].mp4",
+            "Beyonc\u00e9/D\u00e9j\u00e0 vu \u2013 \u65e5\u672c [x].mp4": "Beyonc\u00e9/D\u00e9j\u00e0 vu \u2013 \u65e5\u672c [x].mp4",
+            "?/***.mp4": "_/video.mp4",
+        }
+        for raw, safe in cases.items():
+            self.assertEqual(safe_path(raw), safe)
+
+    def test_a_section_ends_the_name(self):
+        self.assertEqual(to_output_template("{title} [{id}]", Section(start=90, end=3725)),
+                         "%(title).150B [%(id)s] [1m30s-1h02m05s].%(ext)s")
+        with self.assertRaises(ValueError):
+            Section(start=10, end=10.5)
+
+
+class Previews(unittest.TestCase):
+    def test_details_gallery_storyboard_and_subtitles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            video = FileChecks.make(None, Path(tmp), "a.mp4", 12)
+            srt = Path(tmp, "l.srt")
+            srt.write_text("1\n00:00:01,000 --> 00:00:03,000\nHello\n", encoding="utf-8")
+            checks.embed_subtitles(video, srt, "Lyrics")
+            made = previews.Previews(Path(tmp, "previews"))
+            details = made.details(video)
+            self.assertEqual((details["video"]["width"], details["video"]["codec"], len(details["audio"])),
+                             (160, "h264", 1))
+            self.assertEqual(details["subtitles"][0]["title"], "Lyrics")
+            self.assertEqual(len(details["frames"]), previews.FRAMES)
+            self.assertEqual((details["storyboard"]["count"], details["storyboard"]["every"]), (6, 2.0))
+            self.assertTrue(made.frame(video, 7).stat().st_size > 0)
+            self.assertIsNone(made.frame(video, 8))
+            board = made.storyboard(video)
+            size = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=width,height", "-of", "csv=p=0",
+                                   str(board)], capture_output=True, text=True, check=True).stdout.strip()
+            self.assertEqual(size, "960,90")  # 6 pictures of 160×90 in a row
+            self.assertIn("Hello", made.subtitles(video, 0).read_text())
+            self.assertIsNone(made.subtitles(video, 1))
+            # A link to the same file shares them; once no file has them, they go.
+            linked = Path(tmp, "b.mp4")
+            linked.hardlink_to(video)
+            self.assertEqual(made.key(linked), made.key(video))
+            self.assertEqual(made.sweep([video]), 0)
+            old = time.time() - previews.UNUSED_FOR - 10
+            home = Path(tmp, "previews", made.key(video))
+            import os
+            os.utime(home, (old, old))
+            self.assertEqual(made.sweep([]), 1)
+            self.assertFalse(home.exists())
+            made.close()
 
 
 class Fingerprints(unittest.TestCase):
@@ -425,6 +481,34 @@ class Api(unittest.TestCase):
         self.assertIsNone(other_quality["reused_from"])
         again = self.wait(self.ask("okokokokok1", destination="music-videos", again=True)["id"], "finished")
         self.assertIsNone(again["reused_from"])
+
+    def test_a_section_is_a_download_of_its_own(self):
+        whole = self.wait(self.ask("okokokokok3")["id"], "finished")
+        part = self.wait(self.ask("okokokokok3", section={"start": 30, "end": 90})["id"], "finished")
+        self.assertEqual((part["section"], part["reused_from"]), ({"start": 30, "end": 90}, None))
+        self.assertTrue(part["files"][0]["name"].endswith("[30-90].mp4"))
+        self.assertIsNone(whole["section"])
+        same = self.wait(self.ask("okokokokok3", section={"start": 30, "end": 90})["id"], "finished")
+        self.assertEqual(same["reused_from"], part["id"])
+        playlist = self.client.post("/api/v1/jobs", json={"url": watch("okokokokok3"), "options": {"playlist": True},
+                                                          "section": {"start": 1, "end": 5}})
+        self.assertEqual(playlist.status_code, 422)
+
+    def test_a_video_file_has_details_and_pictures(self):
+        done = self.wait(self.ask("okokokokok4")["id"], "finished")
+        path = self.services.jobs.file_path(self.services.jobs.files(done["id"])[0])
+        path.unlink()
+        FileChecks.make(None, path.parent, path.name, 6)
+        here = f"/api/v1/jobs/{done['id']}/files/0"
+        details = self.client.get(f"{here}/details")
+        self.assertEqual(details.status_code, 200, details.text)
+        body = details.json()
+        self.assertEqual((body["video"]["height"], body["storyboard"]["count"]), (120, 3))
+        frame = self.client.get(body["frames"][0]["url"])
+        self.assertEqual((frame.status_code, frame.headers["content-type"]), (200, "image/jpeg"))
+        self.assertEqual(self.client.get(body["storyboard"]["url"]).status_code, 200)
+        self.assertEqual(self.client.get(f"{here}/frames/99.jpg").status_code, 404)
+        self.assertEqual(self.client.get(f"/api/v1/jobs/{done['id']}/files/5/details").status_code, 404)
 
     def test_a_held_file_reused_has_its_own_life(self):
         first = self.wait(self.ask("okokokokok2")["id"], "finished")

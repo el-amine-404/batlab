@@ -34,6 +34,8 @@ export type LinkCheck = Schemas["LinkCheck"];
 export type Probe = Schemas["Probe"];
 export type ProbeIn = Schemas["ProbeIn"];
 export type Issue = Schemas["IssueOut"];
+export type FileDetails = Schemas["FileDetails"];
+export type Section = Schemas["Section"];
 export type IssueList = Schemas["IssueList"];
 
 export class ApiError extends Error {
@@ -99,6 +101,7 @@ export const api = {
   cancelJob: (id: string) => request<Job>(`/jobs/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
   retryJob: (id: string) => request<Job>(`/jobs/${encodeURIComponent(id)}/retry`, { method: "POST" }),
   deleteJob: (id: string) => request<void>(`/jobs/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  fileDetails: (id: string, index: number) => request<FileDetails>(`/jobs/${encodeURIComponent(id)}/files/${index}/details`),
 
   checkLink: (url: string, signal?: AbortSignal) => request<LinkCheck>(`/links/check?url=${encodeURIComponent(url)}`, { signal }),
   probe: (body: ProbeIn, signal?: AbortSignal) => request<Probe>("/probe", { ...json("POST", body), signal }),
@@ -134,6 +137,16 @@ export const api = {
 /** A file's address on this page (download_url is made for whoever asked, which may be another app). */
 export function fileUrl(job: Job, file: JobFile, inline = false): string {
   return `/api/v1/jobs/${encodeURIComponent(job.id)}/files/${file.index}${inline ? "?inline=true" : ""}`;
+}
+
+/** An address the API made (with the address it was reached at) as one on this page. */
+export function local(url: string): string {
+  try {
+    const parsed = new URL(url, window.location.origin);
+    return parsed.pathname + parsed.search;
+  } catch {
+    return url;
+  }
 }
 
 /** The message of anything thrown by api.*, for a toast. */

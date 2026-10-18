@@ -2,10 +2,11 @@ import { AlertTriangle, ExternalLink, FileCheck2, Film, History, ListVideo, Load
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 
+import { Size } from "@/components/common/Size";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import type { Probe } from "@/lib/api";
-import { clock, cn, formatBytes } from "@/lib/utils";
+import { clock, cn } from "@/lib/utils";
 
 const CODECS: Record<string, string> = { avc1: "H.264", h264: "H.264", av01: "AV1", vp09: "VP9", vp9: "VP9", hev1: "H.265", hvc1: "H.265", mp4a: "AAC", opus: "Opus" };
 
@@ -62,7 +63,6 @@ export function VideoPreview({ probe, loading, error, holdHours, again, onAgain 
     ) : null;
   }
   const f = probe.format;
-  const size = f?.size_bytes ? `${f.size_exact ? "" : "≈ "}${formatBytes(f.size_bytes)}` : "unknown";
   const sizeHint = f?.size_from === "bitrate" ? "Worked out from the bitrate and the length: the site doesn't say the size."
     : f?.size_exact ? "As the site says." : "The site's estimate.";
   const video = f && [f.height ? `${f.width}×${f.height}` : null, f.fps ? `${Math.round(f.fps)} fps` : null, f.dynamic_range && f.dynamic_range !== "SDR" ? f.dynamic_range : null].filter(Boolean).join(" · ");
@@ -101,7 +101,7 @@ export function VideoPreview({ probe, loading, error, holdHours, again, onAgain 
               <Fact label="Picture">{video || "—"}</Fact>
               <Fact label="Video">{[codec(f?.vcodec), f?.video_kbps ? `${Math.round(f.video_kbps)} kb/s` : null].filter(Boolean).join(" · ") || "—"}</Fact>
               <Fact label="Sound">{[codec(f?.acodec), f?.audio_kbps ? `${Math.round(f.audio_kbps)} kb/s` : null].filter(Boolean).join(" · ") || "none"}</Fact>
-              <Fact label="Size"><span title={sizeHint}>{size}</span> · {(f?.container ?? "").toUpperCase()}</Fact>
+              <Fact label="Size">{f?.size_bytes ? <Size bytes={f.size_bytes} approximate={!f.size_exact} how={sizeHint} /> : "unknown"} · {(f?.container ?? "").toUpperCase()}</Fact>
             </dl>
           )}
           <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">

@@ -3,7 +3,7 @@ server stays responsive whatever yt-dlp and ffmpeg do, a download is stopped
 by stopping its process (and its ffmpeg with it), and a crash ends only it.
 
 stdin: one line, a JSON object {"url", "work_dir", "options", "output",
-"rate_limit", "max_filesize", "cookies", "deno", "song"}; later, one more line
+"section", "rate_limit", "max_filesize", "cookies", "deno", "song"}; later, one more line
 answering the fingerprint event: {"reuse": <an earlier job's id> or null}.
 stdout: events, one JSON object a line (EVENTS); anything else the process
 prints goes to stderr, the container's log. Exit 0 when at least one file was
@@ -16,7 +16,10 @@ nothing is downloaded.
 
 Each step after the download (joining, tags, cover…) writes a new copy of
 the file; how far that copy has grown, against the file it is made from, is
-the step's progress (StepWatch)."""
+the step's progress (StepWatch).
+
+A finished file is renamed to a name any disk and player takes
+(options.safe_path) before it is checked."""
 
 import copy
 import json
@@ -130,11 +133,12 @@ def main() -> int:
     from yt_dlp.utils import DownloadError
 
     from . import checks, lyrics
-    from .options import VideoOptions
+    from .options import VideoOptions, safe_path
     from .ytdlp import fingerprint, params
 
     work_dir = Path(config["work_dir"])
     options = VideoOptions.model_validate(config["options"])
+    section = config.get("section")
     made: list[str] = []
     errors: list[str] = []
     seen: dict[str, int] = {}
@@ -242,12 +246,19 @@ def main() -> int:
             if not path or not os.path.isfile(path):
                 return [], info
             path = Path(path)
+            safe = work_dir / safe_path(os.path.relpath(path, work_dir))
+            if safe != path and not safe.exists():
+                safe.parent.mkdir(parents=True, exist_ok=True)
+                path = path.rename(safe)
             relative = os.path.relpath(path, work_dir)
             if options.lyrics:
                 emit("stage", stage="processing", step="lyrics")
                 add_lyrics(path, info)
             emit("stage", stage="processing", step="check")
-            result = checks.check(path, info.get("duration"))
+            expected = info.get("duration")
+            if section and expected:
+                expected = max(0.0, min(section[1], expected) - section[0])
+            result = checks.check(path, expected)
             if not result["ok"]:
                 emit("error", message=f"{info.get('title') or relative}: the file failed its check: "
                                       f"{' '.join(result['problems'])}")
@@ -261,6 +272,11 @@ def main() -> int:
                         max_filesize=config.get("max_filesize"), cookies=config.get("cookies"),
                         deno=config.get("deno"))
     ydl_params.update(logger=Logger(), progress_hooks=[progress], postprocessor_hooks=[postprocessing])
+    if section:
+        from yt_dlp.utils import download_range_func
+
+        # Cut at the keyframes around it, by ffmpeg, without re-encoding.
+        ydl_params.update(download_ranges=download_range_func(None, [tuple(section)]), force_keyframes_at_cuts=False)
     emit("stage", stage="downloading")
     try:
         with yt_dlp.YoutubeDL(ydl_params) as ydl:

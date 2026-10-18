@@ -54,6 +54,11 @@ class Config:
         return self.state_dir / "videodrop.db"
 
     @property
+    def previews_dir(self) -> Path:
+        """Each video's gallery, storyboard and details (previews.py)."""
+        return self.state_dir / "previews"
+
+    @property
     def work_dir(self) -> Path:
         """One folder per download in progress; emptied when it ends."""
         return self.media_root / OWN_FOLDER / "work"

@@ -1,5 +1,6 @@
 /** The words the page uses for the API's values. */
 import type { Job, Status, VideoOptions } from "@/lib/api";
+import { clock } from "@/lib/utils";
 
 export const QUALITY: Record<VideoOptions["quality"], string> = {
   best: "Best",
@@ -75,4 +76,9 @@ export const STEP: Record<string, string> = {
 /** What a job is called before its title is known. */
 export function jobTitle(job: Job): string {
   return job.title ?? job.url.replace(/^https?:\/\/(www\.)?/, "");
+}
+
+/** "1:30 → 2:45": the part of a video a job asked for. */
+export function sectionText(section: { start: number; end: number }): string {
+  return `${clock(section.start)} → ${clock(section.end)}`;
 }

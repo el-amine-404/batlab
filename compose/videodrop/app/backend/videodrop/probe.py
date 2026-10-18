@@ -12,6 +12,7 @@ import re
 import sys
 from pathlib import Path
 
+from .options import safe_path
 from .ytdlp import fingerprint
 
 ENTRIES_SHOWN = 10
@@ -132,7 +133,7 @@ def main() -> int:
                     "entries": [{"title": e.get("title"), "id": e.get("id"), "duration": _number(e.get("duration"))}
                                 for e in entries[:ENTRIES_SHOWN]],
                 }})
-            filename = os.path.relpath(ydl.prepare_filename(info), home)
+            filename = safe_path(os.path.relpath(ydl.prepare_filename(info), home))
             return answer({"ok": True, "info": describe(info, filename)})
     except DownloadError as exc:
         return answer({"ok": False, "message": re.sub(r"^ERROR:\s*(\[[^\]]+\]\s*[\w-]+:\s*)?", "", str(exc))[:500]})

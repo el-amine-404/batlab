@@ -24,7 +24,9 @@ def make(index, total, ident, title):
     emit("stage", stage="downloading")
     emit("progress", index=index, downloaded=500, total=1000.4, speed=100.0, eta=5)  # sizes come with decimals
     emit("stage", stage="processing")
-    path = Path("Fake Artist") / f"{title} [{ident}].mp4"
+    section = config.get("section")
+    part = f" [{section[0]:g}-{section[1]:g}]" if section else ""
+    path = Path("Fake Artist") / f"{title} [{ident}]{part}.mp4"
     (work / path).parent.mkdir(parents=True, exist_ok=True)
     (work / path).write_bytes(b"0123456789" * 100)
     if config["options"].get("lyrics"):

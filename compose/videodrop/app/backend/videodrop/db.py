@@ -114,8 +114,15 @@ def _fingerprints(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS jobs_fingerprint ON jobs (fingerprint, status)")
 
 
+def _sections(conn: sqlite3.Connection) -> None:
+    """A job for only a part of the video: [start, end] in seconds."""
+    if "section" not in {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}:
+        conn.execute("ALTER TABLE jobs ADD COLUMN section TEXT")
+
+
 # Step n brings user_version n-1 to n. A new step goes at the end; none is ever changed.
-MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (_checks_lyrics_and_lookups, _fingerprints)
+MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (_checks_lyrics_and_lookups, _fingerprints,
+                                                                 _sections)
 
 
 class Database:

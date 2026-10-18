@@ -35,6 +35,19 @@ export function clock(seconds: number): string {
   return h ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
 }
 
+/** 10607 → "10.6 Mb/s", 185 → "185 kb/s". */
+export function formatBitrate(kbps: number): string {
+  if (kbps >= 1000) return `${(kbps / 1000).toFixed(kbps >= 100_000 ? 0 : 1)} Mb/s`;
+  return `${Math.round(kbps)} kb/s`;
+}
+
+/** "1:30", "90", "1:02:03" → seconds; null when it isn't a time. */
+export function parseClock(text: string): number | null {
+  const parts = text.trim().split(":");
+  if (!parts.length || parts.length > 3 || parts.some((p) => !/^\d+(\.\d+)?$/.test(p))) return null;
+  return parts.reduce((total, part) => total * 60 + Number(part), 0);
+}
+
 export function formatSpeed(bytesPerSecond: number): string {
   return `${formatBytes(bytesPerSecond)}/s`;
 }

@@ -9,7 +9,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..domain import FileKind, Stage, Status
-from ..options import OptionsPatch, VideoOptions
+from ..options import OptionsPatch, Section, VideoOptions
 
 
 class Problem(BaseModel):
@@ -69,6 +69,75 @@ class JobFile(BaseModel):
                                                  "address the caller reaches videodrop at.")
 
 
+class VideoTrack(BaseModel):
+    codec: str | None = Field(examples=["h264"])
+    profile: str | None = Field(examples=["High"])
+    width: int | None
+    height: int | None
+    fps: float | None
+    kbps: float | None = Field(description="Its bitrate, when the container says.")
+    pixel_format: str | None = Field(examples=["yuv420p10le"])
+    bit_depth: int | None
+    dynamic_range: str = Field(description="SDR, HDR10 (PQ) or HLG.")
+
+
+class AudioTrack(BaseModel):
+    codec: str | None = Field(examples=["aac"])
+    profile: str | None
+    channels: int | None
+    layout: str | None = Field(examples=["stereo"])
+    sample_rate: int | None = Field(description="Hz.")
+    kbps: float | None
+    language: str | None
+
+
+class SubtitleTrack(BaseModel):
+    index: int = Field(description="Its number among the file's subtitle tracks.")
+    codec: str | None
+    language: str | None
+    title: str | None = Field(examples=["Lyrics"])
+    url: str | None = Field(description="It as WebVTT, which a browser shows; none for a picture-based track.")
+
+
+class Chapter(BaseModel):
+    start: float
+    end: float
+    title: str | None
+
+
+class Frame(BaseModel):
+    time: float = Field(description="Seconds into the video.")
+    url: str = Field(description="A JPEG, 640 pixels wide.")
+
+
+class Storyboard(BaseModel):
+    """Small pictures of the whole video in one JPEG, a grid read left to
+    right, top to bottom: picture n shows the video from n × every seconds."""
+
+    url: str
+    count: int
+    columns: int
+    width: int = Field(description="One picture's width, in pixels.")
+    height: int
+    every: float = Field(description="Seconds between two pictures.")
+
+
+class FileDetails(BaseModel):
+    """A video file as ffprobe reads it, and its pictures."""
+
+    name: str
+    size: int
+    container: str | None = Field(examples=["mov,mp4,m4a,3gp,3g2,mj2"])
+    duration: float | None
+    kbps: float | None = Field(description="Its overall bitrate.")
+    video: VideoTrack | None
+    audio: list[AudioTrack]
+    subtitles: list[SubtitleTrack]
+    chapters: list[Chapter]
+    frames: list[Frame] = Field(description="Pictures taken across the video, for a gallery.")
+    storyboard: Storyboard | None = Field(description="For a player's seek bar: what each moment looks like.")
+
+
 class CallbackLast(BaseModel):
     at: float
     event: str
@@ -113,6 +182,7 @@ class Job(BaseModel):
     reused_from: str | None = Field(description="The earlier download whose file it reused: the site served the "
                                                 "same video. Nothing was downloaded.")
     song: SongOut | None = Field(description="The song its caller named, for its lyrics.")
+    section: Section | None = Field(description="Only this part of the video was asked for.")
     attempts: int = Field(description="Tries so far.")
     retry_at: float | None = Field(description="When a queued job is tried again.")
     files: list[JobFile]
@@ -156,6 +226,7 @@ class ProbeIn(BaseModel):
     url: str = Field(min_length=8, max_length=2000)
     destination: str | None = Field(None, max_length=40, description="As for a job: None the default, \"\" none.")
     options: OptionsPatch = Field(default_factory=OptionsPatch)
+    section: Section | None = Field(None, description="As for a job: the size and the file name are that part's.")
 
 
 class ProbeFormat(BaseModel):

@@ -30,9 +30,9 @@ export function Unsaved({ dirty, busy, onSave, onDiscard, what = "settings" }: {
   return (
     <>
       {dirty && (
-        <div className="sticky top-14 z-20 -mx-4 mb-4 border-y border-warning/30 bg-[color-mix(in_oklch,var(--warning)_12%,var(--background))] px-4 py-2.5 sm:-mx-6 sm:px-6 lg:top-0 lg:-mx-10 lg:px-10"
-             role="status">
-          <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-3">
+        // As wide as the screen's content, held under the top while it scrolls.
+        <div className="sticky top-16 z-20 mb-4 lg:top-4" role="status">
+          <div className="flex flex-wrap items-center gap-3 rounded-xl border border-warning/30 bg-[color-mix(in_oklch,var(--warning)_12%,var(--background))] px-4 py-2.5 shadow-lg shadow-black/30">
             <AlertCircle className="size-4 shrink-0 text-warning" />
             <p className="flex-1 text-sm">You changed {what}. They apply once saved.</p>
             <Button size="sm" variant="ghost" onClick={onDiscard} disabled={busy}>Discard</Button>

@@ -1,12 +1,18 @@
-import { Ban, Download, RotateCcw, Trash2 } from "lucide-react";
+import { Ban, Download, Play, RotateCcw, Trash2 } from "lucide-react";
+import { Link } from "react-router";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { api, errorText, fileUrl, type Job } from "@/lib/api";
 import { useJobsChanged } from "@/lib/queries";
+import { cn } from "@/lib/utils";
 
-/** What can be done with a job now: get its file, stop it, try it again, forget it. */
-export function JobActions({ job, compact = false }: { job: Job; compact?: boolean }) {
+/**
+ * What can be done with a job now, in the order it is most wanted: play it,
+ * get its file, stop it, try it again, forget it. compact: icons only (the
+ * list); else labelled, play first and plain to see (a job's page).
+ */
+export function JobActions({ job, compact = false, className }: { job: Job; compact?: boolean; className?: string }) {
   const changed = useJobsChanged();
   const run = async (work: () => Promise<unknown>, done: string) => {
     try {
@@ -20,25 +26,30 @@ export function JobActions({ job, compact = false }: { job: Job; compact?: boole
   const video = job.files.find((file) => file.kind === "video" && file.available);
   const size = compact ? "icon-sm" : "sm";
   return (
-    <div className="flex shrink-0 items-center gap-1">
+    <div className={cn("flex shrink-0 flex-wrap items-center gap-1", !compact && "gap-2", className)}>
       {video && (
-        <Button variant="ghost" size={size} asChild title="Download the file">
-          <a href={fileUrl(job, video)} download aria-label="Download the file"><Download />{!compact && "File"}</a>
+        <Button variant={compact ? "ghost" : "default"} size={size} asChild title="Play it">
+          <Link to={`/jobs/${job.id}/play`} aria-label="Play it"><Play className={compact ? undefined : "fill-current"} />{!compact && "Play"}</Link>
+        </Button>
+      )}
+      {video && (
+        <Button variant={compact ? "ghost" : "secondary"} size={size} asChild title="Download the file">
+          <a href={fileUrl(job, video)} download aria-label="Download the file"><Download />{!compact && "Download"}</a>
         </Button>
       )}
       {(job.status === "queued" || job.status === "running") && (
-        <Button variant="ghost" size={size} title="Stop it" aria-label="Stop it" onClick={() => void run(() => api.cancelJob(job.id), "Stopped")}>
+        <Button variant={compact ? "ghost" : "secondary"} size={size} title="Stop it" aria-label="Stop it" onClick={() => void run(() => api.cancelJob(job.id), "Stopped")}>
           <Ban />{!compact && "Stop"}
         </Button>
       )}
       {(job.status === "failed" || job.status === "cancelled") && (
-        <Button variant="ghost" size={size} title="Try again" aria-label="Try again" onClick={() => void run(() => api.retryJob(job.id), "Queued again")}>
+        <Button variant={compact ? "ghost" : "default"} size={size} title="Try again" aria-label="Try again" onClick={() => void run(() => api.retryJob(job.id), "Queued again")}>
           <RotateCcw />{!compact && "Try again"}
         </Button>
       )}
       {(job.status === "finished" || job.status === "failed" || job.status === "cancelled") && (
         <Button variant="ghost" size={size} title="Forget it (its files in a destination stay)" aria-label="Forget it"
-                onClick={() => void run(() => api.deleteJob(job.id), "Forgotten")}>
+                className="hover:text-destructive" onClick={() => void run(() => api.deleteJob(job.id), "Forgotten")}>
           <Trash2 />{!compact && "Forget"}
         </Button>
       )}

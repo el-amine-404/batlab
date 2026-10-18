@@ -9,12 +9,13 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { api, ApiError, errorText, type OptionsPatch, type VideoOptions } from "@/lib/api";
+import { api, ApiError, errorText, type OptionsPatch, type Section, type VideoOptions } from "@/lib/api";
 import { useDestinations, useJobsChanged, useSettings } from "@/lib/queries";
 import { useDebounced } from "@/lib/useDebounced";
 import { cn } from "@/lib/utils";
 
 import { OptionsFields } from "./OptionsFields";
+import { SectionPicker } from "./SectionPicker";
 import { VideoPreview } from "./VideoPreview";
 
 // The "save to" choice that isn't a destination: kept here for whoever asked.
@@ -43,6 +44,7 @@ export function NewDownload() {
   const [options, setOptions] = useState<OptionsPatch>({});
   const [more, setMore] = useState(false);
   const [again, setAgain] = useState(false);
+  const [section, setSection] = useState<Section | null>(null);
   const [busy, setBusy] = useState(false);
 
   const list = destinations?.destinations ?? [];
@@ -63,10 +65,11 @@ export function NewDownload() {
   const linkOk = !!typed && check.data?.ok === true && typed === url.trim();
 
   // The preview, once the link is good and the choices have settled.
-  const probeKey = useDebounced({ url: check.data?.ok ? check.data.url : "", destination, options }, 600);
+  const probeKey = useDebounced({ url: check.data?.ok ? check.data.url : "", destination, options, section }, 600);
   const probe = useQuery({
     queryKey: ["probe", probeKey],
-    queryFn: ({ signal }) => api.probe({ url: probeKey.url, destination: probeKey.destination === HELD ? "" : probeKey.destination, options: probeKey.options }, signal),
+    queryFn: ({ signal }) => api.probe({ url: probeKey.url, destination: probeKey.destination === HELD ? "" : probeKey.destination,
+                                         options: probeKey.options, section: probeKey.section }, signal),
     enabled: !!probeKey.url && linkOk,
     staleTime: 10 * 60 * 1000,
     retry: false,
@@ -79,6 +82,8 @@ export function NewDownload() {
   useEffect(() => {
     if (!url) setMore(false);
   }, [url]);
+  // Another video: its own part, if any.
+  useEffect(() => setSection(null), [check.data?.url]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -90,6 +95,7 @@ export function NewDownload() {
         destination: destination === HELD ? "" : destination,
         options,
         priority: 0,
+        section,
         again,
         client: "videodrop page",
       });
@@ -100,6 +106,7 @@ export function NewDownload() {
       setUrl("");
       setOptions({});
       setAgain(false);
+      setSection(null);
       changed();
     } catch (caught) {
       toast.error(errorText(caught, "Couldn't ask for it."));
@@ -152,6 +159,9 @@ export function NewDownload() {
 
         {linkOk && <VideoPreview probe={probe.data} loading={probe.isFetching || (!probe.data && !probeError)} error={probeError} holdHours={settings?.hold_hours}
                                   again={again} onAgain={setAgain} />}
+        {linkOk && probe.data?.kind === "video" && !!probe.data.duration && !probe.data.is_live && !inherited?.playlist && (
+          <SectionPicker duration={probe.data.duration} value={section} onChange={setSection} />
+        )}
 
         <button type="button" onClick={() => setMore(!more)} aria-expanded={more}
                 className="flex items-center gap-1.5 self-start text-xs text-muted-foreground hover:text-foreground">

@@ -21,9 +21,10 @@ from .db import Database
 from .destinations import DestinationIn, DestinationStore
 from .domain import Conflict, Invalid, NotFound
 from .issues import Issues, ReleaseWatch
-from .jobs import JobIn, JobStore
+from .jobs import JobIn, JobStore, section_text
 from .notifications import TYPES, NotificationStore, Notifier
-from .options import DEFAULT_TEMPLATE, OptionsPatch, VideoOptions, resolve, to_output_template
+from .options import DEFAULT_TEMPLATE, OptionsPatch, Section, VideoOptions, resolve, to_output_template
+from .previews import Previews
 from .prober import Prober
 from .scheduler import Scheduler
 from .settings import SettingsStore
@@ -51,6 +52,7 @@ class Services:
     prober: Prober
     releases: ReleaseWatch
     issues: Issues
+    previews: Previews
     started_at: float = field(default_factory=time.time)
     _tasks: list[asyncio.Task] = field(default_factory=list)
 
@@ -71,6 +73,7 @@ class Services:
         await self.scheduler.stop()
         await self.callbacks.drain()
         await self.notifier.drain()
+        self.previews.close()
         await self.http.aclose()
         self.db.close()
 
@@ -101,17 +104,28 @@ class Services:
         return self.jobs.create(body, destination=destination, options=options, template=template,
                                 base_url=base_url)
 
-    async def probe(self, url: str, destination: str | None, options: OptionsPatch) -> dict:
+    async def probe(self, url: str, destination: str | None, options: OptionsPatch,
+                    section: Section | None = None) -> dict:
         """What the link would download (probe.py), and where it would land."""
         url = links.check(url)
         row, resolved, template = self.plan(destination, options)
+        # Read for the whole video (a section changed doesn't ask the site again), then made the section's.
         info = await self.prober.probe(url, resolved, to_output_template(template))
+        duration, size = info.get("duration"), (info.get("format") or {}).get("size_bytes")
+        if section and duration and size:
+            # The part's share of the whole: a size worked out, not the site's.
+            share = max(0.0, min(section.end, duration) - section.start) / duration
+            info = {**info, "format": {**info["format"], "size_bytes": int(size * share), "size_exact": False}}
+        if section and info.get("filename"):
+            stem, dot, extension = info["filename"].rpartition(".")
+            info = {**info, "filename": f"{stem} [{section.label()}]{dot}{extension}" if dot else
+                    f"{info['filename']} [{section.label()}]"}
         target = None
         if info.get("kind") == "video" and info.get("filename"):
             folder = row["folder"] if row else None
             path = f"{folder}/{info['filename']}" if folder else info["filename"]
-            earlier = self.jobs.reusable(info["fingerprint"], json.dumps(resolved.model_dump()), folder, template) \
-                if info.get("fingerprint") else None
+            earlier = self.jobs.reusable(info["fingerprint"], json.dumps(resolved.model_dump()), folder, template,
+                                         section_text(section)) if info.get("fingerprint") else None
             target = {"destination": row["slug"] if row else None, "path": path if folder else None,
                       "exists": bool(folder) and (self.config.media_root / path).is_file(),
                       "earlier": {"job_id": earlier["id"], "finished_at": earlier["finished_at"]} if earlier else None}
@@ -145,6 +159,7 @@ class Services:
             forgotten = self.jobs.forget(forget_before)
             if forgotten:
                 log.info("forgot %d downloads older than %d days", forgotten, settings.keep_days)
+        self.previews.sweep([path for path in self.jobs.every_file() if path.is_file()])
 
     def remove_job(self, job_id: str) -> None:
         """Forgets an ended job, and its held files; files in a destination stay."""
@@ -195,10 +210,14 @@ def build(config: Config, http: httpx.AsyncClient | None = None) -> Services:
     destinations.on_remove(settings.forget_destination)
     releases = ReleaseWatch(db, http)
     issues = Issues(config, db, settings, scheduler, notifications, releases)
+    previews = Previews(config.previews_dir)
+    # A finished video's gallery and storyboard are made at once, ready when someone looks.
+    scheduler.on_finished(lambda job_id: previews.prepare(
+        [jobs.file_path(f) for f in jobs.files(job_id) if f["kind"] == "video"]))
     return Services(config=config, db=db, http=http, settings=settings, destinations=destinations, jobs=jobs,
                     notifications=notifications, notifier=notifier, broker=broker, callbacks=callbacks,
                     scheduler=scheduler, prober=Prober(config.state_dir, config.deno, config.prober),
-                    releases=releases, issues=issues)
+                    releases=releases, issues=issues, previews=previews)
 
 
 def _record_callback(jobs: JobStore, job_id: str, last: dict) -> None:

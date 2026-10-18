@@ -6,9 +6,10 @@ Options come in three layers, the first set wins: the job's own, its
 destination's, the settings' defaults (resolve())."""
 
 import re
+import unicodedata
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Quality = Literal["best", "2160", "1440", "1080", "720", "480", "360"]
 Codec = Literal["any", "h264", "h265", "vp9", "av1"]
@@ -138,8 +139,35 @@ def check_template(template: str) -> str:
     return template
 
 
-def to_output_template(template: str) -> str:
-    """The template as yt-dlp's output template, the extension added."""
+class Section(BaseModel):
+    """A part of the video, in seconds from its start."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    start: float = Field(ge=0, le=86400 * 7, description="Where it starts.")
+    end: float = Field(gt=0, le=86400 * 7, description="Where it ends.")
+
+    @model_validator(mode="after")
+    def _order(self):
+        if self.end - self.start < 1:
+            raise ValueError("A section ends at least a second after it starts.")
+        return self
+
+    def label(self) -> str:
+        """For a file name: "1m30s-2m45s"."""
+        return f"{_stamp(self.start)}-{_stamp(self.end)}"
+
+
+def _stamp(seconds: float) -> str:
+    total = int(seconds)
+    h, m, s = total // 3600, total % 3600 // 60, total % 60
+    return f"{h}h{m:02d}m{s:02d}s" if h else f"{m}m{s:02d}s" if m else f"{s}s"
+
+
+def to_output_template(template: str, section: Section | None = None) -> str:
+    """The template as yt-dlp's output template, the extension added; a
+    section's times after the name, so that it never takes the whole
+    video's place."""
     parts = []
     position = 0
     for found in _PLACEHOLDER.finditer(template):
@@ -147,4 +175,42 @@ def to_output_template(template: str) -> str:
         parts.append(FIELDS[found.group(1)])
         position = found.end()
     parts.append(template[position:].replace("%", "%%"))
+    if section:
+        parts.append(f" [{section.label()}]")
     return "".join(parts) + ".%(ext)s"
+
+
+# yt-dlp writes the characters a file name can't hold as look-alikes
+# (full-width "：", "⧸"…): still odd for a share, a script or a player. Each
+# is turned into plain characters, or dropped.
+_LOOK_ALIKES = str.maketrans({"\uff1a": ":", "\uff5c": "|", "\u29f8": "/", "\u29f9": "\\", "\uff02": '"',
+                              "\uff1f": "?", "\uff0a": "*", "\uff1c": "<", "\uff1e": ">"})
+_INVISIBLE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
+
+
+def _safe_part(part: str) -> str:
+    part = unicodedata.normalize("NFC", part).translate(_LOOK_ALIKES)
+    part = "".join(c for c in part if unicodedata.category(c) != "Cc")
+    part = _INVISIBLE.sub("", part)
+    part = re.sub(r"(?<=\d):(?=\d)", "-", part)       # 12:30 → 12-30
+    part = re.sub(r"\s*[:|]\s*", " - ", part)         # "Song: Live" → "Song - Live"
+    part = re.sub(r"[/\\]", "-", part)                 # AC/DC → AC-DC
+    part = part.replace('"', "'")
+    part = re.sub(r"[?*<>]", "", part)
+    part = re.sub(r"\s+", " ", part)
+    part = re.sub(r"(?: - )+", " - ", part)
+    return part.strip(" .-")
+
+
+def safe_path(relative: str) -> str:
+    """A file's path (folders/name.ext) with names any disk, share and
+    player takes: no : | / \\ " ? * < > (nor yt-dlp's look-alikes for them),
+    no control or invisible characters, no leading or trailing dot, dash or
+    space. Letters of every language stay."""
+    *folders, name = relative.split("/")
+    stem, dot, extension = name.rpartition(".")
+    if not dot:
+        stem, extension = name, ""
+    stem = _safe_part(stem) or "video"
+    parts = [_safe_part(folder) or "_" for folder in folders]
+    return "/".join([*parts, f"{stem}.{extension}" if dot else stem])

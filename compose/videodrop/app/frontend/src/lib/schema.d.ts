@@ -173,6 +173,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/jobs/{job_id}/files/{index}/details": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A video file's details and pictures
+         * @description As ffprobe reads it: its codecs, bitrates, tracks and chapters; and
+         *     the addresses of its pictures (a gallery, a storyboard for a seek bar)
+         *     and of its subtitle tracks as WebVTT. The pictures are made the first
+         *     time they are asked for, or right after the download: a few seconds.
+         */
+        get: operations["file_details_api_v1_jobs__job_id__files__index__details_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{job_id}/files/{index}/frames/{n}.jpg": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One of a video's gallery pictures */
+        get: operations["file_frame_api_v1_jobs__job_id__files__index__frames__n__jpg_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{job_id}/files/{index}/storyboard.jpg": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A video's storyboard
+         * @description Small pictures of the whole video in one image (details.storyboard says how to read it).
+         */
+        get: operations["file_storyboard_api_v1_jobs__job_id__files__index__storyboard_jpg_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{job_id}/files/{index}/subtitles/{n}.vtt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A video's subtitle track, as WebVTT */
+        get: operations["file_subtitles_api_v1_jobs__job_id__files__index__subtitles__n__vtt_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/links/check": {
         parameters: {
             query?: never;
@@ -513,6 +590,32 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AudioTrack */
+        AudioTrack: {
+            /**
+             * Codec
+             * @example aac
+             */
+            codec: string | null;
+            /** Profile */
+            profile: string | null;
+            /** Channels */
+            channels: number | null;
+            /**
+             * Layout
+             * @example stereo
+             */
+            layout: string | null;
+            /**
+             * Sample Rate
+             * @description Hz.
+             */
+            sample_rate: number | null;
+            /** Kbps */
+            kbps: number | null;
+            /** Language */
+            language: string | null;
+        };
         /** CallbackInfo */
         CallbackInfo: {
             /** Url */
@@ -539,6 +642,15 @@ export interface components {
             message: string;
             /** Tries */
             tries: number;
+        };
+        /** Chapter */
+        Chapter: {
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Title */
+            title: string | null;
         };
         /** CookieStatus */
         CookieStatus: {
@@ -692,6 +804,42 @@ export interface components {
             /** Duration */
             duration: number | null;
         };
+        /**
+         * FileDetails
+         * @description A video file as ffprobe reads it, and its pictures.
+         */
+        FileDetails: {
+            /** Name */
+            name: string;
+            /** Size */
+            size: number;
+            /**
+             * Container
+             * @example mov,mp4,m4a,3gp,3g2,mj2
+             */
+            container: string | null;
+            /** Duration */
+            duration: number | null;
+            /**
+             * Kbps
+             * @description Its overall bitrate.
+             */
+            kbps: number | null;
+            video: components["schemas"]["VideoTrack"] | null;
+            /** Audio */
+            audio: components["schemas"]["AudioTrack"][];
+            /** Subtitles */
+            subtitles: components["schemas"]["SubtitleTrack"][];
+            /** Chapters */
+            chapters: components["schemas"]["Chapter"][];
+            /**
+             * Frames
+             * @description Pictures taken across the video, for a gallery.
+             */
+            frames: components["schemas"]["Frame"][];
+            /** @description For a player's seek bar: what each moment looks like. */
+            storyboard: components["schemas"]["Storyboard"] | null;
+        };
         /** FolderCheck */
         FolderCheck: {
             /** Path */
@@ -728,6 +876,19 @@ export interface components {
             folders: components["schemas"]["FolderEntry"][];
             /** Truncated */
             truncated: boolean;
+        };
+        /** Frame */
+        Frame: {
+            /**
+             * Time
+             * @description Seconds into the video.
+             */
+            time: number;
+            /**
+             * Url
+             * @description A JPEG, 640 pixels wide.
+             */
+            url: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -863,6 +1024,8 @@ export interface components {
             reused_from: string | null;
             /** @description The song its caller named, for its lyrics. */
             song: components["schemas"]["SongOut"] | null;
+            /** @description Only this part of the video was asked for. */
+            section: components["schemas"]["Section"] | null;
             /**
              * Attempts
              * @description Tries so far.
@@ -961,6 +1124,8 @@ export interface components {
             destination?: string | null;
             /** @description Options of its own; the destination's, then the settings', fill in the rest. */
             options?: components["schemas"]["OptionsPatch"];
+            /** @description Only this part of the video, cut at the keyframes around it (no re-encoding: it may start a few seconds early). Its times end the file's name. Not for a playlist. */
+            section?: components["schemas"]["Section"] | null;
             /**
              * Priority
              * @description Higher goes first among queued jobs; then oldest first.
@@ -1364,6 +1529,8 @@ export interface components {
              */
             destination?: string | null;
             options?: components["schemas"]["OptionsPatch"];
+            /** @description As for a job: the size and the file name are that part's. */
+            section?: components["schemas"]["Section"] | null;
         };
         /** ProbeTarget */
         ProbeTarget: {
@@ -1443,6 +1610,22 @@ export interface components {
             items?: number | null;
             /** Item Title */
             item_title?: string | null;
+        };
+        /**
+         * Section
+         * @description A part of the video, in seconds from its start.
+         */
+        Section: {
+            /**
+             * Start
+             * @description Where it starts.
+             */
+            start: number;
+            /**
+             * End
+             * @description Where it ends.
+             */
+            end: number;
         };
         /** Settings */
         Settings: {
@@ -1542,6 +1725,53 @@ export interface components {
             artist: string;
             /** Title */
             title: string;
+        };
+        /**
+         * Storyboard
+         * @description Small pictures of the whole video in one JPEG, a grid read left to
+         *     right, top to bottom: picture n shows the video from n × every seconds.
+         */
+        Storyboard: {
+            /** Url */
+            url: string;
+            /** Count */
+            count: number;
+            /** Columns */
+            columns: number;
+            /**
+             * Width
+             * @description One picture's width, in pixels.
+             */
+            width: number;
+            /** Height */
+            height: number;
+            /**
+             * Every
+             * @description Seconds between two pictures.
+             */
+            every: number;
+        };
+        /** SubtitleTrack */
+        SubtitleTrack: {
+            /**
+             * Index
+             * @description Its number among the file's subtitle tracks.
+             */
+            index: number;
+            /** Codec */
+            codec: string | null;
+            /** Language */
+            language: string | null;
+            /**
+             * Title
+             * @example Lyrics
+             */
+            title: string | null;
+            /**
+             * Url
+             * @description It as WebVTT, which a browser shows; none for a picture-based track.
+             */
+            url: string | null;
         };
         /** SystemStatus */
         SystemStatus: {
@@ -1675,6 +1905,42 @@ export interface components {
              * @description A playlist's first videos to take at most.
              */
             playlist_limit: number;
+        };
+        /** VideoTrack */
+        VideoTrack: {
+            /**
+             * Codec
+             * @example h264
+             */
+            codec: string | null;
+            /**
+             * Profile
+             * @example High
+             */
+            profile: string | null;
+            /** Width */
+            width: number | null;
+            /** Height */
+            height: number | null;
+            /** Fps */
+            fps: number | null;
+            /**
+             * Kbps
+             * @description Its bitrate, when the container says.
+             */
+            kbps: number | null;
+            /**
+             * Pixel Format
+             * @example yuv420p10le
+             */
+            pixel_format: string | null;
+            /** Bit Depth */
+            bit_depth: number | null;
+            /**
+             * Dynamic Range
+             * @description SDR, HDR10 (PQ) or HLG.
+             */
+            dynamic_range: string;
         };
     };
     responses: never;
@@ -2091,6 +2357,181 @@ export interface operations {
                 };
                 content: {
                     "application/octet-stream": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    file_details_api_v1_jobs__job_id__files__index__details_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+                index: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    file_frame_api_v1_jobs__job_id__files__index__frames__n__jpg_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+                index: number;
+                n: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    file_storyboard_api_v1_jobs__job_id__files__index__storyboard_jpg_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+                index: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    file_subtitles_api_v1_jobs__job_id__files__index__subtitles__n__vtt_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+                index: number;
+                n: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/vtt": unknown;
                 };
             };
             /** @description Not Found */

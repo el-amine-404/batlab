@@ -239,6 +239,22 @@ the service.
   downloaded (`reused_from`); a re-encoded or trimmed video, another quality
   or a new stream changes the fingerprint. `again: true` downloads anyway; the
   preview says so first (`target.earlier`).
+- **A part of a video** (`section: {start, end}`, seconds): cut by ffmpeg at
+  the keyframes around it, without re-encoding (it may start a few seconds
+  early); its times end the file's name (`… [1m30s-2m45s].mp4`). A section is
+  a download of its own: it is in the dedupe and reuse keys.
+- **File names** (`options.safe_path`): yt-dlp's look-alikes for characters a
+  name can't hold (`：`, `⧸`…) become plain ones (`Song: Live` → `Song -
+  Live`, `AC/DC` → `AC-DC`), the rest of `: | / \ " ? * < >`, control and
+  invisible characters go. Letters of every language stay.
+- **Seeing a file** (`previews.py`, `GET …/files/{n}/details`): ffprobe's
+  reading of it (codecs, bitrates, tracks, chapters), 8 pictures across it,
+  a storyboard (a picture every few seconds in one JPEG, for the player's
+  seek bar) and its text subtitle tracks as WebVTT. ffmpeg decodes keyframes
+  only (a 4K film's storyboard in about 15 s), right after the download, in
+  the background; kept in `$VOLUMES_ROOT/videodrop/previews/<file identity>`
+  and dropped once no job has that file. The page's player
+  (`/jobs/{id}/play`) is the browser's `<video>` with these.
 - **Lyrics** (`options.lyrics`, on for `music-videos`): a music video's
   synced lyrics from LRCLIB, as a subtitle track named Lyrics. The song is
   the job's `song` (clipseerr sends the one it matched), else guessed from
