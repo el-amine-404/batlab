@@ -154,6 +154,19 @@ class Sorting(unittest.TestCase):
         self.assertEqual([v.title for v in asyncio.run(routes._sorted(videos, "default"))], ["b", "C", "a"])
 
 
+class PreviewRanges(unittest.TestCase):
+    def test_ranges_asked_of_youtube_are_bounded(self):
+        os.environ.setdefault("CLIPSEERR_STATE", tempfile.mkdtemp())
+        import importlib
+
+        routes = importlib.import_module("app.routes.catalog")
+        chunk = routes._PREVIEW_CHUNK
+        self.assertEqual(routes._bounded("bytes=0-"), f"bytes=0-{chunk - 1}")
+        self.assertEqual(routes._bounded(None), f"bytes=0-{chunk - 1}")
+        self.assertEqual(routes._bounded("bytes=500-999"), "bytes=500-999")
+        self.assertEqual(routes._bounded(f"bytes=10-{10 * chunk}"), f"bytes=10-{9 + chunk}")
+
+
 class HotFeeds(unittest.TestCase):
     def test_a_clipfeed_feed_gives_its_real_songs(self):
         import httpx

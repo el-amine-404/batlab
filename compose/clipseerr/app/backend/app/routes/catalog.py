@@ -188,6 +188,21 @@ async def video_files(video_id: str):
 
 
 _PREVIEW_HEADERS = ("content-type", "content-length", "content-range", "accept-ranges")
+# YouTube's file servers refuse an open range ("bytes=0-", what a <video> asks
+# first) and serve a bounded one: each answer is this much at most, which
+# HTTP allows, and the player asks for the rest as it goes.
+_PREVIEW_CHUNK = 2 * 1024 * 1024
+_RANGE = re.compile(r"bytes=(\d+)-(\d*)$")
+
+
+def _bounded(asked: str | None) -> str:
+    """The Range to ask YouTube for: the one asked, never open nor larger than _PREVIEW_CHUNK."""
+    found = _RANGE.match((asked or "").strip())
+    start = int(found[1]) if found else 0
+    end = start + _PREVIEW_CHUNK - 1
+    if found and found[2]:
+        end = min(end, int(found[2]))
+    return f"bytes={start}-{end}"
 
 
 @router.get("/previews/{youtube_id}", summary="A video's preview for its card: its 360p file with sound, "
@@ -196,7 +211,7 @@ _PREVIEW_HEADERS = ("content-type", "content-length", "content-range", "accept-r
 async def preview_file(youtube_id: str, request: Request):
     if not _YOUTUBE_ID.fullmatch(youtube_id):
         raise Problem(404, "No such video.")
-    wanted = {"Range": request.headers.get("range") or "bytes=0-"}
+    wanted = {"Range": _bounded(request.headers.get("range"))}
     for again in (False, True):
         try:
             found = await catalog.preview_url(youtube_id, again=again)
