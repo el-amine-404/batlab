@@ -13,8 +13,12 @@ import asyncio
 import logging
 import os
 import re
+import secrets
 import subprocess
+import threading
 import time
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import yt_dlp
@@ -40,16 +44,97 @@ OPTIONS = {
 }
 
 
-def _headers(fmt: dict) -> list[str]:
-    """ffmpeg's options to ask for a stream as yt-dlp would."""
-    found = fmt.get("http_headers") or {}
-    options = []
-    if found.get("User-Agent"):
-        options += ["-user_agent", found["User-Agent"]]
-    extra = "".join(f"{k}: {v}\r\n" for k, v in found.items() if k not in ("User-Agent", "Accept"))
-    if extra:
-        options += ["-headers", extra]
-    return options
+# YouTube serves a read of 1 MB at full speed (about 200 Mbit/s here), an
+# open or larger one at 1 Mbit/s, past a few MB not at all (403): ffmpeg's
+# reads, always open, go through the relay below, which asks in pieces.
+PIECE = 1024 * 1024
+_RANGE = re.compile(r"bytes=(\d+)-(\d*)")
+
+
+class _Relay(BaseHTTPRequestHandler):
+    """ffmpeg's reads of a stream, asked of YouTube PIECE by PIECE. Only on
+    127.0.0.1, and only for the streams of the cuts in progress, under names
+    made for them (STREAMS)."""
+
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *args):
+        pass
+
+    def _piece(self, url: str, headers: dict, start: int, end: int):
+        request = urllib.request.Request(url, headers={**headers, "Range": f"bytes={start}-{end}"})
+        for attempt in range(2):
+            try:
+                return urllib.request.urlopen(request, timeout=20)
+            except OSError:
+                if attempt:
+                    raise
+                time.sleep(0.3)
+
+    def do_GET(self):
+        stream = STREAMS.get(self.path.lstrip("/"))
+        if stream is None:
+            self.send_error(404)
+            return
+        url, headers = stream
+        asked = _RANGE.match(self.headers.get("Range") or "")
+        start = int(asked[1]) if asked else 0
+        try:
+            first = self._piece(url, headers, start, start + PIECE - 1)
+        except OSError:
+            self.send_error(502)
+            return
+        total = int((first.headers.get("Content-Range") or "/0").rsplit("/", 1)[1] or 0)
+        if not total:
+            first.close()
+            self.send_error(502)
+            return
+        end = total - 1
+        if asked and asked[2]:
+            end = min(end, int(asked[2]))
+        self.send_response(206 if asked else 200)
+        self.send_header("Content-Type", first.headers.get("Content-Type", "application/octet-stream"))
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(end - start + 1))
+        if asked:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{total}")
+        self.end_headers()
+        position, answer = start, first
+        try:
+            while position <= end:
+                while chunk := answer.read(min(65536, end - position + 1)):
+                    self.wfile.write(chunk)
+                    position += len(chunk)
+                    if position > end:
+                        break
+                answer.close()
+                if position <= end:
+                    answer = self._piece(url, headers, position, min(position + PIECE - 1, end))
+        except OSError:
+            # ffmpeg has what it wanted and hung up (it does, after a seek), or YouTube failed.
+            self.close_connection = True
+        finally:
+            answer.close()
+
+
+STREAMS: dict[str, tuple[str, dict]] = {}
+_relay: ThreadingHTTPServer | None = None
+_relay_lock = threading.Lock()
+
+
+def _relay_port() -> int:
+    global _relay
+    with _relay_lock:
+        if _relay is None:
+            _relay = ThreadingHTTPServer(("127.0.0.1", 0), _Relay)
+            _relay.daemon_threads = True
+            threading.Thread(target=_relay.serve_forever, name="preview-relay", daemon=True).start()
+        return _relay.server_address[1]
+
+
+def _headers(fmt: dict) -> dict:
+    """The headers to ask for a stream as yt-dlp would."""
+    return {k: v for k, v in (fmt.get("http_headers") or {}).items() if k.lower() != "accept"}
 
 
 def start_of(duration: float | None) -> float:
@@ -83,11 +168,16 @@ def _cut_once(youtube_id: str, out: Path, timeout: int = 60) -> Path:
     streams = info.get("requested_formats") or [info]
     start = start_of(info.get("duration"))
     command = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y"]
+    port = _relay_port()
+    names = []
     for stream in streams:
         if not stream.get("url"):
             raise LookupError(f"no stream address for {youtube_id}")
+        name = secrets.token_urlsafe(16)
+        STREAMS[name] = (stream["url"], _headers(stream))
+        names.append(name)
         # Seeking each input before reading it: ffmpeg asks for the bytes of the clip's stretch only.
-        command += [*_headers(stream), "-ss", str(start), "-t", str(LENGTH), "-i", stream["url"]]
+        command += ["-ss", str(start), "-t", str(LENGTH), "-i", f"http://127.0.0.1:{port}/{name}"]
     command += ["-map", "0:v:0", "-map", f"{len(streams) - 1}:a:0", "-c", "copy",
                 # The index first: the page plays it before it has it all.
                 "-movflags", "+faststart", "-f", "mp4"]
@@ -100,6 +190,8 @@ def _cut_once(youtube_id: str, out: Path, timeout: int = 60) -> Path:
         os.replace(partial, out)
     finally:
         partial.unlink(missing_ok=True)
+        for name in names:
+            STREAMS.pop(name, None)
     return out
 
 

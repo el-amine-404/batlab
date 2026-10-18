@@ -202,6 +202,56 @@ class Previews(unittest.TestCase):
         self.assertEqual(calls, ["aaaaaaaaaaa"])
 
 
+class PreviewRelay(unittest.TestCase):
+    """ffmpeg's open reads, asked of a YouTube that refuses more than a piece at once."""
+
+    def test_reads_served_whole_from_pieces(self):
+        import http.server
+        import re
+        import threading
+        import urllib.request
+
+        from app.catalog import preview
+
+        data = bytes(range(256)) * 12_000  # about 3 MB
+        asked = []
+
+        class YouTube(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                start, end = map(int, re.match(r"bytes=(\d+)-(\d+)", self.headers["Range"]).groups())
+                asked.append(end - start + 1)
+                if end - start + 1 > preview.PIECE:
+                    self.send_error(403)
+                    return
+                end = min(end, len(data) - 1)
+                self.send_response(206)
+                self.send_header("Content-Range", f"bytes {start}-{end}/{len(data)}")
+                self.send_header("Content-Length", str(end - start + 1))
+                self.end_headers()
+                self.wfile.write(data[start:end + 1])
+
+        upstream = http.server.ThreadingHTTPServer(("127.0.0.1", 0), YouTube)
+        threading.Thread(target=upstream.serve_forever, daemon=True).start()
+        name = "test-stream"
+        preview.STREAMS[name] = (f"http://127.0.0.1:{upstream.server_address[1]}/v", {})
+        relay = f"http://127.0.0.1:{preview._relay_port()}/{name}"
+        try:
+            for rng, want in ((None, data), ("bytes=1500000-", data[1500000:]),
+                              ("bytes=10-2500000", data[10:2500001])):
+                headers = {"Range": rng} if rng else {}
+                got = urllib.request.urlopen(urllib.request.Request(relay, headers=headers), timeout=10).read()
+                self.assertEqual(got, want, rng)
+            with self.assertRaises(urllib.error.HTTPError):
+                urllib.request.urlopen(relay.replace(name, "unknown"), timeout=10)
+        finally:
+            preview.STREAMS.pop(name, None)
+            upstream.shutdown()
+        self.assertLessEqual(max(asked), preview.PIECE)
+
+
 class PreviewBudget(unittest.TestCase):
     def setUp(self):
         from app.catalog import preview
