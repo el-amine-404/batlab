@@ -61,6 +61,9 @@ class Run:
     task: asyncio.Task | None = None
     progress: dict = field(default_factory=dict)
     made: list[str] = field(default_factory=list)
+    # Each made file's check (checks.py), by its path in the work folder.
+    checks: dict[str, dict] = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     cancelled: bool = False
     stopping: bool = False
@@ -173,7 +176,7 @@ class Scheduler:
             run = Run(row["id"], row["site"])
             self._runs[row["id"]] = run
             self._jobs.update(row["id"], status="running", stage="starting", attempts=row["attempts"] + 1,
-                              retry_at=None, error=None, progress={},
+                              retry_at=None, error=None, progress={}, notes=[],
                               started_at=row["started_at"] or time.time())
             run.task = asyncio.get_running_loop().create_task(self._run(run), name=f"job-{row['id'][:8]}")
 
@@ -208,6 +211,7 @@ class Scheduler:
                 "max_filesize": settings.max_filesize_gb * 1024 ** 3 or None,
                 "cookies": cookies.copy_for(self._config.state_dir, work),
                 "deno": self._config.deno,
+                "song": json.loads(row["song"]) if row["song"] else None,
             }
             await self._follow(run, work, request)
             await self._end(run, row, work)
@@ -275,6 +279,10 @@ class Scheduler:
             self._jobs.update(run.job_id, stage=event.get("stage"))
         elif name == "file":
             run.made.append(event["path"])
+            run.checks[event["path"]] = event.get("checks")
+        elif name == "note":
+            run.notes.append(str(event.get("message") or "")[:500])
+            self._jobs.update(run.job_id, notes=run.notes)
         elif name == "error":
             run.errors.append(str(event.get("message") or "")[:1000])
         if now - run.saved_at >= SAVE_EVERY:
@@ -298,6 +306,9 @@ class Scheduler:
         if run.made:
             self._jobs.update(run.job_id, stage="placing")
             placed = await asyncio.to_thread(placement.place, work, run.made, self._target(row))
+            for file in placed:
+                # A copy that was there already keeps no check of the dropped one.
+                file["checks"] = None if file["existed"] else run.checks.get(file["source"])
             self._jobs.add_files(run.job_id, placed)
         self._finish(run, row, placed)
 

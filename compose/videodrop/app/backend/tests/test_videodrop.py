@@ -6,6 +6,8 @@ included, with fake_runner.py in place of yt-dlp: no network."""
 import hashlib
 import hmac
 import json
+import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -20,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi.testclient import TestClient  # noqa: E402
 
 from videodrop import config as config_module  # noqa: E402
-from videodrop import links, placement  # noqa: E402
+from videodrop import checks, links, lyrics, placement  # noqa: E402
 from videodrop.api.app import create_app  # noqa: E402
 from videodrop.callbacks import sign  # noqa: E402
 from videodrop.domain import Invalid  # noqa: E402
@@ -30,6 +32,7 @@ from videodrop.services import build  # noqa: E402
 from videodrop.ytdlp import params  # noqa: E402
 
 FAKE = str(Path(__file__).with_name("fake_runner.py"))
+FAKE_PROBE = str(Path(__file__).with_name("fake_probe.py"))
 
 
 def watch(video: str) -> str:
@@ -102,6 +105,59 @@ class Placement(unittest.TestCase):
             self.assertFalse((work / "A" / "t [x].mp4").exists())
 
 
+class Lyrics(unittest.TestCase):
+    def test_the_song_from_the_title(self):
+        self.assertEqual(lyrics.guess({"title": "Tate McRae - Housewife (Official Video)", "uploader": "TateMcRaeVEVO"}),
+                         ("Tate McRae", "Housewife"))
+        self.assertEqual(lyrics.guess({"track": "Housewife", "artist": "Tate McRae, Someone", "title": "x"}),
+                         ("Tate McRae", "Housewife"))
+        self.assertEqual(lyrics.guess({"title": "Housewife [4K]", "uploader": "Tate McRae - Topic"}),
+                         ("Tate McRae", "Housewife"))
+
+    def test_lrc_to_srt(self):
+        srt = lyrics.to_srt("[ar: x]\n[00:01.50] First\n[00:04.00]\n[00:05.2] Second", end=7)
+        self.assertEqual(srt, "1\n00:00:01,500 --> 00:00:04,000\nFirst\n\n2\n00:00:05,200 --> 00:00:07,000\nSecond\n")
+
+
+@unittest.skipUnless(shutil.which("ffmpeg"), "needs ffmpeg")
+class FileChecks(unittest.TestCase):
+    def make(self, folder: Path, name: str, seconds: int, audio: bool = True) -> Path:
+        path = folder / name
+        inputs = ["-f", "lavfi", "-i", f"testsrc=size=160x120:rate=10:duration={seconds}"]
+        if audio:
+            inputs += ["-f", "lavfi", "-i", f"sine=duration={seconds}"]
+        subprocess.run(["ffmpeg", "-v", "error", "-y", *inputs, "-shortest", str(path)], check=True)
+        return path
+
+    def test_a_good_video_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = checks.check(self.make(Path(tmp), "a.mp4", 3), 3)
+            self.assertTrue(result["ok"], result)
+            self.assertIn("160×120", result["summary"])
+
+    def test_cut_short_and_wrong_files_fail(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertFalse(checks.check(self.make(Path(tmp), "a.mp4", 2), 30)["ok"])
+            fake = Path(tmp, "b.mp4")
+            fake.write_bytes(b"MZ\x90\x00 not a video")
+            self.assertFalse(checks.check(fake, None)["ok"])
+            mkv = self.make(Path(tmp), "c.mkv", 2)
+            renamed = mkv.rename(Path(tmp, "c.mp4"))
+            self.assertIn("not the .mp4", " ".join(checks.check(renamed, 2)["problems"]))
+            silent = checks.check(self.make(Path(tmp), "d.mp4", 2, audio=False), 2)
+            self.assertEqual((silent["ok"], silent["problems"]), (True, ["It has no sound."]))
+
+    def test_lyrics_become_a_subtitle_track(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            video = self.make(Path(tmp), "a.mp4", 3)
+            srt = Path(tmp, "l.srt")
+            srt.write_text(lyrics.to_srt("[00:00.50] Hello\n[00:02.00] World", 3))
+            checks.embed_subtitles(video, srt, "Lyrics")
+            kinds = [s["codec_type"] for s in checks.probe(video)["streams"]]
+            self.assertEqual(kinds.count("subtitle"), 1)
+            self.assertTrue(checks.check(video, 3)["ok"])
+
+
 class Api(unittest.TestCase):
     """videodrop whole, against fake_runner.py."""
 
@@ -111,8 +167,9 @@ class Api(unittest.TestCase):
         (root / "media").mkdir()
         config = config_module.load({"VIDEODROP_STATE": str(root / "state"), "VIDEODROP_MEDIA": str(root / "media"),
                                      "VIDEODROP_STATIC": str(root / "static"),
-                                     "VIDEODROP_DESTINATIONS": "music-videos=music-videos"})
-        self.config = replace(config, runner=(sys.executable, FAKE))
+                                     "VIDEODROP_DESTINATIONS": "music-videos=music-videos",
+                                     "VIDEODROP_CHECK_RELEASES": "0"})
+        self.config = replace(config, runner=(sys.executable, FAKE), prober=(sys.executable, FAKE_PROBE))
         self.services = build(self.config)
         self.client = TestClient(create_app(self.services))
         self.client.__enter__()
@@ -310,6 +367,35 @@ class Api(unittest.TestCase):
         again = self.wait(job["id"], "running")
         self.assertEqual(again["attempts"], 1)
         self.client.post(f"/api/v1/jobs/{job['id']}/cancel")
+
+    def test_link_check_and_probe(self):
+        good = self.client.get("/api/v1/links/check", params={"url": "https://youtu.be/okokokokok1?si=x"}).json()
+        self.assertEqual((good["ok"], good["canonical"]), (True, "https://www.youtube.com/watch?v=okokokokok1"))
+        bad = self.client.get("/api/v1/links/check", params={"url": "http://10.0.0.1/a"}).json()
+        self.assertEqual(bad["ok"], False)
+        self.assertIn("this network", bad["message"])
+        probe = self.client.post("/api/v1/probe", json={"url": watch("okokokokok1"), "destination": "music-videos"})
+        self.assertEqual(probe.status_code, 200, probe.text)
+        info = probe.json()
+        self.assertEqual((info["format"]["height"], info["target"]["path"], info["target"]["exists"]),
+                         (1080, "music-videos/Fake Artist/Song [okokokokok1].mp4", False))
+        gone = self.client.post("/api/v1/probe", json={"url": watch("gonegonegon")})
+        self.assertEqual((gone.status_code, gone.json()["detail"]), (422, "Video unavailable"))
+
+    def test_lyrics_notes_and_checks_reach_the_job(self):
+        job = self.ask("okokokokok9", options={"lyrics": True}, song={"artist": "Tate McRae", "title": "Housewife"})
+        done = self.wait(job["id"], "finished")
+        self.assertEqual(done["song"], {"artist": "Tate McRae", "title": "Housewife"})
+        self.assertEqual(done["notes"], ["Lyrics added as subtitles (LRCLIB: Tate McRae – Housewife)."])
+        self.assertEqual(done["files"][0]["checks"]["summary"], "AV1 1920×1080 · Opus · 3:20")
+
+    def test_issues(self):
+        self.services.db.put("yt_dlp_latest", {"version": "2999.1.1", "released_at": "2020-01-01T00:00:00Z"})
+        failed = self.wait(self.ask("gonegonegon")["id"], "failed")
+        self.services.jobs.update(failed["id"], error="Sign in to confirm you're not a bot")
+        ids = [issue["id"] for issue in self.client.get("/api/v1/issues").json()["issues"]]
+        self.assertIn("yt-dlp", ids)
+        self.assertIn("bot-check", ids)
 
     def test_status_and_docs(self):
         status = self.client.get("/api/v1/status").json()

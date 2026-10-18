@@ -27,7 +27,11 @@ def make(index, total, ident, title):
     path = Path("Fake Artist") / f"{title} [{ident}].mp4"
     (work / path).parent.mkdir(parents=True, exist_ok=True)
     (work / path).write_bytes(b"0123456789" * 100)
-    emit("file", path=str(path))
+    if config["options"].get("lyrics"):
+        song = config.get("song") or {"artist": "Fake Artist", "title": title}
+        emit("note", message=f"Lyrics added as subtitles (LRCLIB: {song['artist']} – {song['title']}).")
+    emit("file", path=str(path), checks={"ok": True, "problems": [], "summary": "AV1 1920×1080 · Opus · 3:20",
+                                        "duration": 200.0})
 
 
 if video.startswith("okokokokok"):

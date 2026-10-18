@@ -13,7 +13,7 @@ Two pieces keep those pins current without hand-editing:
   says, and recreates the services listed in `conf/auto-services.txt`. It waits
   for the healthcheck, rolls back to the previous image if the new one does not
   come up, and removes the old image once the new one is healthy. A service
-  built locally (songdrop, clipseerr, subfeed, musicguard, tv-remote) is
+  built locally (songdrop, clipseerr, subfeed, videodrop, musicguard, tv-remote) is
   rebuilt instead of pulled whenever its *build fingerprint* changes: its build
   settings, with the pins from `compose/versions.env` they pass as build args,
   and the git trees of its build contexts. A new base image digest (Debian's

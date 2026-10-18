@@ -30,6 +30,11 @@ export type TestResult = Schemas["TestResult"];
 export type Settings = Schemas["Settings"];
 export type SettingsPatch = Schemas["SettingsPatch"];
 export type SystemStatus = Schemas["SystemStatus"];
+export type LinkCheck = Schemas["LinkCheck"];
+export type Probe = Schemas["Probe"];
+export type ProbeIn = Schemas["ProbeIn"];
+export type Issue = Schemas["IssueOut"];
+export type IssueList = Schemas["IssueList"];
 
 export class ApiError extends Error {
   constructor(
@@ -94,6 +99,10 @@ export const api = {
   cancelJob: (id: string) => request<Job>(`/jobs/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
   retryJob: (id: string) => request<Job>(`/jobs/${encodeURIComponent(id)}/retry`, { method: "POST" }),
   deleteJob: (id: string) => request<void>(`/jobs/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  checkLink: (url: string, signal?: AbortSignal) => request<LinkCheck>(`/links/check?url=${encodeURIComponent(url)}`, { signal }),
+  probe: (body: ProbeIn, signal?: AbortSignal) => request<Probe>("/probe", { ...json("POST", body), signal }),
+  issues: () => request<IssueList>("/issues"),
 
   destinations: () => request<{ destinations: Destination[] }>("/destinations"),
   templateFields: () => request<TemplateFields>("/destinations/template"),

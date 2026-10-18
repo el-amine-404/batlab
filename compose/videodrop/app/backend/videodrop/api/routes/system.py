@@ -39,6 +39,13 @@ def status(ctx: Ctx):
     }
 
 
+@router.get("/issues", tags=["System"], summary="What needs a person's eye", response_model=schemas.IssueList)
+def list_issues(ctx: Ctx):
+    """Errors first. Each says what is wrong, why it matters and, when it is
+    fixed on the page, where. An issue goes once fixed."""
+    return ctx.issues.public()
+
+
 @router.get("/settings", tags=["Settings"], summary="The settings", response_model=Settings)
 def get_settings(ctx: Ctx):
     return ctx.settings()

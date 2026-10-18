@@ -44,6 +44,10 @@ class Config:
     deno: str | None
     # The command a download runs as (runner.py, with this interpreter).
     runner: tuple[str, ...]
+    # The command that reads a link without downloading it (probe.py).
+    prober: tuple[str, ...]
+    # Whether to ask PyPI daily for yt-dlp's newest release (issues.py).
+    check_releases: bool
 
     @property
     def database(self) -> Path:
@@ -95,4 +99,6 @@ def load(env: Mapping[str, str] = os.environ) -> Config:
         apprise_tag=env.get("VIDEODROP_APPRISE_TAG", "").strip(),
         deno=deno if deno and os.access(deno, os.X_OK) else None,
         runner=(sys.executable, "-m", "videodrop.runner"),
+        prober=(sys.executable, "-m", "videodrop.probe"),
+        check_releases=env.get("VIDEODROP_CHECK_RELEASES", "1").strip() not in ("0", "false", "no"),
     )

@@ -28,6 +28,10 @@ class Videodrop(ServiceType):
         Field("container", "File", "select", default="mp4",
               help="MP4 plays everywhere, Jellyfin included.",
               choices=(Choice("mp4", "MP4"), Choice("mkv", "MKV"), Choice("original", "As YouTube sends it"))),
+        Field("lyrics", "Lyrics", "select", default="destination",
+              help="The song's synced lyrics (LRCLIB) as a subtitle track in Jellyfin; clipseerr names the song.",
+              choices=(Choice("destination", "As the destination says"), Choice("yes", "Always"),
+                       Choice("no", "Never"))),
     )
 
     def kinds(self, config):
@@ -37,11 +41,17 @@ class Videodrop(ServiceType):
         youtube_id = request["media"].get("video_id")
         if not youtube_id:
             raise outbound.SendFailed("This song has no YouTube video for videodrop to download.")
+        media = request["media"]
+        options = {"quality": config.get("quality", "best"), "codec": config.get("codec", "any"),
+                   "container": config.get("container", "mp4")}
+        if config.get("lyrics") in ("yes", "no"):
+            options["lyrics"] = config["lyrics"] == "yes"
         body = {
             "url": watch_url(youtube_id),
             "destination": config.get("destination") or "music-videos",
-            "options": {"quality": config.get("quality", "best"), "codec": config.get("codec", "any"),
-                        "container": config.get("container", "mp4")},
+            "options": options,
+            # The song as clipseerr matched it: lyrics are looked up by it, not by the upload's title.
+            "song": {"artist": media["artist"], "title": media["title"]},
             "client": "clipseerr",
             "callback_url": f"{ctx.callback_base}/hooks/videodrop?request={request['id']}",
             "callback_events": ["finished", "failed", "cancelled"],

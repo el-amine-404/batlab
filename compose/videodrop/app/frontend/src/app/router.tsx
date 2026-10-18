@@ -9,7 +9,11 @@ import { NotFoundPage } from "@/pages/NotFoundPage";
 
 // Opened now and then: their code loads when they are.
 const DestinationsPage = lazy(() => import("@/pages/DestinationsPage"));
+const IssuesPage = lazy(() => import("@/pages/IssuesPage"));
 const GeneralPage = lazy(() => import("@/pages/settings/GeneralPage"));
+const DownloadSettingsPage = lazy(() => import("@/pages/settings/DownloadSettingsPage"));
+const DefaultOptionsPage = lazy(() => import("@/pages/settings/DefaultOptionsPage"));
+const StoragePage = lazy(() => import("@/pages/settings/StoragePage"));
 const CookiesPage = lazy(() => import("@/pages/settings/CookiesPage"));
 const NotificationsPage = lazy(() => import("@/pages/settings/NotificationsPage"));
 const StatusPage = lazy(() => import("@/pages/settings/StatusPage"));
@@ -27,8 +31,12 @@ export const router = createBrowserRouter([
           { path: "/", element: <DownloadsPage /> },
           { path: "/jobs/:id", element: <JobPage /> },
           { path: "/destinations", element: <DestinationsPage /> },
+          { path: "/issues", element: <IssuesPage /> },
           { path: "/settings", element: <Navigate to="/settings/general" replace /> },
           { path: "/settings/general", element: <GeneralPage /> },
+          { path: "/settings/downloads", element: <DownloadSettingsPage /> },
+          { path: "/settings/options", element: <DefaultOptionsPage /> },
+          { path: "/settings/storage", element: <StoragePage /> },
           { path: "/settings/cookies", element: <CookiesPage /> },
           { path: "/settings/notifications", element: <NotificationsPage /> },
           { path: "/settings/status", element: <StatusPage /> },

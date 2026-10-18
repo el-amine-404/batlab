@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { errorText } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+import { ErrorScreen } from "./ErrorScreen";
+
 export function Loading({ label = "Loading" }: { label?: string }) {
   return (
     <div className="flex items-center justify-center gap-2 py-24 text-sm text-muted-foreground" role="status">
@@ -13,7 +15,9 @@ export function Loading({ label = "Loading" }: { label?: string }) {
   );
 }
 
-export function Failed({ error, retry, className }: { error: unknown; retry?: () => void; className?: string }) {
+/** A load that failed: the whole error screen when it is the screen's own data. */
+export function Failed({ error, retry, className, inline = false }: { error: unknown; retry?: () => void; className?: string; inline?: boolean }) {
+  if (!inline) return <ErrorScreen error={error} retry={retry} className={className} />;
   return (
     <div className={cn("flex flex-col items-center gap-3 py-20 text-center", className)} role="alert">
       <span className="flex size-11 items-center justify-center rounded-full bg-destructive/10 text-destructive">

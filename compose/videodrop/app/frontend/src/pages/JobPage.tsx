@@ -1,4 +1,4 @@
-import { ArrowLeft, Download, Play } from "lucide-react";
+import { ArrowLeft, Download, Play, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link, useParams } from "react-router";
 
@@ -31,6 +31,7 @@ function options(job: Job): string {
     o.codec !== "any" && CODEC[o.codec],
     CONTAINER[o.container],
     o.subtitles.length ? `subtitles ${o.subtitles.join(", ")}` : null,
+    o.lyrics ? "lyrics" : null,
     o.playlist ? `playlist (${o.playlist_limit} at most)` : null,
   ].filter(Boolean).join(" · ");
 }
@@ -59,6 +60,7 @@ export function JobPage() {
           {job.uploader && <p className="text-sm text-muted-foreground">{job.uploader}</p>}
           <JobProgress job={job} className="mt-1" />
           {job.error && <p className={job.status === "finished" ? "text-sm text-warning" : "text-sm text-destructive"}>{job.error}</p>}
+          {job.notes.map((note, n) => <p key={n} className="text-sm text-muted-foreground">{note}</p>)}
           <div className="mt-auto pt-2"><JobActions job={job} /></div>
         </div>
       </div>
@@ -72,10 +74,17 @@ export function JobPage() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm" title={file.name}>{file.name}</p>
                   <p className="truncate text-xs text-muted-foreground" title={file.path ?? undefined}>
-                    {formatBytes(file.size)} · {file.path ?? "held here for its caller"}
-                    {file.existed && " · was there already"}
+                    {formatBytes(file.size)} · {file.path ? `media/${file.path}` : "held here for its caller"}
+                    {file.existed && " · was there already, kept as it was"}
                     {!file.available && " · not there any more"}
                   </p>
+                  {file.checks && (
+                    <p className={file.checks.ok ? "flex items-center gap-1 text-xs text-success" : "flex items-center gap-1 text-xs text-destructive"}
+                       title="Read by ffprobe after the download: a real video, of the length the site said, in the container its name says">
+                      <ShieldCheck className="size-3.5" /> Checked: {file.checks.summary}
+                      {file.checks.problems.length > 0 && <span className="text-warning"> · {file.checks.problems.join(" ")}</span>}
+                    </p>
+                  )}
                 </div>
                 {file.available && (
                   <>
@@ -101,6 +110,7 @@ export function JobPage() {
             <Row label="Link"><a href={job.url} target="_blank" rel="noreferrer" className="text-sky-300 hover:underline">{job.url}</a></Row>
             <Row label="Into">{job.destination ? `${job.destination} (${job.folder})` : job.folder ?? "kept here, to download"}</Row>
             <Row label="Options">{options(job)}</Row>
+            {job.song && <Row label="Song">{job.song.artist} – {job.song.title}</Row>}
             <Row label="Asked">{timeAgo(job.created_at)}{job.priority ? ` · priority ${job.priority}` : ""}</Row>
             {job.started_at && <Row label="Started">{timeAgo(job.started_at)}{job.attempts > 1 ? ` · try ${job.attempts}` : ""}</Row>}
             {job.finished_at && <Row label="Ended">{timeAgo(job.finished_at)}</Row>}

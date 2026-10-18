@@ -222,6 +222,26 @@ the service.
   after 1, 5, 25… minutes; nothing starts while the media disk has less than
   `min_free_gb` free. A finished file is moved into place by a rename and
   never replaces one already there.
+- **Before and after a download**: a link is checked as it is typed
+  (`GET /api/v1/links/check`, without asking the site), then read for a
+  preview (`POST /api/v1/probe`: the picture, title and source, the format the
+  options pick with its bitrate and size, the subtitles there are, where the
+  file would land; two at a time, kept 10 minutes). After a download each
+  video is read by ffprobe (`checks.py`): a real video, of the length the
+  site said, in the container its name says; one that fails isn't kept. A
+  video file holds no program, so there is no virus scan; what can be wrong
+  with one is that it is broken or cut short, which this sees.
+- **Lyrics** (`options.lyrics`, on for `music-videos`): a music video's
+  synced lyrics from LRCLIB, as a subtitle track named Lyrics. The song is
+  the job's `song` (clipseerr sends the one it matched), else guessed from
+  the title. Subtitles are a video's business; which song a video is, its
+  caller's.
+- **Issues** (`GET /api/v1/issues`, the page's Issues, counted in the
+  sidebar): what needs a person: yt-dlp behind PyPI's newest release for
+  more than two days (the update chain stopped: Renovate, then the nightly
+  updater, which rebuilds videodrop when `VERSION_YTDLP` changes), YouTube's
+  bot check, failed downloads, the disk, cookies running out, notifications
+  or callbacks failing.
 
 ### musicguard: inbox → checked library
 

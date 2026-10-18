@@ -6,7 +6,7 @@ SettingsPatch…)."""
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..domain import FileKind, Stage, Status
 from ..options import OptionsPatch, VideoOptions
@@ -37,6 +37,19 @@ class Progress(BaseModel):
     item_title: str | None = None
 
 
+class FileChecks(BaseModel):
+    ok: bool = Field(description="A real video of the length the site said, in the container its name says.")
+    problems: list[str] = Field(description="What is wrong, or worth knowing (no sound).")
+    summary: str | None = Field(description="What ffprobe read: codec, size, sound, length.",
+                                examples=["AV1 1920×1080 · Opus · 3:45"])
+    duration: float | None
+
+
+class SongOut(BaseModel):
+    artist: str
+    title: str
+
+
 class JobFile(BaseModel):
     index: int
     name: str = Field(examples=["Housewife (Official Video) [DPEodkHzH-s].mp4"])
@@ -46,6 +59,7 @@ class JobFile(BaseModel):
                              examples=["music-videos/Tate McRae/Housewife (Official Video) [DPEodkHzH-s].mp4"])
     existed: bool = Field(description="The destination had it already (same name): the new copy was dropped.")
     available: bool = Field(description="It can be downloaded: it's still there.")
+    checks: FileChecks | None = Field(description="Its check after the download (videos only).")
     download_url: str | None = Field(description="Downloads it (Range requests work: resume, seek). Made from the "
                                                  "address the caller reaches videodrop at.")
 
@@ -89,6 +103,8 @@ class Job(BaseModel):
     progress: Progress | None = Field(description="While it runs.")
     error: str | None = Field(description="Why it failed; for a queued job, why its last try did; for a finished "
                                           "playlist, the videos that failed.")
+    notes: list[str] = Field(description="What happened beside the download: lyrics found or not.")
+    song: SongOut | None = Field(description="The song its caller named, for its lyrics.")
     attempts: int = Field(description="Tries so far.")
     retry_at: float | None = Field(description="When a queued job is tried again.")
     files: list[JobFile]
@@ -113,6 +129,110 @@ class JobCounts(BaseModel):
     finished: int
     failed: int
     cancelled: int
+
+
+# ---- reading a link -------------------------------------------------------------------
+
+class LinkCheck(BaseModel):
+    ok: bool = Field(description="videodrop takes this link. Checked without asking the site.")
+    message: str | None = Field(description="Why not, as a sentence.")
+    url: str
+    site: str | None
+    canonical: str | None = Field(description="The one spelling of this video (a YouTube link without its "
+                                              "tracking).")
+
+
+class ProbeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    url: str = Field(min_length=8, max_length=2000)
+    destination: str | None = Field(None, max_length=40, description="As for a job: None the default, \"\" none.")
+    options: OptionsPatch = Field(default_factory=OptionsPatch)
+
+
+class ProbeFormat(BaseModel):
+    width: int | None
+    height: int | None
+    fps: float | None
+    vcodec: str | None
+    acodec: str | None
+    video_kbps: float | None
+    audio_kbps: float | None
+    dynamic_range: str | None = Field(description="SDR, HDR10…")
+    container: str | None
+    size_bytes: int | None = Field(description="Of the file, as the site says; may be an estimate (size_exact).")
+    size_exact: bool
+    format_id: str | None = Field(description="yt-dlp's name for the streams picked.")
+
+
+class ProbeEntry(BaseModel):
+    title: str | None
+    id: str | None
+    duration: float | None
+
+
+class ProbeTarget(BaseModel):
+    destination: str | None
+    path: str | None = Field(description="Where the file would be, inside the media folder; none when held.")
+    exists: bool = Field(description="A file with that name is there already: the download would keep it.")
+
+
+class Probe(BaseModel):
+    """What a link would download, read from the site without downloading."""
+
+    kind: Literal["video", "playlist"]
+    id: str | None
+    title: str | None
+    uploader: str | None
+    channel_url: str | None
+    webpage_url: str | None = Field(description="The video's own page, as the site names it (not the link given).")
+    extractor: str | None = Field(description="Which of yt-dlp's sites read it.", examples=["Youtube"])
+    thumbnail: str | None
+    duration: float | None = None
+    upload_date: str | None = Field(None, description="YYYYMMDD.")
+    views: int | None = None
+    is_live: bool = False
+    age_limit: int | None = None
+    artist: str | None = None
+    track: str | None = None
+    format: ProbeFormat | None = Field(None, description="What the options pick.")
+    heights: list[int] = Field(default_factory=list, description="Every video height the site has.")
+    subtitles: list[str] = Field(default_factory=list, description="Languages with real subtitles.")
+    automatic_captions: int = Field(0, description="Languages with the site's automatic captions.")
+    automatic_has_english: bool = False
+    filename: str | None = Field(None, description="Its file name, as the destination's template makes it.")
+    count: int | None = Field(None, description="A playlist's videos.")
+    taken: int | None = Field(None, description="Of which downloaded (playlist_limit).")
+    entries: list[ProbeEntry] | None = Field(None, description="A playlist's first videos.")
+    options: VideoOptions = Field(description="The options it was read with, every layer resolved.")
+    target: ProbeTarget | None
+
+
+# ---- issues ------------------------------------------------------------------------------
+
+class IssueAction(BaseModel):
+    label: str
+    path: str = Field(description="A page of videodrop's, where it is fixed.")
+
+
+class IssueOut(BaseModel):
+    id: str
+    level: Literal["error", "warning", "info"]
+    title: str
+    detail: str
+    action: IssueAction | None
+    since: float | None
+
+
+class IssueCounts(BaseModel):
+    error: int
+    warning: int
+    info: int
+
+
+class IssueList(BaseModel):
+    issues: list[IssueOut]
+    counts: IssueCounts
 
 
 # ---- destinations ----------------------------------------------------------------------------

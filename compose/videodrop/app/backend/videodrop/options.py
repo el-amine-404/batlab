@@ -30,6 +30,9 @@ class VideoOptions(BaseModel):
     subtitles: list[str] = Field(description="Subtitle languages to embed (en, fr, pt-BR…); empty: none.")
     auto_subtitles: bool = Field(description="Also the site's automatic captions, when a language has no "
                                              "subtitles.")
+    lyrics: bool = Field(description="A music video: its synced lyrics (LRCLIB) as a subtitle track named Lyrics, "
+                                     "when there are some. The job's song names the song; else it is guessed from "
+                                     "the video's title.")
     embed_metadata: bool = Field(description="Title, artist, date and description written into the file.")
     embed_thumbnail: bool = Field(description="The video's picture as the file's cover (not in webm).")
     embed_chapters: bool = Field(description="The video's chapters as the file's chapters.")
@@ -63,6 +66,7 @@ class OptionsPatch(BaseModel):
     container: Container | None = None
     subtitles: list[str] | None = None
     auto_subtitles: bool | None = None
+    lyrics: bool | None = None
     embed_metadata: bool | None = None
     embed_thumbnail: bool | None = None
     embed_chapters: bool | None = None
@@ -76,7 +80,7 @@ class OptionsPatch(BaseModel):
 
 
 DEFAULTS = VideoOptions(quality="best", codec="any", container="mp4", subtitles=[], auto_subtitles=False,
-                        embed_metadata=True, embed_thumbnail=True, embed_chapters=True, playlist=False,
+                        lyrics=False, embed_metadata=True, embed_thumbnail=True, embed_chapters=True, playlist=False,
                         playlist_limit=50)
 
 

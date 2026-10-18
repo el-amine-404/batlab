@@ -87,8 +87,23 @@ SCHEMA = (
     "CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
 )
 
+def _checks_lyrics_and_lookups(conn: sqlite3.Connection) -> None:
+    """A job's song (for its lyrics), its notes (what happened beside the
+    download: lyrics found or not…) and its files' check; indexes for
+    forgetting old jobs and for the client filter."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
+    for column, definition in (("song", "TEXT"), ("notes", "TEXT NOT NULL DEFAULT '[]'")):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} {definition}")
+    if "checks" not in {row[1] for row in conn.execute("PRAGMA table_info(files)")}:
+        conn.execute("ALTER TABLE files ADD COLUMN checks TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS jobs_finished ON jobs (status, finished_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS jobs_client ON jobs (client, created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS files_held ON files (root, removed_at)")
+
+
 # Step n brings user_version n-1 to n. A new step goes at the end; none is ever changed.
-MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = ()
+MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (_checks_lyrics_and_lookups,)
 
 
 class Database:

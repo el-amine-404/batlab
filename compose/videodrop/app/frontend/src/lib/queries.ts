@@ -32,6 +32,7 @@ export const keys = {
   settings: ["settings"] as const,
   status: ["status"] as const,
   cookies: ["cookies"] as const,
+  issues: ["issues"] as const,
 };
 
 /** Downloads, newest first, a page at a time. */
@@ -57,6 +58,8 @@ export const useNotificationTypes = () =>
   useQuery({ queryKey: keys.notificationTypes, queryFn: api.notificationTypes, staleTime: Infinity });
 export const useSettings = () => useQuery({ queryKey: keys.settings, queryFn: api.settings });
 export const useStatus = () => useQuery({ queryKey: keys.status, queryFn: api.status, refetchInterval: 30 * SECOND });
+/** What needs a person's eye; read again every minute and when a download ends. */
+export const useIssues = () => useQuery({ queryKey: keys.issues, queryFn: api.issues, refetchInterval: 60 * SECOND });
 export const useCookies = () => useQuery({ queryKey: keys.cookies, queryFn: api.cookies });
 
 /** After a job was asked for, retried or removed here: the lists and counts read again. */
@@ -105,6 +108,7 @@ export function useLiveJobs(): Live {
       refresh = window.setTimeout(() => {
         void client.invalidateQueries({ queryKey: ["jobs"] });
         void client.invalidateQueries({ queryKey: keys.counts });
+        void client.invalidateQueries({ queryKey: keys.issues });
       }, 300);
     };
     const source = new EventSource("/api/v1/jobs/events");

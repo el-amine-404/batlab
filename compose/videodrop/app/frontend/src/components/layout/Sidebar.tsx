@@ -1,24 +1,37 @@
-import { Braces, X } from "lucide-react";
-import { Link, NavLink } from "react-router";
+import { Braces, ChevronDown, Settings, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Link, NavLink, useLocation } from "react-router";
 
 import { BROWSE, type Entry, SETTINGS } from "@/app/navigation";
 import { Logo } from "@/components/Logo";
-import { type Live, useCounts, useStatus } from "@/lib/queries";
+import { type Live, useCounts, useIssues, useStatus } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
 const item =
   "flex h-9 items-center gap-3 rounded-lg px-3 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
 
-function EntryLink({ entry, badge, tone }: { entry: Entry; badge?: number; tone?: "active" | "failed" }) {
+type Tone = "active" | "error" | "warning";
+const TONES: Record<Tone, string> = {
+  active: "bg-primary/20 text-sky-300",
+  error: "bg-destructive/20 text-destructive",
+  warning: "bg-warning/20 text-warning",
+};
+
+function EntryLink({ entry, badge, tone = "active", title, nested = false }: {
+  entry: Entry;
+  badge?: number;
+  tone?: Tone;
+  title?: string;
+  nested?: boolean;
+}) {
   const Icon = entry.icon;
   return (
-    <NavLink to={entry.path} end={entry.path === "/"} className={({ isActive }) => cn(item, isActive && "bg-accent font-medium text-foreground")}>
-      <Icon className="size-4 shrink-0" />
+    <NavLink to={entry.path} end={entry.path === "/"}
+             className={({ isActive }) => cn(item, nested && "h-8 pl-9 text-[13px]", isActive && "bg-accent font-medium text-foreground")}>
+      <Icon className={cn("shrink-0", nested ? "size-3.5" : "size-4")} />
       <span className="flex-1 truncate">{entry.label}</span>
       {!!badge && (
-        <span className={cn("min-w-5 rounded-full px-1.5 text-center text-[11px] font-medium tabular-nums",
-                            tone === "failed" ? "bg-destructive/20 text-destructive" : "bg-primary/20 text-sky-300")}
-              title={tone === "failed" ? `${badge} failed` : `${badge} running or queued`}>
+        <span className={cn("min-w-5 rounded-full px-1.5 text-center text-[11px] font-medium tabular-nums", TONES[tone])} title={title}>
           {badge}
         </span>
       )}
@@ -33,9 +46,22 @@ const LIVE = {
 } as const;
 
 export function Sidebar({ live, onClose }: { live: Live; onClose: () => void }) {
+  const { pathname } = useLocation();
   const { data: status } = useStatus();
   const { data: counts } = useCounts();
+  const { data: issues } = useIssues();
+  const inSettings = pathname.startsWith("/settings");
+  // Open while a settings page shows; can be opened from elsewhere too.
+  const [open, setOpen] = useState(inSettings);
+  useEffect(() => setOpen(inSettings), [inSettings]);
+
   const active = counts ? counts.queued + counts.running : 0;
+  const problems = issues ? issues.counts.error + issues.counts.warning : 0;
+  const badges: Record<string, { badge?: number; tone?: Tone; title?: string }> = {
+    "/": { badge: active, tone: "active", title: `${active} running or queued` },
+    "/issues": { badge: problems, tone: issues?.counts.error ? "error" : "warning", title: `${problems} to look at` },
+  };
+
   return (
     <div className="flex h-full flex-col pt-[env(safe-area-inset-top)]">
       <div className="flex h-16 items-center justify-between px-5">
@@ -50,15 +76,19 @@ export function Sidebar({ live, onClose }: { live: Live; onClose: () => void }) 
 
       <nav aria-label="Main" className="flex-1 overflow-y-auto px-3 pb-4">
         <div className="flex flex-col gap-0.5">
-          {BROWSE.map((entry) => (
-            <EntryLink key={entry.path} entry={entry} badge={entry.path === "/" ? active : undefined} tone="active" />
-          ))}
-        </div>
-        <p className="mt-6 mb-1.5 px-3 text-[11px] font-medium tracking-wider text-muted-foreground/70 uppercase">Settings</p>
-        <div className="flex flex-col gap-0.5">
-          {SETTINGS.map((entry) => (
-            <EntryLink key={entry.path} entry={entry} />
-          ))}
+          {BROWSE.map((entry) => <EntryLink key={entry.path} entry={entry} {...badges[entry.path]} />)}
+          <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-controls="settings-menu"
+                  className={cn(item, "w-full", inSettings && "text-foreground")}>
+            <Settings className="size-4 shrink-0" />
+            <span className="flex-1 truncate text-left">Settings</span>
+            <ChevronDown className={cn("size-4 transition-transform", open && "rotate-180")} />
+          </button>
+          {open && (
+            <div id="settings-menu" className="relative flex flex-col gap-0.5">
+              <span className="absolute top-1 bottom-1 left-[19px] w-px bg-border" aria-hidden />
+              {SETTINGS.map((entry) => <EntryLink key={entry.path} entry={entry} nested />)}
+            </div>
+          )}
         </div>
         <p className="mt-6 mb-1.5 px-3 text-[11px] font-medium tracking-wider text-muted-foreground/70 uppercase">Developers</p>
         <a href="/docs" className={item}>

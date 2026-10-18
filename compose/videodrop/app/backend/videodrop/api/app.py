@@ -47,6 +47,7 @@ Errors answer `{"detail": "<sentence>"}`. Times are Unix seconds.
 TAGS = [
     {"name": "Jobs", "description": "The downloads: ask for one, follow it (live, or by callback), stop it, try "
                                      "it again, fetch its files."},
+    {"name": "Links", "description": "Before asking: whether a link is taken, and what it would download."},
     {"name": "Destinations", "description": "Where downloads go, how their files are named there, and the options "
                                              "they take."},
     {"name": "Notifications", "description": "Where videodrop tells people: a download failing, done, the disk "

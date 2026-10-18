@@ -3,7 +3,7 @@ server stays responsive whatever yt-dlp and ffmpeg do, a download is stopped
 by stopping its process (and its ffmpeg with it), and a crash ends only it.
 
 stdin: one JSON object {"url", "work_dir", "options", "output", "rate_limit",
-"max_filesize", "cookies", "deno"}. stdout: events, one JSON object a line
+"max_filesize", "cookies", "deno", "song"}. stdout: events, one JSON object a line
 (EVENTS); anything else the process prints goes to stderr, the container's
 log. Exit 0 when at least one file was made, 1 otherwise."""
 
@@ -17,10 +17,11 @@ from pathlib import Path
 #   item      {index, total, id, title, uploader, thumbnail, duration}  a video starts
 #   progress  {index, downloaded, total, speed, eta}                     at most twice a second
 #   stage     {stage}                                                    downloading, processing
-#   file      {path}                                                     a finished file, relative to work_dir
+#   file      {path, checks}                                             a finished file, relative to work_dir, checked
+#   note      {message}                                                  beside the download: lyrics found or not
 #   warning   {message}
 #   error     {message}                                                  a video failed (the job may go on)
-EVENTS = ("item", "progress", "stage", "file", "warning", "error")
+EVENTS = ("item", "progress", "stage", "file", "note", "warning", "error")
 PROGRESS_EVERY = 0.5
 
 
@@ -50,6 +51,7 @@ def main() -> int:
     from yt_dlp.postprocessor.common import PostProcessor
     from yt_dlp.utils import DownloadError
 
+    from . import checks, lyrics
     from .options import VideoOptions
     from .ytdlp import params
 
@@ -105,15 +107,52 @@ def main() -> int:
         if status.get("status") == "started":
             emit("stage", stage="processing")
 
+    def add_lyrics(path: Path, info: dict) -> None:
+        song = config.get("song") or {}
+        named = (song.get("artist"), song.get("title")) if song.get("artist") and song.get("title") else lyrics.guess(info)
+        if not named:
+            emit("note", message="No lyrics: the song couldn't be told from the video's title.")
+            return
+        artist, title = named
+        try:
+            found = lyrics.find(artist, title, info.get("duration"))
+        except OSError as exc:
+            emit("note", message=f"No lyrics: LRCLIB couldn't be reached ({exc.__class__.__name__}).")
+            return
+        if not found:
+            emit("note", message=f"No synced lyrics on LRCLIB for {artist} – {title}.")
+            return
+        srt = work_dir / ".lyrics.srt"
+        srt.write_text(lyrics.to_srt(found, info.get("duration")), encoding="utf-8")
+        try:
+            checks.embed_subtitles(path, srt, "Lyrics")
+            emit("note", message=f"Lyrics added as subtitles (LRCLIB: {artist} – {title}).")
+        except ValueError as exc:
+            emit("note", message=f"No lyrics: {exc}")
+        finally:
+            srt.unlink(missing_ok=True)
+
     class Collect(PostProcessor):
-        """Last step of each video: its file, where it ended up."""
+        """Last step of each video: its lyrics when asked, its check, and its
+        file, where it ended up. A file that fails its check is not kept."""
 
         def run(self, info):
             path = info.get("filepath")
-            if path and os.path.isfile(path):
-                relative = os.path.relpath(path, work_dir)
-                made.append(relative)
-                emit("file", path=relative)
+            if not path or not os.path.isfile(path):
+                return [], info
+            path = Path(path)
+            relative = os.path.relpath(path, work_dir)
+            if options.lyrics:
+                emit("stage", stage="processing")
+                add_lyrics(path, info)
+            result = checks.check(path, info.get("duration"))
+            if not result["ok"]:
+                emit("error", message=f"{info.get('title') or relative}: the file failed its check: "
+                                      f"{' '.join(result['problems'])}")
+                path.unlink(missing_ok=True)
+                return [], info
+            made.append(relative)
+            emit("file", path=relative, checks=result)
             return [], info
 
     ydl_params = params(options, config["output"], work_dir, rate_limit=config.get("rate_limit"),

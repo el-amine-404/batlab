@@ -67,7 +67,7 @@ def place(work_dir: Path, made: list[str], target: Target) -> list[dict]:
         path = f"{target.prefix}/{relative}" if target.prefix else relative
         destination = target.base / path
         created = _move(source, destination)
-        placed.append({"root": target.root, "path": path, "name": destination.name,
+        placed.append({"source": relative, "root": target.root, "path": path, "name": destination.name,
                        "size": destination.stat().st_size, "kind": kind_of(destination.name),
                        "existed": not created})
     return placed

@@ -836,7 +836,7 @@ class VideodropService(unittest.TestCase):
     def test_submit_names_the_destination(self):
         kind = TYPES["videodrop"]
         config = {"base_url": "http://videodrop:8840", "destination": "music-videos", "quality": "1080"}
-        request = {"id": "r1", "media": {"video_id": "DPEodkHzH-s"}}
+        request = {"id": "r1", "media": {"video_id": "DPEodkHzH-s", "artist": "Tate McRae", "title": "Housewife"}}
         update, sent = self.run_with({("POST", "/api/v1/jobs"): (201, {"json": {"id": "j1"}})},
                                      lambda ctx: kind.submit(ctx, request, config))
         self.assertEqual((update.state, update.external_id), ("sent", "j1"))
@@ -844,6 +844,8 @@ class VideodropService(unittest.TestCase):
         self.assertEqual((body["url"], body["destination"], body["options"]["quality"], body["client"]),
                          ("https://www.youtube.com/watch?v=DPEodkHzH-s", "music-videos", "1080", "clipseerr"))
         self.assertEqual(body["callback_url"], "http://clipseerr:8820/api/v1/hooks/videodrop?request=r1")
+        self.assertEqual(body["song"], {"artist": "Tate McRae", "title": "Housewife"})
+        self.assertNotIn("lyrics", body["options"], "left to the destination")
 
     def test_poll_follows_the_job(self):
         kind = TYPES["videodrop"]

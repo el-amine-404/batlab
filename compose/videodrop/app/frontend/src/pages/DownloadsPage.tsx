@@ -1,5 +1,6 @@
 import { Download, Search } from "lucide-react";
 import { useDeferredValue, useState } from "react";
+import { useSearchParams } from "react-router";
 
 import { NewDownload } from "@/components/jobs/NewDownload";
 import { JobRow } from "@/components/jobs/JobRow";
@@ -24,7 +25,10 @@ function count(counts: JobCounts | undefined, status: Status[]): number | undefi
 }
 
 export function DownloadsPage() {
-  const [tab, setTab] = useState(TABS[0]);
+  // The tab is in the address: a link (Issues) can open Failed.
+  const [params, setParams] = useSearchParams();
+  const tab = TABS.find((t) => t.key === params.get("tab")) ?? TABS[0];
+  const setTab = (next: (typeof TABS)[number]) => setParams(next.key === "all" ? {} : { tab: next.key }, { replace: true });
   const [search, setSearch] = useState("");
   const q = useDeferredValue(search.trim());
   const { data: counts } = useCounts();
@@ -56,7 +60,7 @@ export function DownloadsPage() {
       {isPending ? (
         <Loading />
       ) : error ? (
-        <Failed error={error} retry={() => void refetch()} />
+        <Failed error={error} retry={() => void refetch()} inline />
       ) : !jobs.length ? (
         <Empty icon={<Download />} title={q || tab.status.length ? "Nothing here" : "No download yet"}>
           {q || tab.status.length ? "Nothing matches." : "Paste a link above, or let an app ask through the API."}

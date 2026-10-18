@@ -13,16 +13,18 @@ from dataclasses import dataclass, field
 
 import httpx
 
-from . import outbound, placement
+from . import links, outbound, placement
 from .broker import Broker
 from .callbacks import Callbacks
 from .config import Config
 from .db import Database
 from .destinations import DestinationIn, DestinationStore
 from .domain import Conflict, Invalid, NotFound
+from .issues import Issues, ReleaseWatch
 from .jobs import JobIn, JobStore
 from .notifications import TYPES, NotificationStore, Notifier
-from .options import DEFAULT_TEMPLATE, resolve
+from .options import DEFAULT_TEMPLATE, OptionsPatch, VideoOptions, resolve, to_output_template
+from .prober import Prober
 from .scheduler import Scheduler
 from .settings import SettingsStore
 
@@ -46,20 +48,26 @@ class Services:
     broker: Broker
     callbacks: Callbacks
     scheduler: Scheduler
+    prober: Prober
+    releases: ReleaseWatch
+    issues: Issues
     started_at: float = field(default_factory=time.time)
-    _housekeeping: asyncio.Task | None = None
+    _tasks: list[asyncio.Task] = field(default_factory=list)
 
     async def start(self) -> None:
         self.broker.bind(asyncio.get_running_loop())
         self.seed()
         self.scheduler.start()
-        self._housekeeping = asyncio.get_running_loop().create_task(self._keep_house(), name="housekeeping")
+        loop = asyncio.get_running_loop()
+        self._tasks = [loop.create_task(self._keep_house(), name="housekeeping")]
+        if self.config.check_releases:
+            self._tasks.append(loop.create_task(self.releases.run(), name="releases"))
 
     async def stop(self) -> None:
-        if self._housekeeping:
-            self._housekeeping.cancel()
+        for task in self._tasks:
+            task.cancel()
             with suppress(asyncio.CancelledError):
-                await self._housekeeping
+                await task
         await self.scheduler.stop()
         await self.callbacks.drain()
         await self.notifier.drain()
@@ -68,23 +76,43 @@ class Services:
 
     # ---- asking for a download ---------------------------------------------------------------------
 
+    def plan(self, destination: str | None, options: OptionsPatch) -> tuple[sqlite3.Row | None, VideoOptions, str]:
+        """Where a download would go, with what options and under which file
+        name: the destination asked for (None: the settings' default; "":
+        none), the options of the job, then the destination's, then the
+        settings'."""
+        settings = self.settings()
+        slug = destination if destination is not None else settings.default_destination
+        row = None
+        if slug:
+            try:
+                row = self.destinations.row(slug)
+            except NotFound:
+                raise Invalid(f"There's no destination {slug!r} (GET /api/v1/destinations).") from None
+        resolved = resolve(options.model_dump(exclude_none=True), json.loads(row["options"]) if row else None,
+                           base=settings.defaults)
+        return row, resolved, row["template"] if row else DEFAULT_TEMPLATE
+
     def submit(self, body: JobIn, base_url: str | None) -> tuple[sqlite3.Row, bool]:
         """The job (new, or the same one already queued or running) and
         whether it is new. Its destination, options and file name are fixed
         now: a destination changed later changes the downloads after."""
-        settings = self.settings()
-        slug = body.destination if body.destination is not None else settings.default_destination
-        destination = None
-        if slug:
-            try:
-                destination = self.destinations.row(slug)
-            except NotFound:
-                raise Invalid(f"There's no destination {slug!r} (GET /api/v1/destinations).") from None
-        options = resolve(body.options.model_dump(exclude_none=True),
-                          json.loads(destination["options"]) if destination else None, base=settings.defaults)
-        template = destination["template"] if destination else DEFAULT_TEMPLATE
+        destination, options, template = self.plan(body.destination, body.options)
         return self.jobs.create(body, destination=destination, options=options, template=template,
                                 base_url=base_url)
+
+    async def probe(self, url: str, destination: str | None, options: OptionsPatch) -> dict:
+        """What the link would download (probe.py), and where it would land."""
+        url = links.check(url)
+        row, resolved, template = self.plan(destination, options)
+        info = await self.prober.probe(url, resolved, to_output_template(template))
+        target = None
+        if info.get("kind") == "video" and info.get("filename"):
+            folder = row["folder"] if row else None
+            path = f"{folder}/{info['filename']}" if folder else info["filename"]
+            target = {"destination": row["slug"] if row else None, "path": path if folder else None,
+                      "exists": bool(folder) and (self.config.media_root / path).is_file()}
+        return {**info, "options": resolved.model_dump(), "target": target}
 
     # ---- housekeeping ---------------------------------------------------------------------------------
 
@@ -162,9 +190,12 @@ def build(config: Config, http: httpx.AsyncClient | None = None) -> Services:
     jobs.on_change(broker.publish)
     jobs.on_change(scheduler.wake)
     destinations.on_remove(settings.forget_destination)
+    releases = ReleaseWatch(db, http)
+    issues = Issues(config, db, settings, scheduler, notifications, releases)
     return Services(config=config, db=db, http=http, settings=settings, destinations=destinations, jobs=jobs,
                     notifications=notifications, notifier=notifier, broker=broker, callbacks=callbacks,
-                    scheduler=scheduler)
+                    scheduler=scheduler, prober=Prober(config.state_dir, config.deno, config.prober),
+                    releases=releases, issues=issues)
 
 
 def _record_callback(jobs: JobStore, job_id: str, last: dict) -> None:

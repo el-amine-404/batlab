@@ -27,6 +27,15 @@ DEFAULT_CALLBACK_EVENTS = ("started", "finished", "failed", "cancelled")
 MAX_PAGE = 200
 
 
+class Song(BaseModel):
+    """The song a music video carries, as its caller knows it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    artist: str = Field(min_length=1, max_length=200)
+    title: str = Field(min_length=1, max_length=300)
+
+
 class JobIn(BaseModel):
     """A download to make. Only the link is needed."""
 
@@ -43,6 +52,9 @@ class JobIn(BaseModel):
                                   description="Options of its own; the destination's, then the settings', fill in "
                                               "the rest.")
     priority: int = Field(0, ge=-10, le=10, description="Higher goes first among queued jobs; then oldest first.")
+    song: Song | None = Field(None, description="The song, when it is a music video and the caller knows it: what "
+                                                "its lyrics are looked up by (options.lyrics). Left out: guessed "
+                                                "from the video's title.")
     client: str | None = Field(None, max_length=40, pattern=r"^[\w .-]+$",
                                description="Who asks (an app's name), shown on the page and filterable.",
                                examples=["clipseerr"])
@@ -154,6 +166,7 @@ class JobStore:
             files.append({"index": file["position"], "name": file["name"], "kind": file["kind"],
                           "size": file["size"], "path": file["path"] if file["root"] == "destination" else None,
                           "existed": bool(file["existed"]), "available": available,
+                          "checks": json.loads(file["checks"]) if file["checks"] else None,
                           "download_url": f"{base}{path}" if available else None})
         progress = self._live(row["id"]) if row["status"] == "running" else None
         if progress is None and row["status"] == "running":
@@ -180,6 +193,8 @@ class JobStore:
             "options": json.loads(row["options"]),
             "progress": progress,
             "error": row["error"],
+            "notes": json.loads(row["notes"] or "[]"),
+            "song": json.loads(row["song"]) if row["song"] else None,
             "attempts": row["attempts"],
             "retry_at": row["retry_at"],
             "files": files,
@@ -224,11 +239,12 @@ class JobStore:
         events = body.callback_events if body.callback_events is not None else list(DEFAULT_CALLBACK_EVENTS)
         self._db.run(
             "INSERT INTO jobs (id, url, site, dedupe_key, destination, folder, template, options, priority, client, "
-            "status, callback_url, callback_secret, callback_events, base_url, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)",
+            "status, callback_url, callback_secret, callback_events, base_url, song, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)",
             (job_id, url, links.site_of(url), key, slug, destination["folder"] if destination else None, template,
              json.dumps(options.model_dump()), body.priority, body.client, body.callback_url, body.callback_secret,
-             json.dumps([e for e in CALLBACK_EVENTS if e in events]), base_url, now, now))
+             json.dumps([e for e in CALLBACK_EVENTS if e in events]), base_url,
+             body.song.model_dump_json() if body.song else None, now, now))
         self._touch(job_id)
         return self.row(job_id), True
 
@@ -238,7 +254,8 @@ class JobStore:
         if row["status"] not in ("failed", "cancelled"):
             raise Conflict("Only a failed or cancelled download can be tried again.")
         self._db.run("UPDATE jobs SET status = 'queued', stage = NULL, error = NULL, attempts = 0, retry_at = NULL, "
-                     "progress = '{}', started_at = NULL, finished_at = NULL, updated_at = ? WHERE id = ?",
+                     "progress = '{}', notes = '[]', started_at = NULL, finished_at = NULL, updated_at = ? "
+                     "WHERE id = ?",
                      (time.time(), job_id))
         self._touch(job_id)
         return self.row(job_id)
@@ -265,8 +282,9 @@ class JobStore:
     def update(self, job_id: str, **fields) -> None:
         if "progress" in fields:
             fields["progress"] = json.dumps(fields["progress"] or {})
-        if "callback_last" in fields:
-            fields["callback_last"] = json.dumps(fields["callback_last"])
+        for column in ("callback_last", "notes"):
+            if column in fields:
+                fields[column] = json.dumps(fields[column])
         fields["updated_at"] = time.time()
         assignments = ", ".join(f"{column} = ?" for column in fields)
         self._db.run(f"UPDATE jobs SET {assignments} WHERE id = ?", (*fields.values(), job_id))
@@ -276,17 +294,18 @@ class JobStore:
         def work(conn):
             start = conn.execute("SELECT COALESCE(MAX(position) + 1, 0) FROM files WHERE job_id = ?",
                                  (job_id,)).fetchone()[0]
-            conn.executemany("INSERT INTO files (job_id, position, root, path, name, size, kind, existed) "
-                             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            conn.executemany("INSERT INTO files (job_id, position, root, path, name, size, kind, existed, checks) "
+                             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                              [(job_id, start + n, f["root"], f["path"], f["name"], f["size"], f["kind"],
-                               int(f["existed"])) for n, f in enumerate(files)])
+                               int(f["existed"]), json.dumps(f["checks"]) if f.get("checks") else None)
+                              for n, f in enumerate(files)])
 
         self._db.transaction(work)
 
     def requeue_running(self) -> int:
         """After a restart: what was running starts again (the try isn't counted)."""
         return self._db.run("UPDATE jobs SET status = 'queued', stage = NULL, attempts = MAX(attempts - 1, 0), "
-                            "progress = '{}', updated_at = ? WHERE status = 'running'", (time.time(),))
+                            "progress = '{}', notes = '[]', updated_at = ? WHERE status = 'running'", (time.time(),))
 
     def expired_held(self, before: float) -> list[sqlite3.Row]:
         return self._db.all("SELECT files.* FROM files JOIN jobs ON jobs.id = files.job_id WHERE files.root = 'held' "

@@ -173,6 +173,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/links/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whether videodrop takes a link (instant, without asking the site)
+         * @description For checking a link as it is typed: the scheme, an address outside the
+         *     home network, a site yt-dlp has an extractor for. Always 200; ok says.
+         */
+        get: operations["check_link_api_v1_links_check_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What a link would download, without downloading it
+         * @description Asks the site (a few seconds): the title, picture and source, the
+         *     format the options pick with its size and bitrate, the subtitles there
+         *     are, and where the file would land. Two at a time at most; an answer is
+         *     kept 10 minutes. 422 with the site's reason when it can't be read.
+         */
+        post: operations["probe_link_api_v1_probe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/destinations": {
         parameters: {
             query?: never;
@@ -397,6 +441,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/issues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What needs a person's eye
+         * @description Errors first. Each says what is wrong, why it matters and, when it is
+         *     fixed on the page, where. An issue goes once fixed.
+         */
+        get: operations["list_issues_api_v1_issues_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings": {
         parameters: {
             query?: never;
@@ -599,6 +664,27 @@ export interface components {
              */
             kind: "info" | "success" | "warning" | "failure";
         };
+        /** FileChecks */
+        FileChecks: {
+            /**
+             * Ok
+             * @description A real video of the length the site said, in the container its name says.
+             */
+            ok: boolean;
+            /**
+             * Problems
+             * @description What is wrong, or worth knowing (no sound).
+             */
+            problems: string[];
+            /**
+             * Summary
+             * @description What ffprobe read: codec, size, sound, length.
+             * @example AV1 1920×1080 · Opus · 3:45
+             */
+            summary: string | null;
+            /** Duration */
+            duration: number | null;
+        };
         /** FolderCheck */
         FolderCheck: {
             /** Path */
@@ -650,6 +736,48 @@ export interface components {
             ok: boolean;
             /** Version */
             version: string;
+        };
+        /** IssueAction */
+        IssueAction: {
+            /** Label */
+            label: string;
+            /**
+             * Path
+             * @description A page of videodrop's, where it is fixed.
+             */
+            path: string;
+        };
+        /** IssueCounts */
+        IssueCounts: {
+            /** Error */
+            error: number;
+            /** Warning */
+            warning: number;
+            /** Info */
+            info: number;
+        };
+        /** IssueList */
+        IssueList: {
+            /** Issues */
+            issues: components["schemas"]["IssueOut"][];
+            counts: components["schemas"]["IssueCounts"];
+        };
+        /** IssueOut */
+        IssueOut: {
+            /** Id */
+            id: string;
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "error" | "warning" | "info";
+            /** Title */
+            title: string;
+            /** Detail */
+            detail: string;
+            action: components["schemas"]["IssueAction"] | null;
+            /** Since */
+            since: number | null;
         };
         /** Job */
         Job: {
@@ -711,6 +839,13 @@ export interface components {
              * @description Why it failed; for a queued job, why its last try did; for a finished playlist, the videos that failed.
              */
             error: string | null;
+            /**
+             * Notes
+             * @description What happened beside the download: lyrics found or not.
+             */
+            notes: string[];
+            /** @description The song its caller named, for its lyrics. */
+            song: components["schemas"]["SongOut"] | null;
             /**
              * Attempts
              * @description Tries so far.
@@ -782,6 +917,8 @@ export interface components {
              * @description It can be downloaded: it's still there.
              */
             available: boolean;
+            /** @description Its check after the download (videos only). */
+            checks: components["schemas"]["FileChecks"] | null;
             /**
              * Download Url
              * @description Downloads it (Range requests work: resume, seek). Made from the address the caller reaches videodrop at.
@@ -813,6 +950,8 @@ export interface components {
              * @default 0
              */
             priority: number;
+            /** @description The song, when it is a music video and the caller knows it: what its lyrics are looked up by (options.lyrics). Left out: guessed from the video's title. */
+            song?: components["schemas"]["Song"] | null;
             /**
              * Client
              * @description Who asks (an app's name), shown on the page and filterable.
@@ -871,6 +1010,28 @@ export interface components {
             ok: boolean;
             /** Message */
             message: string;
+        };
+        /** LinkCheck */
+        LinkCheck: {
+            /**
+             * Ok
+             * @description videodrop takes this link. Checked without asking the site.
+             */
+            ok: boolean;
+            /**
+             * Message
+             * @description Why not, as a sentence.
+             */
+            message: string | null;
+            /** Url */
+            url: string;
+            /** Site */
+            site: string | null;
+            /**
+             * Canonical
+             * @description The one spelling of this video (a YouTube link without its tracking).
+             */
+            canonical: string | null;
         };
         /** Notification */
         Notification: {
@@ -1004,6 +1165,8 @@ export interface components {
             subtitles?: string[] | null;
             /** Auto Subtitles */
             auto_subtitles?: boolean | null;
+            /** Lyrics */
+            lyrics?: boolean | null;
             /** Embed Metadata */
             embed_metadata?: boolean | null;
             /** Embed Thumbnail */
@@ -1014,6 +1177,175 @@ export interface components {
             playlist?: boolean | null;
             /** Playlist Limit */
             playlist_limit?: number | null;
+        };
+        /**
+         * Probe
+         * @description What a link would download, read from the site without downloading.
+         */
+        Probe: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "video" | "playlist";
+            /** Id */
+            id: string | null;
+            /** Title */
+            title: string | null;
+            /** Uploader */
+            uploader: string | null;
+            /** Channel Url */
+            channel_url: string | null;
+            /**
+             * Webpage Url
+             * @description The video's own page, as the site names it (not the link given).
+             */
+            webpage_url: string | null;
+            /**
+             * Extractor
+             * @description Which of yt-dlp's sites read it.
+             * @example Youtube
+             */
+            extractor: string | null;
+            /** Thumbnail */
+            thumbnail: string | null;
+            /** Duration */
+            duration?: number | null;
+            /**
+             * Upload Date
+             * @description YYYYMMDD.
+             */
+            upload_date?: string | null;
+            /** Views */
+            views?: number | null;
+            /**
+             * Is Live
+             * @default false
+             */
+            is_live: boolean;
+            /** Age Limit */
+            age_limit?: number | null;
+            /** Artist */
+            artist?: string | null;
+            /** Track */
+            track?: string | null;
+            /** @description What the options pick. */
+            format?: components["schemas"]["ProbeFormat"] | null;
+            /**
+             * Heights
+             * @description Every video height the site has.
+             */
+            heights?: number[];
+            /**
+             * Subtitles
+             * @description Languages with real subtitles.
+             */
+            subtitles?: string[];
+            /**
+             * Automatic Captions
+             * @description Languages with the site's automatic captions.
+             * @default 0
+             */
+            automatic_captions: number;
+            /**
+             * Automatic Has English
+             * @default false
+             */
+            automatic_has_english: boolean;
+            /**
+             * Filename
+             * @description Its file name, as the destination's template makes it.
+             */
+            filename?: string | null;
+            /**
+             * Count
+             * @description A playlist's videos.
+             */
+            count?: number | null;
+            /**
+             * Taken
+             * @description Of which downloaded (playlist_limit).
+             */
+            taken?: number | null;
+            /**
+             * Entries
+             * @description A playlist's first videos.
+             */
+            entries?: components["schemas"]["ProbeEntry"][] | null;
+            /** @description The options it was read with, every layer resolved. */
+            options: components["schemas"]["VideoOptions"];
+            target: components["schemas"]["ProbeTarget"] | null;
+        };
+        /** ProbeEntry */
+        ProbeEntry: {
+            /** Title */
+            title: string | null;
+            /** Id */
+            id: string | null;
+            /** Duration */
+            duration: number | null;
+        };
+        /** ProbeFormat */
+        ProbeFormat: {
+            /** Width */
+            width: number | null;
+            /** Height */
+            height: number | null;
+            /** Fps */
+            fps: number | null;
+            /** Vcodec */
+            vcodec: string | null;
+            /** Acodec */
+            acodec: string | null;
+            /** Video Kbps */
+            video_kbps: number | null;
+            /** Audio Kbps */
+            audio_kbps: number | null;
+            /**
+             * Dynamic Range
+             * @description SDR, HDR10…
+             */
+            dynamic_range: string | null;
+            /** Container */
+            container: string | null;
+            /**
+             * Size Bytes
+             * @description Of the file, as the site says; may be an estimate (size_exact).
+             */
+            size_bytes: number | null;
+            /** Size Exact */
+            size_exact: boolean;
+            /**
+             * Format Id
+             * @description yt-dlp's name for the streams picked.
+             */
+            format_id: string | null;
+        };
+        /** ProbeIn */
+        ProbeIn: {
+            /** Url */
+            url: string;
+            /**
+             * Destination
+             * @description As for a job: None the default, "" none.
+             */
+            destination?: string | null;
+            options?: components["schemas"]["OptionsPatch"];
+        };
+        /** ProbeTarget */
+        ProbeTarget: {
+            /** Destination */
+            destination: string | null;
+            /**
+             * Path
+             * @description Where the file would be, inside the media folder; none when held.
+             */
+            path: string | null;
+            /**
+             * Exists
+             * @description A file with that name is there already: the download would keep it.
+             */
+            exists: boolean;
         };
         /** Problem */
         Problem: {
@@ -1144,6 +1476,23 @@ export interface components {
             /** Public Url */
             public_url?: string | null;
         };
+        /**
+         * Song
+         * @description The song a music video carries, as its caller knows it.
+         */
+        Song: {
+            /** Artist */
+            artist: string;
+            /** Title */
+            title: string;
+        };
+        /** SongOut */
+        SongOut: {
+            /** Artist */
+            artist: string;
+            /** Title */
+            title: string;
+        };
         /** SystemStatus */
         SystemStatus: {
             /** Version */
@@ -1246,6 +1595,11 @@ export interface components {
              * @description Also the site's automatic captions, when a language has no subtitles.
              */
             auto_subtitles: boolean;
+            /**
+             * Lyrics
+             * @description A music video: its synced lyrics (LRCLIB) as a subtitle track named Lyrics, when there are some. The job's song names the song; else it is guessed from the video's title.
+             */
+            lyrics: boolean;
             /**
              * Embed Metadata
              * @description Title, artist, date and description written into the file.
@@ -1705,6 +2059,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_link_api_v1_links_check_get: {
+        parameters: {
+            query: {
+                url: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkCheck"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    probe_link_api_v1_probe_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProbeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Probe"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -2356,6 +2774,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SystemStatus"];
+                };
+            };
+        };
+    };
+    list_issues_api_v1_issues_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssueList"];
                 };
             };
         };
