@@ -12,15 +12,32 @@ const SOUND_KEY = "preview-sound";
 let stopCurrent: (() => void) | null = null;
 // The browser refused a preview's sound this visit: the next ones start muted, until the speaker is clicked.
 let soundRefused = false;
-const prepared = new Set<string>();
 // Videos with no preview (the server couldn't cut one): their cards stop offering it this visit.
 const unplayable = new Set<string>();
+// Clips ready on the server this visit: played at once, no asking first.
+const ready = new Set<string>();
+// Previews resting (the server's budget with YouTube spent) until then.
+let restingUntil = 0;
 
-/** Has the server find a video's preview file now, once a visit: it then starts sooner. */
-export function preparePreview(youtubeId: string) {
-  if (prepared.has(youtubeId)) return;
-  prepared.add(youtubeId);
-  void fetch(`/api/v1/previews/${youtubeId}/prepare`, { method: "POST" }).catch(() => undefined);
+/**
+ * Has the server cut a video's clip, answering once it's ready: "ready",
+ * "none" (the video has no preview) or "resting" (not now).
+ */
+async function clipFor(youtubeId: string): Promise<"ready" | "none" | "resting"> {
+  if (ready.has(youtubeId)) return "ready";
+  if (Date.now() < restingUntil) return "resting";
+  try {
+    const answer = await fetch(`/api/v1/previews/${youtubeId}/prepare`, { method: "POST" });
+    if (answer.ok) {
+      ready.add(youtubeId);
+      return "ready";
+    }
+    if (answer.status === 404) return "none";
+    if (answer.status === 429) restingUntil = Date.now() + 60_000;
+  } catch {
+    // offline, or the server restarting: nothing to play now
+  }
+  return "resting";
 }
 
 function soundWanted(): boolean {
@@ -107,15 +124,21 @@ export function useHoverPreview(video: Video) {
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [sound, setSound] = useState(false);
-  // Playing, or still waiting for its clip (the first hover of a video, about 3 s).
+  // Its clip on the server, ready to play: the first hover of a video waits about 2.5 s for its cut.
+  const [clip, setClip] = useState(false);
+  // Playing, not waiting any more.
   const [shown, setShown] = useState(false);
+  // Which start the clip's answer belongs to: one that comes after the pointer left is dropped.
+  const attempt = useRef(0);
   const timer = useRef<number | undefined>(undefined);
   const held = useRef(false);
   const playable = video.youtube_id ? !unplayable.has(video.youtube_id) : !!video.preview_url;
 
   const stop = () => {
     window.clearTimeout(timer.current);
+    attempt.current += 1;
     setPlaying(false);
+    setClip(false);
     setShown(false);
     setProgress(0);
   };
@@ -127,6 +150,18 @@ export function useHoverPreview(video: Video) {
       onStart?.();
       setSound(soundWanted() && soundAllowed() && !soundRefused);
       setPlaying(true);
+      const id = video.youtube_id;
+      if (!id) {
+        setClip(true);
+        return;
+      }
+      const mine = ++attempt.current;
+      void clipFor(id).then((answer) => {
+        if (attempt.current !== mine) return;
+        if (answer === "ready") return setClip(true);
+        if (answer === "none") unplayable.add(id);
+        stop();
+      });
     }, delay);
   };
   useEffect(() => () => window.clearTimeout(timer.current), []);
@@ -169,7 +204,7 @@ export function useHoverPreview(video: Video) {
 
   const preview = playing ? (
     <span className="absolute inset-0 overflow-hidden">
-      <PreviewVideo
+      {clip && <PreviewVideo
         src={video.youtube_id ? `/api/v1/previews/${video.youtube_id}` : video.preview_url!}
         sound={sound}
         onShown={() => setShown(true)}
@@ -179,7 +214,7 @@ export function useHoverPreview(video: Video) {
           if (video.youtube_id) unplayable.add(video.youtube_id);
           stop();
         }}
-      />
+      />}
       <button type="button" onClick={toggleSound} onPointerDown={(e) => e.stopPropagation()}
               aria-label={sound ? "Mute the preview" : "Play the preview's sound"}
               className="absolute bottom-2 left-2 z-10 flex size-7 items-center justify-center rounded-full bg-black/70 text-white backdrop-blur-md hover:bg-black/90">

@@ -1,4 +1,3 @@
-import asyncio
 import re
 from typing import Literal
 from urllib.parse import quote
@@ -10,6 +9,7 @@ from .. import schemas
 from ..catalog.models import (AlbumPage, ArtistPage, ArtistSummary, CategoryGroup, Credits, Lyrics, SearchResults, Shelf, Video,
                               VideoDetail, Versions)
 from ..cache import tracking
+from ..catalog.preview import Busy
 from ..context import catalog, clips, known, library, requests, settings
 from ..problems import Problem
 
@@ -186,26 +186,33 @@ async def video_files(video_id: str):
                       for f in files]}
 
 
-@router.get("/previews/{youtube_id}", summary="A video's preview for its card: a 15 s clip with its sound, "
-            "from a third in; cut on first ask, then kept", response_class=FileResponse,
-            responses={404: {"model": schemas.Problem}, 200: {"content": {"video/mp4": {}}}})
-async def preview_file(youtube_id: str):
+async def _clip(youtube_id: str):
     if not _YOUTUBE_ID.fullmatch(youtube_id):
         raise Problem(404, "No such video.")
     try:
-        clip = await clips.get(youtube_id)
+        return await clips.get(youtube_id)
+    except Busy as busy:
+        raise Problem(429, f"Previews are resting for {max(1, busy.seconds // 60)} min, "
+                      "to stay in YouTube's good books.") from None
     except LookupError:
         raise Problem(404, "No preview for this video.") from None
+
+
+@router.get("/previews/{youtube_id}", summary="A video's preview for its card: a 15 s clip with its sound, "
+            "from a third in; cut on first ask, then kept", response_class=FileResponse,
+            responses={404: {"model": schemas.Problem}, 429: {"model": schemas.Problem},
+                       200: {"content": {"video/mp4": {}}}})
+async def preview_file(youtube_id: str):
+    clip = await _clip(youtube_id)
     # A clip never changes: the browser keeps it.
     return FileResponse(clip, media_type="video/mp4", headers={"Cache-Control": "private, max-age=86400"})
 
 
-@router.post("/previews/{youtube_id}/prepare", status_code=204, summary="Cut a preview's clip ahead "
-             "(the pointer is on its card), so it starts at once")
+@router.post("/previews/{youtube_id}/prepare", status_code=204, summary="Cut a preview's clip, answering once "
+             "it's ready: 404 when the video has none, 429 when previews are resting",
+             responses={404: {"model": schemas.Problem}, 429: {"model": schemas.Problem}})
 async def prepare_preview(youtube_id: str):
-    if _YOUTUBE_ID.fullmatch(youtube_id):
-        task = asyncio.create_task(clips.get(youtube_id))
-        task.add_done_callback(lambda t: t.cancelled() or t.exception())
+    await _clip(youtube_id)
     return Response(status_code=204)
 
 

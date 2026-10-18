@@ -7,7 +7,7 @@ import { Marquee } from "@/components/ui/marquee";
 import { prefetchVideo, useFacts } from "@/lib/queries";
 import { clock, cn, dated, upcoming } from "@/lib/utils";
 
-import { preparePreview, useHoverPreview } from "./HoverPreview";
+import { useHoverPreview } from "./HoverPreview";
 import { TagBadge } from "./TagBadge";
 import { Thumb } from "./Thumb";
 import type { Requested } from "./useRequested";
@@ -51,11 +51,7 @@ export const VideoCard = memo(function VideoCard({ video, requested, className, 
   const timer = useRef<number | undefined>(undefined);
   const warm = () => {
     window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => {
-      prefetchVideo(video.id);
-      // Its preview's file found ahead, while the pointer is still deciding.
-      if (video.youtube_id) preparePreview(video.youtube_id);
-    }, 120);
+    timer.current = window.setTimeout(() => prefetchVideo(video.id), 120);
   };
   const cool = () => window.clearTimeout(timer.current);
   const looked = useFacts(video.youtube_id, !video.views || !video.released).data;

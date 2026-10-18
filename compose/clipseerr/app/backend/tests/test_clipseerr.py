@@ -202,6 +202,43 @@ class Previews(unittest.TestCase):
         self.assertEqual(calls, ["aaaaaaaaaaa"])
 
 
+class PreviewBudget(unittest.TestCase):
+    def setUp(self):
+        from app.catalog import preview
+
+        self.preview = preview
+        self.clips = preview.Clips(Path(tempfile.mkdtemp()))
+        self.original = preview.cut
+
+    def tearDown(self):
+        self.preview.cut = self.original
+
+    def test_new_clips_stop_at_the_budget_but_cut_ones_are_served(self):
+        def ok(youtube_id, out):
+            out.write_bytes(b"clip")
+
+        self.preview.cut = ok
+        self.clips.BUDGET = 2
+        for vid in ("aaaaaaaaaaa", "bbbbbbbbbbb"):
+            asyncio.run(self.clips.get(vid))
+        with self.assertRaises(self.preview.Busy):
+            asyncio.run(self.clips.get("ccccccccccc"))
+        self.assertTrue(asyncio.run(self.clips.get("aaaaaaaaaaa")).exists())
+
+    def test_bot_check_pauses_every_cut(self):
+        calls = []
+
+        def refused(youtube_id, out):
+            calls.append(youtube_id)
+            raise RuntimeError("ERROR: [youtube] x: Sign in to confirm you\u2019re not a bot.")
+
+        self.preview.cut = refused
+        for vid in ("aaaaaaaaaaa", "bbbbbbbbbbb"):
+            with self.assertRaises(self.preview.Busy):
+                asyncio.run(self.clips.get(vid))
+        self.assertEqual(calls, ["aaaaaaaaaaa"])
+
+
 class HotFeeds(unittest.TestCase):
     def test_a_clipfeed_feed_gives_its_real_songs(self):
         import httpx

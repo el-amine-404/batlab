@@ -20,6 +20,8 @@ from pathlib import Path
 import yt_dlp
 
 log = logging.getLogger("clipseerr.preview")
+# YouTube's answer once an address asks too much: "Sign in to confirm you're not a bot".
+BOT_CHECK = re.compile(r"confirm you.re not a bot|sign in to confirm", re.I)
 
 # Seconds a clip plays, and where it starts: a third in, past the intro.
 LENGTH = 15
@@ -61,7 +63,9 @@ def cut(youtube_id: str, out: Path) -> Path:
     """Makes out, the video's clip; raises when YouTube or ffmpeg won't, twice."""
     try:
         return _cut_once(youtube_id, out)
-    except Exception:
+    except Exception as error:
+        if BOT_CHECK.search(str(error)):
+            raise
         # YouTube refuses a stream now and then: once more, with new addresses.
         time.sleep(1)
         return _cut_once(youtube_id, out)
@@ -110,26 +114,54 @@ def prune(folder: Path, keep_bytes: int) -> None:
         clip.unlink(missing_ok=True)
 
 
+class Busy(Exception):
+    """No new clip for now: the budget is spent, or YouTube asked to prove we aren't a bot."""
+
+    def __init__(self, seconds: int):
+        super().__init__(f"previews paused for {seconds} s")
+        self.seconds = seconds
+
+
 class Clips:
     """The clips kept on disk (state/previews), made on demand: one cut per
     video at a time, a few at once, a failure not tried again for a while,
-    and the folder kept under KEEP_BYTES (about 1 MB a clip)."""
+    and the folder kept under KEEP_BYTES (about 1 MB a clip).
+
+    Gentle with YouTube, whose bot check would also stop songdrop and MeTube
+    (same address): at most BUDGET new clips per WINDOW, and none for PAUSE
+    once YouTube asks to sign in. Clips already cut are always served."""
 
     KEEP_BYTES = 500 * 1024 * 1024
-    AT_ONCE = 3
+    AT_ONCE = 2
     RETRY_AFTER = 30 * 60
+    BUDGET = 12
+    WINDOW = 10 * 60
+    PAUSE = 60 * 60
 
     def __init__(self, folder: Path):
         self.folder = folder
         self._cutting: dict[str, "asyncio.Task[Path]"] = {}
         self._failed: dict[str, float] = {}
+        self._started: list[float] = []
+        self._paused_until = 0.0
         self._gate: asyncio.Semaphore | None = None
 
     def path(self, youtube_id: str) -> Path:
         return self.folder / f"{youtube_id}.mp4"
 
+    def _admit(self) -> None:
+        """Counts a new cut against the budget; raises Busy when there's none left."""
+        now = time.monotonic()
+        if now < self._paused_until:
+            raise Busy(int(self._paused_until - now))
+        self._started = [t for t in self._started if now - t < self.WINDOW]
+        if len(self._started) >= self.BUDGET:
+            raise Busy(int(self.WINDOW - (now - self._started[0])) + 1)
+        self._started.append(now)
+
     async def get(self, youtube_id: str) -> Path:
-        """The video's clip, cut first if needed; raises LookupError when it can't be."""
+        """The video's clip, cut first if needed; raises LookupError when it
+        can't be, Busy when not now."""
         out = self.path(youtube_id)
         if out.exists():
             # Recently played: the last pruned.
@@ -139,6 +171,7 @@ class Clips:
             raise LookupError(f"no preview for {youtube_id} for now")
         task = self._cutting.get(youtube_id)
         if task is None:
+            self._admit()
             task = asyncio.create_task(self._cut(youtube_id, out))
             self._cutting[youtube_id] = task
             task.add_done_callback(lambda _: self._cutting.pop(youtube_id, None))
@@ -149,9 +182,16 @@ class Clips:
         if self._gate is None:
             self._gate = asyncio.Semaphore(self.AT_ONCE)
         async with self._gate:
+            if time.monotonic() < self._paused_until:
+                raise Busy(int(self._paused_until - time.monotonic()))
             try:
                 await asyncio.to_thread(cut, youtube_id, out)
             except Exception as error:
+                if BOT_CHECK.search(str(error)):
+                    self._paused_until = time.monotonic() + self.PAUSE
+                    log.warning("YouTube asks to prove clipseerr isn't a bot: no new preview for %d min",
+                                self.PAUSE // 60)
+                    raise Busy(self.PAUSE) from error
                 self._failed[youtube_id] = time.monotonic()
                 log.warning("preview of %s: %s", youtube_id, str(error)[:300])
                 raise LookupError(f"no preview for {youtube_id}") from error
