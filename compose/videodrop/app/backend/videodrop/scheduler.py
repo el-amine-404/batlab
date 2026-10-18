@@ -461,9 +461,9 @@ class Scheduler:
                     self._journal.add(run.job_id, f"Downloaded in {took:.1f} s.")
             else:
                 self._journal.add(run.job_id, f"{run.doing} took {took:.1f} s.", "debug")
-        if what and what != run.doing:
+        if what != run.doing:
             run.doing, run.doing_since = what, now
-            if what != "downloading":
+            if what and what != "downloading":
                 self._journal.add(run.job_id, f"Step: {what}.", "debug")
 
     async def _end(self, run: Run, row, work: Path) -> None:
