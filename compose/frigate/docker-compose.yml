@@ -174,11 +174,14 @@ services:
       # Frigate's YOLO model (build-model.sh), to look at the spots itself.
       - ${VOLUMES_ROOT}/frigate/config/models:/models:ro
     environment:
-      - TZ=${TZ}
+      # The times in its messages. CARWATCH_TZ in compose/.env when the
+      # system's zone data and the clocks people live by disagree (Morocco:
+      # tzdata says UTC+0, phones and the DVR UTC+1).
+      - TZ=${CARWATCH_TZ:-${TZ}}
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONPATH=/opt/batlab-common
       # The zones of camera_2 in config.yml, and who parks there.
-      - CARWATCH_SPOTS=spot_1=Clio 4,spot_2=Ford
+      - CARWATCH_SPOTS=spot_1=Clio 4 spot,spot_2=Ford spot
       # Cars with no spot of their own, by the sub label Frigate's classifier
       # gives them (Settings > Classification, docs/cameras.md).
       - CARWATCH_FOLLOW=sandero=Sandero
@@ -196,8 +199,12 @@ services:
       timeout: 5s
       start_period: 120s
       retries: 3
-    # The model on two crops every 3 s (about 0.4 s of CPU), and a 4K frame
-    # and a 4K clip re-encoded, a few times a day.
+    # The model on the iGPU, 9 crops every 3 s (0.3 s), and a 4K frame and a
+    # 4K clip re-encoded, a few times a day.
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${RENDER_GID:?set in hosts/<profile>/compose.env}"
     mem_limit: 768m
     cpus: 3
     read_only: true

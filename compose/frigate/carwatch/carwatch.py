@@ -1,11 +1,13 @@
-"""Says when the Clio 4 or the Ford leaves its parking spot on the street,
-and when it is back.
+"""Says when a car leaves the Clio 4's or the Ford's parking spot on the
+street, and when a car parks there: any car, the spot is what is watched.
 
 Every CARWATCH_POLL seconds it looks at the spots itself: Frigate's latest
-frame of the street, the area around the spots, through the same YOLO model
-Frigate uses. A spot holds a car when a car's box covers CARWATCH_FILL of its
-zone (Frigate's zones, drawn around each parked car). A spot that changes,
-and stays changed for CARWATCH_CONFIRM seconds, is told: "left" or "is back",
+frame of the street, through the same YOLO model Frigate uses, on 9 squares
+of three sizes around the spots (from above the model finds a dark car next
+to another in some framings and not others; 9 together find it). A spot holds
+a car when a car's box covers CARWATCH_FILL of its zone (Frigate's zones,
+drawn around each parked car). A spot is told changed when 75% of the looks
+of the last CARWATCH_CONFIRM seconds say so: "car left" or "car arrived",
 with a close-up from the 4K stream and the street. Once the recording is
 written, a second message says which way the car went (or came from), from
 the path of the car Frigate followed near the spot then, and holds the clip,
@@ -70,6 +72,8 @@ MODEL_SIZE = 320
 CAR = 2  # COCO's car
 POLL = int(os.environ.get("CARWATCH_POLL", "3"))
 CONFIRM = int(os.environ.get("CARWATCH_CONFIRM", "12"))
+# OpenVINO's device for the model: the iGPU, else the CPU.
+DEVICE = os.environ.get("CARWATCH_DEVICE", "GPU")
 FILL = float(os.environ.get("CARWATCH_FILL", "0.4"))
 # sub_label=name pairs of the cars followed wherever they park.
 FOLLOW = dict(pair.split("=", 1) for pair in
@@ -248,35 +252,41 @@ class Spots:
         import openvino
 
         if self.model is None:
-            self.model = openvino.Core().compile_model(MODEL, "CPU")
+            try:
+                self.model = openvino.Core().compile_model(MODEL, DEVICE)
+            except RuntimeError as error:
+                log(f"model on {DEVICE}: {error}; on the CPU")
+                self.model = openvino.Core().compile_model(MODEL, "CPU")
         # The zones are drawn in Frigate's UI; read them again now and then.
         if time.time() - self.loaded > 600:
             zones = json.loads(get(f"{FRIGATE}/api/config") or b"{}")["cameras"][CAMERA]["zones"]
             self.zones = {spot: coordinates(zones[spot]) for spot in SPOTS if spot in zones}
             self.loaded = time.time()
 
-    def cars(self, frame, polygon):
-        """The cars' boxes in a square around one spot. The model is sure of a
-        parked car from above only with room around it: a square twice the
-        car, centred on it, scaled to the model (a tight crop loses it)."""
+    def cars(self, frame):
+        """The cars' boxes around the spots: the model on squares of three
+        sizes, each at three places, merged."""
         import cv2
         import numpy
 
-        (x1, y1), (x2, y2) = polygon.min(0), polygon.max(0)
-        side = int(min(max(x2 - x1, y2 - y1) * 1.9, HEIGHT))
-        left = int(min(max((x1 + x2 - side) / 2, 0), WIDTH - side))
-        top = int(min(max((y1 + y2 - side) / 2, 0), HEIGHT - side))
-        crop = cv2.resize(frame[top:top + side, left:left + side], (MODEL_SIZE, MODEL_SIZE))
-        tensor = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB).transpose(2, 0, 1)[None].astype(numpy.float32) / 255
-        rows = self.model([tensor])[0][0].T
-        rows = rows[rows[:, 4 + CAR] > 0.4]
-        scale = side / MODEL_SIZE
-        boxes = [((cx - w / 2) * scale + left, (cy - h / 2) * scale + top,
-                  (cx + w / 2) * scale + left, (cy + h / 2) * scale + top)
-                 for cx, cy, w, h in rows[:, :4]]
-        keep = cv2.dnn.NMSBoxes([[b[0], b[1], b[2] - b[0], b[3] - b[1]] for b in boxes],
-                                [float(v) for v in rows[:, 4 + CAR]], 0.4, 0.5) if boxes else []
-        return [boxes[i] for i in numpy.array(keep).flatten()]
+        points = numpy.concatenate(list(self.zones.values()))
+        middle = (points.min(0) + points.max(0)) / 2
+        found, scores = [], []
+        for side in (400, 480, 576):
+            side = min(side, HEIGHT)
+            for shift in (-60, 0, 60):
+                left = int(min(max(middle[0] - side / 2 + shift, 0), WIDTH - side))
+                top = int(min(max(middle[1] - side / 2, 0), HEIGHT - side))
+                crop = cv2.resize(frame[top:top + side, left:left + side], (MODEL_SIZE, MODEL_SIZE))
+                tensor = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB).transpose(2, 0, 1)[None].astype(numpy.float32) / 255
+                rows = self.model([tensor])[0][0].T
+                rows = rows[rows[:, 4 + CAR] > 0.4]
+                scale = side / MODEL_SIZE
+                for cx, cy, w, h, score in zip(*rows[:, :4].T, rows[:, 4 + CAR]):
+                    found.append([(cx - w / 2) * scale + left, (cy - h / 2) * scale + top, w * scale, h * scale])
+                    scores.append(float(score))
+        keep = cv2.dnn.NMSBoxes(found, scores, 0.4, 0.5) if found else []
+        return [(x, y, x + w, y + h) for x, y, w, h in (found[i] for i in numpy.array(keep).flatten())]
 
     def look(self):
         """spot -> (how much of it a car covers, that car's box), or None when
@@ -291,8 +301,8 @@ class Spots:
             return None
         frame = cv2.resize(frame, (WIDTH, HEIGHT)) if frame.shape[:2] != (HEIGHT, WIDTH) else frame
         seen = {}
+        boxes = self.cars(frame)
         for spot, polygon in self.zones.items():
-            boxes = self.cars(frame, polygon)
             zone = numpy.zeros((HEIGHT, WIDTH), numpy.uint8)
             cv2.fillPoly(zone, [polygon.astype(numpy.int32)], 1)
             best, where = 0.0, None
@@ -309,7 +319,7 @@ class Watch:
         self.spots = Spots()
         self.alive, self.asked = False, float("-inf")
         self.held = {}     # spot -> True (a car) or False, as last told or first seen
-        self.change = {}   # spot -> (True | False, since, box): what it looks like, not yet held
+        self.looks = {}    # spot -> [(when, True | False)] of the last CONFIRM seconds
         self.boxes = {}    # spot -> the box of the car last seen in it
         self.trails = {}   # car (Frigate's id) -> [(when, x, y)] of its box's bottom middle
         self.last = {}     # spot or label -> ("arrived" | "parked" | "left", when), last told
@@ -324,7 +334,7 @@ class Watch:
         stayed so."""
         if not self.live(now):
             # A dark camera's last frame, or none, says nothing of the spots.
-            self.change.clear()
+            self.looks.clear()
             return
         try:
             seen = self.spots.look()
@@ -335,23 +345,27 @@ class Watch:
             full = covered >= FILL
             if full:
                 self.boxes[spot] = box
-            if self.held.get(spot) == full:
-                self.change.pop(spot, None)
-                continue
-            if spot not in self.change or self.change[spot][0] != full:
-                self.change[spot] = (full, now, box or self.boxes.get(spot))
-                continue
-            _, since, where = self.change[spot]
-            if now - since < CONFIRM:
-                continue
-            self.change.pop(spot)
+            looks = [l for l in self.looks.get(spot, []) if l[0] > now - CONFIRM] + [(now, full)]
+            self.looks[spot] = looks
+            if now - looks[0][0] < CONFIRM - 2 * POLL:
+                continue  # not enough looks yet
+            share = sum(l[1] for l in looks) / len(looks)
+            state = True if share >= 0.75 else False if share <= 0.25 else None
             was = self.held.get(spot)
-            self.held[spot] = full
+            if state is None or state == was:
+                continue
+            self.held[spot] = state
             if was is None:
-                log(f"{SPOTS[spot]}: {'a car' if full else 'empty'} ({covered:.2f})")
-            else:
-                self.tell(spot, SPOTS[spot], "arrived" if full else "left", None, since,
-                          where or (0, 0, 0, 0))
+                log(f"{SPOTS[spot]}: {'a car' if state else 'empty'} ({covered:.2f})")
+                continue
+            # Since the first look of the run that says so.
+            since = now
+            for when, value in reversed(looks):
+                if value != state:
+                    break
+                since = when
+            self.tell(spot, SPOTS[spot], "arrived" if state else "left", None, since,
+                      self.boxes.get(spot) or (0, 0, 0, 0))
 
     def live(self, now):
         """Whether the camera gives frames, from Frigate's stats every 30 s."""
@@ -480,26 +494,33 @@ class Watch:
 
     def report(self, key, name, kind, car, when, box, before):
         at = datetime.fromtimestamp(when).strftime("%H:%M:%S")
-        title = {"left": f"{name} left", "arrived": f"{name} is back", "parked": f"{name} parked"}[kind]
+        spot = car is None
+        if spot:
+            title = f"{name} · car {'left' if kind == 'left' else 'arrived'}"
+        else:
+            title = f"{name} {'left' if kind == 'left' else 'parked'}"
         line = at
         if before and (before[0] == "left") != (kind == "left"):
-            line += f" · {'parked' if kind == 'left' else 'away'} {duration(when - before[1])}"
+            if spot:
+                line += f" · {'taken' if kind == 'left' else 'empty'} for {duration(when - before[1])}"
+            else:
+                line += f" · {'parked' if kind == 'left' else 'away'} {duration(when - before[1])}"
         notify(f"***{title}***\n{line}", "info" if kind == "left" else "success",
                [(f"{key}.jpg", self.near(box)), ("street.jpg", picture())])
-        log(f"told: {name} {kind} at {at} ({car})")
+        log(f"told: {title} at {at}")
 
         video = self.later_clip(when - BEFORE, when + AFTER)
-        if car is None:
+        if spot:
             way = self.way(key, kind, when)
         else:
             where = (self.seen if kind == "left" else self.origin).get(car)
             way = WAYS["left" if where and where[0] < WIDTH / 2 else "right"] if where else None
-        if kind == "left":
-            words = f"***{name} went {way}***" if way else f"***{title}***"
+        if way:
+            words = f"{title} · went {way}" if kind == "left" else f"{title} · came from the {way}"
         else:
-            words = f"***{name} came from the {way}***" if way else f"***{title}***"
-        notify(f"{words}\n{at}" + ("" if video else " · no clip"), "info", [(f"{key}.mp4", video)])
-        log(f"told: {name} {kind} {way}, clip {len(video or b'')} bytes")
+            words = title
+        notify(f"***{words}***\n{at}" + ("" if video else " · no clip"), "info", [(f"{key}.mp4", video)])
+        log(f"told: {words}, clip {len(video or b'')} bytes")
 
 
 def main():

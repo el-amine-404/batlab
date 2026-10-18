@@ -84,22 +84,27 @@ everything; Frigate is the alarm and the index.
   inside. Move them in Settings > Masks / Zones if a car is parked where its
   zone does not reach.
 - **carwatch** (`compose/frigate/carwatch`, in Frigate's image for its
-  OpenVINO, OpenCV and ffmpeg) looks at the two spots itself every 3 s:
-  Frigate's latest frame, a square around each spot, through Frigate's YOLO
-  model. A spot holds a car when a car's box covers 40% of its zone
-  (`CARWATCH_FILL`); a change that holds 12 s (`CARWATCH_CONFIRM`) is
-  posted to Apprise's `cameras` channel: "Clio 4 left" or "Clio 4 is back",
-  how long it was parked or away, a close-up from the 4K stream and the
-  street. About 45 s later a second message says which way it went ("went
+  OpenVINO, OpenCV and ffmpeg) watches the two spots, not the cars: any car
+  in the Clio 4's or the Ford's spot counts. Every 3 s it runs Frigate's
+  YOLO model on Frigate's latest frame, on 9 squares of three sizes around
+  the spots, on the iGPU (0.3 s). One square is not enough: from above, a
+  dark car beside another is found in some framings and missed in others. A
+  spot holds a car when a car's box covers 40% of its zone
+  (`CARWATCH_FILL`); it is told changed when 75% of the looks of the last
+  12 s (`CARWATCH_CONFIRM`) say so, so stray misses change nothing. The
+  message ("Ford spot · car arrived", "Clio 4 spot · car left", with how
+  long it was taken or empty) has a close-up from the 4K stream and the
+  street; about 45 s later a second one says which way the car went ("went
   left/right": the last point of the car Frigate followed near the spot;
   "came from" for one arriving) with the clip, 10 s before to 15 s after,
   re-encoded to 1280 px H.264 for Discord. Frigate's own tracking is not
   used for the spots: from above it loses a parked car every half hour, finds
   it again only when something moves near it, and gave the parked Clio's
-  identity to a car driving past (a false "Clio 4 is back", 2026-10-18).
-  Another car parked in a spot is taken for its usual car. A dark camera
-  (Frigate's `camera_fps` 0) changes nothing. `docker logs carwatch` shows
-  each spot's first state and each message.
+  identity to a car driving past. A dark camera (Frigate's `camera_fps` 0)
+  changes nothing. Its times follow `CARWATCH_TZ` in `compose/.env`
+  (`Etc/GMT-1` on lab2: the zone data there puts Casablanca at UTC+0, the
+  phones and the DVR at UTC+1). `docker logs carwatch` shows each spot's
+  first state and each message.
 - **The Sandero** parks anywhere, so it has no zone: Frigate's object
   classifier tells it from the other cars. Each car Frigate follows is
   cropped from the frame and given up to 16 guesses; when 60% agree (at least
