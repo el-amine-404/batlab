@@ -34,11 +34,11 @@ const asText = (line: LogLine) =>
 function Line({ line }: { line: LogLine }) {
   const [open, setOpen] = useState(false);
   return (
-    <li className={cn("grid grid-cols-[auto_auto_1fr] gap-x-2 px-3 py-0.5 hover:bg-white/[0.03]", line.level === "error" && "bg-destructive/5")}>
+    <li className={cn("grid grid-cols-[auto_1fr] gap-x-2 px-3 py-0.5 sm:grid-cols-[auto_auto_1fr] hover:bg-white/[0.03]", line.level === "error" && "bg-destructive/5")}>
       <time className="text-muted-foreground/70 tabular-nums" dateTime={new Date(line.at * 1000).toISOString()}
             title={new Date(line.at * 1000).toLocaleString()}>{stamp(line.at)}</time>
       <span className={cn("w-12 uppercase", TONE[line.level])}>{line.level === "warning" ? "warn" : line.level}</span>
-      <span className="min-w-0 break-words whitespace-pre-wrap">
+      <span className="col-span-2 min-w-0 break-words whitespace-pre-wrap sm:col-span-1">
         <span className="mr-1.5 text-muted-foreground">{line.source}</span>
         {line.message}
         {line.detail && (
