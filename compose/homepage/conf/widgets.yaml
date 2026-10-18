@@ -6,24 +6,16 @@
     text_size: xl
     text: Potato homelab
 
+# One line, no labels: CPU, memory, temperature and the media disk
+# (/mnt/storage, mounted read-only in docker-compose.yml). Netdata has the rest.
 - resources:
-    label: lab2
-    expanded: true
     cpu: true
     memory: true
     cputemp: true
-    uptime: true
+    disk: /mnt/storage
     units: metric
     tempmin: 30
     tempmax: 90
-
-# /mnt/storage is the media disk, mounted read-only in docker-compose.yml.
-- resources:
-    label: Storage
-    expanded: true
-    disk:
-      - /
-      - /mnt/storage
 
 - search:
     provider: [google, duckduckgo]
@@ -42,8 +34,11 @@
       maximumFractionDigits: 1
 
 - datetime:
-    text_size: xl
+    text_size: lg
     format:
-      dateStyle: medium
-      timeStyle: short
+      weekday: short
+      day: numeric
+      month: short
+      hour: numeric
+      minute: 2-digit
       hour12: true
