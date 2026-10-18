@@ -42,6 +42,7 @@ export function NewDownload() {
   const [chosen, setChosen] = useState<string | null>(null);
   const [options, setOptions] = useState<OptionsPatch>({});
   const [more, setMore] = useState(false);
+  const [again, setAgain] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const list = destinations?.destinations ?? [];
@@ -89,14 +90,16 @@ export function NewDownload() {
         destination: destination === HELD ? "" : destination,
         options,
         priority: 0,
+        again,
         client: "videodrop page",
       });
       const fresh = job.created_at > Date.now() / 1000 - 10;
-      toast.success(fresh ? "Queued" : "Asked for already: that one goes on", {
+      toast.success(!fresh ? "Asked for already: that one goes on" : probe.data?.target?.earlier && !again ? "Queued: the earlier file will be reused" : "Queued", {
         action: { label: "Open", onClick: () => navigate(`/jobs/${job.id}`) },
       });
       setUrl("");
       setOptions({});
+      setAgain(false);
       changed();
     } catch (caught) {
       toast.error(errorText(caught, "Couldn't ask for it."));
@@ -147,7 +150,8 @@ export function NewDownload() {
           </Button>
         </div>
 
-        {linkOk && <VideoPreview probe={probe.data} loading={probe.isFetching || (!probe.data && !probeError)} error={probeError} holdHours={settings?.hold_hours} />}
+        {linkOk && <VideoPreview probe={probe.data} loading={probe.isFetching || (!probe.data && !probeError)} error={probeError} holdHours={settings?.hold_hours}
+                                  again={again} onAgain={setAgain} />}
 
         <button type="button" onClick={() => setMore(!more)} aria-expanded={more}
                 className="flex items-center gap-1.5 self-start text-xs text-muted-foreground hover:text-foreground">

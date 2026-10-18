@@ -110,8 +110,11 @@ class Services:
         if info.get("kind") == "video" and info.get("filename"):
             folder = row["folder"] if row else None
             path = f"{folder}/{info['filename']}" if folder else info["filename"]
+            earlier = self.jobs.reusable(info["fingerprint"], json.dumps(resolved.model_dump()), folder, template) \
+                if info.get("fingerprint") else None
             target = {"destination": row["slug"] if row else None, "path": path if folder else None,
-                      "exists": bool(folder) and (self.config.media_root / path).is_file()}
+                      "exists": bool(folder) and (self.config.media_root / path).is_file(),
+                      "earlier": {"job_id": earlier["id"], "finished_at": earlier["finished_at"]} if earlier else None}
         return {**info, "options": resolved.model_dump(), "target": target}
 
     # ---- housekeeping ---------------------------------------------------------------------------------

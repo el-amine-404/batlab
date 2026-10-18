@@ -13,7 +13,7 @@ def emit(event, **fields):
     print(json.dumps({"event": event, **fields}), flush=True)
 
 
-config = json.load(sys.stdin)
+config = json.loads(sys.stdin.readline())
 work = Path(config["work_dir"])
 video = config["url"].split("v=")[-1][:11]
 
@@ -35,6 +35,11 @@ def make(index, total, ident, title):
 
 
 if video.startswith("okokokokok"):
+    # Like the real runner: the site's fingerprint first (here: the video and its quality), then the answer.
+    emit("fingerprint", value=f"{video}:{config['options']['quality']}")
+    if json.loads(sys.stdin.readline() or "{}").get("reuse"):
+        emit("reused", job="x")
+        sys.exit(0)
     make(0, 1, video, f"Song {video[-1]}")
 elif video == "playlist000":
     make(0, 2, "aaaaaaaaaa1", "First")

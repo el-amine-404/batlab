@@ -2,14 +2,27 @@
 server stays responsive whatever yt-dlp and ffmpeg do, a download is stopped
 by stopping its process (and its ffmpeg with it), and a crash ends only it.
 
-stdin: one JSON object {"url", "work_dir", "options", "output", "rate_limit",
-"max_filesize", "cookies", "deno", "song"}. stdout: events, one JSON object a line
-(EVENTS); anything else the process prints goes to stderr, the container's
-log. Exit 0 when at least one file was made, 1 otherwise."""
+stdin: one line, a JSON object {"url", "work_dir", "options", "output",
+"rate_limit", "max_filesize", "cookies", "deno", "song"}; later, one more line
+answering the fingerprint event: {"reuse": <an earlier job's id> or null}.
+stdout: events, one JSON object a line (EVENTS); anything else the process
+prints goes to stderr, the container's log. Exit 0 when at least one file was
+made or an earlier one reused, 1 otherwise.
 
+A video (not a playlist) is read first without downloading: its fingerprint
+(ytdlp.fingerprint, what the site serves for these options) goes to the
+server, which answers whether an earlier download got that same file; then
+nothing is downloaded.
+
+Each step after the download (joining, tags, cover…) writes a new copy of
+the file; how far that copy has grown, against the file it is made from, is
+the step's progress (StepWatch)."""
+
+import copy
 import json
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -19,21 +32,84 @@ from pathlib import Path
 #                                                                        the video's streams together
 #   stage     {stage, step}                                              downloading, processing (step: which
 #                                                                        part of it: Merger, EmbedThumbnail…)
+#   step      {percent}                                                  how far the step's new copy has grown
+#   fingerprint {value}                                                  the server answers on stdin (reuse)
+#   reused    {job}                                                      an earlier job's file is the same: done
 #   file      {path, checks}                                             a finished file, relative to work_dir, checked
 #   note      {message}                                                  beside the download: lyrics found or not
 #   warning   {message}
 #   error     {message}                                                  a video failed (the job may go on)
-EVENTS = ("item", "progress", "stage", "file", "note", "warning", "error")
+EVENTS = ("item", "progress", "stage", "step", "fingerprint", "reused", "file", "note", "warning", "error")
 PROGRESS_EVERY = 0.5
+STEP_EVERY = 1.0
+# Files that aren't the video while it is worked on.
+NOT_THE_VIDEO = {".jpg", ".jpeg", ".png", ".webp", ".srt", ".vtt", ".ass", ".json", ".part", ".ytdl", ".lrc"}
 
 
 class Emitter:
+    """Events to stdout, one line each; the step watcher writes from its own thread."""
+
     def __init__(self, stream):
         self._stream = stream
+        self._lock = threading.Lock()
 
     def __call__(self, event: str, **fields) -> None:
-        self._stream.write(json.dumps({"event": event, **fields}, ensure_ascii=False, default=str) + "\n")
-        self._stream.flush()
+        line = json.dumps({"event": event, **fields}, ensure_ascii=False, default=str) + "\n"
+        with self._lock:
+            self._stream.write(line)
+            self._stream.flush()
+
+
+def _media_sizes(folder: Path) -> dict[str, int]:
+    sizes = {}
+    for path in folder.rglob("*"):
+        if path.is_file() and path.suffix.lower() not in NOT_THE_VIDEO and not path.name.startswith(".cookies"):
+            try:
+                sizes[str(path)] = path.stat().st_size
+            except OSError:
+                pass
+    return sizes
+
+
+class StepWatch:
+    """While a step runs: the files it started from, and how far the new
+    file it writes has grown against them (a percent, emitted every
+    STEP_EVERY). A step that changes the file in place has none to show."""
+
+    def __init__(self, emit, folder: Path):
+        self._emit = emit
+        self._folder = folder
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        self.stop()
+        before = _media_sizes(self._folder)
+        if not before:
+            return
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._watch, args=(before, self._stop), daemon=True)
+        self._thread.start()
+
+    def _watch(self, before: dict[str, int], stop: threading.Event) -> None:
+        # Joining picture and sound: the new file is both together; else it is a copy of the biggest one.
+        sources = sorted(before.values(), reverse=True)
+        whole = sum(sources[:2]) if len(sources) > 1 else sources[0]
+        last = -1
+        while not stop.wait(STEP_EVERY):
+            now = _media_sizes(self._folder)
+            grown = sum(size for path, size in now.items() if path not in before)
+            if whole and grown:
+                percent = min(99, round(100 * grown / whole))
+                if percent != last:
+                    last = percent
+                    self._emit("step", percent=percent)
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=2)
+            self._thread = None
 
 
 def _stdout_for_events():
@@ -47,7 +123,7 @@ def _stdout_for_events():
 
 def main() -> int:
     emit = Emitter(_stdout_for_events())
-    config = json.load(sys.stdin)
+    config = json.loads(sys.stdin.readline())
 
     import yt_dlp
     from yt_dlp.postprocessor.common import PostProcessor
@@ -55,7 +131,7 @@ def main() -> int:
 
     from . import checks, lyrics
     from .options import VideoOptions
-    from .ytdlp import params
+    from .ytdlp import fingerprint, params
 
     work_dir = Path(config["work_dir"])
     options = VideoOptions.model_validate(config["options"])
@@ -123,9 +199,14 @@ def main() -> int:
              speed=status.get("speed"), eta=status.get("eta"),
              fragment=status.get("fragment_index"), fragments=status.get("fragment_count"))
 
+    watch = StepWatch(emit, work_dir)
+
     def postprocessing(status: dict) -> None:
         if status.get("status") == "started":
             emit("stage", stage="processing", step=status.get("postprocessor"))
+            watch.start()
+        else:
+            watch.stop()
 
     def add_lyrics(path: Path, info: dict) -> None:
         song = config.get("song") or {}
@@ -184,12 +265,25 @@ def main() -> int:
     try:
         with yt_dlp.YoutubeDL(ydl_params) as ydl:
             ydl.add_post_processor(Collect(), when="after_move")
-            ydl.download([config["url"]])
+            found = ydl.extract_info(config["url"], download=False, process=False)
+            if found.get("_type") in ("playlist", "multi_video"):
+                ydl.download([config["url"]])
+            else:
+                info = ydl.process_ie_result(copy.deepcopy(found), download=False)
+                item(info)
+                emit("fingerprint", value=fingerprint(info))
+                answer = json.loads(sys.stdin.readline() or "{}")
+                if answer.get("reuse"):
+                    emit("reused", job=answer["reuse"])
+                    return 0
+                ydl.process_ie_result(found, download=True)
     except DownloadError as exc:
         if not errors:
             emit("error", message=str(exc)[:1000])
     except Exception as exc:  # yt-dlp's own bug: said, not hidden
         emit("error", message=f"yt-dlp failed: {exc.__class__.__name__}: {exc}"[:1000])
+    finally:
+        watch.stop()
     if not made and not errors:
         emit("error", message="Nothing was downloaded: the file is probably over the size limit, or the link "
                               "has no video.")

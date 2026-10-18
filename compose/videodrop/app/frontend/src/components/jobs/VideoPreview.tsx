@@ -1,7 +1,9 @@
-import { AlertTriangle, ExternalLink, FileCheck2, Film, ListVideo, Loader2, Radio } from "lucide-react";
+import { AlertTriangle, ExternalLink, FileCheck2, Film, History, ListVideo, Loader2, Radio } from "lucide-react";
 import type { ReactNode } from "react";
+import { Link } from "react-router";
 
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import type { Probe } from "@/lib/api";
 import { clock, cn, formatBytes } from "@/lib/utils";
 
@@ -28,7 +30,15 @@ function date(yyyymmdd: string | null | undefined): string | null {
 }
 
 /** What a link will download, read from the site before downloading: picture, title, source, format and size. */
-export function VideoPreview({ probe, loading, error, holdHours }: { probe?: Probe; loading: boolean; error?: string; holdHours?: number }) {
+export function VideoPreview({ probe, loading, error, holdHours, again, onAgain }: {
+  probe?: Probe;
+  loading: boolean;
+  error?: string;
+  holdHours?: number;
+  /** Download again even when an earlier download got this same file. */
+  again: boolean;
+  onAgain: (again: boolean) => void;
+}) {
   if (error) {
     return (
       <div className="flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm">
@@ -53,6 +63,8 @@ export function VideoPreview({ probe, loading, error, holdHours }: { probe?: Pro
   }
   const f = probe.format;
   const size = f?.size_bytes ? `${f.size_exact ? "" : "≈ "}${formatBytes(f.size_bytes)}` : "unknown";
+  const sizeHint = f?.size_from === "bitrate" ? "Worked out from the bitrate and the length: the site doesn't say the size."
+    : f?.size_exact ? "As the site says." : "The site's estimate.";
   const video = f && [f.height ? `${f.width}×${f.height}` : null, f.fps ? `${Math.round(f.fps)} fps` : null, f.dynamic_range && f.dynamic_range !== "SDR" ? f.dynamic_range : null].filter(Boolean).join(" · ");
   return (
     <div className={cn("rounded-xl border border-border bg-black/10 p-3", loading && "opacity-70")}>
@@ -74,7 +86,7 @@ export function VideoPreview({ probe, loading, error, holdHours }: { probe?: Pro
             {date(probe.upload_date) && <span>· {date(probe.upload_date)}</span>}
             {probe.views != null && <span>· {probe.views.toLocaleString()} views</span>}
             {probe.is_live && <Badge variant="destructive"><Radio /> Live now</Badge>}
-            {!!probe.age_limit && <Badge variant="warning">{probe.age_limit}+: needs cookies</Badge>}
+            {!!probe.age_limit && <Badge variant="muted" title="Some sites show it only to a signed-in viewer: cookies (Settings) then">{probe.age_limit}+</Badge>}
           </p>
           {probe.kind === "playlist" ? (
             <div className="text-sm">
@@ -89,7 +101,7 @@ export function VideoPreview({ probe, loading, error, holdHours }: { probe?: Pro
               <Fact label="Picture">{video || "—"}</Fact>
               <Fact label="Video">{[codec(f?.vcodec), f?.video_kbps ? `${Math.round(f.video_kbps)} kb/s` : null].filter(Boolean).join(" · ") || "—"}</Fact>
               <Fact label="Sound">{[codec(f?.acodec), f?.audio_kbps ? `${Math.round(f.audio_kbps)} kb/s` : null].filter(Boolean).join(" · ") || "none"}</Fact>
-              <Fact label="Size">{size} · {(f?.container ?? "").toUpperCase()}</Fact>
+              <Fact label="Size"><span title={sizeHint}>{size}</span> · {(f?.container ?? "").toUpperCase()}</Fact>
             </dl>
           )}
           <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
@@ -101,6 +113,19 @@ export function VideoPreview({ probe, loading, error, holdHours }: { probe?: Pro
           </p>
         </div>
       </div>
+      {probe.target?.earlier && (
+        <div className="mt-3 flex flex-col gap-2 rounded-lg border border-sky-400/30 bg-sky-400/5 p-3 text-sm sm:flex-row sm:items-center">
+          <History className="size-4 shrink-0 text-sky-300" />
+          <p className="flex-1">
+            Already downloaded on {new Date(probe.target.earlier.finished_at * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}{" "}
+            (<Link to={`/jobs/${probe.target.earlier.job_id}`} className="text-sky-300 hover:underline">that download</Link>), and the site still serves exactly that
+            video with these options. {again ? "It will be downloaded again." : "Its file is reused: nothing is downloaded."}
+          </p>
+          <label className="flex shrink-0 items-center gap-2 text-xs">
+            <Switch checked={again} onCheckedChange={onAgain} /> Download again anyway
+          </label>
+        </div>
+      )}
       {probe.target && (
         <p className={cn("mt-3 flex items-start gap-1.5 border-t border-border pt-2 text-xs", probe.target.exists ? "text-warning" : "text-muted-foreground")}>
           <FileCheck2 className="mt-px size-3.5 shrink-0" />

@@ -642,6 +642,13 @@ export interface components {
             /** Min Free Bytes */
             min_free_bytes: number;
         };
+        /** EarlierDownload */
+        EarlierDownload: {
+            /** Job Id */
+            job_id: string;
+            /** Finished At */
+            finished_at: number;
+        };
         /** EventDescription */
         EventDescription: {
             /**
@@ -841,9 +848,19 @@ export interface components {
             error: string | null;
             /**
              * Notes
-             * @description What happened beside the download: lyrics found or not.
+             * @description What happened beside the download: lyrics found or not, a file reused.
              */
             notes: string[];
+            /**
+             * Fingerprint
+             * @description What the site served for its options (a hash).
+             */
+            fingerprint: string | null;
+            /**
+             * Reused From
+             * @description The earlier download whose file it reused: the site served the same video. Nothing was downloaded.
+             */
+            reused_from: string | null;
             /** @description The song its caller named, for its lyrics. */
             song: components["schemas"]["SongOut"] | null;
             /**
@@ -950,6 +967,12 @@ export interface components {
              * @default 0
              */
             priority: number;
+            /**
+             * Again
+             * @description Download it even when an earlier download got the same file: the site serves the same video (its fingerprint), with the same options, to the same place, and that file is still there. Left false, that file is reused and nothing is downloaded.
+             * @default false
+             */
+            again: boolean;
             /** @description The song, when it is a music video and the caller knows it: what its lyrics are looked up by (options.lyrics). Left out: guessed from the video's title. */
             song?: components["schemas"]["Song"] | null;
             /**
@@ -1258,6 +1281,11 @@ export interface components {
              */
             filename?: string | null;
             /**
+             * Fingerprint
+             * @description What the site serves for these options (a hash): the same later means the same file.
+             */
+            fingerprint?: string | null;
+            /**
              * Count
              * @description A playlist's videos.
              */
@@ -1316,6 +1344,11 @@ export interface components {
             /** Size Exact */
             size_exact: boolean;
             /**
+             * Size From
+             * @description site: the site said it; bitrate: worked out from the bitrate and the length.
+             */
+            size_from?: ("site" | "bitrate") | null;
+            /**
              * Format Id
              * @description yt-dlp's name for the streams picked.
              */
@@ -1346,6 +1379,8 @@ export interface components {
              * @description A file with that name is there already: the download would keep it.
              */
             exists: boolean;
+            /** @description A download that got this same file (the site serves the same video, same options, same place) and whose files are still there: a new one reuses it, unless it asks again. */
+            earlier?: components["schemas"]["EarlierDownload"] | null;
         };
         /** Problem */
         Problem: {
@@ -1369,6 +1404,11 @@ export interface components {
              * @description When this stage or step began.
              */
             step_since?: number | null;
+            /**
+             * Step Percent
+             * @description How far the step's new copy of the file has grown; none for a step that changes the file in place.
+             */
+            step_percent?: number | null;
             /**
              * Percent
              * @description 0-100 of the whole job (a playlist's videos together); none while the size isn't known.

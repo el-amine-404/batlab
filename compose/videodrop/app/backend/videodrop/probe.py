@@ -12,6 +12,8 @@ import re
 import sys
 from pathlib import Path
 
+from .ytdlp import fingerprint
+
 ENTRIES_SHOWN = 10
 
 
@@ -27,6 +29,17 @@ def describe_format(info: dict) -> dict:
     audio = next((f for f in picked if f.get("acodec") not in (None, "none")), None)
     sizes = [f.get("filesize") or f.get("filesize_approx") for f in picked]
     exact = all(f.get("filesize") for f in picked)
+    size = int(sum(sizes)) if all(sizes) else None
+    estimated_from = "site" if size else None
+    duration = _number(info.get("duration"))
+    if size is None and duration:
+        # The site gives no size (streams cut in pieces, HLS): bitrate × length.
+        if len(picked) > 1:
+            kbps = ((video or {}).get("vbr") or (video or {}).get("tbr") or 0) + ((audio or {}).get("abr") or (audio or {}).get("tbr") or 0)
+        else:
+            kbps = picked[0].get("tbr") or 0
+        if kbps:
+            size, estimated_from = int(kbps * 1000 / 8 * duration), "bitrate"
     return {
         "width": _number((video or {}).get("width")),
         "height": _number((video or {}).get("height")),
@@ -37,8 +50,9 @@ def describe_format(info: dict) -> dict:
         "audio_kbps": _number((audio or {}).get("abr") or ((audio or {}).get("tbr") if audio is not video else None)),
         "dynamic_range": (video or {}).get("dynamic_range"),
         "container": info.get("ext"),
-        "size_bytes": int(sum(sizes)) if all(sizes) else None,
-        "size_exact": bool(all(sizes) and exact),
+        "size_bytes": size,
+        "size_exact": bool(size and exact and estimated_from == "site"),
+        "size_from": estimated_from,
         "format_id": info.get("format_id"),
     }
 
@@ -70,6 +84,7 @@ def describe(info: dict, filename: str | None) -> dict:
         "automatic_captions": len(automatic),
         "automatic_has_english": any(code.split("-")[0] == "en" for code in automatic),
         "filename": filename,
+        "fingerprint": fingerprint(info),
         "entries": None,
     }
 

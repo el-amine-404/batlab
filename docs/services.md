@@ -231,6 +231,14 @@ the service.
   site said, in the container its name says; one that fails isn't kept. A
   video file holds no program, so there is no virus scan; what can be wrong
   with one is that it is broken or cut short, which this sees.
+- **The same file twice**: before downloading a video, its *fingerprint* is
+  read from the site (`ytdlp.fingerprint`: site, id, length, and the exact
+  streams the options pick: their ids, size, codecs, bitrate). When an
+  earlier download had the same fingerprint, the same options and the same
+  place, and its files are still there, they are reused and nothing is
+  downloaded (`reused_from`); a re-encoded or trimmed video, another quality
+  or a new stream changes the fingerprint. `again: true` downloads anyway; the
+  preview says so first (`target.earlier`).
 - **Lyrics** (`options.lyrics`, on for `music-videos`): a music video's
   synced lyrics from LRCLIB, as a subtitle track named Lyrics. The song is
   the job's `song` (clipseerr sends the one it matched), else guessed from

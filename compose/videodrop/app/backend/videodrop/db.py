@@ -102,8 +102,20 @@ def _checks_lyrics_and_lookups(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS files_held ON files (root, removed_at)")
 
 
+def _fingerprints(conn: sqlite3.Connection) -> None:
+    """What the site served (ytdlp.fingerprint), the earlier job whose file
+    a job reused because the site serves the same video, and whether the
+    job asked to download again anyway."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
+    for column, definition in (("fingerprint", "TEXT"), ("reused_from", "TEXT"),
+                               ("again", "INTEGER NOT NULL DEFAULT 0")):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} {definition}")
+    conn.execute("CREATE INDEX IF NOT EXISTS jobs_fingerprint ON jobs (fingerprint, status)")
+
+
 # Step n brings user_version n-1 to n. A new step goes at the end; none is ever changed.
-MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (_checks_lyrics_and_lookups,)
+MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (_checks_lyrics_and_lookups, _fingerprints)
 
 
 class Database:

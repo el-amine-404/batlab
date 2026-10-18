@@ -111,6 +111,7 @@ export function JobPage() {
             <Row label="Into">{job.destination ? `${job.destination} (${job.folder})` : job.folder ?? "kept here, to download"}</Row>
             <Row label="Options">{options(job)}</Row>
             {job.song && <Row label="Song">{job.song.artist} – {job.song.title}</Row>}
+            {job.reused_from && <Row label="File">reused from <Link to={`/jobs/${job.reused_from}`} className="text-sky-300 hover:underline">an earlier download</Link></Row>}
             <Row label="Asked">{timeAgo(job.created_at)}{job.priority ? ` · priority ${job.priority}` : ""}</Row>
             {job.started_at && <Row label="Started">{timeAgo(job.started_at)}{job.attempts > 1 ? ` · try ${job.attempts}` : ""}</Row>}
             {job.finished_at && <Row label="Ended">{timeAgo(job.finished_at)}</Row>}

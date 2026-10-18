@@ -52,6 +52,10 @@ class JobIn(BaseModel):
                                   description="Options of its own; the destination's, then the settings', fill in "
                                               "the rest.")
     priority: int = Field(0, ge=-10, le=10, description="Higher goes first among queued jobs; then oldest first.")
+    again: bool = Field(False, description="Download it even when an earlier download got the same file: the site "
+                                           "serves the same video (its fingerprint), with the same options, to the "
+                                           "same place, and that file is still there. Left false, that file is "
+                                           "reused and nothing is downloaded.")
     song: Song | None = Field(None, description="The song, when it is a music video and the caller knows it: what "
                                                 "its lyrics are looked up by (options.lyrics). Left out: guessed "
                                                 "from the video's title.")
@@ -194,6 +198,8 @@ class JobStore:
             "progress": progress,
             "error": row["error"],
             "notes": json.loads(row["notes"] or "[]"),
+            "fingerprint": row["fingerprint"],
+            "reused_from": row["reused_from"],
             "song": json.loads(row["song"]) if row["song"] else None,
             "attempts": row["attempts"],
             "retry_at": row["retry_at"],
@@ -239,12 +245,13 @@ class JobStore:
         events = body.callback_events if body.callback_events is not None else list(DEFAULT_CALLBACK_EVENTS)
         self._db.run(
             "INSERT INTO jobs (id, url, site, dedupe_key, destination, folder, template, options, priority, client, "
-            "status, callback_url, callback_secret, callback_events, base_url, song, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)",
+            "status, callback_url, callback_secret, callback_events, base_url, song, again, created_at, "
+            "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?)",
             (job_id, url, links.site_of(url), key, slug, destination["folder"] if destination else None, template,
              json.dumps(options.model_dump()), body.priority, body.client, body.callback_url, body.callback_secret,
              json.dumps([e for e in CALLBACK_EVENTS if e in events]), base_url,
-             body.song.model_dump_json() if body.song else None, now, now))
+             body.song.model_dump_json() if body.song else None,
+             int(body.again), now, now))
         self._touch(job_id)
         return self.row(job_id), True
 
@@ -301,6 +308,19 @@ class JobStore:
                               for n, f in enumerate(files)])
 
         self._db.transaction(work)
+
+    def reusable(self, fingerprint: str, options: str, folder: str | None, template: str,
+                 exclude: str | None = None) -> sqlite3.Row | None:
+        """The newest finished job that got the same file: the same
+        fingerprint, options and place, every file still there."""
+        rows = self._db.all("SELECT * FROM jobs WHERE fingerprint = ? AND status = 'finished' AND options = ? AND "
+                            "folder IS ? AND template = ? AND id IS NOT ? ORDER BY finished_at DESC LIMIT 5",
+                            (fingerprint, options, folder, template, exclude))
+        for row in rows:
+            files = self.files(row["id"])
+            if files and all(f["removed_at"] is None and self.file_path(f).is_file() for f in files):
+                return row
+        return None
 
     def requeue_running(self) -> int:
         """After a restart: what was running starts again (the try isn't counted)."""

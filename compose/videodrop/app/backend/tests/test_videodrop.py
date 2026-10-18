@@ -29,7 +29,8 @@ from videodrop.domain import Invalid  # noqa: E402
 from videodrop.options import DEFAULTS, check_template, resolve, to_output_template  # noqa: E402
 from videodrop.scheduler import TRANSIENT, backoff  # noqa: E402
 from videodrop.services import build  # noqa: E402
-from videodrop.ytdlp import params  # noqa: E402
+from videodrop.runner import StepWatch  # noqa: E402
+from videodrop.ytdlp import fingerprint, params  # noqa: E402
 
 FAKE = str(Path(__file__).with_name("fake_runner.py"))
 FAKE_PROBE = str(Path(__file__).with_name("fake_probe.py"))
@@ -64,6 +65,40 @@ class Options(unittest.TestCase):
         webm = params(resolve({"container": "webm"}), "x", Path("/w"))
         self.assertFalse(webm["writethumbnail"])
         self.assertNotIn("merge_output_format", params(resolve({"container": "original"}), "x", Path("/w")))
+
+
+class Fingerprints(unittest.TestCase):
+    def info(self, **change):
+        video = {"format_id": "401", "width": 3840, "height": 2160, "vcodec": "av01", "acodec": "none",
+                 "filesize": 280_000_000, "tbr": 10595.1}
+        audio = {"format_id": "140", "vcodec": "none", "acodec": "mp4a", "filesize": 3_400_000, "tbr": 129.5}
+        info = {"id": "DPEodkHzH-s", "extractor_key": "Youtube", "duration": 209,
+                "requested_formats": [{**video, **change}, audio]}
+        return info
+
+    def test_same_video_same_fingerprint(self):
+        self.assertEqual(fingerprint(self.info()), fingerprint(self.info()))
+        self.assertEqual(len(fingerprint(self.info())), 32)
+
+    def test_a_changed_video_or_another_quality_differs(self):
+        for change in ({"filesize": 281_000_000}, {"format_id": "400", "height": 1440}, {"tbr": 9000}):
+            with self.subTest(change):
+                self.assertNotEqual(fingerprint(self.info()), fingerprint(self.info(**change)))
+        self.assertIsNone(fingerprint({"_type": "playlist", "id": "x"}))
+
+
+class StepProgress(unittest.TestCase):
+    def test_the_new_copy_against_the_old(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "a.mp4").write_bytes(b"x" * 1000)
+            Path(tmp, "a.jpg").write_bytes(b"x" * 5000)  # the cover isn't the video
+            seen = []
+            watch = StepWatch(lambda event, **fields: seen.append(fields["percent"]), Path(tmp))
+            watch.start()
+            Path(tmp, "a.temp.mp4").write_bytes(b"x" * 400)
+            time.sleep(1.3)
+            watch.stop()
+            self.assertEqual(seen, [40])
 
 
 class Links(unittest.TestCase):
@@ -378,6 +413,25 @@ class Api(unittest.TestCase):
         again = self.wait(job["id"], "running")
         self.assertEqual(again["attempts"], 1)
         self.client.post(f"/api/v1/jobs/{job['id']}/cancel")
+
+    def test_the_same_file_is_reused_unless_asked_again(self):
+        first = self.wait(self.ask("okokokokok1", destination="music-videos")["id"], "finished")
+        second = self.wait(self.ask("okokokokok1", destination="music-videos")["id"], "finished")
+        self.assertEqual((second["reused_from"], second["files"][0]["path"], second["files"][0]["existed"]),
+                         (first["id"], first["files"][0]["path"], True))
+        self.assertIn("nothing was downloaded", second["notes"][0])
+        other_quality = self.wait(self.ask("okokokokok1", destination="music-videos", options={"quality": "720"})["id"],
+                                  "finished")
+        self.assertIsNone(other_quality["reused_from"])
+        again = self.wait(self.ask("okokokokok1", destination="music-videos", again=True)["id"], "finished")
+        self.assertIsNone(again["reused_from"])
+
+    def test_a_held_file_reused_has_its_own_life(self):
+        first = self.wait(self.ask("okokokokok2")["id"], "finished")
+        second = self.wait(self.ask("okokokokok2")["id"], "finished")
+        self.assertEqual(second["reused_from"], first["id"])
+        self.client.delete(f"/api/v1/jobs/{first['id']}")
+        self.assertEqual(self.client.get(second["files"][0]["download_url"]).status_code, 200)
 
     def test_link_check_and_probe(self):
         good = self.client.get("/api/v1/links/check", params={"url": "https://youtu.be/okokokokok1?si=x"}).json()

@@ -65,6 +65,8 @@ class Run:
     checks: dict[str, dict] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    # The earlier job whose file this one reuses (the site serves the same video).
+    reused: str | None = None
     cancelled: bool = False
     stopping: bool = False
     saved_at: float = 0.0
@@ -242,9 +244,9 @@ class Scheduler:
         run.process = await asyncio.create_subprocess_exec(
             *self._config.runner, stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE, cwd=work, env=env, start_new_session=True, limit=LINE_LIMIT)
-        run.process.stdin.write(json.dumps(request).encode())
+        # Open until the process ends: it asks once more (the fingerprint).
+        run.process.stdin.write(json.dumps(request).encode() + b"\n")
         await run.process.stdin.drain()
-        run.process.stdin.close()
         while True:
             try:
                 line = await asyncio.wait_for(run.process.stdout.readline(), STALLED)
@@ -260,8 +262,25 @@ class Scheduler:
                 event = json.loads(line)
             except ValueError:
                 continue
+            if event.get("event") == "fingerprint":
+                await self._answer(run, event.get("value"))
             self._on_event(run, event)
+        with suppress(Exception):
+            run.process.stdin.close()
         await run.process.wait()
+
+    async def _answer(self, run: Run, fingerprint: str | None) -> None:
+        """Whether an earlier download got the same file: then that one is
+        reused and nothing is downloaded (unless the job asked again)."""
+        row = self._jobs.row(run.job_id)
+        self._jobs.update(run.job_id, fingerprint=fingerprint)
+        earlier = None
+        if fingerprint and not row["again"]:
+            earlier = self._jobs.reusable(fingerprint, row["options"], row["folder"], row["template"], row["id"])
+        run.reused = earlier["id"] if earlier else None
+        with suppress(ConnectionError, BrokenPipeError):
+            run.process.stdin.write(json.dumps({"reuse": run.reused}).encode() + b"\n")
+            await run.process.stdin.drain()
 
     def _on_event(self, run: Run, event: dict) -> None:
         name, now = event.get("event"), time.monotonic()
@@ -291,11 +310,14 @@ class Scheduler:
                 progress.update(stage="downloading", step=None, step_since=time.time())
         elif name == "stage":
             if (event.get("stage"), event.get("step")) != (progress.get("stage"), progress.get("step")):
-                progress.update(stage=event.get("stage"), step=event.get("step"), step_since=time.time())
+                progress.update(stage=event.get("stage"), step=event.get("step"), step_since=time.time(),
+                                step_percent=None)
                 self._jobs.update(run.job_id, stage=event.get("stage"), progress=progress)
         elif name == "file":
             run.made.append(event["path"])
             run.checks[event["path"]] = event.get("checks")
+        elif name == "step":
+            progress["step_percent"] = _number(event.get("percent"))
         elif name == "note":
             run.notes.append(str(event.get("message") or "")[:500])
             self._jobs.update(run.job_id, notes=run.notes)
@@ -319,7 +341,16 @@ class Scheduler:
             self._tell(run.job_id, "cancelled")
             return
         placed = []
-        if run.made:
+        if run.reused:
+            placed = await asyncio.to_thread(self._reuse, run, row)
+            if placed:
+                earlier = self._jobs.row(run.reused)
+                when = time.strftime("%d %b %Y at %H:%M", time.localtime(earlier["finished_at"]))
+                run.notes.append(f"The site serves the same video as for the download of {when}, with the same "
+                                 "options: its file is reused, nothing was downloaded.")
+                self._jobs.update(run.job_id, notes=run.notes, reused_from=run.reused)
+                self._jobs.add_files(run.job_id, placed)
+        elif run.made:
             run.progress.update(stage="placing", step=None, step_since=time.time())
             self._jobs.update(run.job_id, stage="placing", progress=run.progress)
             placed = await asyncio.to_thread(placement.place, work, run.made, self._target(row))
@@ -328,6 +359,29 @@ class Scheduler:
                 file["checks"] = None if file["existed"] else run.checks.get(file["source"])
             self._jobs.add_files(run.job_id, placed)
         self._finish(run, row, placed)
+
+    def _reuse(self, run: Run, row) -> list[dict]:
+        """The earlier job's files as this job's: the same place in a
+        destination; a held file linked into this job's own held folder (its
+        own lifetime, no second copy on the disk)."""
+        placed = []
+        for file in self._jobs.files(run.reused):
+            source = self._jobs.file_path(file)
+            if not source.is_file():
+                return []
+            path = file["path"]
+            if file["root"] == "held":
+                path = f"{row['id']}/{file['path'].split('/', 1)[1]}"
+                target = self._config.held_dir / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    os.link(source, target)
+                except FileExistsError:
+                    pass
+            placed.append({"root": file["root"], "path": path, "name": file["name"], "size": file["size"],
+                           "kind": file["kind"], "existed": True,
+                           "checks": json.loads(file["checks"]) if file["checks"] else None})
+        return placed
 
     def _target(self, row) -> placement.Target:
         if row["folder"]:

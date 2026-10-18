@@ -17,4 +17,5 @@ print(json.dumps({"ok": True, "info": {
         "audio_kbps": 130, "dynamic_range": "SDR", "container": config["options"]["container"],
         "size_bytes": 40_000_000, "size_exact": False, "format_id": "399+251"},
     "heights": [1080, 720], "subtitles": ["en"], "automatic_captions": 150, "automatic_has_english": True,
-    "filename": f"Fake Artist/Song [{video}].mp4", "entries": None}}))
+    "filename": f"Fake Artist/Song [{video}].mp4", "fingerprint": f"{video}:{config['options']['quality']}",
+    "entries": None}}))

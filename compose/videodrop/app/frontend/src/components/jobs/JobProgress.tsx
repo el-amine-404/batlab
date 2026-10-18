@@ -42,18 +42,21 @@ export function JobProgress({ job, className }: { job: Job; className?: string }
     stage === "downloading" && progress?.speed ? formatSpeed(progress.speed) : null,
     stage === "downloading" && progress?.eta ? `${clock(progress.eta)} left` : null,
   ].filter(Boolean);
-  const busy = stage !== "downloading" || percent === null;
+  // Working on the file: how far the step's new copy has grown, when it makes one.
+  const stepPercent = stage === "processing" ? progress?.step_percent ?? null : null;
+  const shown = stage === "downloading" ? percent : stepPercent;
+  const busy = shown === null;
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
       <div className="h-1.5 overflow-hidden rounded-full bg-secondary" role="progressbar" aria-valuemin={0} aria-valuemax={100}
-           aria-valuenow={percent ?? undefined} aria-label={STAGE[stage]}>
+           aria-valuenow={shown ?? undefined} aria-label={STAGE[stage]}>
         {/* Working, with no share to show: a piece of bar that moves. */}
         <div className={cn("h-full rounded-full bg-gradient-to-r from-sky-500 to-cyan-400 transition-[width] duration-700",
                            busy && "progress-indeterminate")}
-             style={busy ? undefined : { width: `${Math.max(2, percent ?? 0)}%` }} />
+             style={busy ? undefined : { width: `${Math.max(2, shown ?? 0)}%` }} />
       </div>
       <p className="text-xs text-muted-foreground tabular-nums">
-        {step ?? STAGE[stage]}{percent !== null && stage === "downloading" ? ` · ${percent.toFixed(0)}%` : ""}
+        {step ?? STAGE[stage]}{shown !== null ? ` · ${shown.toFixed(0)}%` : ""}
         {figures.length ? ` · ${figures.join(" · ")}` : ""}
       </p>
     </div>

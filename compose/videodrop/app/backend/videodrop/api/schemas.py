@@ -28,6 +28,8 @@ class Progress(BaseModel):
     step: str | None = Field(None, description="Which part of processing: yt-dlp's postprocessor (Merger, "
                                                 "FixupM3u8, FFmpegMetadata, EmbedThumbnail…), lyrics or check.")
     step_since: float | None = Field(None, description="When this stage or step began.")
+    step_percent: float | None = Field(None, description="How far the step's new copy of the file has grown; none "
+                                                         "for a step that changes the file in place.")
     percent: float | None = Field(None, description="0-100 of the whole job (a playlist's videos together); "
                                                     "none while the size isn't known.")
     downloaded_bytes: int | None = Field(None, description="Of the video downloading now.")
@@ -106,7 +108,10 @@ class Job(BaseModel):
     progress: Progress | None = Field(description="While it runs.")
     error: str | None = Field(description="Why it failed; for a queued job, why its last try did; for a finished "
                                           "playlist, the videos that failed.")
-    notes: list[str] = Field(description="What happened beside the download: lyrics found or not.")
+    notes: list[str] = Field(description="What happened beside the download: lyrics found or not, a file reused.")
+    fingerprint: str | None = Field(description="What the site served for its options (a hash).")
+    reused_from: str | None = Field(description="The earlier download whose file it reused: the site served the "
+                                                "same video. Nothing was downloaded.")
     song: SongOut | None = Field(description="The song its caller named, for its lyrics.")
     attempts: int = Field(description="Tries so far.")
     retry_at: float | None = Field(description="When a queued job is tried again.")
@@ -165,6 +170,8 @@ class ProbeFormat(BaseModel):
     container: str | None
     size_bytes: int | None = Field(description="Of the file, as the site says; may be an estimate (size_exact).")
     size_exact: bool
+    size_from: Literal["site", "bitrate"] | None = Field(None, description="site: the site said it; bitrate: worked "
+                                                                          "out from the bitrate and the length.")
     format_id: str | None = Field(description="yt-dlp's name for the streams picked.")
 
 
@@ -174,10 +181,19 @@ class ProbeEntry(BaseModel):
     duration: float | None
 
 
+class EarlierDownload(BaseModel):
+    job_id: str
+    finished_at: float
+
+
 class ProbeTarget(BaseModel):
     destination: str | None
     path: str | None = Field(description="Where the file would be, inside the media folder; none when held.")
     exists: bool = Field(description="A file with that name is there already: the download would keep it.")
+    earlier: EarlierDownload | None = Field(None, description="A download that got this same file (the site serves "
+                                                              "the same video, same options, same place) and whose "
+                                                              "files are still there: a new one reuses it, unless "
+                                                              "it asks again.")
 
 
 class Probe(BaseModel):
@@ -204,6 +220,8 @@ class Probe(BaseModel):
     automatic_captions: int = Field(0, description="Languages with the site's automatic captions.")
     automatic_has_english: bool = False
     filename: str | None = Field(None, description="Its file name, as the destination's template makes it.")
+    fingerprint: str | None = Field(None, description="What the site serves for these options (a hash): the same "
+                                                      "later means the same file.")
     count: int | None = Field(None, description="A playlist's videos.")
     taken: int | None = Field(None, description="Of which downloaded (playlist_limit).")
     entries: list[ProbeEntry] | None = Field(None, description="A playlist's first videos.")

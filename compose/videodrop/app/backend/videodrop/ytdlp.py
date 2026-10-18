@@ -1,6 +1,8 @@
 """videodrop's options in yt-dlp's words: the one place that knows them. A
 pure function, so that a test reads what a download would run with."""
 
+import hashlib
+import json
 from pathlib import Path
 
 from .options import VideoOptions
@@ -76,3 +78,21 @@ def params(options: VideoOptions, output: str, work_dir: Path, *, rate_limit: fl
     if deno:
         result["js_runtimes"] = {"deno": {"path": deno}}
     return result
+
+
+def fingerprint(info: dict) -> str | None:
+    """What the site serves for these options, as a short hash: the video
+    (site, id, length, when it was last changed when the site says) and the
+    exact streams picked (their ids, size, codecs, bitrate). The same
+    fingerprint later means the same file would come down again; a
+    re-encoded or trimmed video, another quality or a new stream doesn't
+    have it. None for a playlist."""
+    if info.get("_type") == "playlist" or not info.get("id"):
+        return None
+    picked = info.get("requested_formats") or [info]
+    streams = [[f.get("format_id"), f.get("width"), f.get("height"), f.get("vcodec"), f.get("acodec"),
+                f.get("filesize") or (round(f["filesize_approx"], -5) if f.get("filesize_approx") else None),
+                round(f.get("tbr") or 0)] for f in picked]
+    version = info.get("modified_timestamp") or info.get("modified_date")
+    raw = json.dumps([info.get("extractor_key"), info["id"], round(info.get("duration") or 0), version, streams])
+    return hashlib.sha256(raw.encode()).hexdigest()[:32]
