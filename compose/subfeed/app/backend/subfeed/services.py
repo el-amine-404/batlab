@@ -15,7 +15,7 @@ import httpx
 from . import outbound
 from .config import Config
 from .db import Database
-from .domain import Conflict, Invalid
+from .domain import Conflict, Invalid, NotFound
 from .feeds import FeedIn, FeedStore
 from .notifications import TYPES, NotificationStore, Notifier
 from .poller import Poller
@@ -73,6 +73,9 @@ class Services:
         if self.db.get(SEEDED):
             return
         for seed in self.config.seed:
+            if self._has_feed(seed.slug):
+                # Kept from before (clipfeed's database): nothing to make.
+                continue
             try:
                 self.feeds.create(FeedIn(slug=seed.slug, source=seed.source, target=seed.target),
                                   self.settings().default_poll_minutes)
@@ -87,6 +90,13 @@ class Services:
             except Invalid as exc:
                 log.warning("no Apprise notification from the environment: %s", exc)
         self.db.put(SEEDED, True)
+
+    def _has_feed(self, slug: str) -> bool:
+        try:
+            self.feeds.row(slug)
+        except NotFound:
+            return False
+        return True
 
 
 def build(config: Config, sources: Mapping[str, Source] | None = None,

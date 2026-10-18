@@ -367,6 +367,24 @@ class Migration(unittest.TestCase):
                           ("b", "text", [], None)])
 
 
+class Seeding(unittest.TestCase):
+    def test_the_environment_makes_what_is_missing_once(self):
+        with tempfile.TemporaryDirectory() as folder:
+            conf = config_module.load({"SUBFEED_STATE": folder, "SUBFEED_FEEDS": "smv=reddit:SexyMusicVideos,x=reddit:Other",
+                                       "SUBFEED_APPRISE_URL": "http://apprise:8000/notify/subfeed",
+                                       "SUBFEED_APPRISE_TAG": "alerts"})
+            ctx = build(conf, sources={"reddit": FakeSource()})
+            ctx.feeds.create(FeedIn(target="SexyMusicVideos", slug="smv"), 30)
+            with self.assertNoLogs("subfeed", level="WARNING"):
+                ctx.seed()
+            ctx.feeds.delete("x")
+            ctx.seed()
+            self.assertEqual([r["slug"] for r in ctx.feeds.rows()], ["smv"])
+            self.assertEqual([(n["type"], n["summary"]) for n in ctx.notifications.list()],
+                             [("apprise", "apprise:8000/notify/subfeed · alerts")])
+            ctx.db.close()
+
+
 class Config(unittest.TestCase):
     def test_seed_and_urls(self):
         conf = config_module.load({"SUBFEED_FEEDS": "smv=reddit:SexyMusicVideos, x=reddit:Other",
