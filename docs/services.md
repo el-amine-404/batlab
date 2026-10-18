@@ -267,6 +267,13 @@ the service.
   the job's `song` (clipseerr sends the one it matched), else guessed from
   the title. Subtitles are a video's business; which song a video is, its
   caller's.
+- **Sites** (`sites.py`, `GET /api/v1/sites`, the page's Sites): the sites
+  yt-dlp downloads from, one entry a site (its extractors' test links give
+  its domain), in categories; known sites named and described by hand, the
+  others sorted by the words in their names. Read in a process of its own
+  once for each yt-dlp version and kept in `$VOLUMES_ROOT/videodrop/sites`;
+  their icons are asked of DuckDuckGo's icon service by videodrop (never by
+  the browser), a listed site's only, and kept there too.
 - **Logs** (`journal.py`, `logs.py`, `redact.py`): each download has its
   own log (`GET /api/v1/jobs/{id}/log`, `…/log.txt`; on its page): who
   asked, each try, what yt-dlp said and what its process printed, the

@@ -28,6 +28,7 @@ from .options import DEFAULT_TEMPLATE, OptionsPatch, Section, VideoOptions, reso
 from .previews import Previews
 from .prober import Prober
 from .scheduler import Scheduler
+from .sites import Sites
 from .settings import SettingsStore
 
 log = logging.getLogger("videodrop")
@@ -55,6 +56,7 @@ class Services:
     issues: Issues
     previews: Previews
     journal: Journal
+    sites: Sites
     started_at: float = field(default_factory=time.time)
     _tasks: list[asyncio.Task] = field(default_factory=list)
 
@@ -236,7 +238,8 @@ def build(config: Config, http: httpx.AsyncClient | None = None) -> Services:
     return Services(config=config, db=db, http=http, settings=settings, destinations=destinations, jobs=jobs,
                     notifications=notifications, notifier=notifier, broker=broker, callbacks=callbacks,
                     scheduler=scheduler, prober=Prober(config.state_dir, config.deno, config.prober),
-                    releases=releases, issues=issues, previews=previews, journal=journal)
+                    releases=releases, issues=issues, previews=previews, journal=journal,
+                    sites=Sites(config.state_dir, http))
 
 
 def _record_callback(jobs: JobStore, journal: Journal, job_id: str, last: dict) -> None:

@@ -11,6 +11,7 @@ stopped."""
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import time
@@ -33,6 +34,7 @@ DAY = 86400
 UPDATE_GRACE = 2 * DAY
 LATEST_KEY = "yt_dlp_latest"
 PYPI = "https://pypi.org/pypi/yt-dlp/json"
+ITEMS = 5
 BOT_CHECK = re.compile(r"confirm you.re not a bot|sign in to confirm", re.I)
 
 
@@ -45,6 +47,8 @@ class Issue:
     # Where on the page it is fixed: {"label", "path"}.
     action: dict | None = None
     since: float | None = None
+    # What it is about, each with its page: [{"label", "path", "detail"}], ITEMS at most.
+    items: tuple[dict, ...] = ()
 
 
 def _version_tuple(version: str) -> tuple[int, ...]:
@@ -108,13 +112,19 @@ class Issues:
                 found.append(Issue(f"notification:{item['id']}", "warning", f"Notification {item['name']} fails",
                                    item["last"]["message"], {"label": "Notifications", "path": "/settings/notifications"},
                                    item["last"]["at"]))
-        callbacks = self._db.one("SELECT COUNT(*) AS n, MAX(updated_at) AS at FROM jobs WHERE updated_at > ? AND "
-                                 "json_extract(callback_last, '$.ok') = 0", (now - DAY,))
-        if callbacks["n"]:
-            found.append(Issue("callbacks", "warning", f"{callbacks['n']} callback{'s' if callbacks['n'] > 1 else ''} "
-                                                       "failed in the last day",
-                               "The apps that asked weren't told; they still see their downloads when they ask.",
-                               None, callbacks["at"]))
+        callbacks = self._db.all("SELECT id, title, url, client, callback_url, callback_last, updated_at FROM jobs "
+                                 "WHERE updated_at > ? AND json_extract(callback_last, '$.ok') = 0 "
+                                 "ORDER BY updated_at DESC", (now - DAY,))
+        if callbacks:
+            count = len(callbacks)
+            found.append(Issue("callbacks", "warning", f"{count} callback{'s' if count > 1 else ''} failed in the last day",
+                               "videodrop couldn't tell the apps that asked how their downloads went (the address "
+                               "they gave doesn't answer). They still see their downloads when they ask.",
+                               None, callbacks[0]["updated_at"],
+                               tuple({"label": row["title"] or row["url"], "path": f"/jobs/{row['id']}",
+                                      "detail": f"{row['client'] or 'An app'}: "
+                                                f"{json.loads(row['callback_last'])['message']}"}
+                                     for row in callbacks[:ITEMS])))
         order = {"error": 0, "warning": 1, "info": 2}
         return sorted(found, key=lambda issue: order[issue.level])
 
@@ -138,8 +148,12 @@ class Issues:
                       None, released)]
 
     def _failures(self, now: float) -> list[Issue]:
-        rows = self._db.all("SELECT error, finished_at FROM jobs WHERE status = 'failed' AND finished_at > ? "
-                            "ORDER BY finished_at DESC", (now - DAY,))
+        rows = self._db.all("SELECT id, title, url, error, finished_at FROM jobs WHERE status = 'failed' AND "
+                            "finished_at > ? ORDER BY finished_at DESC", (now - DAY,))
+
+        def items(chosen):
+            return tuple({"label": row["title"] or row["url"], "path": f"/jobs/{row['id']}", "detail": row["error"]}
+                         for row in chosen[:ITEMS])
         bot = [r for r in rows if BOT_CHECK.search(r["error"] or "")]
         found = []
         if bot:
@@ -147,12 +161,14 @@ class Issues:
                                f"{len(bot)} download{'s' if len(bot) > 1 else ''} in the last day failed with "
                                "\"confirm you're not a bot\". It passes after a while; cookies of a signed-in "
                                "account get through now. Every app here shares this address.",
-                               {"label": "Cookies", "path": "/settings/cookies"}, bot[0]["finished_at"]))
-        others = len(rows) - len(bot)
-        if others:
+                               {"label": "Cookies", "path": "/settings/cookies"}, bot[0]["finished_at"], items(bot)))
+        failed = [r for r in rows if not BOT_CHECK.search(r["error"] or "")]
+        if failed:
+            others = len(failed)
             found.append(Issue("failed", "warning", f"{others} download{'s' if others > 1 else ''} failed in the last day",
-                               f"The last: {next(r['error'] for r in rows if not BOT_CHECK.search(r['error'] or ''))}",
-                               {"label": "Failed downloads", "path": "/?tab=failed"}, rows[0]["finished_at"]))
+                               "Each one's page says why, and its log what happened.",
+                               {"label": "Failed downloads", "path": "/?tab=failed"}, failed[0]["finished_at"],
+                               items(failed)))
         return found
 
     def _cookies(self, now: float) -> list[Issue]:

@@ -176,6 +176,14 @@ class Redaction(unittest.TestCase):
         self.assertEqual(recent.lines(after=first["seq"]), [second])
 
 
+class SitesOf(unittest.TestCase):
+    def test_a_site_is_its_domain(self):
+        from videodrop.sites import site_of
+        self.assertEqual([site_of(h) for h in ("www.youtube.com", "music.youtube.com", "www.bbc.co.uk",
+                                               "music.163.com", "m.facebook.com", "player.vimeo.com")],
+                         ["youtube.com", "youtube.com", "bbc.co.uk", "music.163.com", "facebook.com", "vimeo.com"])
+
+
 class Fingerprints(unittest.TestCase):
     def info(self, **change):
         video = {"format_id": "401", "width": 3840, "height": 2160, "vcodec": "av01", "acodec": "none",
@@ -640,9 +648,22 @@ class Api(unittest.TestCase):
         self.services.db.put("yt_dlp_latest", {"version": "2999.1.1", "released_at": "2020-01-01T00:00:00Z"})
         failed = self.wait(self.ask("gonegonegon")["id"], "failed")
         self.services.jobs.update(failed["id"], error="Sign in to confirm you're not a bot")
-        ids = [issue["id"] for issue in self.client.get("/api/v1/issues").json()["issues"]]
-        self.assertIn("yt-dlp", ids)
-        self.assertIn("bot-check", ids)
+        issues = {issue["id"]: issue for issue in self.client.get("/api/v1/issues").json()["issues"]}
+        self.assertIn("yt-dlp", issues)
+        self.assertEqual(issues["bot-check"]["items"][0]["path"], f"/jobs/{failed['id']}")
+
+    def test_supported_sites(self):
+        answer = self.client.get("/api/v1/sites")
+        self.assertEqual(answer.status_code, 200)
+        body = answer.json()
+        sites = {site["domain"]: site for site in body["sites"]}
+        self.assertGreater(len(sites), 500)
+        self.assertEqual((sites["youtube.com"]["name"], sites["youtube.com"]["category"]), ("YouTube", "video"))
+        self.assertEqual(sites["xhamster.com"]["category"], "adult")
+        self.assertIn("playlists", sites["youtube.com"]["kinds"])
+        self.assertEqual(sum(c["count"] for c in body["categories"]), len(body["sites"]))
+        # Only a listed site's icon is ever asked for.
+        self.assertEqual(self.client.get("/api/v1/sites/evil.example/icon").status_code, 404)
 
     def test_status_and_docs(self):
         status = self.client.get("/api/v1/status").json()

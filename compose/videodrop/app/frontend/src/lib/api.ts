@@ -40,6 +40,8 @@ export type IssueList = Schemas["IssueList"];
 export type JobLogLine = Schemas["JobLogLine"];
 export type ServerLogLine = Schemas["ServerLogLine"];
 export type LogLevel = JobLogLine["level"];
+export type Site = Schemas["Site"];
+export type SiteList = Schemas["SiteList"];
 
 export class ApiError extends Error {
   constructor(
@@ -112,6 +114,7 @@ export const api = {
   checkLink: (url: string, signal?: AbortSignal) => request<LinkCheck>(`/links/check?url=${encodeURIComponent(url)}`, { signal }),
   probe: (body: ProbeIn, signal?: AbortSignal) => request<Probe>("/probe", { ...json("POST", body), signal }),
   issues: () => request<IssueList>("/issues"),
+  sites: () => request<SiteList>("/sites"),
 
   destinations: () => request<{ destinations: Destination[] }>("/destinations"),
   templateFields: () => request<TemplateFields>("/destinations/template"),

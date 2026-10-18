@@ -10,6 +10,7 @@ import { NotFoundPage } from "@/pages/NotFoundPage";
 // Opened now and then: their code loads when they are.
 const DestinationsPage = lazy(() => import("@/pages/DestinationsPage"));
 const IssuesPage = lazy(() => import("@/pages/IssuesPage"));
+const SitesPage = lazy(() => import("@/pages/SitesPage"));
 const PlayerPage = lazy(() => import("@/pages/PlayerPage"));
 const GeneralPage = lazy(() => import("@/pages/settings/GeneralPage"));
 const DownloadSettingsPage = lazy(() => import("@/pages/settings/DownloadSettingsPage"));
@@ -35,6 +36,7 @@ export const router = createBrowserRouter([
           { path: "/jobs/:id/play", element: <PlayerPage /> },
           { path: "/destinations", element: <DestinationsPage /> },
           { path: "/issues", element: <IssuesPage /> },
+          { path: "/sites", element: <SitesPage /> },
           { path: "/settings", element: <Navigate to="/settings/general" replace /> },
           { path: "/settings/general", element: <GeneralPage /> },
           { path: "/settings/downloads", element: <DownloadSettingsPage /> },

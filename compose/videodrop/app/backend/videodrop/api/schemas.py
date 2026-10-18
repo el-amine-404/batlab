@@ -345,9 +345,43 @@ class Probe(BaseModel):
 
 # ---- issues ------------------------------------------------------------------------------
 
+class Site(BaseModel):
+    id: str = Field(description="Its domain.", examples=["youtube.com"])
+    name: str = Field(examples=["YouTube"])
+    domain: str
+    url: str
+    category: Literal["video", "social", "music", "podcasts", "live", "tv", "film", "learning", "sports", "adult",
+                      "other"]
+    description: str
+    kinds: list[str] = Field(description="What else than videos: playlists, channels, live streams, clips, podcasts.")
+    account: bool = Field(description="Some of it needs an account (cookies or a login).")
+    broken: bool = Field(description="yt-dlp says it doesn't work now.")
+    known: bool = Field(description="Named and described by videodrop; the others as yt-dlp knows them.")
+    extractors: int = Field(description="yt-dlp's extractors for it.")
+    examples: list[str] = Field(description="Links yt-dlp is tested with: the kind of link it takes.")
+
+
+class SiteCategory(BaseModel):
+    id: str
+    label: str
+    count: int
+
+
+class SiteList(BaseModel):
+    yt_dlp: str = Field(description="The yt-dlp these are of.")
+    categories: list[SiteCategory]
+    sites: list[Site]
+
+
 class IssueAction(BaseModel):
     label: str
     path: str = Field(description="A page of videodrop's, where it is fixed.")
+
+
+class IssueItem(BaseModel):
+    label: str = Field(description="What it is about: a download's title.")
+    path: str = Field(description="Its page.")
+    detail: str | None = Field(description="What went wrong with it.")
 
 
 class IssueOut(BaseModel):
@@ -357,6 +391,7 @@ class IssueOut(BaseModel):
     detail: str
     action: IssueAction | None
     since: float | None
+    items: list[IssueItem] = Field(description="What it is about (5 at most), each with its page.")
 
 
 class IssueCounts(BaseModel):

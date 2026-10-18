@@ -33,6 +33,7 @@ export const keys = {
   status: ["status"] as const,
   cookies: ["cookies"] as const,
   issues: ["issues"] as const,
+  sites: ["sites"] as const,
   fileDetails: (id: string, index: number) => ["job", id, "file", index] as const,
 };
 
@@ -64,6 +65,8 @@ export const useIssues = () => useQuery({ queryKey: keys.issues, queryFn: api.is
 /** A video file's details and pictures: they don't change, read once. */
 export const useFileDetails = (id: string, index: number, enabled = true) =>
   useQuery({ queryKey: keys.fileDetails(id, index), queryFn: () => api.fileDetails(id, index), enabled, staleTime: Infinity, retry: 1 });
+/** The sites videodrop downloads from: they change with yt-dlp only, read once. */
+export const useSites = () => useQuery({ queryKey: keys.sites, queryFn: api.sites, staleTime: Infinity });
 export const useCookies = () => useQuery({ queryKey: keys.cookies, queryFn: api.cookies });
 
 /** After a job was asked for, retried or removed here: the lists and counts read again. */

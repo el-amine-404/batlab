@@ -342,6 +342,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The sites videodrop downloads from
+         * @description yt-dlp's sites, one entry a site, in categories; known sites first
+         *     in each. Read once for each yt-dlp version (a few seconds the first
+         *     time). Other links are refused (POST /api/v1/links/check says so).
+         */
+        get: operations["list_sites_api_v1_sites_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{domain}/icon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A site's icon
+         * @description Asked of DuckDuckGo's icon service by videodrop (the browser asks
+         *     only videodrop), kept, and kept by the browser a week.
+         */
+        get: operations["site_icon_api_v1_sites__domain__icon_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/destinations": {
         parameters: {
             query?: never;
@@ -1017,6 +1060,24 @@ export interface components {
             /** Info */
             info: number;
         };
+        /** IssueItem */
+        IssueItem: {
+            /**
+             * Label
+             * @description What it is about: a download's title.
+             */
+            label: string;
+            /**
+             * Path
+             * @description Its page.
+             */
+            path: string;
+            /**
+             * Detail
+             * @description What went wrong with it.
+             */
+            detail: string | null;
+        };
         /** IssueList */
         IssueList: {
             /** Issues */
@@ -1039,6 +1100,11 @@ export interface components {
             action: components["schemas"]["IssueAction"] | null;
             /** Since */
             since: number | null;
+            /**
+             * Items
+             * @description What it is about (5 at most), each with its page.
+             */
+            items: components["schemas"]["IssueItem"][];
         };
         /** Job */
         Job: {
@@ -1895,6 +1961,82 @@ export interface components {
             default_destination?: string | null;
             /** Public Url */
             public_url?: string | null;
+        };
+        /** Site */
+        Site: {
+            /**
+             * Id
+             * @description Its domain.
+             * @example youtube.com
+             */
+            id: string;
+            /**
+             * Name
+             * @example YouTube
+             */
+            name: string;
+            /** Domain */
+            domain: string;
+            /** Url */
+            url: string;
+            /**
+             * Category
+             * @enum {string}
+             */
+            category: "video" | "social" | "music" | "podcasts" | "live" | "tv" | "film" | "learning" | "sports" | "adult" | "other";
+            /** Description */
+            description: string;
+            /**
+             * Kinds
+             * @description What else than videos: playlists, channels, live streams, clips, podcasts.
+             */
+            kinds: string[];
+            /**
+             * Account
+             * @description Some of it needs an account (cookies or a login).
+             */
+            account: boolean;
+            /**
+             * Broken
+             * @description yt-dlp says it doesn't work now.
+             */
+            broken: boolean;
+            /**
+             * Known
+             * @description Named and described by videodrop; the others as yt-dlp knows them.
+             */
+            known: boolean;
+            /**
+             * Extractors
+             * @description yt-dlp's extractors for it.
+             */
+            extractors: number;
+            /**
+             * Examples
+             * @description Links yt-dlp is tested with: the kind of link it takes.
+             */
+            examples: string[];
+        };
+        /** SiteCategory */
+        SiteCategory: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Count */
+            count: number;
+        };
+        /** SiteList */
+        SiteList: {
+            /**
+             * Yt Dlp
+             * @description The yt-dlp these are of.
+             */
+            yt_dlp: string;
+            /** Categories */
+            categories: components["schemas"]["SiteCategory"][];
+            /** Sites */
+            sites: components["schemas"]["Site"][];
         };
         /**
          * Song
@@ -2903,6 +3045,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    list_sites_api_v1_sites_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteList"];
+                };
+            };
+        };
+    };
+    site_icon_api_v1_sites__domain__icon_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                domain: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/x-icon": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
