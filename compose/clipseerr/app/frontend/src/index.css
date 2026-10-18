@@ -183,3 +183,15 @@
     animation-duration: 0.01ms !important;
   }
 }
+
+/* A card's preview on its way: a light running along its bar. */
+@keyframes preview-wait {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}
+.preview-wait {
+  animation: preview-wait 1.1s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .preview-wait { animation: none; transform: none; width: 100%; opacity: 0.5; }
+}

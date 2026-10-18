@@ -6,8 +6,6 @@ import type { Video } from "@/lib/api";
 /** How long the pointer rests on a card, or a finger holds it, before its preview plays. */
 const HOVER_MS = 700;
 const HOLD_MS = 450;
-/** Seconds of the video a preview plays, from about a third in (past the intro), then again. */
-const LENGTH = 15;
 const SOUND_KEY = "preview-sound";
 
 // One preview at a time on the whole page: starting one stops the last.
@@ -15,6 +13,8 @@ let stopCurrent: (() => void) | null = null;
 // The browser refused a preview's sound this visit: the next ones start muted, until the speaker is clicked.
 let soundRefused = false;
 const prepared = new Set<string>();
+// Videos with no preview (the server couldn't cut one): their cards stop offering it this visit.
+const unplayable = new Set<string>();
 
 /** Has the server find a video's preview file now, once a visit: it then starts sooner. */
 export function preparePreview(youtubeId: string) {
@@ -41,16 +41,15 @@ function soundAllowed(): boolean {
 }
 
 /**
- * The preview itself: a plain video, the 360p file with sound that clipseerr
- * streams (/api/v1/previews/{id}) or Apple's preview, so nothing but the
- * picture shows. Seen once it plays, round again at the end of its stretch,
- * and its sound only if the browser allows it.
+ * The preview itself: a plain video, the clip clipseerr cuts
+ * (/api/v1/previews/{id}: 15 s from a third in) or Apple's 30 s preview, so
+ * nothing but the picture shows. Played round and round, seen once it plays,
+ * its sound only if the browser allows it.
  */
-function PreviewVideo({ src, from, length, sound, onProgress, onSoundRefused, onFailed }: {
+function PreviewVideo({ src, sound, onShown, onProgress, onSoundRefused, onFailed }: {
   src: string;
-  from: number;
-  length: number;
   sound: boolean;
+  onShown: () => void;
   onProgress: (p: number) => void;
   onSoundRefused: () => void;
   onFailed: () => void;
@@ -78,21 +77,19 @@ function PreviewVideo({ src, from, length, sound, onProgress, onSoundRefused, on
       src={src}
       muted
       autoPlay
+      loop
       playsInline
       preload="auto"
       disablePictureInPicture
       className="pointer-events-none absolute inset-0 size-full bg-black object-cover transition-opacity duration-200"
       style={{ opacity: shown ? 1 : 0 }}
-      onLoadedMetadata={(event) => {
-        const el = event.currentTarget;
-        if (from && from < el.duration) el.currentTime = from;
+      onPlaying={() => {
+        setShown(true);
+        onShown();
       }}
-      onPlaying={() => setShown(true)}
       onTimeUpdate={(event) => {
         const el = event.currentTarget;
-        const into = el.currentTime - from;
-        onProgress(Math.min(1, Math.max(0, into / length)));
-        if (into >= length) el.currentTime = from;
+        if (el.duration) onProgress(el.currentTime / el.duration);
       }}
       onError={onFailed}
     />
@@ -110,13 +107,16 @@ export function useHoverPreview(video: Video) {
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [sound, setSound] = useState(false);
+  // Playing, or still waiting for its clip (the first hover of a video, about 3 s).
+  const [shown, setShown] = useState(false);
   const timer = useRef<number | undefined>(undefined);
   const held = useRef(false);
-  const playable = !!video.youtube_id || !!video.preview_url;
+  const playable = video.youtube_id ? !unplayable.has(video.youtube_id) : !!video.preview_url;
 
   const stop = () => {
     window.clearTimeout(timer.current);
     setPlaying(false);
+    setShown(false);
     setProgress(0);
   };
   const start = (delay: number, onStart?: () => void) => {
@@ -167,29 +167,33 @@ export function useHoverPreview(video: Video) {
     onContextMenu: (event: React.MouseEvent) => held.current && event.preventDefault(),
   } : {};
 
-  // YouTube's: a stretch from a third in, past the intro. Apple's 30 s preview: all of it.
-  // From the start: seeking a third in stalled the browser's player (to look into).
-  const from = 0;
   const preview = playing ? (
     <span className="absolute inset-0 overflow-hidden">
       <PreviewVideo
         src={video.youtube_id ? `/api/v1/previews/${video.youtube_id}` : video.preview_url!}
-        from={from}
-        length={video.youtube_id ? LENGTH : 30}
         sound={sound}
+        onShown={() => setShown(true)}
         onProgress={setProgress}
         onSoundRefused={() => { soundRefused = true; setSound(false); }}
-        onFailed={stop}
+        onFailed={() => {
+          if (video.youtube_id) unplayable.add(video.youtube_id);
+          stop();
+        }}
       />
       <button type="button" onClick={toggleSound} onPointerDown={(e) => e.stopPropagation()}
               aria-label={sound ? "Mute the preview" : "Play the preview's sound"}
               className="absolute bottom-2 left-2 z-10 flex size-7 items-center justify-center rounded-full bg-black/70 text-white backdrop-blur-md hover:bg-black/90">
         {sound ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />}
       </button>
-      <span className="absolute inset-x-0 bottom-0 z-10 h-1 bg-white/15" aria-hidden>
-        <span className="block h-full bg-rose-500 transition-[width] duration-300 ease-linear" style={{ width: `${progress * 100}%` }} />
+      <span className="absolute inset-x-0 bottom-0 z-10 h-1 overflow-hidden bg-white/15" aria-hidden>
+        {shown ? (
+          <span className="block h-full bg-rose-500 transition-[width] duration-300 ease-linear" style={{ width: `${progress * 100}%` }} />
+        ) : (
+          // Its clip on the way: a light running along the bar.
+          <span className="preview-wait block h-full w-1/3 bg-gradient-to-r from-transparent via-rose-400 to-transparent" />
+        )}
       </span>
     </span>
   ) : null;
-  return { handlers, preview, playing };
+  return { handlers, preview, playing, shown };
 }

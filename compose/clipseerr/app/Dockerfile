@@ -3,6 +3,10 @@
 # where Renovate keeps them current; compose passes them in.
 ARG BASE_IMAGE
 ARG NODE_IMAGE
+ARG DENO_IMAGE
+
+# Deno, the JavaScript runtime yt-dlp answers YouTube's challenge with (the previews).
+FROM ${DENO_IMAGE} AS deno
 
 FROM ${NODE_IMAGE} AS page
 WORKDIR /src
@@ -16,13 +20,21 @@ ARG YTMUSICAPI_VERSION
 ARG YTDLP_VERSION
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# ffmpeg cuts a video's preview clip (catalog/preview.py); Debian's, which a
+# new base image brings up to date.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=deno /usr/bin/deno /usr/local/bin/deno
+
 WORKDIR /opt/clipseerr
 COPY backend/requirements.txt ./
+# yt-dlp with its default extras: yt-dlp-ejs among them, which answers
+# YouTube's challenge with Deno.
 RUN python -m venv .venv \
  && .venv/bin/pip install --require-hashes -r requirements.txt \
  && .venv/bin/pip install --no-deps "ytmusicapi==${YTMUSICAPI_VERSION}" \
- # yt-dlp alone: the previews' client (android_vr) needs none of its extras, nor a JavaScript runtime.
- && .venv/bin/pip install --no-deps "yt-dlp==${YTDLP_VERSION}"
+ && .venv/bin/pip install "yt-dlp[default]==${YTDLP_VERSION}"
 COPY backend/app ./app
 # batlab's shared code (lib/batlab-common), handed in by compose as the build
 # context "common".
@@ -31,7 +43,9 @@ COPY --from=page /src/dist ./static
 RUN .venv/bin/python -m compileall -q app /opt/batlab-common
 
 ENV CLIPSEERR_STATIC=/opt/clipseerr/static \
-    PYTHONPATH=/opt/batlab-common
+    PYTHONPATH=/opt/batlab-common \
+    DENO_DIR=/tmp/deno \
+    XDG_CACHE_HOME=/state/cache
 USER 1000:1000
 EXPOSE 8820
 ENTRYPOINT ["/opt/clipseerr/.venv/bin/python", "-m", "app"]

@@ -1,17 +1,16 @@
+import asyncio
 import re
 from typing import Literal
 from urllib.parse import quote
 
-import httpx
-from fastapi import APIRouter, Query, Request, Response
-from fastapi.responses import StreamingResponse
-from starlette.background import BackgroundTask
+from fastapi import APIRouter, Query, Response
+from fastapi.responses import FileResponse, StreamingResponse
 
 from .. import schemas
 from ..catalog.models import (AlbumPage, ArtistPage, ArtistSummary, CategoryGroup, Credits, Lyrics, SearchResults, Shelf, Video,
                               VideoDetail, Versions)
 from ..cache import tracking
-from ..context import catalog, http, known, library, requests, settings
+from ..context import catalog, clips, known, library, requests, settings
 from ..problems import Problem
 
 router = APIRouter(tags=["Catalog"])
@@ -187,60 +186,26 @@ async def video_files(video_id: str):
                       for f in files]}
 
 
-_PREVIEW_HEADERS = ("content-type", "content-length", "content-range", "accept-ranges")
-# YouTube's file servers refuse an open range ("bytes=0-", what a <video> asks
-# first) and serve a bounded one: each answer is this much at most, which
-# HTTP allows, and the player asks for the rest as it goes.
-_PREVIEW_CHUNK = 2 * 1024 * 1024
-_RANGE = re.compile(r"bytes=(\d+)-(\d*)$")
-
-
-def _bounded(asked: str | None) -> str:
-    """The Range to ask YouTube for: the one asked, never open nor larger than _PREVIEW_CHUNK."""
-    found = _RANGE.match((asked or "").strip())
-    start = int(found[1]) if found else 0
-    end = start + _PREVIEW_CHUNK - 1
-    if found and found[2]:
-        end = min(end, int(found[2]))
-    return f"bytes={start}-{end}"
-
-
-@router.get("/previews/{youtube_id}", summary="A video's preview for its card: its 360p file with sound, "
-            "streamed through clipseerr; ranges as asked", responses={404: {"model": schemas.Problem},
-                                                                     206: {"content": {"video/mp4": {}}}})
-async def preview_file(youtube_id: str, request: Request):
+@router.get("/previews/{youtube_id}", summary="A video's preview for its card: a 15 s clip with its sound, "
+            "from a third in; cut on first ask, then kept", response_class=FileResponse,
+            responses={404: {"model": schemas.Problem}, 200: {"content": {"video/mp4": {}}}})
+async def preview_file(youtube_id: str):
     if not _YOUTUBE_ID.fullmatch(youtube_id):
         raise Problem(404, "No such video.")
-    wanted = {"Range": _bounded(request.headers.get("range"))}
-    for again in (False, True):
-        try:
-            found = await catalog.preview_url(youtube_id, again=again)
-        except Problem:
-            raise Problem(404, "YouTube has no preview file for this video.") from None
-        upstream = await http.send(http.build_request("GET", found["url"], headers={**found["headers"], **wanted},
-                                                      timeout=httpx.Timeout(30.0, connect=5.0)), stream=True)
-        # A kept address YouTube no longer honours: found again, once.
-        if upstream.status_code in (403, 410) and not again:
-            await upstream.aclose()
-            continue
-        if upstream.status_code >= 400:
-            await upstream.aclose()
-            raise Problem(404, "YouTube refused the preview file.")
-        headers = {k: upstream.headers[k] for k in _PREVIEW_HEADERS if k in upstream.headers}
-        headers["Cache-Control"] = "private, max-age=3600"
-        return StreamingResponse(upstream.aiter_raw(), status_code=upstream.status_code, headers=headers,
-                                 background=BackgroundTask(upstream.aclose))
-    raise Problem(404, "YouTube refused the preview file.")
+    try:
+        clip = await clips.get(youtube_id)
+    except LookupError:
+        raise Problem(404, "No preview for this video.") from None
+    # A clip never changes: the browser keeps it.
+    return FileResponse(clip, media_type="video/mp4", headers={"Cache-Control": "private, max-age=86400"})
 
 
-@router.post("/previews/{youtube_id}/prepare", status_code=204, summary="Find a preview's file ahead "
-             "(the pointer is on its card), so it starts sooner")
+@router.post("/previews/{youtube_id}/prepare", status_code=204, summary="Cut a preview's clip ahead "
+             "(the pointer is on its card), so it starts at once")
 async def prepare_preview(youtube_id: str):
     if _YOUTUBE_ID.fullmatch(youtube_id):
-        try:
-            await catalog.preview_url(youtube_id)
-        except Problem:
-            pass
+        task = asyncio.create_task(clips.get(youtube_id))
+        task.add_done_callback(lambda t: t.cancelled() or t.exception())
     return Response(status_code=204)
 
 

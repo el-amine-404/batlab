@@ -5,6 +5,7 @@ import time
 
 from . import config, events, libraries, notifications, outbound, services
 from .cache import Cache
+from .catalog.preview import Clips
 from .catalog.service import Catalog
 from .db import Database
 from .hotlist import HotList
@@ -21,6 +22,7 @@ settings = SettingsStore(db, conf)
 http = outbound.client()
 cache = Cache(db)
 catalog = Catalog(cache, http, settings)
+clips = Clips(conf.state_dir / "previews")
 hotlist = HotList(db)
 catalog.hotlist = hotlist
 known = Known(db)

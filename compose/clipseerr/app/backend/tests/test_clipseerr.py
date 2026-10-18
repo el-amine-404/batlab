@@ -154,17 +154,46 @@ class Sorting(unittest.TestCase):
         self.assertEqual([v.title for v in asyncio.run(routes._sorted(videos, "default"))], ["b", "C", "a"])
 
 
-class PreviewRanges(unittest.TestCase):
-    def test_ranges_asked_of_youtube_are_bounded(self):
-        os.environ.setdefault("CLIPSEERR_STATE", tempfile.mkdtemp())
-        import importlib
+class Previews(unittest.TestCase):
+    def test_clip_starts_a_third_in_without_running_short(self):
+        from app.catalog import preview
 
-        routes = importlib.import_module("app.routes.catalog")
-        chunk = routes._PREVIEW_CHUNK
-        self.assertEqual(routes._bounded("bytes=0-"), f"bytes=0-{chunk - 1}")
-        self.assertEqual(routes._bounded(None), f"bytes=0-{chunk - 1}")
-        self.assertEqual(routes._bounded("bytes=500-999"), "bytes=500-999")
-        self.assertEqual(routes._bounded(f"bytes=10-{10 * chunk}"), f"bytes=10-{9 + chunk}")
+        self.assertEqual(preview.start_of(None), 0.0)
+        self.assertEqual(preview.start_of(18), 0.0)
+        self.assertEqual(preview.start_of(180), 60.0)
+        self.assertEqual(preview.start_of(30), 10.0)
+        self.assertEqual(preview.start_of(400), 133.3)
+
+    def test_least_recently_played_clips_pruned_first(self):
+        from app.catalog import preview
+
+        folder = Path(tempfile.mkdtemp())
+        for i, name in enumerate(("old", "mid", "new")):
+            clip = folder / f"{name}.mp4"
+            clip.write_bytes(b"x" * 100)
+            os.utime(clip, (1000 + i, 1000 + i))
+        preview.prune(folder, 250)
+        self.assertEqual(sorted(p.stem for p in folder.glob("*.mp4")), ["mid", "new"])
+
+    def test_failure_not_retried_at_once(self):
+        from app.catalog import preview
+
+        clips = preview.Clips(Path(tempfile.mkdtemp()))
+        calls = []
+
+        def failing(youtube_id, out):
+            calls.append(youtube_id)
+            raise RuntimeError("refused")
+
+        original = preview.cut
+        preview.cut = failing
+        try:
+            for _ in range(2):
+                with self.assertRaises(LookupError):
+                    asyncio.run(clips.get("aaaaaaaaaaa"))
+        finally:
+            preview.cut = original
+        self.assertEqual(calls, ["aaaaaaaaaaa"])
 
 
 class HotFeeds(unittest.TestCase):

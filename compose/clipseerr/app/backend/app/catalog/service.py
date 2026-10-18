@@ -16,7 +16,7 @@ from batlab_common import titles
 
 from ..cache import Cache, tracking
 from ..problems import Problem
-from . import language, lrclib, match, preview, youtube
+from . import language, lrclib, match, youtube
 from .apple import GENRES, Apple
 from .models import (AlbumPage, ArtistPage, ArtistRef, AudioMatch, Category, CategoryGroup, Credits, Lyrics, SearchResults, Shelf,
                      Version, Versions, Video, VideoDetail)
@@ -630,19 +630,6 @@ class Catalog:
         for video, day in zip(missing, days):
             if isinstance(day, str):
                 video.released = day
-
-    async def preview_url(self, youtube_id: str, again: bool = False) -> dict:
-        """The address of a video's preview file (catalog/preview.py): kept 3 h,
-        YouTube's last about 6. again: the kept one was refused, find a new one."""
-        key = f"yt:preview2:{youtube_id}"
-        if again:
-            self._cache.forget(key)
-
-        async def fetch():
-            async with self._gate:
-                return await asyncio.to_thread(preview.file_url, youtube_id)
-
-        return await self._get("youtube", key, fetch, fresh=3 * HOUR, stale=3 * HOUR)
 
     def known_views(self, videos: list[Video]) -> None:
         """Fills in the views and days already looked up, without asking YouTube."""

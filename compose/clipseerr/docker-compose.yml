@@ -21,6 +21,7 @@ services:
       args:
         BASE_IMAGE: ${IMAGE_CLIPSEERR_BASE}:${TAG_CLIPSEERR_BASE}
         NODE_IMAGE: ${IMAGE_CLIPSEERR_NODE}:${TAG_CLIPSEERR_NODE}
+        DENO_IMAGE: ${IMAGE_CLIPSEERR_DENO}:${TAG_CLIPSEERR_DENO}
         YTMUSICAPI_VERSION: ${VERSION_YTMUSICAPI}
         # The cards' previews (catalog/preview.py): songdrop's pin, followed by Renovate.
         YTDLP_VERSION: ${VERSION_YTDLP}
