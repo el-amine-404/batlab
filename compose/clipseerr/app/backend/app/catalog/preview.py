@@ -12,6 +12,7 @@ re-encoded: about a megabyte, made in a few seconds, then instant."""
 import asyncio
 import logging
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -56,8 +57,23 @@ def start_of(duration: float | None) -> float:
     return round(min(duration * START_AT, duration - LENGTH - 1), 1)
 
 
-def cut(youtube_id: str, out: Path, timeout: int = 90) -> Path:
-    """Makes out, the video's clip; raises when YouTube or ffmpeg won't."""
+def cut(youtube_id: str, out: Path) -> Path:
+    """Makes out, the video's clip; raises when YouTube or ffmpeg won't, twice."""
+    try:
+        return _cut_once(youtube_id, out)
+    except Exception:
+        # YouTube refuses a stream now and then: once more, with new addresses.
+        time.sleep(1)
+        return _cut_once(youtube_id, out)
+
+
+def _quiet(stderr: bytes) -> str:
+    """ffmpeg's complaint, without the streams' long addresses."""
+    text = re.sub(r"https?://\S+", "<stream>", stderr.decode(errors="replace"))
+    return " / ".join(line.strip() for line in text.splitlines() if line.strip())[-300:]
+
+
+def _cut_once(youtube_id: str, out: Path, timeout: int = 60) -> Path:
     with yt_dlp.YoutubeDL(OPTIONS) as ydl:
         info = ydl.extract_info(f"https://www.youtube.com/watch?v={youtube_id}", download=False)
     streams = info.get("requested_formats") or [info]
@@ -76,7 +92,7 @@ def cut(youtube_id: str, out: Path, timeout: int = 90) -> Path:
     try:
         done = subprocess.run([*command, str(partial)], capture_output=True, timeout=timeout, check=False)
         if done.returncode or not partial.exists() or partial.stat().st_size < 10_000:
-            raise RuntimeError(f"ffmpeg couldn't cut {youtube_id}: {done.stderr.decode(errors='replace')[-300:]}")
+            raise RuntimeError(f"ffmpeg couldn't cut {youtube_id}: {_quiet(done.stderr) or 'no clip'}")
         os.replace(partial, out)
     finally:
         partial.unlink(missing_ok=True)

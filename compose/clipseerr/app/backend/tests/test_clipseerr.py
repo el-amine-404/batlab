@@ -164,6 +164,12 @@ class Previews(unittest.TestCase):
         self.assertEqual(preview.start_of(30), 10.0)
         self.assertEqual(preview.start_of(400), 133.3)
 
+    def test_ffmpeg_complaint_without_addresses(self):
+        from app.catalog import preview
+
+        said = b"[https @ 0x1] HTTP error 403 Forbidden\nhttps://rr1.googlevideo.com/videoplayback?x=1: Server returned 403\n"
+        self.assertEqual(preview._quiet(said), "[https @ 0x1] HTTP error 403 Forbidden / <stream> Server returned 403")
+
     def test_least_recently_played_clips_pruned_first(self):
         from app.catalog import preview
 
