@@ -2,14 +2,16 @@ import re
 from typing import Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, Query, Response
+import httpx
+from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 
 from .. import schemas
 from ..catalog.models import (AlbumPage, ArtistPage, ArtistSummary, CategoryGroup, Credits, Lyrics, SearchResults, Shelf, Video,
                               VideoDetail, Versions)
 from ..cache import tracking
-from ..context import catalog, known, library, requests, settings
+from ..context import catalog, http, known, library, requests, settings
 from ..problems import Problem
 
 router = APIRouter(tags=["Catalog"])
@@ -183,6 +185,48 @@ async def video_files(video_id: str):
         files += [f for f in library.files(None, found.audio.title, found.audio.artist) if f not in files]
     return {"files": [{"kind": f.kind, "name": f.name, "size": f.size, "url": f"/api/v1/files/{library.token(f)}"}
                       for f in files]}
+
+
+_PREVIEW_HEADERS = ("content-type", "content-length", "content-range", "accept-ranges")
+
+
+@router.get("/previews/{youtube_id}", summary="A video's preview for its card: its 360p file with sound, "
+            "streamed through clipseerr; ranges as asked", responses={404: {"model": schemas.Problem},
+                                                                     206: {"content": {"video/mp4": {}}}})
+async def preview_file(youtube_id: str, request: Request):
+    if not _YOUTUBE_ID.fullmatch(youtube_id):
+        raise Problem(404, "No such video.")
+    wanted = {"Range": request.headers.get("range") or "bytes=0-"}
+    for again in (False, True):
+        try:
+            url = await catalog.preview_url(youtube_id, again=again)
+        except Problem:
+            raise Problem(404, "YouTube has no preview file for this video.") from None
+        upstream = await http.send(http.build_request("GET", url, headers=wanted,
+                                                      timeout=httpx.Timeout(30.0, connect=5.0)), stream=True)
+        # A kept address YouTube no longer honours: found again, once.
+        if upstream.status_code in (403, 410) and not again:
+            await upstream.aclose()
+            continue
+        if upstream.status_code >= 400:
+            await upstream.aclose()
+            raise Problem(404, "YouTube refused the preview file.")
+        headers = {k: upstream.headers[k] for k in _PREVIEW_HEADERS if k in upstream.headers}
+        headers["Cache-Control"] = "private, max-age=3600"
+        return StreamingResponse(upstream.aiter_raw(), status_code=upstream.status_code, headers=headers,
+                                 background=BackgroundTask(upstream.aclose))
+    raise Problem(404, "YouTube refused the preview file.")
+
+
+@router.post("/previews/{youtube_id}/prepare", status_code=204, summary="Find a preview's file ahead "
+             "(the pointer is on its card), so it starts sooner")
+async def prepare_preview(youtube_id: str):
+    if _YOUTUBE_ID.fullmatch(youtube_id):
+        try:
+            await catalog.preview_url(youtube_id)
+        except Problem:
+            pass
+    return Response(status_code=204)
 
 
 @router.get("/files/{token}", summary="Download a file of a library, by the url /videos/{id}/files gave",

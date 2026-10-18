@@ -9,17 +9,19 @@ const HOLD_MS = 450;
 /** Seconds of the video a preview plays, from about a third in (past the intro), then again. */
 const LENGTH = 15;
 const SOUND_KEY = "preview-sound";
-/**
- * Seconds of playing before the preview shows: YouTube's player shows the
- * video's title and its logo over the first seconds of any playback, and
- * hides them after; the card's picture stays over it until then.
- */
-const REVEAL = 2.5;
 
 // One preview at a time on the whole page: starting one stops the last.
 let stopCurrent: (() => void) | null = null;
 // The browser refused a preview's sound this visit: the next ones start muted, until the speaker is clicked.
 let soundRefused = false;
+const prepared = new Set<string>();
+
+/** Has the server find a video's preview file now, once a visit: it then starts sooner. */
+export function preparePreview(youtubeId: string) {
+  if (prepared.has(youtubeId)) return;
+  prepared.add(youtubeId);
+  void fetch(`/api/v1/previews/${youtubeId}/prepare`, { method: "POST" }).catch(() => undefined);
+}
 
 function soundWanted(): boolean {
   try {
@@ -38,91 +40,61 @@ function soundAllowed(): boolean {
   return activation ? activation.hasBeenActive : true;
 }
 
-/** YouTube's player in a card: controlled through its iframe API, its own overlays kept out of sight. */
-function YouTubePreview({ id, from, sound, onProgress, onSoundBlocked }: {
-  id: string;
+/**
+ * The preview itself: a plain video, the 360p file with sound that clipseerr
+ * streams (/api/v1/previews/{id}) or Apple's preview, so nothing but the
+ * picture shows. Seen once it plays, round again at the end of its stretch,
+ * and its sound only if the browser allows it.
+ */
+function PreviewVideo({ src, from, length, sound, onProgress, onSoundRefused, onFailed }: {
+  src: string;
   from: number;
+  length: number;
   sound: boolean;
   onProgress: (p: number) => void;
-  onSoundBlocked: () => void;
+  onSoundRefused: () => void;
+  onFailed: () => void;
 }) {
-  const frame = useRef<HTMLIFrameElement>(null);
+  const video = useRef<HTMLVideoElement>(null);
   const [shown, setShown] = useState(false);
-  // When the sound was last turned on: a pause right after is the browser refusing it.
-  const unmutedAt = useRef(0);
-  const send = (func: string, args: unknown[] = []) =>
-    frame.current?.contentWindow?.postMessage(JSON.stringify({ event: "command", func, args }), "*");
 
+  // The sound, asked for when wanted: a browser that refuses it rejects play(); then muted, and on.
   useEffect(() => {
-    let heard = false;
-    let tries = 0;
-    const ask = () => {
-      if (heard || tries++ > 20) return;
-      frame.current?.contentWindow?.postMessage(JSON.stringify({ event: "listening", id, channel: "widget" }), "*");
-      window.setTimeout(ask, 400);
-    };
-    const onMessage = (event: MessageEvent) => {
-      if (event.source !== frame.current?.contentWindow || typeof event.data !== "string") return;
-      let data: { event?: string; info?: { currentTime?: number; playerState?: number } };
-      try {
-        data = JSON.parse(event.data);
-      } catch {
-        return;
-      }
-      heard = true;
-      const info = data.info ?? {};
-      // Sound on, and paused at once: the browser (Firefox by default) refuses
-      // sound a page didn't get a click for. Back to muted, and on playing.
-      if (info.playerState === 2 && Date.now() - unmutedAt.current < 2000) {
-        unmutedAt.current = 0;
-        send("mute");
-        send("playVideo");
-        onSoundBlocked();
-        return;
-      }
-      if (typeof info.currentTime === "number") {
-        const into = info.currentTime - from;
-        // Shown once it has played a moment: its loading, its big play button,
-        // its title and logo of the first seconds stay under the picture.
-        if (into >= REVEAL) setShown(true);
-        onProgress(Math.min(1, Math.max(0, into / LENGTH)));
-        // Round again from the start, rather than YouTube's end screen.
-        if (into >= LENGTH) send("seekTo", [from, true]);
-      }
-    };
-    window.addEventListener("message", onMessage);
-    ask();
-    return () => window.removeEventListener("message", onMessage);
+    const el = video.current;
+    if (!el) return;
+    el.muted = !sound;
+    if (!sound) return;
+    el.play().catch(() => {
+      el.muted = true;
+      void el.play().catch(() => undefined);
+      onSoundRefused();
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, from]);
-
-  useEffect(() => {
-    if (!shown) return;
-    if (sound) {
-      unmutedAt.current = Date.now();
-      send("unMute");
-      send("setVolume", [70]);
-      send("playVideo");
-    } else {
-      send("mute");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sound, shown]);
+  }, [sound]);
 
   return (
-    <iframe
-      ref={frame}
-      title=""
-      aria-hidden
-      tabIndex={-1}
-      // A little larger than the card: YouTube's title bar and watermark fall outside it.
-      className="pointer-events-none absolute inset-0 size-full scale-[1.35] transition-opacity duration-300"
+    <video
+      ref={video}
+      src={src}
+      muted
+      autoPlay
+      playsInline
+      preload="auto"
+      disablePictureInPicture
+      className="pointer-events-none absolute inset-0 size-full bg-black object-cover transition-opacity duration-200"
       style={{ opacity: shown ? 1 : 0 }}
-      allow="autoplay; encrypted-media"
-      src={`https://www.youtube-nocookie.com/embed/${id}?${new URLSearchParams({
-        autoplay: "1", mute: "1", controls: "0", disablekb: "1", fs: "0", iv_load_policy: "3", modestbranding: "1",
-        playsinline: "1", rel: "0", start: String(from), enablejsapi: "1", origin: window.location.origin,
-      })}`}
+      onLoadedMetadata={(event) => {
+        const el = event.currentTarget;
+        if (from && from < el.duration) el.currentTime = from;
+      }}
+      onPlaying={() => setShown(true)}
+      onTimeUpdate={(event) => {
+        const el = event.currentTarget;
+        const into = el.currentTime - from;
+        onProgress(Math.min(1, Math.max(0, into / length)));
+        if (into >= length) el.currentTime = from;
+      }}
+      onError={onFailed}
     />
   );
 }
@@ -195,16 +167,19 @@ export function useHoverPreview(video: Video) {
     onContextMenu: (event: React.MouseEvent) => held.current && event.preventDefault(),
   } : {};
 
-  const from = Math.round((video.duration ?? 90) / 3);
+  // YouTube's: a stretch from a third in, past the intro. Apple's 30 s preview: all of it.
+  const from = video.youtube_id ? Math.round((video.duration ?? 90) / 3) : 0;
   const preview = playing ? (
     <span className="absolute inset-0 overflow-hidden">
-      {video.youtube_id ? (
-        <YouTubePreview id={video.youtube_id} from={from} sound={sound} onProgress={setProgress}
-                        onSoundBlocked={() => { soundRefused = true; setSound(false); }} />
-      ) : (
-        <video className="pointer-events-none absolute inset-0 size-full object-cover" src={video.preview_url!} muted={!sound} autoPlay loop
-               playsInline onTimeUpdate={(e) => setProgress(e.currentTarget.currentTime / (e.currentTarget.duration || 30))} />
-      )}
+      <PreviewVideo
+        src={video.youtube_id ? `/api/v1/previews/${video.youtube_id}` : video.preview_url!}
+        from={from}
+        length={video.youtube_id ? LENGTH : 30}
+        sound={sound}
+        onProgress={setProgress}
+        onSoundRefused={() => { soundRefused = true; setSound(false); }}
+        onFailed={stop}
+      />
       <button type="button" onClick={toggleSound} onPointerDown={(e) => e.stopPropagation()}
               aria-label={sound ? "Mute the preview" : "Play the preview's sound"}
               className="absolute bottom-2 left-2 z-10 flex size-7 items-center justify-center rounded-full bg-black/70 text-white backdrop-blur-md hover:bg-black/90">

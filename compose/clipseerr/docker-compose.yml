@@ -12,7 +12,7 @@ services:
   clipseerr:
     # The tag names the ytmusicapi pin: a bumped pin is a different image,
     # which `make up` builds.
-    image: local/batlab-clipseerr:ytmusicapi-${VERSION_YTMUSICAPI}
+    image: local/batlab-clipseerr:ytmusicapi-${VERSION_YTMUSICAPI}-yt-dlp-${VERSION_YTDLP}
     build:
       context: ./app
       additional_contexts:
@@ -22,6 +22,8 @@ services:
         BASE_IMAGE: ${IMAGE_CLIPSEERR_BASE}:${TAG_CLIPSEERR_BASE}
         NODE_IMAGE: ${IMAGE_CLIPSEERR_NODE}:${TAG_CLIPSEERR_NODE}
         YTMUSICAPI_VERSION: ${VERSION_YTMUSICAPI}
+        # The cards' previews (catalog/preview.py): songdrop's pin, followed by Renovate.
+        YTDLP_VERSION: ${VERSION_YTDLP}
     # Rebuild on every `make up`, so code changes are always deployed.
     pull_policy: build
     container_name: clipseerr

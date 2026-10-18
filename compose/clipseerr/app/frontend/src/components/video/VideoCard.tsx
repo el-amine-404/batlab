@@ -7,7 +7,7 @@ import { Marquee } from "@/components/ui/marquee";
 import { prefetchVideo, useFacts } from "@/lib/queries";
 import { clock, cn, dated, upcoming } from "@/lib/utils";
 
-import { useHoverPreview } from "./HoverPreview";
+import { preparePreview, useHoverPreview } from "./HoverPreview";
 import { TagBadge } from "./TagBadge";
 import { Thumb } from "./Thumb";
 import type { Requested } from "./useRequested";
@@ -51,7 +51,11 @@ export const VideoCard = memo(function VideoCard({ video, requested, className, 
   const timer = useRef<number | undefined>(undefined);
   const warm = () => {
     window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => prefetchVideo(video.id), 120);
+    timer.current = window.setTimeout(() => {
+      prefetchVideo(video.id);
+      // Its preview's file found ahead, while the pointer is still deciding.
+      if (video.youtube_id) preparePreview(video.youtube_id);
+    }, 120);
   };
   const cool = () => window.clearTimeout(timer.current);
   const looked = useFacts(video.youtube_id, !video.views || !video.released).data;
@@ -76,7 +80,7 @@ export const VideoCard = memo(function VideoCard({ video, requested, className, 
                className="transition-transform duration-300 group-hover:scale-[1.03]" />
         {preview}
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
-        <span className={cn(playing && "hidden", "pointer-events-none absolute top-1/2 left-1/2 flex size-11 -translate-x-1/2 -translate-y-1/2 scale-90 items-center justify-center rounded-full bg-white/90 text-black opacity-0 shadow-xl transition-all group-hover:scale-100 group-hover:opacity-100")}>
+        <span className={cn("pointer-events-none absolute top-1/2 left-1/2 flex size-11 -translate-x-1/2 -translate-y-1/2 scale-90 items-center justify-center rounded-full bg-white/90 text-black opacity-0 shadow-xl transition-all group-hover:scale-100 group-hover:opacity-100", playing && "hidden")}>
           <Play className="ml-0.5 size-5 fill-current" />
         </span>
         <div className="absolute top-2 left-2 flex gap-1">

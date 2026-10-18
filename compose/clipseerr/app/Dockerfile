@@ -13,13 +13,16 @@ RUN npm run build
 
 FROM ${BASE_IMAGE}
 ARG YTMUSICAPI_VERSION
+ARG YTDLP_VERSION
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /opt/clipseerr
 COPY backend/requirements.txt ./
 RUN python -m venv .venv \
  && .venv/bin/pip install --require-hashes -r requirements.txt \
- && .venv/bin/pip install --no-deps "ytmusicapi==${YTMUSICAPI_VERSION}"
+ && .venv/bin/pip install --no-deps "ytmusicapi==${YTMUSICAPI_VERSION}" \
+ # yt-dlp alone: the previews' client (android_vr) needs none of its extras, nor a JavaScript runtime.
+ && .venv/bin/pip install --no-deps "yt-dlp==${YTDLP_VERSION}"
 COPY backend/app ./app
 # batlab's shared code (lib/batlab-common), handed in by compose as the build
 # context "common".
