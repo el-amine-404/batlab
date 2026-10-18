@@ -79,29 +79,6 @@
         href: http://songdrop.homelab.lan
         description: Paste a Spotify or YouTube link, get the song
         siteMonitor: http://songdrop:8810/api/v1/health
-    - MeTube:
-        icon: metube
-        href: http://metube.homelab.lan
-        description: Paste a YouTube link, get the song
-        siteMonitor: http://metube:8081
-        # No MeTube widget in Homepage; its /history lists each queue.
-        widget:
-          type: customapi
-          url: http://metube:8081/history
-          refreshInterval: 30000
-          mappings:
-            - field: queue
-              label: Downloading
-              format: size
-            - field: pending
-              label: Waiting
-              format: size
-            - field: done
-              label: Done
-              format: size
-
-# --- Home --------------------------------------------------------------
-
 - Feeds:
     - subfeed:
         icon: mdi-rss
@@ -235,6 +212,23 @@
         siteMonitor: http://gluetun:9191/hdhr/discover.json
 
 - Downloaders:
+    - videodrop:
+        icon: mdi-download-box
+        href: http://videodrop.homelab.lan
+        description: Videos for whoever asks (clipseerr, a pasted link)
+        siteMonitor: http://videodrop:8840/api/v1/health
+        # No videodrop widget in Homepage; its /jobs/counts counts the downloads.
+        widget:
+          type: customapi
+          url: http://videodrop:8840/api/v1/jobs/counts
+          refreshInterval: 30000
+          mappings:
+            - field: running
+              label: Downloading
+            - field: queued
+              label: Queued
+            - field: failed
+              label: Failed
     - qBittorrent:
         icon: qbittorrent
         href: http://qbittorrent.homelab.lan

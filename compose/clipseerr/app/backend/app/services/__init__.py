@@ -2,11 +2,11 @@
 
 from .aurral import Aurral
 from .base import Context, Kind, ServiceType, Update
-from .metube import Metube
 from .songdrop import Songdrop
+from .videodrop import Videodrop
 from .webhook import Webhook
 
-TYPES: dict[str, ServiceType] = {kind.key: kind for kind in (Aurral(), Songdrop(), Metube(), Webhook())}
+TYPES: dict[str, ServiceType] = {kind.key: kind for kind in (Aurral(), Songdrop(), Videodrop(), Webhook())}
 
 
 def describe_extra(kind: ServiceType, config: dict) -> dict:

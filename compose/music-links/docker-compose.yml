@@ -1,96 +1,18 @@
 name: ${MUSIC_LINKS_PROJECT_NAME}
 # Paste a link, get the song (docs/music.md). songdrop takes Spotify links
 # (through spotDL, which finds the same song on YouTube Music) and any site
-# yt-dlp knows; MeTube stays for the one thing songdrop lacks: following a
-# channel for new uploads. Both only write into the inbox: musicguard checks each file,
+# yt-dlp knows. It only writes into the inbox: musicguard checks each file,
 # keeps the audio and clean tags, adds lyrics, and files it under music-extras.
-# Nothing they download is ever played straight from where they wrote it.
+# Nothing it downloads is ever played straight from where it wrote it.
+# Videos are videodrop's (compose/videodrop).
 #
-# Both connect directly, not through the VPN: YouTube answers VPN addresses with
+# It connects directly, not through the VPN: YouTube answers VPN addresses with
 # "sign in to confirm you're not a bot".
 services:
-  metube:
-    image: ${IMAGE_METUBE}:${TAG_METUBE}
-    container_name: metube
-    environment:
-      - PUID=${PUID}
-      - PGID=${PGID}
-      - UMASK=022
-      - TZ=${TZ}
-      - PORT=${METUBE_HTTP_PORT}
-      - DOWNLOAD_DIR=/downloads
-      - STATE_DIR=/state
-      # Partial downloads stay on the SSD; the inbox only ever sees whole files.
-      - TEMP_DIR=/state/tmp
-      # Everything lands in one inbox folder; no folder picker in the UI.
-      - CUSTOM_DIRS=false
-      - CLEAR_COMPLETED_AFTER=86400
-      - DEFAULT_THEME=auto
-      # Per-download yt-dlp options can run commands in the container.
-      - ALLOW_YTDL_OPTIONS_OVERRIDES=false
-    volumes:
-      - ${VOLUMES_ROOT}/metube:/state
-      - ${DATA_ROOT}/inbox/music/metube:/downloads
-    networks:
-      - home_server
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - SETUID
-      - SETGID
-      - DAC_OVERRIDE
-      - FOWNER
-    mem_limit: 1g
-
-  # The music videos library (docs/music.md): video files asked for in
-  # clipseerr (compose/clipseerr), best quality as MP4, one folder per artist,
-  # with tags and the cover embedded, into media/music-videos, which Jellyfin
-  # shows. A MeTube of its own so that videos never reach musicguard's inbox.
-  # No page: clipseerr drives it through its API, on home_server only.
-  metube-videos:
-    image: ${IMAGE_METUBE}:${TAG_METUBE}
-    container_name: metube-videos
-    environment:
-      - PUID=${PUID}
-      - PGID=${PGID}
-      - UMASK=022
-      - TZ=${TZ}
-      - PORT=8081
-      - DOWNLOAD_DIR=/downloads
-      - STATE_DIR=/state
-      - TEMP_DIR=/state/tmp
-      - CUSTOM_DIRS=false
-      - CLEAR_COMPLETED_AFTER=604800
-      - OUTPUT_TEMPLATE=%(artist,uploader)s/%(title)s [%(id)s].%(ext)s
-      - 'YTDL_OPTIONS={"writethumbnail": true, "postprocessors": [{"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"}, {"key": "FFmpegMetadata", "add_metadata": true}, {"key": "EmbedThumbnail"}]}'
-      - ALLOW_YTDL_OPTIONS_OVERRIDES=false
-    volumes:
-      - ${VOLUMES_ROOT}/metube-videos:/state
-      - ${DATA_ROOT}/media/music-videos:/downloads
-    networks:
-      - home_server
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - SETUID
-      - SETGID
-      - DAC_OVERRIDE
-      - FOWNER
-    mem_limit: 1g
-
   # Paste a link, get the song (compose/music-links/songdrop, docs/music.md):
   # Spotify links through spotDL, any other site yt-dlp knows through yt-dlp,
-  # into the inbox like MeTube, and downloadable for a day. It replaced
-  # spotDL's own page on 2026-10-14; MeTube stays for what songdrop lacks
-  # (following a channel for new uploads).
+  # into the inbox, and downloadable for a day. It replaced spotDL's own page
+  # on 2026-10-14, and MeTube on 2026-10-18.
   songdrop:
     # The tag names both pins (spotDL and yt-dlp): a bumped pin is a different
     # image, which the nightly updater rebuilds.

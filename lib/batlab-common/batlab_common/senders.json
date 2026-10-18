@@ -5,6 +5,7 @@
   "songdrop": {"name": "songdrop"},
   "clipseerr": {"name": "clipseerr", "link": "http://clipseerr.homelab.lan"},
   "subfeed": {"name": "subfeed", "link": "http://subfeed.homelab.lan"},
+  "videodrop": {"name": "videodrop", "link": "http://videodrop.homelab.lan"},
   "camwatch": {"name": "camwatch"},
   "carwatch": {"name": "carwatch", "link": "http://frigate.homelab.lan"},
   "diun": {"name": "diun", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/diun.png"},

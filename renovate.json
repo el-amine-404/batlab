@@ -115,7 +115,6 @@
         "!amir20/dozzle",
         "!ghcr.io/netalertx/netalertx",
         "!ghcr.io/dmunozv04/isponsorblocktv",
-        "!alexta69/metube",
         "!spotdl/spotify-downloader",
         "!yt-dlp",
         "!python",
@@ -150,7 +149,6 @@
         "amir20/dozzle",
         "ghcr.io/netalertx/netalertx",
         "ghcr.io/dmunozv04/isponsorblocktv",
-        "alexta69/metube",
         "spotdl/spotify-downloader",
         "yt-dlp"
       ],
@@ -163,7 +161,7 @@
       "ignoreTests": true
     },
     {
-      "description": "What the apps built here (clipseerr, subfeed, musicguard, tv-remote, songdrop) are made of: the build stages' Rust and Node, and the Python libraries and crates they pin, merge their minor and patch updates straight into main; the nightly updater rebuilds the apps from them, its health check and rollback the test",
+      "description": "What the apps built here (clipseerr, subfeed, videodrop, musicguard, tv-remote, songdrop) are made of: the build stages' Rust and Node, and the Python libraries and crates they pin, merge their minor and patch updates straight into main; the nightly updater rebuilds the apps from them, its health check and rollback the test",
       "matchPackageNames": [
         "rust",
         "node",
@@ -204,9 +202,8 @@
       ]
     },
     {
-      "description": "MeTube and yt-dlp number releases by date (2026.10.09), so January's first release looks like a major; merge those too",
+      "description": "yt-dlp numbers releases by date (2026.10.09), so January's first release looks like a major; merge those too",
       "matchPackageNames": [
-        "alexta69/metube",
         "yt-dlp"
       ],
       "matchUpdateTypes": [

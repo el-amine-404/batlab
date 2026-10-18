@@ -1,8 +1,8 @@
 """songdrop's web server: the API (/api/v1, routes/), the docs (/docs) and
 the page (everything else).
 
-LAN-only behind Caddy, without a login, like MeTube. The page is a client of
-the API like any other.
+LAN-only behind Caddy, without a login, like clipseerr and videodrop. The
+page is a client of the API like any other.
 """
 
 import logging

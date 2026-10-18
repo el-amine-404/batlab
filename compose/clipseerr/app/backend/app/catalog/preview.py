@@ -219,7 +219,7 @@ class Clips:
     video at a time, a few at once, a failure not tried again for a while,
     and the folder kept under KEEP_BYTES (about 1 MB a clip).
 
-    Gentle with YouTube, whose bot check would also stop songdrop and MeTube
+    Gentle with YouTube, whose bot check would also stop songdrop and videodrop
     (same address): at most BUDGET new clips per WINDOW, and none for PAUSE
     once YouTube asks to sign in. Clips already cut are always served."""
 

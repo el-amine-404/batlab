@@ -1,6 +1,6 @@
 """A folder of files, read where clipseerr sees it (a volume in its compose
 file): music videos or songs, named "Artist - Title" or "Artist/Title"; a
-YouTube id in the name ("… [id].mp4", as MeTube saves them) matches exactly."""
+YouTube id in the name ("… [id].mp4", as videodrop saves them) matches exactly."""
 
 import asyncio
 import os
@@ -43,7 +43,7 @@ class Folder(LibraryType):
     key = "folder"
     label = "Folder"
     description = ("Files in a folder clipseerr can read (mounted in its compose file), named \"Artist - Title\" "
-                   "or \"Artist/Title\": music videos (a YouTube id in the name, as MeTube saves them, matches "
+                   "or \"Artist/Title\": music videos (a YouTube id in the name, as videodrop saves them, matches "
                    "exactly) or songs.")
     fields = (
         Field("path", "Folder", "text", help="Where clipseerr sees it, inside its container.",

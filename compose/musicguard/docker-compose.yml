@@ -1,6 +1,6 @@
 name: ${MUSICGUARD_PROJECT_NAME}
 # Checks every music file before anyone plays it (app/guard.py, docs/music.md):
-# files from pasted links (MeTube, spotDL) are identified (Shazam), rebuilt and
+# files from pasted links (songdrop) are identified (Shazam), rebuilt and
 # filed into music-extras; new files in Aurral's and the extras library are
 # rebuilt where they are, Lidarr's are verified and get MusicBrainz's full
 # artist credits. Rejected files go to .quarantine/musicguard with a note

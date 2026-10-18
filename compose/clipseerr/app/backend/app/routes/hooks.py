@@ -12,3 +12,11 @@ router = APIRouter(tags=["Hooks"])
 def songdrop_hook(request: str = Query("", max_length=40)):
     engine.wake()
     return {"ok": True}
+
+
+@router.post("/hooks/videodrop", summary="videodrop's callback: a download of one of clipseerr's requests ended",
+             description="videodrop's callback_url (its API's /jobs). Only wakes the engine: it asks videodrop "
+                         "itself, so a forged call changes nothing.", response_model=schemas.Health)
+def videodrop_hook(request: str = Query("", max_length=40)):
+    engine.wake()
+    return {"ok": True}

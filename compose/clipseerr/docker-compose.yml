@@ -1,8 +1,8 @@
 name: ${CLIPSEERR_PROJECT_NAME:-clipseerr}
 # Browse the newest music videos and ask for the song or the video, like Seerr
-# for music videos (docs/music.md). It only asks and follows: Aurral, songdrop
-# and MeTube (music-links) download, musicguard checks, Navidrome and Jellyfin
-# play. Each request is announced on Discord's #requests through Apprise.
+# for music videos (docs/music.md). It only asks and follows: Aurral and
+# songdrop (music-links) download the songs, videodrop the videos, musicguard
+# checks, Navidrome and Jellyfin play. Each request is announced on Discord's #requests through Apprise.
 #
 # The catalog is YouTube Music and Apple Music, without an account or a key.
 # Services, notifications and settings live in its database and are changed
@@ -42,11 +42,12 @@ services:
       - CLIPSEERR_HOT_FEEDS=http://subfeed:8830/api/v1/feeds/sexymusicvideos/feed.json?video=youtube&unique=true&limit=500
       # The first services, in the order they are asked: songs from Aurral
       # (Soulseek first: lossless when shared), else songdrop (YouTube Music,
-      # lossy); videos from MeTube's music videos instance.
+      # lossy); videos from videodrop, into its music-videos destination (on
+      # an existing database, the MeTube service becomes this one, once).
       - CLIPSEERR_AURRAL_URL=http://aurral:${AURRAL_HTTP_PORT:-3001}
       - CLIPSEERR_AURRAL_API_KEY=${AURRAL_API_KEY:-}
       - CLIPSEERR_SONGDROP_URL=http://songdrop:${SONGDROP_HTTP_PORT:-8810}
-      - CLIPSEERR_METUBE_URL=http://metube-videos:8081
+      - CLIPSEERR_VIDEODROP_URL=http://videodrop:8840
       # The first libraries (Settings, Libraries): Navidrome's songs, through
       # Caddy's :4534 (a scan asked there never reaches Navidrome), with the
       # token Homepage reads it with; and the music videos folder.

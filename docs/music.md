@@ -7,14 +7,14 @@ it on the way. Set up on 2026-10-11.
  request (Aurral) ─┬─ album ──▶ Lidarr ──▶ Prowlarr ──▶ qBittorrent ─┐
                    │                  └─▶ Soularr ──▶ slskd ────────┤ (both through gluetun)
                    └─ track, playlist ──▶ Aurral: slskd, else yt-dlp ─┤
- pasted link ──▶ songdrop / MeTube / spotDL ─────────▶ inbox ───────┤
+ pasted link ──▶ songdrop (spotDL, yt-dlp) ─────────▶ inbox ───────┤
                                                                       ▼
                                      musicguard: check, strip, tag, lyrics, file
                                                                       ▼
                                                   Navidrome (three libraries)
 
  music video (clipseerr) ─┬─ the song ──▶ Aurral (track), else songdrop ──▶ (as above)
-                          └─ the video ──▶ metube-videos ──▶ media/music-videos ──▶ Jellyfin
+                          └─ the video ──▶ videodrop ──▶ media/music-videos ──▶ Jellyfin
 ```
 
 ## Where everything lives
@@ -24,8 +24,8 @@ it on the way. Set up on 2026-10-11.
 | `media/music` | albums Lidarr manages, and the music that was here before | Lidarr | `/music` |
 | `media/music-aurral` | single tracks, playlists and flows requested in Aurral | Aurral | `/data/media/music-aurral` |
 | `media/music-extras` | songs from pasted links | musicguard | `/music-extras` |
-| `inbox/music/{songdrop,metube,spotdl}` | link downloads waiting to be checked | songdrop, MeTube, spotDL | never |
-| `media/music-videos` | video files asked for in clipseerr, `Artist/Title [id].mp4` | metube-videos | never (Jellyfin's Music Videos library) |
+| `inbox/music/songdrop` | link downloads waiting to be checked | songdrop | never |
+| `media/music-videos` | video files asked for in clipseerr, `Artist/Title [id].mp4` | videodrop (destination `music-videos`) | never (Jellyfin's Music Videos library) |
 | `soulseek/{incomplete,complete}` | slskd downloads before Lidarr or Aurral import them | slskd | never |
 | `.quarantine/musicguard/<date>/` | everything musicguard refused or retired, with a `.why.json` beside it; deleted 30 days after that date (`MUSICGUARD_QUARANTINE_DAYS`, 0 keeps it) | musicguard | never |
 
@@ -358,12 +358,10 @@ Symfonium or Tempo (Android), Amperfy or play:Sub (iPhone).
   that make sense here (format, bitrate, audio source, SponsorBlock…), each
   shown with its flag; lyrics, file names and folders are left to musicguard
   and Stanzarr.
-- **MeTube** (`metube.homelab.lan`): any YouTube link (or one of the other sites
-  yt-dlp supports). Choose **Audio**; the default format and "with cover" are
-  right. A video download works too: musicguard keeps only its audio.
-  What MeTube can do beyond songdrop is following a channel for new uploads;
-  songdrop has the rest since 2026-10-14 (below). A feed of a channel's new
-  uploads may do that job better later.
+- **MeTube** was removed on 2026-10-18, and with it `metube.homelab.lan` and
+  `inbox/music/metube`: songdrop takes every link MeTube took, and videos are
+  videodrop's (`compose/videodrop`, docs/services.md). Following a channel
+  for new uploads, the one thing MeTube did beyond them, was never used.
 - **spotDL's own page** (`spotdl.homelab.lan`, single track links only) was
   removed on 2026-10-14: songdrop takes the same links and albums, playlists
   and artists too, with the same options, and checks each song against
@@ -372,12 +370,12 @@ Symfonium or Tempo (Android), Amperfy or play:Sub (iPhone).
 
 spotDL's image carries the yt-dlp it was released with, and YouTube answers an
 old yt-dlp with 403 Forbidden: v4.5.2 (yt-dlp 2026.07.04) failed every download
-on 2026-10-11 while MeTube's 2026.8.19 worked on the same link. So songdrop is
+on 2026-10-11 while MeTube's 2026.8.19 (then running here) worked on the same link. So songdrop is
 built locally on the pinned spotDL release with the yt-dlp from
 `VERSION_YTDLP` in `compose/versions.env`. Both stay current on their own:
-Renovate merges new yt-dlp (a day after release), MeTube and spotDL minor
-releases straight into `main`, and the nightly updater redeploys them,
-rebuilding songdrop because its image tag names both pins. A spotDL major (v5)
+Renovate merges new yt-dlp (a day after release) and spotDL minor releases
+straight into `main`, and the nightly updater redeploys them, rebuilding
+songdrop and videodrop because their image tags name the pins. A spotDL major (v5)
 still arrives as a pull request. When spotDL starts failing with 403, check
 `#updates` and `#alerts` for a yt-dlp bump that did not land.
 
@@ -544,12 +542,13 @@ Jellyfin play. Its API reference is at `/api/docs` on the service.
   someone shares it, then its own yt-dlp), then **songdrop** (YouTube Music's
   audio, about 130-160 kbps Opus). Both deliver into folders musicguard
   checks. Aurral answering "already in the library" ends the request at once.
-  *The video*: to **metube-videos**, a MeTube of its own (`music-links`) that
-  writes MP4s at the best quality into `media/music-videos`, tags and cover
-  embedded, never into musicguard's inbox. Asking twice for the same thing
+  *The video*: to **videodrop** (`compose/videodrop`), its `music-videos`
+  destination: MP4s at the best quality into `media/music-videos`, named
+  `Artist/Title [id].mp4`, tags and cover embedded, never into musicguard's
+  inbox. videodrop calls back when the download ends. Asking twice for the same thing
   answers the first request.
 - **Follow.** Every 15 s (Settings, General) it asks each service where its
-  requests are, once per service a round; songdrop also calls back. The
+  requests are, once per service a round; songdrop and videodrop also call back. The
   Requests screen shows each request, the services it went through and the
   format it arrived in (FLAC, OPUS, MP4). Retry asks every
   service again from the first.

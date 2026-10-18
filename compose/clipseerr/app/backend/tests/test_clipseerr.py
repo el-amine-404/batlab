@@ -1,6 +1,7 @@
 """python -m unittest discover -s tests (in the image, see docs/music.md)."""
 
 import asyncio
+import json
 import os
 import sys
 import tempfile
@@ -11,10 +12,11 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app import seed  # noqa: E402
 from app.catalog import match  # noqa: E402
 from app.db import Database  # noqa: E402
 from app.integrations import Integrations, Invalid  # noqa: E402
-from app.services import TYPES, Update  # noqa: E402
+from app.services import TYPES, Context, Update  # noqa: E402
 from app.services.aurral import from_activity  # noqa: E402
 from app.tracker.engine import Engine  # noqa: E402
 from app.tracker.store import Requests  # noqa: E402
@@ -809,6 +811,76 @@ class Store(unittest.TestCase):
             self.assertEqual(store.find(item["id"])["config"]["api_key"], "k" * 64)
             with self.assertRaises(Invalid):
                 store.create({"name": "x", "type": "aurral", "config": {"base_url": "aurral"}})
+            db.close()
+
+
+class VideodropService(unittest.TestCase):
+    """clipseerr asks videodrop for the video and follows the job."""
+
+    def run_with(self, answers: dict, call):
+        import httpx
+
+        sent = []
+
+        def handle(request):
+            sent.append(request)
+            status, content = answers[(request.method, request.url.path)]
+            return httpx.Response(status, **content)
+
+        async def go():
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+                return await call(Context(http, "http://clipseerr:8820/api/v1"))
+
+        return asyncio.run(go()), sent
+
+    def test_submit_names_the_destination(self):
+        kind = TYPES["videodrop"]
+        config = {"base_url": "http://videodrop:8840", "destination": "music-videos", "quality": "1080"}
+        request = {"id": "r1", "media": {"video_id": "DPEodkHzH-s"}}
+        update, sent = self.run_with({("POST", "/api/v1/jobs"): (201, {"json": {"id": "j1"}})},
+                                     lambda ctx: kind.submit(ctx, request, config))
+        self.assertEqual((update.state, update.external_id), ("sent", "j1"))
+        body = json.loads(sent[0].content)
+        self.assertEqual((body["url"], body["destination"], body["options"]["quality"], body["client"]),
+                         ("https://www.youtube.com/watch?v=DPEodkHzH-s", "music-videos", "1080", "clipseerr"))
+        self.assertEqual(body["callback_url"], "http://clipseerr:8820/api/v1/hooks/videodrop?request=r1")
+
+    def test_poll_follows_the_job(self):
+        kind = TYPES["videodrop"]
+        config = {"base_url": "http://videodrop:8840"}
+        attempt = {"external_id": "j1"}
+
+        def poll(job):
+            answers = {("GET", "/api/v1/jobs/j1"): (200, {"json": job})}
+            return self.run_with(answers, lambda ctx: kind.poll(ctx, {}, attempt, config))[0]
+
+        self.assertEqual(poll({"status": "running", "progress": {"percent": 40.0}}).progress, 0.4)
+        done = poll({"status": "finished", "options": {"quality": "best", "container": "mp4"},
+                     "files": [{"kind": "video", "name": "A [x].mp4", "existed": True}]})
+        self.assertEqual((done.state, done.already, done.quality), ("completed", True, "MP4 best"))
+        failed = poll({"status": "failed", "error": "Video unavailable"})
+        self.assertEqual((failed.state, failed.message), ("failed", "Video unavailable"))
+        gone = self.run_with({("GET", "/api/v1/jobs/j1"): (404, {"json": {"detail": "no"}})},
+                             lambda ctx: kind.poll(ctx, {}, attempt, config))[0]
+        self.assertEqual(gone.state, "failed")
+
+    def test_metube_service_becomes_videodrop_once(self):
+        with tempfile.TemporaryDirectory() as folder:
+            db = Database(Path(folder) / "t.db")
+            db.run("INSERT INTO integrations (id, family, name, type, enabled, position, config, created_at) "
+                   "VALUES ('m1', 'service', 'MeTube (videos)', 'metube', 1, 2, ?, 0)",
+                   (json.dumps({"base_url": "http://metube-videos:8081"}),))
+            db.put(seed.KEY, True)
+            db.put(seed.LIBRARIES_KEY, True)
+            services = Integrations(db, "service", TYPES)
+            conf = mock.Mock(videodrop_url="http://videodrop:8840")
+            seed.run(db, conf, services, mock.Mock(), mock.Mock())
+            [item] = services.items()
+            self.assertEqual((item["id"], item["type"], item["position"], item["config"]["destination"]),
+                             ("m1", "videodrop", 2, "music-videos"))
+            services.delete("m1")
+            seed.run(db, conf, services, mock.Mock(), mock.Mock())
+            self.assertEqual(services.items(), [], "once: a removed videodrop isn't made again")
             db.close()
 
 

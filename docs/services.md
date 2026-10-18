@@ -44,8 +44,8 @@ in), the consumer takes it and removes it. Neither knows the other exists.
 | Folder (under `DATA_ROOT`) | Written by | Taken by |
 | --- | --- | --- |
 | `inbox/music/songdrop` | songdrop (its output folder setting) | musicguard |
-| `inbox/music/metube` | MeTube | musicguard |
 | `media/music-extras` | musicguard | Navidrome, Stanzarr (read and write lyrics beside songs) |
+| `media/music-videos` | videodrop (its `music-videos` destination) | Jellyfin; clipseerr reads it (what is there already) |
 
 ## Messages
 
@@ -62,7 +62,7 @@ end up. The senders, and the name and avatar each shows on Discord, are in
 | Channel (tag) | Who sends through Apprise | What |
 | --- | --- | --- |
 | `downloads` | musicguard, subtranslate | "Ready to play: Artist – Album", once Navidrome has it; subtitles translated by AI, or replaced by human ones |
-| `download-issues` | musicguard, songdrop, vpnguard, dubkeeper | files quarantined, suspect, flagged or held; songs missing after a download, back, or given up; VPN reconnects; upgrades that lost audio |
+| `download-issues` | musicguard, songdrop, videodrop, vpnguard, dubkeeper | files quarantined, suspect, flagged or held; songs missing after a download, back, or given up; videos that failed, the media disk nearly full; VPN reconnects; upgrades that lost audio |
 | `requests` | clipseerr | a song or a music video asked for, got, or not found by any service |
 | `cameras` | camwatch, carwatch | a camera dark, and back; the Clio 4 or the Ford left its spot, or is back, with a close-up, the street, the way it went and the clip |
 | `alerts` | Netdata, NetAlertX, watchdog (data disk, self-test, SMART), mediascan, updater (failures), subfeed | something is wrong with the machine or the network; a feed failing, and working again |
@@ -109,6 +109,7 @@ Event names are `<thing>.<what happened>`:
 | songdrop | `job.incomplete` (songs missing after a download), `song.recovered`, `song.gave_up`, `job.finished` |
 | clipseerr | `request.created`, `request.completed`, `request.failed` (`data.request`: the request, as its API gives it) |
 | subfeed | `feed.failing`, `feed.recovered`, `posts.new` (`data.feed`: the feed's slug; `data.posts`: the new posts, as its API gives them) |
+| videodrop | `job.failed`, `job.finished` (`data.job`: the job, as its API gives it), `disk.low` |
 
 ## Shared code
 
@@ -152,7 +153,7 @@ the service.
   real songs (YouTube Music, `catalog/verdicts.py`): the feeds Hot reads
   only say what a community posted.
 - **Alone**: browse and watch with no service at all; requests wait for one.
-- **Plugs in through**: its services (Aurral, songdrop, MeTube, or any app
+- **Plugs in through**: its services (Aurral, songdrop, videodrop, or any app
   through a Webhook), its notifications (Apprise, Discord, Webhook), its
   libraries (Navidrome, a folder: what is there already), Hot's feeds (any
   JSON Feed: subfeed's here), its API (`/api/v1`: requests, the catalog,
@@ -188,6 +189,39 @@ the service.
 - **A new source** (Lemmy, a forum) is one module in `subfeed/sources/`
   (a `Source`: its newest posts, its history); a new video provider is one
   line in `subfeed/links.py`.
+
+### videodrop: link → video files
+
+`compose/videodrop`, `videodrop.homelab.lan`. API reference: `/docs`.
+
+- **Job**: getting videos, for whoever asks: a link, the options it wants
+  (quality, codec, container, subtitles, playlist) and a destination;
+  videodrop downloads it with yt-dlp, a few at once, and gives the file
+  back. What a video is for (a music video, a clip) is its caller's
+  business; songs are songdrop's.
+- **Alone**: paste a link on its page; with no destination the files are
+  held for a day (Settings, `hold_hours`), to download from the page.
+- **Plugs in through**: its API (`POST /api/v1/jobs`: asking twice for the
+  same download while it runs answers the same job), three ways to follow a
+  job (`GET /api/v1/jobs/{id}`; its live stream, `…/events`, Server-Sent
+  Events; a `callback_url`, signed with `callback_secret`: `X-Videodrop-
+  Signature: sha256=<HMAC of "<timestamp>.<body>">`), each file's
+  `download_url` (Range requests work), its destinations (named folders
+  under `media`, with a file-name template and options of their own;
+  callers name one, never a path) and its events (Apprise, Discord,
+  Webhook). clipseerr sends "get the video" to the `music-videos`
+  destination.
+- **Owns**: `$VOLUMES_ROOT/videodrop` (one SQLite database, mode 600, and
+  the cookies) and `media/.videodrop` (downloads in progress, held files).
+- **Not its job**: deciding what to download, or what a video is; songs.
+- **How it runs downloads**: each one is a process of its own
+  (`videodrop/runner.py`), so a download is stopped by stopping it and a
+  crash ends only it. At most `max_parallel` at once, `per_site_parallel`
+  from one site (every app here shares one address), the highest priority
+  first. A failure that may pass (the network, the site busy) is tried again
+  after 1, 5, 25… minutes; nothing starts while the media disk has less than
+  `min_free_gb` free. A finished file is moved into place by a rename and
+  never replaces one already there.
 
 ### musicguard: inbox → checked library
 
@@ -252,6 +286,7 @@ the service.
 | --- | --- | --- | --- | --- | --- |
 | songdrop | yes | yes | yes | yes | its connections (Apprise here; Discord, Webhook) |
 | subfeed | yes | yes | yes | yes | its notifications (Apprise here; Discord, Webhook) |
+| videodrop | yes | yes | yes | yes | its notifications (Apprise here; Discord, Webhook), and each job's callback |
 | musicguard | several, one module each | none | none | environment only | Apprise |
 | Stanzarr | yes | own (private project) | no | in its page | none |
 | camwatch | yes | none (needs none) | none | environment only | Apprise |

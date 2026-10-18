@@ -15,7 +15,7 @@ from batlab_common import titles
 
 from ..integrations import IntegrationType
 
-# A YouTube id in a file's name, as yt-dlp and MeTube write it: "Title [dQw4w9WgXcQ].mp4".
+# A YouTube id in a file's name, as yt-dlp and videodrop write it: "Title [dQw4w9WgXcQ].mp4".
 YOUTUBE_IN_NAME = re.compile(r"\[([\w-]{11})\]")
 _BRACKETS = re.compile(r"\s*[\(\[][^\)\]]*[\)\]]")
 

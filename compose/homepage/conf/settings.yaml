@@ -39,12 +39,12 @@ layout:
     tab: Entertainment
     icon: mdi-music-note-plus
     style: row
-    columns: 4
+    columns: 3
   Feeds:
     tab: Entertainment
     icon: mdi-rss
     style: row
-    columns: 4
+    columns: 3
   Photos & files:
     tab: Home
     icon: mdi-image-multiple

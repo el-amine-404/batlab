@@ -1,0 +1,105 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+
+/* shadcn/ui tokens, dark only, like songdrop and clipseerr; videodrop's accent is sky to cyan. */
+:root {
+  color-scheme: dark;
+  --radius: 0.875rem;
+  --background: oklch(0.14 0.008 230);
+  --foreground: oklch(0.97 0.004 230);
+  --card: oklch(0.19 0.01 230 / 0.62);
+  --card-foreground: var(--foreground);
+  --popover: oklch(0.2 0.012 230);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.74 0.14 230);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.255 0.012 230);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(0.245 0.01 230);
+  --muted-foreground: oklch(0.72 0.015 230);
+  --accent: oklch(0.275 0.016 230);
+  --accent-foreground: var(--foreground);
+  --destructive: oklch(0.66 0.2 22);
+  --success: oklch(0.74 0.16 155);
+  --warning: oklch(0.8 0.15 80);
+  --border: oklch(1 0 0 / 0.09);
+  --input: oklch(1 0 0 / 0.12);
+  --ring: oklch(0.74 0.17 230 / 0.6);
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 6px);
+  --radius-md: calc(var(--radius) - 3px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply min-h-dvh bg-background font-sans text-foreground antialiased;
+  }
+}
+
+/* Two soft glows; nothing moves. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(60rem 40rem at 10% -10%, oklch(0.6 0.14 235 / 0.2), transparent 60%),
+    radial-gradient(50rem 36rem at 100% 0%, oklch(0.75 0.12 200 / 0.1), transparent 60%),
+    var(--background);
+}
+
+/* Placeholder shimmer while a list loads. */
+.skeleton {
+  background: linear-gradient(90deg, oklch(1 0 0 / 0.04), oklch(1 0 0 / 0.09), oklch(1 0 0 / 0.04));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

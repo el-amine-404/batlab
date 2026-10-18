@@ -1,7 +1,7 @@
 """musicguard: every music file is checked, stripped to audio and clean tags,
 and filed, or it is quarantined.
 
-  inbox   files from pasted links (MeTube, spotDL) are checked, rebuilt and
+  inbox   files from pasted links (songdrop) are checked, rebuilt and
           filed into the extras library, then removed from the inbox
   roots   new or changed files in the libraries are checked where they are:
           rebuilt in Aurral's and the extras library, verified only in

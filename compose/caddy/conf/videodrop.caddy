@@ -1,0 +1,4 @@
+http://videodrop.homelab.lan {
+  import localSubnets
+	reverse_proxy @localSubnets http://videodrop:8840
+}

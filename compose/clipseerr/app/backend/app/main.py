@@ -30,7 +30,7 @@ CACHE_KEEP = 30 * 86400
 DESCRIPTION = """\
 Browse the newest music videos (YouTube Music, Apple Music: no account, no
 key), watch them, and ask for the song or the video: clipseerr hands the
-request to the services set up in Settings (Aurral, songdrop, MeTube, any app
+request to the services set up in Settings (Aurral, songdrop, videodrop, any app
 through a Webhook), follows it, falls back to the next service when one fails,
 and tells the notifications.
 

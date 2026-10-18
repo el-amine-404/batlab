@@ -1,0 +1,78 @@
+name: ${VIDEODROP_PROJECT_NAME:-videodrop}
+# Getting videos, for whoever asks (docs/services.md): an app (clipseerr, for
+# the music videos) or a person on its page asks for a link with the options
+# and the destination it wants; videodrop downloads it with yt-dlp, a few at
+# once, says how it goes (callbacks, a live stream, its API at /docs) and
+# gives the file back. Songs stay songdrop's (compose/music-links).
+#
+# Destinations are named folders inside the media folder; apps name one,
+# never a path. VIDEODROP_DESTINATIONS and the Apprise address make them on
+# the first start only; after that the page and the API own them.
+#
+# It connects directly, not through the VPN: YouTube answers VPN addresses
+# with "sign in to confirm you're not a bot". Every app here shares lab2's
+# one address, so the settings keep few downloads per site at once.
+services:
+  videodrop:
+    image: local/batlab-videodrop:yt-dlp-${VERSION_YTDLP}
+    build:
+      context: ./app
+      additional_contexts:
+        common: ../../lib/batlab-common
+      network: host
+      args:
+        BASE_IMAGE: ${IMAGE_VIDEODROP_BASE}:${TAG_VIDEODROP_BASE}
+        NODE_IMAGE: ${IMAGE_VIDEODROP_NODE}:${TAG_VIDEODROP_NODE}
+        DENO_IMAGE: ${IMAGE_VIDEODROP_DENO}:${TAG_VIDEODROP_DENO}
+        YTDLP_VERSION: ${VERSION_YTDLP}
+    # Rebuild on every `make up`, so code changes are always deployed.
+    pull_policy: build
+    container_name: videodrop
+    user: "${PUID}:${PGID}"
+    environment:
+      - TZ=${TZ}
+      - VIDEODROP_PORT=8840
+      - VIDEODROP_DESTINATIONS=${VIDEODROP_DESTINATIONS:-music-videos=music-videos}
+      - VIDEODROP_PUBLIC_URL=http://videodrop.homelab.lan
+      # Downloads failing, and the disk nearly full, to #download-issues
+      # beside songdrop's and musicguard's (docs/services.md, "Messages").
+      - VIDEODROP_APPRISE_URL=http://apprise:8000/notify/videodrop
+      - VIDEODROP_APPRISE_TAG=download-issues
+    volumes:
+      # The database and the cookies.
+      - ${VOLUMES_ROOT}/videodrop:/state
+      # Every destination is a folder in here; downloads in progress and held
+      # files are in its .videodrop folder, on the same disk, so a finished
+      # file is moved by a rename.
+      - ${DATA_ROOT}/media:/media
+    tmpfs:
+      - /tmp
+    read_only: true
+    healthcheck:
+      test: ["CMD", "/opt/videodrop/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8840/api/v1/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - home_server
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # yt-dlp and ffmpeg for each download at once (Settings, max_parallel).
+    mem_limit: 2g
+    pids_limit: 512
+    # Stopping lets the downloads end their processes; they start again after.
+    stop_grace_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  home_server:
+    external: true
+    name: home_server

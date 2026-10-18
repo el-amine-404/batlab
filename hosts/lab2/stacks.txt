@@ -33,4 +33,5 @@ speed_test
 tv-remote
 unbound
 untrunc
+videodrop
 uptime_kuma

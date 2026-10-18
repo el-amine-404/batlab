@@ -32,7 +32,7 @@ class Config:
     static_dir: Path
     # The page's address, for links in messages.
     public_url: str
-    # Where the services that call back (songdrop) reach clipseerr.
+    # Where the services that call back (songdrop, videodrop) reach clipseerr.
     internal_url: str
     # First values of the settings (settings.py).
     region: str
@@ -45,7 +45,7 @@ class Config:
     aurral_url: str
     aurral_api_key: str
     songdrop_url: str
-    metube_url: str
+    videodrop_url: str
     # The first libraries (seed.py): Navidrome, and the music videos folder.
     navidrome_url: str
     navidrome_user: str
@@ -75,7 +75,7 @@ def load() -> Config:
         aurral_url=_text("CLIPSEERR_AURRAL_URL"),
         aurral_api_key=_text("CLIPSEERR_AURRAL_API_KEY"),
         songdrop_url=_text("CLIPSEERR_SONGDROP_URL"),
-        metube_url=_text("CLIPSEERR_METUBE_URL"),
+        videodrop_url=_text("CLIPSEERR_VIDEODROP_URL"),
         navidrome_url=_text("CLIPSEERR_NAVIDROME_URL"),
         navidrome_user=_text("CLIPSEERR_NAVIDROME_USER"),
         navidrome_password=_text("CLIPSEERR_NAVIDROME_PASSWORD"),
