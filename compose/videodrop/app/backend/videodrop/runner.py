@@ -211,6 +211,10 @@ def main() -> int:
             watch.start()
         else:
             watch.stop()
+            if not parts:
+                # A step before the download (the cover's): the download comes next, and a section's (by
+                # ffmpeg) says nothing until it ends.
+                emit("stage", stage="downloading")
 
     def add_lyrics(path: Path, info: dict) -> None:
         song = config.get("song") or {}
