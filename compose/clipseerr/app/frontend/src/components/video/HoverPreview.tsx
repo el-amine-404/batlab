@@ -168,7 +168,8 @@ export function useHoverPreview(video: Video) {
   } : {};
 
   // YouTube's: a stretch from a third in, past the intro. Apple's 30 s preview: all of it.
-  const from = video.youtube_id ? Math.round((video.duration ?? 90) / 3) : 0;
+  // From the start: seeking a third in stalled the browser's player (to look into).
+  const from = 0;
   const preview = playing ? (
     <span className="absolute inset-0 overflow-hidden">
       <PreviewVideo
