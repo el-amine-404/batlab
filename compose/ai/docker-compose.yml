@@ -66,9 +66,12 @@ services:
       - AUTO_OCR_TAG=${PAPERLESS_GPT_AUTO_OCR_TAG}
       - LLM_LANGUAGE=${PAPERLESS_GPT_LANGUAGE}
     volumes:
-      - ${CONFIGS_ROOT}/ai/conf/prompts:/app/prompts
-      # Its settings and the history of what it changed in Paperless, kept
-      # across a recreate (it warns at start from v0.30 when they are not).
+      # Its prompts, its settings and the history of what it changed in
+      # Paperless, kept across a recreate (it warns at start from v0.30 when
+      # they are not). The prompts are its state, not the repo's: it rewrites
+      # the ones still at an earlier default when it upgrades, and its page
+      # edits them; in the checkout, that stopped the updater's pull.
+      - ${VOLUMES_ROOT}/paperless-gpt/prompts:/app/prompts
       - ${VOLUMES_ROOT}/paperless-gpt/config:/app/config
       - ${VOLUMES_ROOT}/paperless-gpt/db:/app/db
       - /etc/localtime:/etc/localtime:ro

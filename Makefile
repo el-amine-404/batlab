@@ -217,6 +217,7 @@ setup: check-env
 		$(VOLUMES_ROOT)/paperless/db \
 		$(VOLUMES_ROOT)/paperless/redis \
 		$(VOLUMES_ROOT)/ollama \
+		$(VOLUMES_ROOT)/paperless-gpt/prompts \
 		$(VOLUMES_ROOT)/paperless-gpt/config \
 		$(VOLUMES_ROOT)/paperless-gpt/db \
 		$(VOLUMES_ROOT)/open-webui \
