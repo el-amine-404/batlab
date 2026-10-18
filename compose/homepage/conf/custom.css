@@ -5,3 +5,18 @@
     radial-gradient(ellipse at bottom right, rgb(167 139 250 / 0.12), transparent 50%);
   background-attachment: fixed;
 }
+
+/* The name takes the free space, so the sensor groups sit together on the
+   right, with room between groups. */
+.information-widget-greeting {
+  flex-grow: 1;
+}
+#information-widgets .widget-container:not(.information-widget-greeting) {
+  margin-left: 1.5rem;
+}
+
+/* No search or clock, so the right-hand slot is empty; drop it so the
+   sensors reach the edge. */
+#information-widgets-right:empty {
+  display: none;
+}
