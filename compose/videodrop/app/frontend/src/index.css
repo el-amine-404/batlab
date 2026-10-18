@@ -95,6 +95,20 @@
   }
 }
 
+/* A bar that moves while the share done isn't known. */
+.progress-indeterminate {
+  width: 35%;
+  animation: indeterminate 1.4s ease-in-out infinite;
+}
+@keyframes indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(290%);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

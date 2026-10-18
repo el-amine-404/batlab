@@ -72,6 +72,16 @@ class Run:
     called_at: float = 0.0
 
 
+def _number(value) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def _whole(value) -> int | None:
+    """Sites give sizes as estimates with decimals; bytes are whole."""
+    number = _number(value)
+    return round(number) if number is not None else None
+
+
 def backoff(attempt: int) -> float:
     """1 min, 5 min, 25 min…, 6 h at most."""
     return min(MAX_BACKOFF, 60 * 5 ** max(0, attempt - 1))
@@ -267,16 +277,22 @@ class Scheduler:
                                   duration=event.get("duration") if isinstance(event.get("duration"),
                                                                                (int, float)) else None)
         elif name == "progress":
-            total, done = event.get("total"), event.get("downloaded") or 0
-            fraction = min(1.0, done / total) if total else None
+            total, done = _whole(event.get("total")), _whole(event.get("downloaded")) or 0
+            fragment, fragments = _whole(event.get("fragment")), _whole(event.get("fragments"))
+            # Without a size (a live-made stream), its pieces say how far it is.
+            fraction = (min(1.0, done / total) if total else
+                        min(1.0, fragment / fragments) if fragment and fragments else None)
             items, item = progress.get("items") or 1, (progress.get("item") or 1) - 1
-            progress.update(downloaded_bytes=done, total_bytes=total, speed=event.get("speed"), eta=event.get("eta"),
+            progress.update(downloaded_bytes=done, total_bytes=total, speed=_number(event.get("speed")),
+                            eta=_number(event.get("eta")),
                             percent=round(100 * (item + (fraction or 0)) / items, 1) if fraction is not None
                             else progress.get("percent"))
-            progress["stage"] = "downloading"
+            if progress.get("stage") != "downloading":
+                progress.update(stage="downloading", step=None, step_since=time.time())
         elif name == "stage":
-            progress["stage"] = event.get("stage")
-            self._jobs.update(run.job_id, stage=event.get("stage"))
+            if (event.get("stage"), event.get("step")) != (progress.get("stage"), progress.get("step")):
+                progress.update(stage=event.get("stage"), step=event.get("step"), step_since=time.time())
+                self._jobs.update(run.job_id, stage=event.get("stage"), progress=progress)
         elif name == "file":
             run.made.append(event["path"])
             run.checks[event["path"]] = event.get("checks")
@@ -304,7 +320,8 @@ class Scheduler:
             return
         placed = []
         if run.made:
-            self._jobs.update(run.job_id, stage="placing")
+            run.progress.update(stage="placing", step=None, step_since=time.time())
+            self._jobs.update(run.job_id, stage="placing", progress=run.progress)
             placed = await asyncio.to_thread(placement.place, work, run.made, self._target(row))
             for file in placed:
                 # A copy that was there already keeps no check of the dropped one.

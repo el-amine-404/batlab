@@ -22,7 +22,7 @@ def make(index, total, ident, title):
     emit("item", index=index, total=total, id=ident, title=title, uploader="Fake Artist",
          thumbnail=f"https://i.ytimg.com/vi/{ident}/mqdefault.jpg", duration=200)
     emit("stage", stage="downloading")
-    emit("progress", index=index, downloaded=500, total=1000, speed=100.0, eta=5)
+    emit("progress", index=index, downloaded=500, total=1000.4, speed=100.0, eta=5)  # sizes come with decimals
     emit("stage", stage="processing")
     path = Path("Fake Artist") / f"{title} [{ident}].mp4"
     (work / path).parent.mkdir(parents=True, exist_ok=True)
@@ -48,6 +48,6 @@ elif video == "gonegonegon":
 elif video == "slowslowslo":
     emit("item", index=0, total=1, id=video, title="Slow", uploader="Fake", thumbnail=None, duration=1)
     for step in range(600):
-        emit("progress", index=0, downloaded=step, total=600, speed=1.0, eta=600 - step)
+        emit("progress", index=0, downloaded=step, total=600.7, speed=1.0, eta=600 - step)
         time.sleep(0.1)
     sys.exit(1)

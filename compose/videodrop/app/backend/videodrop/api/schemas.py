@@ -25,6 +25,9 @@ class Health(BaseModel):
 
 class Progress(BaseModel):
     stage: Stage | None = None
+    step: str | None = Field(None, description="Which part of processing: yt-dlp's postprocessor (Merger, "
+                                                "FixupM3u8, FFmpegMetadata, EmbedThumbnail…), lyrics or check.")
+    step_since: float | None = Field(None, description="When this stage or step began.")
     percent: float | None = Field(None, description="0-100 of the whole job (a playlist's videos together); "
                                                     "none while the size isn't known.")
     downloaded_bytes: int | None = Field(None, description="Of the video downloading now.")

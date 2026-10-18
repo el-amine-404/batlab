@@ -15,8 +15,10 @@ from pathlib import Path
 
 # Events: {"event": name, ...}.
 #   item      {index, total, id, title, uploader, thumbnail, duration}  a video starts
-#   progress  {index, downloaded, total, speed, eta}                     at most twice a second
-#   stage     {stage}                                                    downloading, processing
+#   progress  {index, downloaded, total, speed, eta, fragment, fragments} at most twice a second; bytes of
+#                                                                        the video's streams together
+#   stage     {stage, step}                                              downloading, processing (step: which
+#                                                                        part of it: Merger, EmbedThumbnail…)
 #   file      {path, checks}                                             a finished file, relative to work_dir, checked
 #   note      {message}                                                  beside the download: lyrics found or not
 #   warning   {message}
@@ -88,24 +90,42 @@ def main() -> int:
                  thumbnail=info.get("thumbnail"), duration=info.get("duration"))
         return seen[key]
 
+    # A video is often two streams downloaded one after the other (picture,
+    # then sound): bytes are counted over both, so the bar doesn't start again.
+    parts: dict[str, list] = {}
+
+    def expected_size(info: dict) -> float | None:
+        streams = info.get("requested_formats") or [info]
+        sizes = [f.get("filesize") or f.get("filesize_approx") for f in streams]
+        return sum(sizes) if all(sizes) else None
+
     def progress(status: dict) -> None:
         info = status.get("info_dict") or {}
         index = item(info)
-        if status.get("status") == "downloading":
-            now = time.monotonic()
-            if now - last[0] < PROGRESS_EVERY:
-                return
-            last[0] = now
-            emit("progress", index=index, downloaded=status.get("downloaded_bytes") or 0,
-                 total=status.get("total_bytes") or status.get("total_bytes_estimate"),
-                 speed=status.get("speed"), eta=status.get("eta"),
-                 fragment=status.get("fragment_index"), fragments=status.get("fragment_count"))
-        elif status.get("status") == "finished":
-            emit("stage", stage="processing")
+        key = f"{index}:{status.get('filename')}"
+        total = status.get("total_bytes") or status.get("total_bytes_estimate")
+        parts[key] = [index, status.get("downloaded_bytes") or 0, total]
+        if status.get("status") == "finished":
+            parts[key][1] = total or parts[key][1]
+            return
+        if status.get("status") != "downloading":
+            return
+        now = time.monotonic()
+        if now - last[0] < PROGRESS_EVERY:
+            return
+        last[0] = now
+        mine = [p for p in parts.values() if p[0] == index]
+        done = sum(p[1] for p in mine)
+        seen = sum(p[2] or 0 for p in mine)
+        # The size the site said for both streams, else what each said once it started.
+        known = expected_size(info) or (seen if all(p[2] for p in mine) else None)
+        emit("progress", index=index, downloaded=int(done), total=int(max(known, seen)) if known else None,
+             speed=status.get("speed"), eta=status.get("eta"),
+             fragment=status.get("fragment_index"), fragments=status.get("fragment_count"))
 
     def postprocessing(status: dict) -> None:
         if status.get("status") == "started":
-            emit("stage", stage="processing")
+            emit("stage", stage="processing", step=status.get("postprocessor"))
 
     def add_lyrics(path: Path, info: dict) -> None:
         song = config.get("song") or {}
@@ -143,8 +163,9 @@ def main() -> int:
             path = Path(path)
             relative = os.path.relpath(path, work_dir)
             if options.lyrics:
-                emit("stage", stage="processing")
+                emit("stage", stage="processing", step="lyrics")
                 add_lyrics(path, info)
+            emit("stage", stage="processing", step="check")
             result = checks.check(path, info.get("duration"))
             if not result["ok"]:
                 emit("error", message=f"{info.get('title') or relative}: the file failed its check: "

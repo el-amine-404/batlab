@@ -37,8 +37,34 @@ export const STATUS: Record<Status, { label: string; variant: "accent" | "succes
 export const STAGE: Record<NonNullable<Job["stage"]>, string> = {
   starting: "Starting",
   downloading: "Downloading",
-  processing: "Finishing the file",
+  processing: "Working on the file",
   placing: "Moving it into place",
+};
+
+/**
+ * The parts of processing, by the name the download reports (yt-dlp's
+ * postprocessors, then videodrop's own): what is being done to the file.
+ */
+export const STEP: Record<string, string> = {
+  Merger: "Joining the picture and the sound",
+  FixupM3u8: "Repairing the file's container",
+  FixupStretched: "Repairing the picture's shape",
+  FixupDuplicateMoov: "Repairing the file's container",
+  FixupTimestamp: "Repairing the timing",
+  FixupDuration: "Repairing the length",
+  FFmpegMetadata: "Writing the title, artist and chapters",
+  FFmpegThumbnailsConvertor: "Preparing the cover",
+  EmbedThumbnail: "Putting the cover in",
+  FFmpegEmbedSubtitle: "Putting the subtitles in",
+  FFmpegSubtitlesConvertor: "Converting the subtitles",
+  FFmpegVideoRemuxer: "Changing the file type",
+  FFmpegVideoConvertor: "Converting the video",
+  FFmpegSplitChapters: "Splitting the chapters",
+  SponsorBlock: "Finding the segments to cut",
+  ModifyChapters: "Cutting segments",
+  MoveFiles: "Moving the file",
+  lyrics: "Looking up the lyrics",
+  check: "Checking the file (ffprobe)",
 };
 
 /** What a job is called before its title is known. */

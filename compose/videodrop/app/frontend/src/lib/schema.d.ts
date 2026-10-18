@@ -1360,6 +1360,16 @@ export interface components {
             /** Stage */
             stage?: ("starting" | "downloading" | "processing" | "placing") | null;
             /**
+             * Step
+             * @description Which part of processing: yt-dlp's postprocessor (Merger, FixupM3u8, FFmpegMetadata, EmbedThumbnail…), lyrics or check.
+             */
+            step?: string | null;
+            /**
+             * Step Since
+             * @description When this stage or step began.
+             */
+            step_since?: number | null;
+            /**
              * Percent
              * @description 0-100 of the whole job (a playlist's videos together); none while the size isn't known.
              */
