@@ -6,9 +6,12 @@ frame of the street, through the same YOLO model Frigate uses, on 9 squares
 of three sizes around the spots (from above the model finds a dark car next
 to another in some framings and not others; 9 together find it). A spot holds
 a car when a car's box covers CARWATCH_FILL of its zone (Frigate's zones,
-drawn around each parked car). A spot is told changed when 75% of the looks
-of the last CARWATCH_CONFIRM seconds say so: "car left" or "car arrived",
-with a close-up from the 4K stream and the street. Once the recording is
+drawn around each parked car). A car in an empty spot on two looks in a row
+is told at once, "car arrived", while it is still parking: a car driving past
+never covers that much of a spot. A spot is told empty, "car left", when 75%
+of the looks of the last CARWATCH_CONFIRM seconds say so: a van passing in
+front of a parked car for a moment changes nothing. Each with a close-up from
+the 4K stream and the street. Once the recording is
 written, a second message says which way the car went (or came from), from
 the path of the car Frigate followed near the spot then, and holds the clip,
 made small enough for Discord to play.
@@ -70,7 +73,7 @@ BEFORE, AFTER = 10, 15
 MODEL = os.environ.get("CARWATCH_MODEL", "/models/yolov9-s-320.onnx")
 MODEL_SIZE = 320
 CAR = 2  # COCO's car
-POLL = int(os.environ.get("CARWATCH_POLL", "3"))
+POLL = float(os.environ.get("CARWATCH_POLL", "2"))
 CONFIRM = int(os.environ.get("CARWATCH_CONFIRM", "12"))
 # OpenVINO's device for the model: the iGPU, else the CPU.
 DEVICE = os.environ.get("CARWATCH_DEVICE", "GPU")
@@ -349,12 +352,20 @@ class Watch:
             self.looks[spot] = looks
             if now - looks[0][0] < CONFIRM - 2 * POLL:
                 continue  # not enough looks yet
+            was = self.held.get(spot)
+            if was is False and len(looks) >= 2 and looks[-1][1] and looks[-2][1]:
+                # Arriving: told while it parks, not once it has.
+                self.held[spot] = True
+                # The looks from before say nothing of the spot now.
+                self.looks[spot] = looks[-2:]
+                self.tell(spot, SPOTS[spot], "arrived", None, looks[-2][0], box)
+                continue
             share = sum(l[1] for l in looks) / len(looks)
             state = True if share >= 0.75 else False if share <= 0.25 else None
-            was = self.held.get(spot)
             if state is None or state == was:
                 continue
             self.held[spot] = state
+            self.looks[spot] = [l for l in looks if l[1] == state]
             if was is None:
                 log(f"{SPOTS[spot]}: {'a car' if state else 'empty'} ({covered:.2f})")
                 continue

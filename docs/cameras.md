@@ -85,13 +85,16 @@ everything; Frigate is the alarm and the index.
   zone does not reach.
 - **carwatch** (`compose/frigate/carwatch`, in Frigate's image for its
   OpenVINO, OpenCV and ffmpeg) watches the two spots, not the cars: any car
-  in the Clio 4's or the Ford's spot counts. Every 3 s it runs Frigate's
+  in the Clio 4's or the Ford's spot counts. It runs Frigate's
   YOLO model on Frigate's latest frame, on 9 squares of three sizes around
   the spots, on the iGPU (0.3 s). One square is not enough: from above, a
   dark car beside another is found in some framings and missed in others. A
   spot holds a car when a car's box covers 40% of its zone
-  (`CARWATCH_FILL`); it is told changed when 75% of the looks of the last
-  12 s (`CARWATCH_CONFIRM`) say so, so stray misses change nothing. The
+  (`CARWATCH_FILL`). Looks are every 2 s. A car in an empty spot on two
+  looks in a row is told at once, while it parks (a car driving past never
+  covers that much). A spot is told empty when 75% of the looks of the last
+  12 s (`CARWATCH_CONFIRM`) say so, so a van passing in front of a parked
+  car, or a stray miss, changes nothing. The
   message ("Ford spot · car arrived", "Clio 4 spot · car left", with how
   long it was taken or empty) has a close-up from the 4K stream and the
   street; about 45 s later a second one says which way the car went ("went

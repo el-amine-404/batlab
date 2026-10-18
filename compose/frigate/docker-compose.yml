@@ -199,7 +199,7 @@ services:
       timeout: 5s
       start_period: 120s
       retries: 3
-    # The model on the iGPU, 9 crops every 3 s (0.3 s), and a 4K frame and a
+    # The model on the iGPU, 9 crops every 2 s (0.3 s), and a 4K frame and a
     # 4K clip re-encoded, a few times a day.
     devices:
       - /dev/dri:/dev/dri
