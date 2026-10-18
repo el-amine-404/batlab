@@ -12,6 +12,7 @@ from pathlib import Path
 
 # What ffprobe calls each container (format_name), by extension.
 CONTAINERS = {".mp4": "mp4", ".m4v": "mp4", ".mov": "mov", ".mkv": "matroska", ".webm": "webm"}
+AUDIO_NAMES = {"aac": "AAC", "opus": "Opus", "mp3": "MP3", "vorbis": "Vorbis", "flac": "FLAC", "ac3": "AC-3", "eac3": "E-AC-3"}
 # A file this much shorter than the video is cut off: seconds, or a share.
 SHORT_BY = (3.0, 0.02)
 
@@ -62,7 +63,8 @@ def check(path: Path, expected_duration: float | None) -> dict:
         v = video[0]
         parts.append(f"{(v.get('codec_name') or '?').upper()} {v.get('width')}×{v.get('height')}")
     if audio:
-        parts.append((audio[0].get("codec_name") or "?").capitalize())
+        name = audio[0].get("codec_name") or "?"
+        parts.append(AUDIO_NAMES.get(name, name.upper()))
     if duration:
         parts.append(f"{int(duration // 60)}:{int(duration % 60):02d}")
     # Sound missing is said, not refused: some videos have none.

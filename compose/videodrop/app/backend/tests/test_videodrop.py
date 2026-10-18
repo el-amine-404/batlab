@@ -118,6 +118,17 @@ class Lyrics(unittest.TestCase):
         srt = lyrics.to_srt("[ar: x]\n[00:01.50] First\n[00:04.00]\n[00:05.2] Second", end=7)
         self.assertEqual(srt, "1\n00:00:01,500 --> 00:00:04,000\nFirst\n\n2\n00:00:05,200 --> 00:00:07,000\nSecond\n")
 
+    def test_junk_lyrics_are_refused(self):
+        song = "\n".join(f"[{m:02d}:{s:02d}.00] line {m}{s}" for m in range(3) for s in (5, 25, 45))
+        cover = song.replace("line", "verse")
+        candidates = [{"syncedLyrics": "[00:00.00]probe", "duration": 213},  # on LRCLIB for a real song
+                      {"syncedLyrics": song, "duration": 400},  # another recording
+                      {"syncedLyrics": cover, "duration": 212},
+                      {"syncedLyrics": song, "duration": 214}, {"syncedLyrics": song, "duration": 211}]
+        self.assertEqual(lyrics.choose(candidates, 213), song)
+        self.assertIsNone(lyrics.choose(candidates[:1], 213))
+        self.assertFalse(lyrics.plausible(song, 600), "ends too early for a 10-minute video")
+
 
 @unittest.skipUnless(shutil.which("ffmpeg"), "needs ffmpeg")
 class FileChecks(unittest.TestCase):

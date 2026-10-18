@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, CircleCheck, CircleX, Loader2, Plus } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -28,14 +28,17 @@ function dropUnset<T extends object>(value: T): Partial<T> {
  * A link to download, where it goes and, when asked, how. The link is
  * checked as it is typed (instantly, without asking the site); once it is a
  * link videodrop takes, the site is read for a preview: what would be
- * downloaded, at what size, and where it would land.
+ * downloaded, at what size, and where it would land. /?url=<link> fills
+ * the link in.
  */
 export function NewDownload() {
   const navigate = useNavigate();
   const changed = useJobsChanged();
   const { data: settings } = useSettings();
   const { data: destinations } = useDestinations();
-  const [url, setUrl] = useState("");
+  // /?url=<link> opens with the link filled in (a bookmark, another app's link).
+  const [params] = useSearchParams();
+  const [url, setUrl] = useState(() => params.get("url") ?? "");
   const [chosen, setChosen] = useState<string | null>(null);
   const [options, setOptions] = useState<OptionsPatch>({});
   const [more, setMore] = useState(false);
