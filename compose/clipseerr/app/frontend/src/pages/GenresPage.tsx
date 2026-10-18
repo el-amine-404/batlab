@@ -37,14 +37,18 @@ export function GenresPage() {
                       <img src={category.image} alt="" loading="lazy" decoding="async"
                            className="absolute -right-4 -bottom-4 size-24 rotate-12 rounded-lg object-cover opacity-70 shadow-xl transition group-hover:rotate-6 sm:size-28" />
                     ) : (
-                      // No cover (Apple's genres, Hot): its top videos' pictures, fanned like one.
-                      category.images?.slice(0, 3).reverse().map((src, i, all) => (
-                        <img key={src} src={src} alt="" loading="lazy" decoding="async"
-                             style={{ right: `${-14 + (all.length - 1 - i) * 26}px`, transform: `rotate(${12 - (all.length - 1 - i) * 7}deg)` }}
-                             className="absolute -bottom-3 aspect-video w-24 rounded-md object-cover opacity-75 shadow-xl ring-1 ring-black/30 transition group-hover:opacity-90 sm:w-28" />
-                      ))
+                      // No cover (Apple's genres, Hot): its top videos' pictures, held like a hand of cards
+                      // that fans out on hover.
+                      <span className="fan absolute right-3 -bottom-5 h-16 w-28 sm:h-20 sm:w-32" aria-hidden>
+                        {category.images?.slice(0, 3).map((src, i, all) => (
+                          <img key={src} src={src} alt="" loading="lazy" decoding="async"
+                               style={{ "--i": i - (all.length - 1) / 2 } as React.CSSProperties} />
+                        ))}
+                      </span>
                     )}
-                    <span className="relative text-[15px] leading-tight font-semibold text-white drop-shadow">{category.title}</span>
+                    {/* The name stays legible over any picture. */}
+                    <span className="pointer-events-none absolute inset-0 bg-gradient-to-r from-black/55 via-black/15 to-transparent" aria-hidden />
+                    <span className="relative z-10 line-clamp-2 max-w-[58%] text-[15px] leading-tight font-semibold text-white [text-shadow:0_1px_6px_rgb(0_0_0/0.7)]">{category.title}</span>
                   </Link>
                 );
               })}

@@ -78,13 +78,20 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
-const query = (params: Record<string, string | number>) =>
-  new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString();
+/** A query string; what is unset or false is left out ("official" only when on). */
+const query = (params: Record<string, string | number | boolean | undefined>) =>
+  new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== false).map(([k, v]) => [k, String(v)])).toString();
 
 /** Videos a page of a shelf or a genre: two or three screens of cards. */
 export const PAGE = 48;
 export type TagSort = "seen" | "newest" | "views" | "title";
-export type Page = { limit?: number; offset?: number; source?: "youtube" | "apple" };
+export type Page = {
+  limit?: number;
+  offset?: number;
+  source?: "youtube" | "apple";
+  sort?: "default" | "newest" | "views" | "title";
+  official?: boolean;
+};
 
 /** Services and notifications have the same routes. */
 export type Family = "services" | "notifications" | "libraries";

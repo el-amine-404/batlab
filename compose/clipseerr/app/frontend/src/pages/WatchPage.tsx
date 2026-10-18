@@ -77,7 +77,10 @@ function Meta({ video }: { video: Video | VideoDetail }) {
  */
 function TheSong({ audio }: { audio: NonNullable<VideoDetail["audio"]> }) {
   const { data: album } = useAlbum(audio.album_id);
-  const number = album?.tracks.find((t) => t.youtube_id === audio.youtube_id)?.number;
+  // The song search and the album can list the same track under two ids: then its title finds it.
+  const plain = (text: string) => text.toLowerCase().replace(/\s*[([].*?[)\]]/g, "").replace(/[^\p{L}\p{N}]+/gu, "");
+  const number = (album?.tracks.find((t) => t.youtube_id === audio.youtube_id)
+    ?? album?.tracks.find((t) => plain(t.title) === plain(audio.title)))?.number;
   const single = album && album.tracks.length === 1;
   const albumLink = audio.album_id ? (
     <Link to={`/album/${audio.album_id}`} className="text-foreground/85 underline-offset-4 hover:text-rose-200 hover:underline">

@@ -6,7 +6,7 @@
 import { keepPreviousData, QueryClient, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { ACTIVE, api, errorText, type Family, type Kind, PAGE, type Request, type SearchResults, type Shelf, type TagSort } from "./api";
+import { ACTIVE, api, errorText, type Family, type Kind, PAGE, type Page, type Request, type SearchResults, type Shelf, type TagSort } from "./api";
 
 const MINUTE = 60_000;
 
@@ -46,11 +46,12 @@ export const useHome = () => useQuery({ queryKey: keys.home, queryFn: ({ signal 
  * asked for (useInfiniteList), and pages stay cached, so going back finds the
  * list as it was left.
  */
-export function useShelfPages(kind: "shelf" | "category", id: string, source?: "youtube" | "apple") {
+export function useShelfPages(kind: "shelf" | "category", id: string, source?: "youtube" | "apple", sort: Page["sort"] = "default") {
   return useInfiniteQuery({
-    queryKey: [kind, id, "pages", source ?? "all"] as const,
+    queryKey: [kind, id, "pages", source ?? "all", sort] as const,
     queryFn: ({ pageParam, signal }) =>
-      (kind === "shelf" ? api.shelf : api.category)(id, { limit: PAGE, offset: pageParam, ...(source && { source }) }, signal),
+      (kind === "shelf" ? api.shelf : api.category)(id, { limit: PAGE, offset: pageParam, sort, ...(source && { source }) }, signal),
+    placeholderData: keepPreviousData,
     initialPageParam: 0,
     getNextPageParam: (last: Shelf, pages: Shelf[]) => {
       const loaded = pages.reduce((sum, page) => sum + page.items.length, 0);
@@ -64,10 +65,10 @@ export const useReleases = (limit = 60) =>
 export const useCategories = () =>
   useQuery({ queryKey: keys.categories, queryFn: ({ signal }) => api.categories(signal), staleTime: 30 * MINUTE });
 /** A search, a page of videos at a time (the artists come with the first). */
-export const useSearch = (q: string) =>
+export const useSearch = (q: string, sort: Page["sort"] = "default", official = false) =>
   useInfiniteQuery({
-    queryKey: keys.search(q),
-    queryFn: ({ pageParam, signal }) => api.search(q, { limit: PAGE, offset: pageParam }, signal),
+    queryKey: [...keys.search(q), sort, official] as const,
+    queryFn: ({ pageParam, signal }) => api.search(q, { limit: PAGE, offset: pageParam, sort, official }, signal),
     initialPageParam: 0,
     getNextPageParam: (last: SearchResults, pages: SearchResults[]) => {
       const loaded = pages.reduce((sum, page) => sum + page.videos.length, 0);

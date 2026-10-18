@@ -1,8 +1,8 @@
-import { ArrowDownAZ, CalendarArrowDown, Flame } from "lucide-react";
+import { ArrowDownAZ, CalendarArrowDown, Disc3, Flame } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useParams } from "react-router";
 
-import { Failed } from "@/components/layout/States";
+import { Empty, Failed } from "@/components/layout/States";
 import { RailArrows, useRail } from "@/components/ui/rail";
 import { AlbumCard } from "@/components/video/AlbumCard";
 import { MoreLoader, useReveal } from "@/components/video/MoreLoader";
@@ -58,7 +58,13 @@ export function ArtistPage() {
         )}
         <div className="flex flex-col items-start gap-5 sm:flex-row sm:items-end">
           <div className="size-32 shrink-0 overflow-hidden rounded-full bg-secondary shadow-2xl ring-1 ring-white/15 sm:size-40">
-            {data?.thumbnail ? <img src={data.thumbnail} alt="" className="size-full object-cover" /> : <div className="skeleton size-full" />}
+            {data?.thumbnail ? <img src={data.thumbnail} alt="" className="size-full object-cover" />
+              : data ? (
+                // No picture on YouTube Music: the first letter, not a shimmer that looks like it is still loading.
+                <span className="flex size-full items-center justify-center text-5xl font-semibold text-muted-foreground">
+                  {data.name.trim().charAt(0).toUpperCase()}
+                </span>
+              ) : <div className="skeleton size-full" />}
           </div>
           <div className="min-w-0">
             <p className="mb-1 text-xs font-medium tracking-wider text-rose-300/90 uppercase">Artist</p>
@@ -98,7 +104,14 @@ export function ArtistPage() {
           </div>
         </div>
       </div>
-      {isPending ? <GridSkeleton /> : (
+      {isPending ? <GridSkeleton /> : !data?.videos.length && !data?.albums?.length ? (
+        <Empty icon={<Disc3 />} title="Nothing by them on YouTube Music">
+          This channel has no videos or songs YouTube Music lists yet (an artist's auto-made "Topic" channel can be empty).{" "}
+          <a href={`https://www.youtube.com/channel/${id}`} target="_blank" rel="noreferrer" className="text-rose-300 hover:underline">YouTube</a>
+          {" · "}
+          <a href={`https://music.youtube.com/channel/${id}`} target="_blank" rel="noreferrer" className="text-rose-300 hover:underline">YouTube Music</a>
+        </Empty>
+      ) : (
         <>
           <VideoGrid videos={videos.slice(0, reveal.count)} />
           <MoreLoader shown={reveal.count} total={videos.length} hasMore={reveal.hasMore} loading={false} load={reveal.more} />

@@ -2081,6 +2081,8 @@ export interface operations {
                 offset?: number;
                 /** @description Only the videos from YouTube, or from Apple Music. */
                 source?: ("youtube" | "apple") | null;
+                /** @description The list's own order (a chart's rank, YouTube's relevance), newest out, most viewed, or A to Z. */
+                sort?: "default" | "newest" | "views" | "title";
             };
             header?: never;
             path: {
@@ -2175,6 +2177,8 @@ export interface operations {
                 offset?: number;
                 /** @description Only the videos from YouTube, or from Apple Music. */
                 source?: ("youtube" | "apple") | null;
+                /** @description The list's own order (a chart's rank, YouTube's relevance), newest out, most viewed, or A to Z. */
+                sort?: "default" | "newest" | "views" | "title";
             };
             header?: never;
             path: {
@@ -2231,6 +2235,10 @@ export interface operations {
                 limit?: number;
                 /** @description Videos to skip: the next page starts at offset + limit, until total. */
                 offset?: number;
+                /** @description The list's own order (a chart's rank, YouTube's relevance), newest out, most viewed, or A to Z. */
+                sort?: "default" | "newest" | "views" | "title";
+                /** @description Only the artists' own videos, no fan uploads. */
+                official?: boolean;
             };
             header?: never;
             path?: never;

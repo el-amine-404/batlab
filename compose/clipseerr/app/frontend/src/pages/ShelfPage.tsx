@@ -1,6 +1,7 @@
-import { Link, useParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 
 import { Failed, Loading, PageHeader } from "@/components/layout/States";
+import { listSorts, type ListSort, SortControl } from "@/components/ui/sort";
 import { MoreLoader, useReveal } from "@/components/video/MoreLoader";
 import { shelfIcon } from "@/components/video/ShelfRow";
 import { Updated } from "@/components/video/Updated";
@@ -73,8 +74,35 @@ function TitleWithIcon({ shelf }: { shelf: { id: string; title: string } }) {
 }
 
 /** A shelf of the front page, or a genre: every video of it, as a grid that loads a page at a time. */
-function ShelfScreen({ query, eyebrow, extra }: { query: ReturnType<typeof useShelfPages>; eyebrow: string; extra?: React.ReactNode }) {
-  const { data, error, refetch, isPending, fetchNextPage, hasNextPage, isFetchingNextPage, isFetchNextPageError } = query;
+/** The list's order, kept in the address (?sort=newest) so a link opens the same list. */
+function useSort(): [ListSort, (next: ListSort) => void] {
+  const [params, setParams] = useSearchParams();
+  const sort = (params.get("sort") ?? "default") as ListSort;
+  return [sort, (next) => {
+    const query = new URLSearchParams(params);
+    if (next === "default") query.delete("sort");
+    else query.set("sort", next);
+    setParams(query, { replace: true });
+  }];
+}
+
+/** What a list's own order is, by the list. */
+function ownOrder(id: string): string {
+  if (id === "hot" || id === "releases" || id === "yt-new") return "Newest first, as the list has them";
+  if (id.startsWith("am")) return "As Apple Music's chart ranks them";
+  return "As the chart ranks them";
+}
+
+function ShelfScreen({ id, query, eyebrow, extra, sort, onSort }: {
+  id: string;
+  query: ReturnType<typeof useShelfPages>;
+  eyebrow: string;
+  extra?: React.ReactNode;
+  sort: ListSort;
+  onSort: (next: ListSort) => void;
+}) {
+  const { data, error, refetch, isPending, isFetching, isPlaceholderData, fetchNextPage, hasNextPage, isFetchingNextPage,
+          isFetchNextPageError } = query;
   if (error && !data) return <Failed error={error} retry={() => void refetch()} />;
   const first = data?.pages[0];
   const items = data?.pages.flatMap((page) => page.items) ?? [];
@@ -94,12 +122,17 @@ function ShelfScreen({ query, eyebrow, extra }: { query: ReturnType<typeof useSh
         ) : " "}
       />
       {extra}
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold tracking-tight">Videos</h2>
+        <SortControl options={listSorts(ownOrder(id))} value={sort} onChange={onSort} />
+      </div>
       {isPending ? <GridSkeleton /> : (
-        <>
+        // The last order stays in sight, dimmed, while the new one comes.
+        <div className={isFetching && isPlaceholderData ? "opacity-60 transition-opacity" : "transition-opacity"}>
           <VideoGrid videos={items} />
           <MoreLoader shown={items.length} total={total} hasMore={!!hasNextPage} loading={isFetchingNextPage}
                       failed={isFetchNextPageError} load={() => void fetchNextPage()} />
-        </>
+        </div>
       )}
     </>
   );
@@ -107,11 +140,13 @@ function ShelfScreen({ query, eyebrow, extra }: { query: ReturnType<typeof useSh
 
 export function ShelfPage() {
   const { id = "" } = useParams();
-  return <ShelfScreen query={useShelfPages("shelf", id)} eyebrow="Discover" />;
+  const [sort, setSort] = useSort();
+  return <ShelfScreen id={id} query={useShelfPages("shelf", id, undefined, sort)} eyebrow="Discover" sort={sort} onSort={setSort} />;
 }
 
 export function GenrePage() {
   const { id = "" } = useParams();
-  return <ShelfScreen query={useShelfPages("category", id)} eyebrow={id === "hot" ? "Category" : "Genre"}
-                      extra={id === "hot" ? <HotArtists /> : undefined} />;
+  const [sort, setSort] = useSort();
+  return <ShelfScreen id={id} query={useShelfPages("category", id, undefined, sort)} eyebrow={id === "hot" ? "Category" : "Genre"}
+                      extra={id === "hot" ? <HotArtists /> : undefined} sort={sort} onSort={setSort} />;
 }

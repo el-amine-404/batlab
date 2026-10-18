@@ -135,8 +135,23 @@ class Pages(unittest.TestCase):
         shelf = Shelf(id="s", title="S", source="youtube", items=[_video(f"v{i}", explicit=i % 2 == 0)
                                                                     for i in range(10)], total=10)
         with mock.patch.object(routes, "settings", lambda: {"hide_explicit": True}):
-            page = routes._page(shelf, limit=3, offset=3)
+            page = asyncio.run(routes._page(shelf, limit=3, offset=3))
         self.assertEqual((page.total, [v.title for v in page.items]), (5, ["v7", "v9"]))
+
+
+class Sorting(unittest.TestCase):
+    def test_a_list_sorts_whole_before_its_pages(self):
+        os.environ.setdefault("CLIPSEERR_STATE", tempfile.mkdtemp())
+        import importlib
+
+        routes = importlib.import_module("app.routes.catalog")
+        videos = [_video("b"), _video("C"), _video("a")]
+        for video, views in zip(videos, ("2.1K", "1.2M", None)):
+            video.views = views
+        self.assertEqual([v.title for v in asyncio.run(routes._sorted(videos, "title"))], ["a", "b", "C"])
+        # Most viewed first; a count YouTube didn't give, last.
+        self.assertEqual([v.title for v in asyncio.run(routes._sorted(videos, "views"))], ["C", "b", "a"])
+        self.assertEqual([v.title for v in asyncio.run(routes._sorted(videos, "default"))], ["b", "C", "a"])
 
 
 class HotFeeds(unittest.TestCase):

@@ -22,11 +22,35 @@ def _clean(items: list) -> list:
     return [v for v in items if not v.explicit] if settings()["hide_explicit"] else items
 
 
-def _page(shelf: Shelf, limit: int, offset: int, source: str | None = None) -> Shelf:
+Sort = Literal["default", "newest", "views", "title"]
+_SORT = Query("default", description="The list's own order (a chart's rank, YouTube's relevance), newest out, "
+                                     "most viewed, or A to Z.")
+
+
+def _views(views: str | None) -> float:
+    """ "1.2M" → 1200000; an unknown count last."""
+    found = re.fullmatch(r"([\d.]+)([KMB]?)", (views or "").replace(",", ""))
+    return float(found[1]) * {"": 1, "K": 1e3, "M": 1e6, "B": 1e9}[found[2]] if found else -1
+
+
+async def _sorted(items: list, sort: Sort) -> list:
+    """The whole list in the order asked, before it is cut into pages."""
+    if sort == "newest":
+        await catalog.fill_released(items)
+        return sorted(items, key=lambda v: v.released or "", reverse=True)
+    if sort == "views":
+        catalog.known_views(items)
+        return sorted(items, key=lambda v: _views(v.views), reverse=True)
+    if sort == "title":
+        return sorted(items, key=lambda v: v.title.casefold())
+    return items
+
+
+async def _page(shelf: Shelf, limit: int, offset: int, source: str | None = None, sort: Sort = "default") -> Shelf:
     """One page of a shelf; total counts all of it (after _clean, and of one
-    source when asked)."""
+    source when asked), sorted first when asked."""
     known.saw(shelf.items, list_id=shelf.id)
-    items = [v for v in _clean(shelf.items) if not source or v.source == source]
+    items = await _sorted([v for v in _clean(shelf.items) if not source or v.source == source], sort)
     shelf.total = len(items)
     shelf.items = items[offset:offset + limit]
     library.mark(shelf.items)
@@ -54,11 +78,11 @@ async def home():
 @router.get("/shelves/{shelf_id}", summary="One shelf, a page at a time; \"releases\": what came out lately "
             "and what is coming, newest first", response_model=Shelf, responses=_404)
 async def shelf(shelf_id: str, limit: int = _LIMIT, offset: int = _OFFSET,
-                source: Literal["youtube", "apple"] | None = _SOURCE):
+                source: Literal["youtube", "apple"] | None = _SOURCE, sort: Sort = _SORT):
     with tracking() as reads:
         found = await catalog.shelf(shelf_id)
     found.updated_at = min(reads, default=None)
-    return _page(found, limit, offset, source)
+    return await _page(found, limit, offset, source, sort)
 
 
 @router.get("/categories", summary="Genres to browse, by source", response_model=list[CategoryGroup],
@@ -70,19 +94,20 @@ async def categories():
 @router.get("/categories/{category_id}", summary="The videos of a genre, a page at a time", response_model=Shelf,
             responses=_404)
 async def category(category_id: str, limit: int = _LIMIT, offset: int = _OFFSET,
-                   source: Literal["youtube", "apple"] | None = _SOURCE):
+                   source: Literal["youtube", "apple"] | None = _SOURCE, sort: Sort = _SORT):
     with tracking() as reads:
         found = await catalog.category(category_id)
     found.updated_at = min(reads, default=None)
-    return _page(found, limit, offset, source)
+    return await _page(found, limit, offset, source, sort)
 
 
 @router.get("/search", summary="Videos and artists by name", response_model=SearchResults, responses=_404)
 async def search(q: str = Query("", max_length=200, description="Words of the title or the artist."),
-                 limit: int = _LIMIT, offset: int = _OFFSET):
+                 limit: int = _LIMIT, offset: int = _OFFSET, sort: Sort = _SORT,
+                 official: bool = Query(False, description="Only the artists' own videos, no fan uploads.")):
     found = await catalog.search(q)
     known.saw(found.videos, found.artists, list_id=f"search:{q.casefold()}")
-    found.videos = _clean(found.videos)
+    found.videos = await _sorted([v for v in _clean(found.videos) if v.official or not official], sort)
     found.total, found.offset = len(found.videos), offset
     found.videos = found.videos[offset:offset + limit]
     library.mark(found.videos)

@@ -377,8 +377,19 @@ class Catalog:
         key = query.casefold()
 
         async def fetch():
-            videos, artists = await asyncio.gather(youtube.search_videos(region, query, limit=SEARCH_VIDEOS),
-                                                   youtube.search_artists(region, query))
+            videos, artists, official = await asyncio.gather(
+                youtube.search_videos(region, query, limit=SEARCH_VIDEOS), youtube.search_artists(region, query),
+                # YouTube Music ranks a word like "twerk" by its own measure and
+                # buries official videos past its first hundred: asked again
+                # for official videos, their official ones come after.
+                youtube.search_videos(region, f"{query} official video", limit=SEARCH_VIDEOS),
+                return_exceptions=True)
+            if isinstance(videos, Exception):
+                raise videos
+            artists = [] if isinstance(artists, Exception) else artists
+            seen = {v.id for v in videos}
+            if not isinstance(official, Exception):
+                videos += [v for v in official if v.official and v.id not in seen]
             # A search for an artist's name: their own videos first (YouTube's
             # video search favours fan uploads and live clips).
             named = next((a for a in artists[:2] if match.titles.simple(a.name) == match.titles.simple(query)), None)
@@ -392,7 +403,7 @@ class Catalog:
             return {"query": query, "videos": [v.model_dump() for v in videos],
                     "artists": [a.model_dump() for a in artists]}
 
-        found = SearchResults.model_validate(await self._get("youtube", f"yt:search2:{region}:{key}", fetch,
+        found = SearchResults.model_validate(await self._get("youtube", f"yt:search3:{region}:{key}", fetch,
                                                              fresh=30 * MIN, stale=DAY))
         found.total = len(found.videos)
         return found
@@ -606,6 +617,14 @@ class Catalog:
                 if facts[1]:
                     answer["released"][youtube_id] = facts[1]
         return answer
+
+    async def fill_released(self, videos: list[Video]) -> None:
+        """The day each came out, where its list didn't say (YouTube's, cached a year): for sorting by newest."""
+        missing = [v for v in videos if not v.released and v.youtube_id]
+        days = await asyncio.gather(*(self._published(v.youtube_id) for v in missing), return_exceptions=True)
+        for video, day in zip(missing, days):
+            if isinstance(day, str):
+                video.released = day
 
     def known_views(self, videos: list[Video]) -> None:
         """Fills in the views and days already looked up, without asking YouTube."""

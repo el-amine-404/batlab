@@ -4,6 +4,7 @@ import { Link, useSearchParams } from "react-router";
 
 import { Empty, Failed, PageHeader } from "@/components/layout/States";
 import { RailArrows, useRail } from "@/components/ui/rail";
+import { listSorts, type ListSort, SortControl } from "@/components/ui/sort";
 import { Switch } from "@/components/ui/switch";
 import { MoreLoader } from "@/components/video/MoreLoader";
 import { GridSkeleton, VideoGrid } from "@/components/video/VideoGrid";
@@ -30,6 +31,8 @@ export function ArtistBubble({ artist, note }: { artist: ArtistSummary; note?: s
     </Link>
   );
 }
+
+const SEARCH_SORTS = listSorts("Most relevant, as YouTube Music ranks them");
 
 /** A row of artists that scrolls sideways, with arrows on wide screens. */
 export function ArtistRail({ title, count, artists, notes, action }: {
@@ -75,24 +78,15 @@ function merged(full: SearchResults, quick?: SearchResults): SearchResults {
 const any = (found?: SearchResults) => !!found && (found.videos.length > 0 || found.artists.length > 0);
 
 export function SearchPage() {
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const q = (params.get("q") ?? "").trim();
-  const full = useSearch(q);
-  const quick = useQuickSearch(q);
-  // Every page loaded so far, as one answer; clipseerr's own extras only after YouTube's last page.
-  const pages = full.data?.pages ?? [];
-  const joined: SearchResults | undefined = pages.length
-    ? { ...pages[0], videos: pages.flatMap((page) => page.videos), total: pages[pages.length - 1].total }
-    : undefined;
-  const fullNow = full.isPlaceholderData ? undefined : joined;
-  const quickNow = quick.isPlaceholderData ? undefined : quick.data;
-  // This search's full answer (with the index's extras); else the index's, at once; else the last search's, dimmed.
-  const data = fullNow ? (full.hasNextPage ? fullNow : merged(fullNow, quickNow)) : any(quickNow) ? quickNow : (joined ?? quick.data);
-  const early = !fullNow && any(quickNow);
-  const { error, refetch } = full;
-  const isFetching = !early && (full.isFetching || quick.isFetching);
-  // The index found nothing yet: wait for YouTube Music before saying "Nothing found".
-  const isPending = !data || (!fullNow && !early && !full.isPlaceholderData && full.isFetching);
+  const sort = (params.get("sort") ?? "default") as ListSort;
+  const setSort = (next: ListSort) => {
+    const query = new URLSearchParams(params);
+    if (next === "default") query.delete("sort");
+    else query.set("sort", next);
+    setParams(query, { replace: true });
+  };
   const [officialOnly, setOfficialOnly] = useState(() => localStorage.getItem("official-only") === "1");
   const toggleOfficial = (on: boolean) => {
     setOfficialOnly(on);
@@ -102,6 +96,26 @@ export function SearchPage() {
       // private window: the choice lasts this visit
     }
   };
+  // Sorted and filtered by the server, over every result: the count follows.
+  const full = useSearch(q, sort, officialOnly);
+  const quick = useQuickSearch(q);
+  // Every page loaded so far, as one answer; clipseerr's own extras only after YouTube's last page.
+  const pages = full.data?.pages ?? [];
+  const joined: SearchResults | undefined = pages.length
+    ? { ...pages[0], videos: pages.flatMap((page) => page.videos), total: pages[pages.length - 1].total }
+    : undefined;
+  const fullNow = full.isPlaceholderData ? undefined : joined;
+  const quickNow = quick.isPlaceholderData ? undefined : quick.data;
+  // This search's full answer (with the index's extras); else the index's, at once; else the last search's, dimmed.
+  // clipseerr's own extras join YouTube's order only, at its end.
+  const data = fullNow ? (full.hasNextPage || sort !== "default" ? fullNow : merged(fullNow, quickNow))
+    : any(quickNow) ? quickNow : (joined ?? quick.data);
+  const early = !fullNow && any(quickNow);
+  const { error, refetch } = full;
+  const isFetching = !early && (full.isFetching || quick.isFetching);
+  // The index found nothing yet: wait for YouTube Music before saying "Nothing found".
+  const isPending = !data || (!fullNow && !early && !full.isPlaceholderData && full.isFetching);
+  // The server filters its own; clipseerr's quick extras are filtered here.
   const videos = (data?.videos ?? []).filter((v) => !officialOnly || v.official);
 
   if (!q) {
@@ -140,11 +154,14 @@ export function SearchPage() {
             <section>
               <div className="mb-3 flex items-center justify-between gap-4">
                 <h2 className="text-lg font-semibold tracking-tight">
-                  Videos <span className="text-sm font-normal text-muted-foreground">· {Math.max(data.total ?? 0, data.videos.length)}</span>
+                  Videos <span className="text-sm font-normal text-muted-foreground">· {Math.max(data.total ?? 0, videos.length)}</span>
                 </h2>
-                <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                  Official only <Switch checked={officialOnly} onCheckedChange={toggleOfficial} />
-                </label>
+                <div className="flex items-center gap-4">
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                    Official only <Switch checked={officialOnly} onCheckedChange={toggleOfficial} />
+                  </label>
+                  <SortControl options={SEARCH_SORTS} value={sort} onChange={setSort} />
+                </div>
               </div>
               {videos.length ? <VideoGrid videos={videos} /> : (
                 <p className="py-10 text-center text-sm text-muted-foreground">No official video among these. Turn “Official only” off to see the rest.</p>

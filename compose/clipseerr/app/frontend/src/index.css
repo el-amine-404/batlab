@@ -139,6 +139,27 @@
   }
 }
 
+/* A genre's top pictures as a hand of cards (GenresPage): fanned a little at
+   rest, spread apart when the tile is hovered or focused. --i is -1, 0, 1. */
+.fan > img {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  width: 78%;
+  aspect-ratio: 16 / 9;
+  margin-left: -39%;
+  object-fit: cover;
+  border-radius: 0.375rem;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.45);
+  outline: 1px solid rgb(0 0 0 / 0.3);
+  transform-origin: 50% 140%;
+  transform: translateX(calc(var(--i) * 14px)) rotate(calc(var(--i) * 6deg));
+  transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.group:is(:hover, :focus-visible) .fan > img {
+  transform: translateX(calc(var(--i) * 30px)) translateY(-6px) rotate(calc(var(--i) * 13deg));
+}
+
 /* Placeholder shimmer while a list loads. */
 .skeleton {
   background: linear-gradient(90deg, oklch(1 0 0 / 0.04), oklch(1 0 0 / 0.09), oklch(1 0 0 / 0.04));
