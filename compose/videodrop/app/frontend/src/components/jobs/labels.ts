@@ -43,9 +43,10 @@ export const STAGE: Record<NonNullable<Job["stage"]>, string> = {
 
 /**
  * The parts of processing, by the name the download reports (yt-dlp's
- * postprocessors, then videodrop's own): what is being done to the file.
+ * postprocessors, named without "FFmpeg"; then videodrop's own): what is
+ * being done to the file.
  */
-export const STEP: Record<string, string> = {
+const STEPS: Record<string, string> = {
   Merger: "Joining the picture and the sound",
   FixupM3u8: "Repairing the file's container",
   FixupStretched: "Repairing the picture's shape",
@@ -65,6 +66,10 @@ export const STEP: Record<string, string> = {
   MoveFiles: "Moving the file",
   lyrics: "Looking up the lyrics",
   check: "Checking the file (ffprobe)",
+};
+export const STEP: Record<string, string> = {
+  ...STEPS,
+  ...Object.fromEntries(Object.entries(STEPS).filter(([key]) => key.startsWith("FFmpeg")).map(([key, text]) => [key.slice(6), text])),
 };
 
 /** What a job is called before its title is known. */
