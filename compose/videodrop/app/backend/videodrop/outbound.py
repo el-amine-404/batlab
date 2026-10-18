@@ -20,7 +20,9 @@ def client() -> httpx.AsyncClient:
 
 
 def host(url: str) -> str:
-    return urllib.parse.urlsplit(url).netloc or url
+    """Where it goes, without the name and password it may carry."""
+    parts = urllib.parse.urlsplit(url)
+    return (parts.hostname or "?") + (f":{parts.port}" if parts.port else "") if parts.netloc else url
 
 
 async def call(http: httpx.AsyncClient, method: str, url: str, **kwargs) -> httpx.Response:

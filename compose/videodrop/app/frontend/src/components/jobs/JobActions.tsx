@@ -9,7 +9,8 @@ import { cn } from "@/lib/utils";
 
 /**
  * What can be done with a job now, in the order it is most wanted: play it,
- * get its file, stop it, try it again, forget it. compact: icons only (the
+ * get its file, stop it, try it again (or download it again once its files
+ * are gone), forget it. compact: icons only (the
  * list); else labelled, play first and plain to see (a job's page).
  */
 export function JobActions({ job, compact = false, className }: { job: Job; compact?: boolean; className?: string }) {
@@ -24,6 +25,8 @@ export function JobActions({ job, compact = false, className }: { job: Job; comp
     changed();
   };
   const video = job.files.find((file) => file.kind === "video" && file.available);
+  // Its files removed after their hold (or moved away): the same job downloads them again.
+  const gone = job.status === "finished" && job.files.length > 0 && job.files.every((file) => !file.available);
   const size = compact ? "icon-sm" : "sm";
   return (
     <div className={cn("flex shrink-0 flex-wrap items-center gap-1", !compact && "gap-2", className)}>
@@ -45,6 +48,12 @@ export function JobActions({ job, compact = false, className }: { job: Job; comp
       {(job.status === "failed" || job.status === "cancelled") && (
         <Button variant={compact ? "ghost" : "default"} size={size} title="Try again" aria-label="Try again" onClick={() => void run(() => api.retryJob(job.id), "Queued again")}>
           <RotateCcw />{!compact && "Try again"}
+        </Button>
+      )}
+      {gone && (
+        <Button variant={compact ? "ghost" : "default"} size={size} title="Its files are gone: download it again" aria-label="Download it again"
+                onClick={() => void run(() => api.retryJob(job.id), "Queued again")}>
+          <RotateCcw />{!compact && "Download again"}
         </Button>
       )}
       {(job.status === "finished" || job.status === "failed" || job.status === "cancelled") && (

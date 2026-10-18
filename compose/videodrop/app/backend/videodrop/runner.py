@@ -6,7 +6,7 @@ stdin: one line, a JSON object {"url", "work_dir", "options", "output",
 "section", "rate_limit", "max_filesize", "cookies", "deno", "song"}; later, one more line
 answering the fingerprint event: {"reuse": <an earlier job's id> or null}.
 stdout: events, one JSON object a line (EVENTS); anything else the process
-prints goes to stderr, the container's log. Exit 0 when at least one file was
+prints goes to stderr, which the server keeps in the job's log. Exit 0 when at least one file was
 made or an earlier one reused, 1 otherwise.
 
 A video (not a playlist) is read first without downloading: its fingerprint
@@ -40,9 +40,10 @@ from pathlib import Path
 #   reused    {job}                                                      an earlier job's file is the same: done
 #   file      {path, checks}                                             a finished file, relative to work_dir, checked
 #   note      {message}                                                  beside the download: lyrics found or not
+#   log       {level, message}                                           what yt-dlp says as it goes (the job's log)
 #   warning   {message}
 #   error     {message}                                                  a video failed (the job may go on)
-EVENTS = ("item", "progress", "stage", "step", "fingerprint", "reused", "file", "note", "warning", "error")
+EVENTS = ("item", "progress", "stage", "step", "fingerprint", "reused", "file", "note", "log", "warning", "error")
 PROGRESS_EVERY = 0.5
 STEP_EVERY = 1.0
 # Files that aren't the video while it is worked on.
@@ -145,20 +146,22 @@ def main() -> int:
     last = [0.0]
 
     class Logger:
+        """yt-dlp's lines, for the job's log (its own [debug] lines only when asked for: they are many)."""
+
         def debug(self, message):
-            pass
+            if message.startswith("[debug] "):
+                return
+            emit("log", level="info", message=message[:2000])
 
         def info(self, message):
-            pass
+            emit("log", level="info", message=message[:2000])
 
         def warning(self, message):
-            print(f"WARNING: {message}", file=sys.stderr, flush=True)
-            emit("warning", message=message[:500])
+            emit("warning", message=message[:2000])
 
         def error(self, message):
-            print(message, file=sys.stderr, flush=True)
             errors.append(message)
-            emit("error", message=message[:1000])
+            emit("error", message=message[:2000])
 
     def item(info: dict) -> int:
         """The video's index in the job; an item event the first time."""

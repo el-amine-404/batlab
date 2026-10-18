@@ -9,6 +9,10 @@ again later, waiting longer each time, up to the settings' retries; then it
 has failed (job.failed). Nothing starts while the media disk is fuller than
 min_free_gb (disk.low, once). A process silent for STALLED is stopped.
 
+Each job's log (journal.py) says what happened to it: each try, what
+yt-dlp said and what the process printed besides, the fingerprint, each
+step and how long it took, where its files went.
+
 It never stops: a job going wrong is logged and the others go on."""
 
 import asyncio
@@ -28,6 +32,7 @@ from .callbacks import Callbacks
 from .config import Config
 from .events import Event
 from .jobs import JobStore
+from .journal import Journal
 from .loops import call_on
 from .options import Section, to_output_template
 from .settings import Settings
@@ -43,6 +48,8 @@ STOP_GRACE = 10
 MAX_BACKOFF = 6 * 3600
 # What a runner may print on one line (a long error with a URL in it).
 LINE_LIMIT = 1 << 20
+# Lines of a run's log from its process (yt-dlp's, and what it printed besides), at most.
+LOGGED_LINES = 1500
 
 # Failures that may pass: tried again later.
 TRANSIENT = re.compile(
@@ -72,6 +79,13 @@ class Run:
     saved_at: float = 0.0
     published_at: float = 0.0
     called_at: float = 0.0
+    began: float = field(default_factory=time.monotonic)
+    # The stage or step going on, and since when (monotonic): its time is logged when the next begins.
+    doing: str | None = None
+    doing_since: float = 0.0
+    logged: int = 0
+    # The last lines the process printed besides its events (a crash's traceback).
+    printed: list[str] = field(default_factory=list)
 
 
 def _number(value) -> float | None:
@@ -91,6 +105,15 @@ def section_of(row) -> Section | None:
     return Section(start=start, end=end)
 
 
+def _size(count: float | None) -> str:
+    if not count:
+        return "?"
+    for unit, scale in (("GB", 1e9), ("MB", 1e6), ("kB", 1e3)):
+        if count >= scale:
+            return f"{count / scale:.1f} {unit}"
+    return f"{int(count)} B"
+
+
 def backoff(attempt: int) -> float:
     """1 min, 5 min, 25 min…, 6 h at most."""
     return min(MAX_BACKOFF, 60 * 5 ** max(0, attempt - 1))
@@ -98,13 +121,15 @@ def backoff(attempt: int) -> float:
 
 class Scheduler:
     def __init__(self, config: Config, jobs: JobStore, settings: Callable[[], Settings],
-                 emit: Callable[[Event], None], callbacks: Callbacks, publish: Callable[[str], None]):
+                 emit: Callable[[Event], None], callbacks: Callbacks, publish: Callable[[str], None],
+                 journal: Journal):
         self._config = config
         self._jobs = jobs
         self._settings = settings
         self._emit = emit
         self._callbacks = callbacks
         self._publish = publish
+        self._journal = journal
         self._runs: dict[str, Run] = {}
         self._wake = asyncio.Event()
         self._task: asyncio.Task | None = None
@@ -139,10 +164,12 @@ class Scheduler:
         row = self._jobs.row(job_id)
         if row["status"] == "queued":
             self._jobs.update(job_id, status="cancelled", stage=None, retry_at=None, finished_at=time.time())
+            self._journal.add(job_id, "Cancelled before it started.")
             self._tell(job_id, "cancelled")
         elif row["status"] == "running" and job_id in self._runs:
             run = self._runs[job_id]
             run.cancelled = True
+            self._journal.add(job_id, "Cancel asked: its process is stopped.")
             self._stop(run)
 
     # ---- the loop -----------------------------------------------------------------------------
@@ -227,6 +254,8 @@ class Scheduler:
             await asyncio.to_thread(placement.clear, work)
             work.mkdir(parents=True)
             settings = self._settings()
+            self._journal.add(job_id, f"Try {row['attempts']} of {settings.retries + 1} starts"
+                                      f"{' (it was waiting for a retry)' if row['error'] else ''}.")
             request = {
                 "url": row["url"],
                 "work_dir": str(work),
@@ -239,15 +268,23 @@ class Scheduler:
                 "deno": self._config.deno,
                 "song": json.loads(row["song"]) if row["song"] else None,
             }
+            limits = [f"rate limit {settings.rate_limit_mib} MiB/s" if settings.rate_limit_mib else None,
+                      f"files up to {settings.max_filesize_gb} GB" if settings.max_filesize_gb else None,
+                      "with the saved YouTube cookies" if request["cookies"] else None]
+            self._journal.add(job_id, "Its process starts: yt-dlp, output " + request["output"]
+                              + "".join(f", {limit}" for limit in limits if limit) + ".", "debug")
             await self._follow(run, work, request)
             await self._end(run, row, work)
         except Exception as exc:
             log.exception("download %s", job_id)
+            self._journal.add(job_id, f"videodrop failed while running it: {exc.__class__.__name__}: {exc}", "error")
             run.errors.append(f"videodrop failed: {exc.__class__.__name__}.")
             with suppress(Exception):
                 self._finish(run, self._jobs.row(job_id), [])
         finally:
             self._runs.pop(job_id, None)
+            with suppress(Exception):
+                self._journal.trim(job_id)
             await asyncio.to_thread(placement.clear, work)
             self.wake()
 
@@ -256,8 +293,9 @@ class Scheduler:
         env = {**os.environ, "PYTHONUNBUFFERED": "1", "HOME": str(work), "XDG_CACHE_HOME": str(work / ".cache"),
                "DENO_DIR": str(work / ".deno")}
         run.process = await asyncio.create_subprocess_exec(
-            *self._config.runner, stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE, cwd=work, env=env, start_new_session=True, limit=LINE_LIMIT)
+            *self._config.runner, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE, cwd=work, env=env, start_new_session=True, limit=LINE_LIMIT)
+        printed = asyncio.get_running_loop().create_task(self._read_printed(run))
         # Open until the process ends: it asks once more (the fingerprint).
         run.process.stdin.write(json.dumps(request).encode() + b"\n")
         await run.process.stdin.drain()
@@ -266,6 +304,7 @@ class Scheduler:
                 line = await asyncio.wait_for(run.process.stdout.readline(), STALLED)
             except TimeoutError:
                 run.errors.append(f"The download stalled: nothing happened for {STALLED // 60} minutes.")
+                self._journal.add(run.job_id, run.errors[-1] + " Its process is stopped.", "error")
                 self._stop(run)
                 break
             except ValueError:  # a line over LINE_LIMIT
@@ -281,7 +320,39 @@ class Scheduler:
             self._on_event(run, event)
         with suppress(Exception):
             run.process.stdin.close()
-        await run.process.wait()
+        code = await run.process.wait()
+        with suppress(TimeoutError):
+            await asyncio.wait_for(printed, 5)
+        self._journal.add(run.job_id, f"Its process ended (exit {code}) after "
+                                      f"{time.monotonic() - run.began:.1f} s.", "debug" if code == 0 else "info")
+        if code not in (0, 1) and not run.cancelled and not run.stopping:
+            # Not a download failing (1): the process itself did.
+            log.warning("download %s: its process ended with %s; it printed: %s", run.job_id, code,
+                        " | ".join(run.printed[-5:]) or "nothing")
+
+    async def _read_printed(self, run: Run) -> None:
+        """What the process prints besides its events (a library's warning, a
+        crash's traceback): into the job's log, as it comes."""
+        while True:
+            try:
+                line = await run.process.stderr.readline()
+            except ValueError:
+                continue
+            if not line:
+                return
+            text = line.decode("utf-8", "replace").rstrip()
+            if not text:
+                continue
+            run.printed = [*run.printed[-19:], text[:500]]
+            self._log_line(run, text, "warning", "process")
+
+    def _log_line(self, run: Run, message: str, level, source) -> None:
+        """A line from the process, LOGGED_LINES a run at most."""
+        run.logged += 1
+        if run.logged < LOGGED_LINES:
+            self._journal.add(run.job_id, message, level, source)
+        elif run.logged == LOGGED_LINES:
+            self._journal.add(run.job_id, "More lines came from its process; they are not kept.", "warning")
 
     async def _answer(self, run: Run, fingerprint: str | None) -> None:
         """Whether an earlier download got the same file: then that one is
@@ -293,6 +364,16 @@ class Scheduler:
             earlier = self._jobs.reusable(fingerprint, row["options"], row["folder"], row["template"], row["section"],
                                           row["id"])
         run.reused = earlier["id"] if earlier else None
+        if not fingerprint:
+            self._journal.add(run.job_id, "No fingerprint: the site says too little of the file to tell it from "
+                                          "another. It is downloaded.")
+        elif earlier:
+            self._journal.add(run.job_id, f"Fingerprint {fingerprint[:16]}…: download {earlier['id']} got the same "
+                                          "file, with the same options, and it's still there. It is reused.")
+        else:
+            why = ("asked to download again" if row["again"] else
+                   "no earlier download with the same options and place has it")
+            self._journal.add(run.job_id, f"Fingerprint {fingerprint[:16]}…: {why}. It is downloaded.")
         with suppress(ConnectionError, BrokenPipeError):
             run.process.stdin.write(json.dumps({"reuse": run.reused}).encode() + b"\n")
             await run.process.stdin.drain()
@@ -301,6 +382,10 @@ class Scheduler:
         name, now = event.get("event"), time.monotonic()
         progress = run.progress
         if name == "item":
+            self._journal.add(run.job_id, f"Video {event['index'] + 1}"
+                                          f"{' of ' + str(event['total']) if (event.get('total') or 1) > 1 else ''}: "
+                                          f"{event.get('title') or event.get('id') or '?'}"
+                                          f"{' (' + str(round(event['duration'])) + ' s)' if isinstance(event.get('duration'), (int, float)) else ''}.")
             progress.update(item=event["index"] + 1, items=max(event.get("total") or 1, event["index"] + 1),
                             item_title=event.get("title"))
             if event["index"] == 0:
@@ -323,21 +408,32 @@ class Scheduler:
                             else progress.get("percent"))
             if progress.get("stage") != "downloading":
                 progress.update(stage="downloading", step=None, step_since=time.time())
+                self._doing(run, "downloading")
         elif name == "stage":
             if (event.get("stage"), event.get("step")) != (progress.get("stage"), progress.get("step")):
                 progress.update(stage=event.get("stage"), step=event.get("step"), step_since=time.time(),
                                 step_percent=None)
+                self._doing(run, event.get("step") or event.get("stage"))
                 self._jobs.update(run.job_id, stage=event.get("stage"), progress=progress)
         elif name == "file":
             run.made.append(event["path"])
             run.checks[event["path"]] = event.get("checks")
+            checks = event.get("checks") or {}
+            self._journal.add(run.job_id, f"Made {event['path']}: checked, {checks.get('summary') or '?'}"
+                                          + "".join(f" · {problem}" for problem in checks.get("problems") or []))
         elif name == "step":
             progress["step_percent"] = _number(event.get("percent"))
         elif name == "note":
             run.notes.append(str(event.get("message") or "")[:500])
             self._jobs.update(run.job_id, notes=run.notes)
+            self._journal.add(run.job_id, run.notes[-1])
+        elif name == "log":
+            self._log_line(run, str(event.get("message") or ""), event.get("level") or "info", "yt-dlp")
+        elif name == "warning":
+            self._log_line(run, str(event.get("message") or ""), "warning", "yt-dlp")
         elif name == "error":
             run.errors.append(str(event.get("message") or "")[:1000])
+            self._log_line(run, run.errors[-1], "error", "yt-dlp")
         if now - run.saved_at >= SAVE_EVERY:
             run.saved_at = now
             self._jobs.update(run.job_id, progress=progress, stage=progress.get("stage") or "downloading")
@@ -348,11 +444,30 @@ class Scheduler:
             run.called_at = now
             self._tell(run.job_id, "progress")
 
+    def _doing(self, run: Run, what: str | None) -> None:
+        """A stage or step begins: the one before took this long (and, the
+        download, at what speed)."""
+        now = time.monotonic()
+        if run.doing and run.doing != what:
+            took = now - run.doing_since
+            if run.doing == "downloading":
+                done = run.progress.get("downloaded_bytes")
+                speed = f", {_size(done / took)}/s on average" if done and took > 0 else ""
+                self._journal.add(run.job_id, f"Downloaded {_size(done)} in {took:.1f} s{speed}.")
+            else:
+                self._journal.add(run.job_id, f"{run.doing} took {took:.1f} s.", "debug")
+        if what and what != run.doing:
+            run.doing, run.doing_since = what, now
+            if what != "downloading":
+                self._journal.add(run.job_id, f"Step: {what}.", "debug")
+
     async def _end(self, run: Run, row, work: Path) -> None:
+        self._doing(run, None)
         if run.stopping:
             return  # videodrop is stopping: it runs again at the next start
         if run.cancelled:
             self._jobs.update(run.job_id, status="cancelled", stage=None, progress={}, finished_at=time.time())
+            self._journal.add(run.job_id, "Cancelled: what it had downloaded is dropped.")
             self._tell(run.job_id, "cancelled")
             return
         placed = []
@@ -364,6 +479,7 @@ class Scheduler:
                 run.notes.append(f"The site serves the same video as for the download of {when}, with the same "
                                  "options: its file is reused, nothing was downloaded.")
                 self._jobs.update(run.job_id, notes=run.notes, reused_from=run.reused)
+                self._journal.add(run.job_id, run.notes[-1])
                 self._jobs.add_files(run.job_id, placed)
         elif run.made:
             run.progress.update(stage="placing", step=None, step_since=time.time())
@@ -372,6 +488,10 @@ class Scheduler:
             for file in placed:
                 # A copy that was there already keeps no check of the dropped one.
                 file["checks"] = None if file["existed"] else run.checks.get(file["source"])
+                where = f"kept here as {file['path']}" if file["root"] == "held" else f"saved to {file['path']}"
+                self._journal.add(run.job_id, f"{file['name']} ({_size(file['size'])}): "
+                                              + ("the destination had it already, the new copy is dropped."
+                                                 if file["existed"] else f"{where}."))
             self._jobs.add_files(run.job_id, placed)
         self._finish(run, row, placed)
 
@@ -410,6 +530,9 @@ class Scheduler:
             failed = len(run.errors)
             note = f"{failed} of the videos failed; the last: {run.errors[-1]}" if failed else None
             self._jobs.update(run.job_id, status="finished", stage=None, progress={}, error=note, finished_at=now)
+            held = [file for file in placed if file["root"] == "held"]
+            kept = f" Its files are kept {self._jobs.hold_hours(row)} h." if held else ""
+            self._journal.add(run.job_id, f"Finished in {time.monotonic() - run.began:.1f} s.{kept}")
             self._tell(run.job_id, "finished")
             for listener in self._finished:
                 try:
@@ -423,10 +546,15 @@ class Scheduler:
         if TRANSIENT.search(reason) and attempts <= settings.retries:
             wait = backoff(attempts)
             log.info("download %s failed (%s); again in %d s", run.job_id, reason, wait)
+            self._journal.add(run.job_id, f"This try failed, for a reason that may pass: {reason} Tried again in "
+                                          f"{wait // 60:.0f} min.", "warning")
             self._jobs.update(run.job_id, status="queued", stage=None, progress={}, error=reason,
                               retry_at=now + wait)
             return
         self._jobs.update(run.job_id, status="failed", stage=None, progress={}, error=reason, finished_at=now)
+        self._journal.add(run.job_id, f"Failed: {reason}"
+                                      + (f" (after {attempts} tries)" if TRANSIENT.search(reason) else
+                                         " (not a reason that passes: not tried again)"), "error")
         self._tell(run.job_id, "failed")
 
     def _stop(self, run: Run) -> None:

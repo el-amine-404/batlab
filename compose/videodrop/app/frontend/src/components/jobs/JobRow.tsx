@@ -3,7 +3,7 @@ import { Link } from "react-router";
 
 import { Badge } from "@/components/ui/badge";
 import type { Job } from "@/lib/api";
-import { clock, timeAgo } from "@/lib/utils";
+import { clock, duration, timeAgo } from "@/lib/utils";
 
 import { JobActions } from "./JobActions";
 import { JobProgress } from "./JobProgress";
@@ -31,6 +31,8 @@ export function Thumbnail({ job, className = "h-16 w-28" }: { job: Job; classNam
 export function JobRow({ job }: { job: Job }) {
   const status = STATUS[job.status];
   const where = job.destination ?? (job.folder ? job.folder : "held for its caller");
+  const expires = job.files.find((file) => file.expires_at)?.expires_at;
+  const gone = job.status === "finished" && job.files.length > 0 && job.files.every((file) => !file.available);
   return (
     <li className="flex gap-3 rounded-xl border border-border bg-card p-3 sm:gap-4">
       <Link to={`/jobs/${job.id}`} className="shrink-0" tabIndex={-1} aria-hidden>
@@ -41,7 +43,8 @@ export function JobRow({ job }: { job: Job }) {
           {jobTitle(job)}
         </Link>
         <p className="truncate text-xs text-muted-foreground">
-          {[job.uploader, job.site, job.section && `part ${sectionText(job.section)}`, where, job.reused_from && "file reused",
+          {[job.uploader, job.site, job.section && `part ${sectionText(job.section)}`, where,
+            expires && `removed in ${duration(expires - Date.now() / 1000)}`, gone && "files removed", job.reused_from && "file reused",
             job.client && `by ${job.client}`, timeAgo(job.created_at)].filter(Boolean).join(" · ")}
         </p>
         <JobProgress job={job} />

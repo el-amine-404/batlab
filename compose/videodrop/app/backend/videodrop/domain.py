@@ -21,6 +21,16 @@ class NotFound(LookupError):
     """The message is shown as is."""
 
 
+class Gone(LookupError):
+    """It was there and isn't any more, for good (410); the message says
+    what to do instead. again: where to ask for it once more."""
+
+    def __init__(self, message: str, again: str | None = None, removed_at: float | None = None):
+        super().__init__(message)
+        self.again = again
+        self.removed_at = removed_at
+
+
 class Conflict(ValueError):
     """The message is shown as is."""
 

@@ -5,12 +5,12 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { toClipboard } from "@/lib/clipboard";
 
-/** Copies text; a tick for a moment says it did. */
-export function CopyButton({ text, label }: { text: string; label: string }) {
+/** Copies text (made when clicked, when it's a function); a tick for a moment says it did. */
+export function CopyButton({ text, label }: { text: string | (() => string); label: string }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
-      await toClipboard(text);
+      await toClipboard(typeof text === "function" ? text() : text);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {

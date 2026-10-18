@@ -6,6 +6,7 @@ included, with fake_runner.py in place of yt-dlp: no network."""
 import hashlib
 import hmac
 import json
+import logging
 import shutil
 import subprocess
 import sys
@@ -22,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi.testclient import TestClient  # noqa: E402
 
 from videodrop import config as config_module  # noqa: E402
-from videodrop import checks, links, lyrics, placement, previews  # noqa: E402
+from videodrop import checks, links, logs, lyrics, placement, previews, redact  # noqa: E402
 from videodrop.api.app import create_app  # noqa: E402
 from videodrop.callbacks import sign  # noqa: E402
 from videodrop.domain import Invalid  # noqa: E402
@@ -99,10 +100,10 @@ class Previews(unittest.TestCase):
             self.assertEqual((details["video"]["width"], details["video"]["codec"], len(details["audio"])),
                              (160, "h264", 1))
             self.assertEqual(details["subtitles"][0]["title"], "Lyrics")
-            self.assertEqual(len(details["frames"]), previews.FRAMES)
+            self.assertEqual(len(details["frames"]), 4)  # a short video: 4 pictures
             self.assertEqual((details["storyboard"]["count"], details["storyboard"]["every"]), (6, 2.0))
-            self.assertTrue(made.frame(video, 7).stat().st_size > 0)
-            self.assertIsNone(made.frame(video, 8))
+            self.assertTrue(made.frame(video, 3).stat().st_size > 0)
+            self.assertIsNone(made.frame(video, 4))
             board = made.storyboard(video)
             size = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=width,height", "-of", "csv=p=0",
                                    str(board)], capture_output=True, text=True, check=True).stdout.strip()
@@ -121,6 +122,58 @@ class Previews(unittest.TestCase):
             self.assertEqual(made.sweep([]), 1)
             self.assertFalse(home.exists())
             made.close()
+
+
+    def test_the_gallery_follows_the_length_or_the_chapters(self):
+        self.assertEqual([len(previews.gallery(seconds, [])) for seconds in (30, 300, 1800, 7200)], [4, 8, 16, 24])
+        chapters = [{"start": 0.0, "end": 60.0, "title": "Intro"}, {"start": 60.0, "end": 61.0, "title": "Cut"},
+                    {"start": 61.0, "end": 300.0, "title": "Song"}]
+        self.assertEqual(previews.gallery(300, chapters), [{"time": 2.0, "chapter": "Intro"},
+                                                           {"time": 60.25, "chapter": "Cut"},
+                                                           {"time": 63.0, "chapter": "Song"}])
+        self.assertEqual(len(previews.gallery(300, chapters[:2])), 8)  # 2 chapters: evenly
+        self.assertEqual(previews.gallery(0, []), [])
+
+
+class Redaction(unittest.TestCase):
+    def test_secrets_never_reach_a_log(self):
+        cases = {
+            "GET https://rr3.googlevideo.com/videoplayback?expire=1&ip=203.0.113.9&" + "x" * 300:
+                "GET https://rr3.googlevideo.com/videoplayback?•••",
+            "callback http://bob:hunter2@hook.lan/x?token=abc&v=1": "callback http://•••@hook.lan/x?token=•••&v=1",
+            "notify tgram://123456:AAH-bot-token/987": "notify tgram://•••",
+            "Cookie: SID=abc; HSID=def": "Cookie: •••",
+            "Couldn't reach bob:hunter2@127.0.0.1:9: ConnectError": "Couldn't reach •••@127.0.0.1:9: ConnectError",
+            "mail me at a@b.lan, at 12:30@home": "mail me at a@b.lan, at •••@home",
+            "https://site/v?id=7&sig=ABC&api_key=K": "https://site/v?id=7&sig=•••&api_key=•••",
+        }
+        for raw, safe in cases.items():
+            self.assertEqual(redact.clean(raw), safe)
+
+    def test_a_line_cant_forge_another(self):
+        self.assertEqual(redact.clean("title\n2026 ERROR fake\r\x1b[31mred\x1b[0m\x07"), "title ⏎ 2026 ERROR fake ⏎ red")
+        self.assertTrue(redact.clean("x" * 5000).endswith("(1000 more characters)"))
+
+
+    def test_the_server_log_is_cleaned_and_kept(self):
+        recent, logger = logs.Recent(), logging.getLogger("videodrop.test")
+        recent.addFilter(logs.Clean())
+        logger.setLevel(logging.INFO)
+        logger.addHandler(recent)
+        try:
+            logger.info("callback to %s", "http://u:pw@x/h")
+            try:
+                raise ValueError("https://x/?token=abc")
+            except ValueError:
+                logger.exception("failed")
+        finally:
+            logger.removeHandler(recent)
+        first, second = recent.lines()
+        self.assertEqual(first["message"], "callback to http://•••@x/h")
+        self.assertIn("token=•••", second["detail"])
+        self.assertNotIn("abc", second["detail"])
+        self.assertEqual(recent.lines(level="error"), [second])
+        self.assertEqual(recent.lines(after=first["seq"]), [second])
 
 
 class Fingerprints(unittest.TestCase):
@@ -357,10 +410,54 @@ class Api(unittest.TestCase):
 
     def test_held_files_expire(self):
         done = self.wait(self.ask("okokokokok2")["id"], "finished")
+        short = self.wait(self.ask("okokokokok3", hold_hours=1)["id"], "finished")
+        self.assertEqual(done["hold_hours"], 24)
+        self.assertAlmostEqual(done["files"][0]["expires_at"], done["finished_at"] + 24 * 3600, places=3)
+        self.assertAlmostEqual(short["files"][0]["expires_at"], short["finished_at"] + 3600, places=3)
+        url = done["files"][0]["download_url"]
+        # Its own hold: an hour and a half later, the one-hour job's file is gone, the other's not.
+        self.services.keep_house(now=time.time() + 5400)
+        self.assertEqual(self.client.get(short["files"][0]["download_url"]).status_code, 410)
+        self.assertEqual(self.client.get(url).status_code, 200)
         self.services.keep_house(now=time.time() + 25 * 3600)
         again = self.client.get(f"/api/v1/jobs/{done['id']}").json()
         self.assertEqual((again["files"][0]["available"], again["files"][0]["download_url"]), (False, None))
+        self.assertIsNotNone(again["files"][0]["removed_at"])
         self.assertFalse((self.config.held_dir / done["id"]).exists())
+        # Asked for after its hold: 410, and where to ask for it again; then the same job, the same link.
+        gone = self.client.get(url)
+        self.assertEqual(gone.status_code, 410)
+        self.assertIn("kept 24 h", gone.json()["detail"])
+        self.assertTrue(gone.json()["again"].endswith(f"/api/v1/jobs/{done['id']}/retry"))
+        self.assertEqual(self.client.post(gone.json()["again"]).status_code, 200)
+        self.wait(done["id"], "finished")
+        self.assertEqual(self.client.get(url).status_code, 200)
+        self.assertEqual(self.client.post(f"/api/v1/jobs/{done['id']}/retry").status_code, 409)  # it's there
+        self.assertIn("removed", self.client.get(f"/api/v1/jobs/{done['id']}/log.txt").text)
+
+    def test_a_download_has_a_log_without_secrets(self):
+        job = self.ask("okokokokok5", client="clipseerr", callback_url="http://bob:hunter2@127.0.0.1:9/h?token=abc")
+        self.wait(job["id"], "finished")
+        lines = self.client.get(job["links"]["log"]).json()["lines"]
+        text = "\n".join(f"{line['source']} {line['message']}" for line in lines)
+        for said in ("Asked by clipseerr", "Try 1 of", "videodrop Fingerprint", "yt-dlp [info] okokokokok5",
+                     "process a library's warning", "Made Fake Artist/", "Finished in"):
+            self.assertIn(said, text)
+        for secret in ("hunter2", "token=abc", "SECRETSIG", "203.0.113.9"):
+            self.assertNotIn(secret, text)
+        after = self.client.get(job["links"]["log"], params={"after": lines[-2]["seq"]}).json()["lines"]
+        self.assertEqual(len(after), 1)
+        text_file = self.client.get(f"{job['links']['log']}.txt")
+        self.assertEqual(text_file.headers["content-disposition"], f'attachment; filename="videodrop-{job["id"][:8]}.log"')
+        self.assertEqual(self.client.delete(f"/api/v1/jobs/{job['id']}").status_code, 204)
+        self.assertEqual(self.services.db.one("SELECT COUNT(*) AS n FROM job_log")["n"], 0)
+
+    def test_requests_carry_an_id(self):
+        self.assertEqual(len(self.client.get("/api/v1/health").headers["x-request-id"]), 12)
+        self.assertEqual(self.client.get("/api/v1/health", headers={"X-Request-ID": "clip-42"}).headers["x-request-id"],
+                         "clip-42")
+        self.assertNotEqual(self.client.get("/api/v1/health", headers={"X-Request-ID": "bad id\n"})
+                            .headers["x-request-id"], "bad id\n")
 
     def test_one_site_at_a_time(self):
         self.client.patch("/api/v1/settings", json={"max_parallel": 4, "per_site_parallel": 1})
@@ -509,6 +606,7 @@ class Api(unittest.TestCase):
         self.assertEqual(self.client.get(body["storyboard"]["url"]).status_code, 200)
         self.assertEqual(self.client.get(f"{here}/frames/99.jpg").status_code, 404)
         self.assertEqual(self.client.get(f"/api/v1/jobs/{done['id']}/files/5/details").status_code, 404)
+        self.assertEqual(len(body["frames"]), 4)
 
     def test_a_held_file_reused_has_its_own_life(self):
         first = self.wait(self.ask("okokokokok2")["id"], "finished")
@@ -552,6 +650,7 @@ class Api(unittest.TestCase):
         self.assertIn("yt_dlp", status)
         spec = self.client.get("/api/v1/openapi.json").json()
         self.assertIn("/api/v1/jobs/{job_id}/events", spec["paths"])
+        self.assertEqual(self.client.get("/api/v1/log", params={"level": "warning"}).status_code, 200)
         page = self.client.get("/")
         self.assertIn("default-src 'self'", page.headers["content-security-policy"])
 

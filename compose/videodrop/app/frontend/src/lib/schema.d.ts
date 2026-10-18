@@ -144,8 +144,53 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Try a failed or cancelled download again */
+        /**
+         * Download it again
+         * @description A failed or cancelled download, or a finished one whose files are
+         *     gone (removed after their hold): queued again, the same job, the same
+         *     links. 409 while its files are still there.
+         */
         post: operations["retry_job_api_v1_jobs__job_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{job_id}/log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What happened to it, line by line
+         * @description Who asked, each try, what yt-dlp said, the fingerprint, each step
+         *     and how long it took, where the files went, each callback, the held
+         *     files removed. Without secrets (passwords, tokens, signed addresses are
+         *     hidden). The newest 3000 lines of a download are kept.
+         */
+        get: operations["job_log_api_v1_jobs__job_id__log_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{job_id}/log.txt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Its log, as a text file */
+        get: operations["job_log_text_api_v1_jobs__job_id__log_txt_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -162,7 +207,8 @@ export interface paths {
         /**
          * Download one of its files
          * @description The file itself. Range requests work (resume a download, seek in a
-         *     player); the ETag and Last-Modified let a client skip what it has.
+         *     player); the ETag and Last-Modified let a client skip what it has. A
+         *     held file is there until its expires_at; after that, 410 Gone.
          */
         get: operations["get_file_api_v1_jobs__job_id__files__index__get"];
         put?: never;
@@ -186,6 +232,8 @@ export interface paths {
          *     the addresses of its pictures (a gallery, a storyboard for a seek bar)
          *     and of its subtitle tracks as WebVTT. The pictures are made the first
          *     time they are asked for, or right after the download: a few seconds.
+         *     The gallery has a picture at each chapter's start (3 to 24 chapters),
+         *     else 4 to 24 across the video, by its length.
          */
         get: operations["file_details_api_v1_jobs__job_id__files__index__details_get"];
         put?: never;
@@ -518,6 +566,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * videodrop's own log, its newest lines
+         * @description Kept in memory since the start, the newest 2000; the container's log
+         *     has all of it. Without secrets. A download's own log is
+         *     /jobs/{id}/log.
+         */
+        get: operations["server_log_api_v1_log_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/issues": {
         parameters: {
             query?: never;
@@ -834,7 +904,7 @@ export interface components {
             chapters: components["schemas"]["Chapter"][];
             /**
              * Frames
-             * @description Pictures taken across the video, for a gallery.
+             * @description Pictures for a gallery: one at each chapter's start when it has 3 to 24; else evenly across it, 4 to 24 by its length.
              */
             frames: components["schemas"]["Frame"][];
             /** @description For a player's seek bar: what each moment looks like. */
@@ -889,6 +959,29 @@ export interface components {
              * @description A JPEG, 640 pixels wide.
              */
             url: string;
+            /**
+             * Chapter
+             * @description The chapter it starts, when the gallery follows the chapters.
+             */
+            chapter: string | null;
+        };
+        /** GoneProblem */
+        GoneProblem: {
+            /**
+             * Detail
+             * @description What went wrong, as a sentence a person can read.
+             */
+            detail: string;
+            /**
+             * Again
+             * @description POST here: the same job downloads it again.
+             */
+            again: string | null;
+            /**
+             * Removed At
+             * @description When it was removed after its hold.
+             */
+            removed_at: number | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1036,6 +1129,11 @@ export interface components {
              * @description When a queued job is tried again.
              */
             retry_at: number | null;
+            /**
+             * Hold Hours
+             * @description Without a destination: how long its files are kept after the download.
+             */
+            hold_hours: number;
             /** Files */
             files: components["schemas"]["JobFile"][];
             callback: components["schemas"]["CallbackInfo"] | null;
@@ -1100,6 +1198,16 @@ export interface components {
             /** @description Its check after the download (videos only). */
             checks: components["schemas"]["FileChecks"] | null;
             /**
+             * Expires At
+             * @description A held file: when it is removed (the job's hold_hours after the download). After that its download_url answers 410 Gone.
+             */
+            expires_at: number | null;
+            /**
+             * Removed At
+             * @description When it was removed after its hold.
+             */
+            removed_at: number | null;
+            /**
              * Download Url
              * @description Downloads it (Range requests work: resume, seek). Made from the address the caller reaches videodrop at.
              */
@@ -1126,6 +1234,11 @@ export interface components {
             options?: components["schemas"]["OptionsPatch"];
             /** @description Only this part of the video, cut at the keyframes around it (no re-encoding: it may start a few seconds early). Its times end the file's name. Not for a playlist. */
             section?: components["schemas"]["Section"] | null;
+            /**
+             * Hold Hours
+             * @description Without a destination: how long its files are kept for the caller after the download, in hours (each file's expires_at). Left out: the settings' hold_hours. A file asked for after that answers 410 Gone; POST /jobs/{id}/retry downloads it again, same job.
+             */
+            hold_hours?: number | null;
             /**
              * Priority
              * @description Higher goes first among queued jobs; then oldest first.
@@ -1175,6 +1288,47 @@ export interface components {
              * @description GET: its live stream (text/event-stream), until it ends.
              */
             events: string;
+            /**
+             * Log
+             * @description GET: what happened to it, line by line (log.txt: as a file).
+             */
+            log: string;
+        };
+        /** JobLog */
+        JobLog: {
+            /**
+             * Lines
+             * @description Oldest first.
+             */
+            lines: components["schemas"]["JobLogLine"][];
+            /**
+             * More
+             * @description There may be more after the last: ask again from it.
+             */
+            more: boolean;
+        };
+        /** JobLogLine */
+        JobLogLine: {
+            /**
+             * Seq
+             * @description Its number: ask for the lines after it to follow the log.
+             */
+            seq: number;
+            /** At */
+            at: number;
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "debug" | "info" | "warning" | "error";
+            /**
+             * Source
+             * @description videodrop; yt-dlp (and the ffmpeg it runs); the download's process (what it printed besides, a crash); a callback.
+             * @enum {string}
+             */
+            source: "videodrop" | "yt-dlp" | "process" | "callback";
+            /** Message */
+            message: string;
         };
         /** JobPage */
         JobPage: {
@@ -1626,6 +1780,39 @@ export interface components {
              * @description Where it ends.
              */
             end: number;
+        };
+        /** ServerLog */
+        ServerLog: {
+            /**
+             * Lines
+             * @description Oldest first.
+             */
+            lines: components["schemas"]["ServerLogLine"][];
+        };
+        /** ServerLogLine */
+        ServerLogLine: {
+            /** Seq */
+            seq: number;
+            /** At */
+            at: number;
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "debug" | "info" | "warning" | "error";
+            /**
+             * Source
+             * @description Which part of videodrop.
+             * @example videodrop.scheduler
+             */
+            source: string;
+            /** Message */
+            message: string;
+            /**
+             * Detail
+             * @description A traceback, when there was one.
+             */
+            detail: string | null;
         };
         /** Settings */
         Settings: {
@@ -2335,6 +2522,99 @@ export interface operations {
             };
         };
     };
+    job_log_api_v1_jobs__job_id__log_get: {
+        parameters: {
+            query?: {
+                /** @description Only the lines after this one (its seq): to follow it. */
+                after?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobLog"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    job_log_text_api_v1_jobs__job_id__log_txt_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_file_api_v1_jobs__job_id__files__index__get: {
         parameters: {
             query?: {
@@ -2366,6 +2646,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The file was there and isn't any more: removed after its hold, or moved away. POST `again` to download it again. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoneProblem"];
                 };
             };
             /** @description Validation Error */
@@ -3265,6 +3554,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SystemStatus"];
+                };
+            };
+        };
+    };
+    server_log_api_v1_log_get: {
+        parameters: {
+            query?: {
+                /** @description Only the lines after this one (its seq): to follow it. */
+                after?: number;
+                /** @description This one and worse. */
+                level?: "debug" | "info" | "warning" | "error";
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerLog"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

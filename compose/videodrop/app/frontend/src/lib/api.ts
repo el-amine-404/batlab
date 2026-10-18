@@ -37,6 +37,9 @@ export type Issue = Schemas["IssueOut"];
 export type FileDetails = Schemas["FileDetails"];
 export type Section = Schemas["Section"];
 export type IssueList = Schemas["IssueList"];
+export type JobLogLine = Schemas["JobLogLine"];
+export type ServerLogLine = Schemas["ServerLogLine"];
+export type LogLevel = JobLogLine["level"];
 
 export class ApiError extends Error {
   constructor(
@@ -101,6 +104,9 @@ export const api = {
   cancelJob: (id: string) => request<Job>(`/jobs/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
   retryJob: (id: string) => request<Job>(`/jobs/${encodeURIComponent(id)}/retry`, { method: "POST" }),
   deleteJob: (id: string) => request<void>(`/jobs/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  jobLog: (id: string, after: number, signal?: AbortSignal) =>
+    request<Schemas["JobLog"]>(`/jobs/${encodeURIComponent(id)}/log?after=${after}`, { signal }),
+  serverLog: (after: number, signal?: AbortSignal) => request<Schemas["ServerLog"]>(`/log?after=${after}&level=debug`, { signal }),
   fileDetails: (id: string, index: number) => request<FileDetails>(`/jobs/${encodeURIComponent(id)}/files/${index}/details`),
 
   checkLink: (url: string, signal?: AbortSignal) => request<LinkCheck>(`/links/check?url=${encodeURIComponent(url)}`, { signal }),

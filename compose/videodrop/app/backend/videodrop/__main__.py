@@ -1,15 +1,12 @@
 """python -m videodrop: the server and its scheduler, in one process; each
 download runs in a process of its own (runner.py)."""
 
-import logging
-
 import uvicorn
 
+from . import logs
 from .config import load
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-# One line per outgoing request is noise; failures are logged where they matter.
-logging.getLogger("httpx").setLevel(logging.WARNING)
+logs.setup()
 
 uvicorn.run(
     "videodrop.api.app:create_default",
@@ -24,4 +21,6 @@ uvicorn.run(
     server_header=False,
     # Callers poll and pages stream; the access log would be mostly that.
     access_log=False,
+    # Its records go to the root logger (logs.setup): cleaned, and kept for the page.
+    log_config=None,
 )

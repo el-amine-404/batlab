@@ -22,6 +22,8 @@ def make(index, total, ident, title):
     emit("item", index=index, total=total, id=ident, title=title, uploader="Fake Artist",
          thumbnail=f"https://i.ytimg.com/vi/{ident}/mqdefault.jpg", duration=200)
     emit("stage", stage="downloading")
+    emit("log", level="info", message=f"[info] {ident}: Downloading 1 format(s): 401+140")
+    print("a library's warning, https://cdn.example/v.mp4?sig=SECRETSIG&ip=203.0.113.9", file=sys.stderr, flush=True)
     emit("progress", index=index, downloaded=500, total=1000.4, speed=100.0, eta=5)  # sizes come with decimals
     emit("stage", stage="processing")
     section = config.get("section")

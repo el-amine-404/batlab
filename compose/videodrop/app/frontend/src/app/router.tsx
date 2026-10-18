@@ -18,6 +18,7 @@ const StoragePage = lazy(() => import("@/pages/settings/StoragePage"));
 const CookiesPage = lazy(() => import("@/pages/settings/CookiesPage"));
 const NotificationsPage = lazy(() => import("@/pages/settings/NotificationsPage"));
 const StatusPage = lazy(() => import("@/pages/settings/StatusPage"));
+const LogPage = lazy(() => import("@/pages/settings/LogPage"));
 
 export const router = createBrowserRouter([
   {
@@ -42,6 +43,7 @@ export const router = createBrowserRouter([
           { path: "/settings/cookies", element: <CookiesPage /> },
           { path: "/settings/notifications", element: <NotificationsPage /> },
           { path: "/settings/status", element: <StatusPage /> },
+          { path: "/settings/log", element: <LogPage /> },
           { path: "*", element: <NotFoundPage /> },
         ],
       },

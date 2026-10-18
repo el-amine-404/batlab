@@ -120,9 +120,25 @@ def _sections(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE jobs ADD COLUMN section TEXT")
 
 
+def _logs_and_holds(conn: sqlite3.Connection) -> None:
+    """A download's log (journal.py), and how long a job's held files are
+    kept when its caller said (else the settings' hold_hours)."""
+    conn.execute("""CREATE TABLE IF NOT EXISTS job_log (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id TEXT NOT NULL REFERENCES jobs (id) ON DELETE CASCADE,
+        at REAL NOT NULL,
+        level TEXT NOT NULL,
+        source TEXT NOT NULL,
+        message TEXT NOT NULL
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS job_log_job ON job_log (job_id, seq)")
+    if "hold_hours" not in {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}:
+        conn.execute("ALTER TABLE jobs ADD COLUMN hold_hours INTEGER")
+
+
 # Step n brings user_version n-1 to n. A new step goes at the end; none is ever changed.
 MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (_checks_lyrics_and_lookups, _fingerprints,
-                                                                 _sections)
+                                                                 _sections, _logs_and_holds)
 
 
 class Database:

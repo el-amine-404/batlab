@@ -4,16 +4,20 @@ import mimetypes
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Query, Request, Response
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 
 from ...broker import TooMany
 from ...domain import FINAL, STATUSES, Invalid, NotFound, Status
 from ...jobs import MAX_PAGE, JobIn, JobQuery
+from ...journal import PAGE
 from .. import schemas
 from ..deps import Base, Ctx
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
 _PROBLEMS = {404: {"model": schemas.Problem}, 409: {"model": schemas.Problem}, 422: {"model": schemas.Problem}}
+_GONE = {410: {"model": schemas.GoneProblem, "description": "The file was there and isn't any more: removed after "
+                                                             "its hold, or moved away. POST `again` to download "
+                                                             "it again."}}
 _STREAM = {200: {"content": {"text/event-stream": {}}, "description": "Server-Sent Events: `event: job`, "
                                                                      "`data: <the job>`."}}
 # Browsers reconnect a dropped stream after this many milliseconds.
@@ -133,10 +137,14 @@ async def cancel_job(job_id: str, ctx: Ctx, base: Base):
     return ctx.jobs.public(ctx.jobs.row(job_id), base)
 
 
-@router.post("/{job_id}/retry", summary="Try a failed or cancelled download again", response_model=schemas.Job,
-             responses=_PROBLEMS)
+@router.post("/{job_id}/retry", summary="Download it again", response_model=schemas.Job, responses=_PROBLEMS)
 def retry_job(job_id: str, ctx: Ctx, base: Base):
-    return ctx.jobs.public(ctx.jobs.retry(job_id), base)
+    """A failed or cancelled download, or a finished one whose files are
+    gone (removed after their hold): queued again, the same job, the same
+    links. 409 while its files are still there."""
+    row = ctx.jobs.retry(job_id)
+    ctx.journal.add(job_id, "Asked again: queued from the start.")
+    return ctx.jobs.public(row, base)
 
 
 @router.delete("/{job_id}", status_code=204, summary="Forget an ended download", responses=_PROBLEMS)
@@ -147,13 +155,36 @@ def delete_job(job_id: str, ctx: Ctx):
     return Response(status_code=204)
 
 
+@router.get("/{job_id}/log", summary="What happened to it, line by line", response_model=schemas.JobLog,
+            responses=_PROBLEMS)
+def job_log(job_id: str, ctx: Ctx,
+            after: int = Query(0, ge=0, description="Only the lines after this one (its seq): to follow it."),
+            limit: int = Query(PAGE, ge=1, le=PAGE)):
+    """Who asked, each try, what yt-dlp said, the fingerprint, each step
+    and how long it took, where the files went, each callback, the held
+    files removed. Without secrets (passwords, tokens, signed addresses are
+    hidden). The newest 3000 lines of a download are kept."""
+    ctx.jobs.row(job_id)
+    lines = ctx.journal.lines(job_id, after, limit)
+    return {"lines": lines, "more": len(lines) == limit}
+
+
+@router.get("/{job_id}/log.txt", summary="Its log, as a text file", response_class=PlainTextResponse,
+            responses={200: {"content": {"text/plain": {}}}, 404: {"model": schemas.Problem}})
+def job_log_text(job_id: str, ctx: Ctx):
+    ctx.jobs.row(job_id)
+    return PlainTextResponse(ctx.journal.text(job_id), headers={
+        "Content-Disposition": f'attachment; filename="videodrop-{job_id[:8]}.log"'})
+
+
 @router.get("/{job_id}/files/{index}", summary="Download one of its files", response_class=FileResponse,
-            responses={200: {"content": {"application/octet-stream": {}}}, 404: {"model": schemas.Problem}})
-def get_file(job_id: str, index: int, ctx: Ctx,
+            responses={200: {"content": {"application/octet-stream": {}}}, 404: {"model": schemas.Problem}, **_GONE})
+def get_file(job_id: str, index: int, ctx: Ctx, base: Base,
              inline: bool = Query(False, description="To play in the browser rather than save.")):
     """The file itself. Range requests work (resume a download, seek in a
-    player); the ETag and Last-Modified let a client skip what it has."""
-    file, path = ctx.jobs.available(job_id, index)
+    player); the ETag and Last-Modified let a client skip what it has. A
+    held file is there until its expires_at; after that, 410 Gone."""
+    file, path = ctx.jobs.available(job_id, index, base)
     media = mimetypes.guess_type(file["name"])[0] or "application/octet-stream"
     return FileResponse(path, media_type=media, filename=file["name"],
                         content_disposition_type="inline" if inline else "attachment")
@@ -172,7 +203,9 @@ def file_details(job_id: str, index: int, ctx: Ctx, base: Base):
     """As ffprobe reads it: its codecs, bitrates, tracks and chapters; and
     the addresses of its pictures (a gallery, a storyboard for a seek bar)
     and of its subtitle tracks as WebVTT. The pictures are made the first
-    time they are asked for, or right after the download: a few seconds."""
+    time they are asked for, or right after the download: a few seconds.
+    The gallery has a picture at each chapter's start (3 to 24 chapters),
+    else 4 to 24 across the video, by its length."""
     file, path = _video(ctx, job_id, index)
     try:
         details = ctx.previews.details(path)
@@ -182,7 +215,7 @@ def file_details(job_id: str, index: int, ctx: Ctx, base: Base):
     board = details["storyboard"]
     return {
         **details, "name": file["name"], "size": path.stat().st_size,
-        "frames": [{"time": at, "url": f"{here}/frames/{n}.jpg"} for n, at in enumerate(details["frames"])],
+        "frames": [{**frame, "url": f"{here}/frames/{n}.jpg"} for n, frame in enumerate(details["frames"])],
         "storyboard": {**board, "url": f"{here}/storyboard.jpg"} if board else None,
         "subtitles": [{**{k: v for k, v in track.items() if k != "text"},
                        "url": f"{here}/subtitles/{track['index']}.vtt" if track["text"] else None}

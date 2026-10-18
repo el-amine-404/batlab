@@ -59,3 +59,20 @@ export function timeLeft(seconds: number, now = Date.now() / 1000): string {
   if (delta < 3600) return `in ${Math.round(delta / 60)} min`;
   return `at ${new Date(seconds * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
 }
+
+/** How long until then, the two largest units: "21 h 5 min", "2 d 3 h", "4 min", "under a minute". */
+export function duration(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds));
+  if (total < 60) return "under a minute";
+  const d = Math.floor(total / 86400);
+  const h = Math.floor((total % 86400) / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  if (d) return h ? `${d} d ${h} h` : `${d} d`;
+  if (h) return m ? `${h} h ${m} min` : `${h} h`;
+  return `${m} min`;
+}
+
+/** A moment as a person reads it: "Sat 18 Oct, 21:04". */
+export function formatWhen(seconds: number): string {
+  return new Date(seconds * 1000).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}

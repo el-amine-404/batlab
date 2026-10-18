@@ -1,10 +1,12 @@
 import { ArrowLeft, Download, Film } from "lucide-react";
+import { useRef } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 
 import { Size } from "@/components/common/Size";
 import { jobTitle, sectionText } from "@/components/jobs/labels";
 import { Empty, Failed, Loading } from "@/components/layout/States";
-import { Player } from "@/components/player/Player";
+import { Chapters } from "@/components/player/Chapters";
+import { Player, type PlayerHandle } from "@/components/player/Player";
 import { Button } from "@/components/ui/button";
 import { fileUrl, local } from "@/lib/api";
 import { useFileDetails, useJob } from "@/lib/queries";
@@ -17,6 +19,8 @@ export default function PlayerPage() {
   const videos = job?.files.filter((file) => file.kind === "video" && file.available) ?? [];
   const file = videos.find((f) => f.index === Number(params.get("file") ?? videos[0]?.index)) ?? videos[0];
   const { data: details } = useFileDetails(id, file?.index ?? 0, !!file);
+  const player = useRef<PlayerHandle>(null);
+  const chapters = details?.chapters.filter((c) => c.end > c.start) ?? [];
   const start = params.get("t") ? Number(params.get("t")) : undefined;
 
   if (isPending) return <Loading />;
@@ -32,7 +36,7 @@ export default function PlayerPage() {
         </Empty>
       ) : (
         <>
-          <Player key={`${job.id}.${file.index}`} src={fileUrl(job, file, true)} details={details} name={file.name} autoPlay
+          <Player ref={player} key={`${job.id}.${file.index}`} src={fileUrl(job, file, true)} details={details} name={file.name} autoPlay
                   poster={details?.frames[0] ? local(details.frames[0].url) : job.thumbnail ?? undefined}
                   remember={`videodrop.position.${job.id}.${file.index}`} startAt={Number.isFinite(start) ? start : undefined}
                   className="rounded-xl shadow-2xl shadow-black/50 ring-1 ring-border" />
@@ -56,6 +60,12 @@ export default function PlayerPage() {
                 </Button>
               ))}
             </div>
+          )}
+          {chapters.length > 0 && (
+            <section className="mt-5">
+              <h2 className="mb-1 text-[11px] tracking-wide text-muted-foreground uppercase">Chapters · {chapters.length}</h2>
+              <Chapters chapters={chapters} onSeek={(time) => player.current?.seek(time, true)} className="-mx-2 max-h-72" />
+            </section>
           )}
           <p className="mt-6 text-xs text-muted-foreground">
             Keys: space or k play · j / l 10 s · ← → 5 s · ↑ ↓ volume · m mute · f full screen · c subtitles · &lt; &gt; speed · , . a frame · 0–9 jump · i details

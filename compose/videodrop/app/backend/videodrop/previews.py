@@ -25,7 +25,11 @@ from pathlib import Path
 
 log = logging.getLogger("videodrop")
 
-FRAMES = 8
+# The gallery: a picture at each chapter's start when there are this many
+# chapters; else pictures evenly across the video, more for a longer one.
+CHAPTER_FRAMES = (3, 24)
+FRAMES_BY_LENGTH = ((60, 4), (10 * 60, 8), (40 * 60, 16))
+MOST_FRAMES = 24
 FRAME_WIDTH = 640
 TILE = (160, 90)
 COLUMNS = 10
@@ -40,6 +44,8 @@ TEXT_SUBTITLES = {"mov_text", "subrip", "srt", "webvtt", "ass", "ssa", "text"}
 # A preview folder no file has any more is dropped after this long (one being made has no file yet).
 UNUSED_FOR = 3600
 SAVED = "details.json"
+# details.json made by an older videodrop (other pictures) is made again.
+VERSION = 2
 
 
 def _ratio(value) -> float | None:
@@ -76,6 +82,19 @@ def _title(stream: dict) -> str | None:
     tags = stream.get("tags") or {}
     handler = tags.get("handler_name") or ""
     return tags.get("title") or (handler if handler not in _GENERIC_HANDLERS else None)
+
+
+def gallery(duration: float, chapters: list[dict]) -> list[dict]:
+    """When the gallery's pictures are taken: {time, chapter}."""
+    if duration <= 0:
+        return []
+    marked = [c for c in chapters if c["end"] > c["start"]]
+    if CHAPTER_FRAMES[0] <= len(marked) <= CHAPTER_FRAMES[1]:
+        # A little into each chapter: its first frame is often a fade from black.
+        return [{"time": round(min(c["start"] + min(2.0, (c["end"] - c["start"]) / 4), duration), 2),
+                 "chapter": c["title"]} for c in marked]
+    count = next((n for longest, n in FRAMES_BY_LENGTH if duration < longest), MOST_FRAMES)
+    return [{"time": round(duration * (n + 0.5) / count, 2), "chapter": None} for n in range(count)]
 
 
 def _range(stream: dict) -> str:
@@ -172,15 +191,18 @@ class Previews:
         storyboard (count, every…). Raises ValueError when ffprobe can't read it."""
         home = self._home(path)
         saved = home / SAVED
-        if saved.is_file():
-            return json.loads(saved.read_text())
+        if (found := self._saved(saved)) is not None:
+            return found
         with self._lock(f"{home.name}:details"):
-            if saved.is_file():
-                return json.loads(saved.read_text())
+            if (found := self._saved(saved)) is not None:
+                return found
+            # What an older videodrop made is made again.
+            shutil.rmtree(home, ignore_errors=True)
             details = read(path)
             duration = details["duration"] or 0
             pictures = details["video"] is not None and duration > 0
-            details["frames"] = [round(duration * (n + 0.5) / FRAMES, 2) for n in range(FRAMES)] if pictures else []
+            details["version"] = VERSION
+            details["frames"] = gallery(duration, details["chapters"]) if pictures else []
             details["storyboard"] = None
             if pictures:
                 count = max(1, min(MAX_TILES, int(duration // MIN_EVERY)))
@@ -191,6 +213,14 @@ class Previews:
             partial.write_text(json.dumps(details))
             partial.replace(saved)
             return details
+
+    @staticmethod
+    def _saved(saved: Path) -> dict | None:
+        try:
+            found = json.loads(saved.read_text())
+        except (OSError, ValueError):
+            return None
+        return found if found.get("version") == VERSION else None
 
     def frame(self, path: Path, n: int) -> Path | None:
         """The gallery's picture n; None when there's none."""
@@ -242,7 +272,7 @@ class Previews:
             started = time.monotonic()
             scale = f"scale={FRAME_WIDTH}:-2"
             with ThreadPoolExecutor(AT_ONCE) as pool:
-                list(pool.map(lambda job: _picture(path, job[1], home / f"frame-{job[0]}.jpg", scale),
+                list(pool.map(lambda job: _picture(path, job[1]["time"], home / f"frame-{job[0]}.jpg", scale),
                               enumerate(details["frames"])))
             (home / "frames.done").touch()
             log.info("gallery of %s in %.1f s", path.name, time.monotonic() - started)

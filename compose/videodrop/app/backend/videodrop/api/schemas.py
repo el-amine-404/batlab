@@ -16,6 +16,11 @@ class Problem(BaseModel):
     detail: str = Field(description="What went wrong, as a sentence a person can read.")
 
 
+class GoneProblem(Problem):
+    again: str | None = Field(description="POST here: the same job downloads it again.")
+    removed_at: float | None = Field(description="When it was removed after its hold.")
+
+
 class Health(BaseModel):
     ok: bool = Field(description="videodrop answers and its database is readable.")
     version: str
@@ -65,6 +70,9 @@ class JobFile(BaseModel):
     existed: bool = Field(description="The destination had it already (same name): the new copy was dropped.")
     available: bool = Field(description="It can be downloaded: it's still there.")
     checks: FileChecks | None = Field(description="Its check after the download (videos only).")
+    expires_at: float | None = Field(description="A held file: when it is removed (the job's hold_hours after the "
+                                                 "download). After that its download_url answers 410 Gone.")
+    removed_at: float | None = Field(description="When it was removed after its hold.")
     download_url: str | None = Field(description="Downloads it (Range requests work: resume, seek). Made from the "
                                                  "address the caller reaches videodrop at.")
 
@@ -108,6 +116,7 @@ class Chapter(BaseModel):
 class Frame(BaseModel):
     time: float = Field(description="Seconds into the video.")
     url: str = Field(description="A JPEG, 640 pixels wide.")
+    chapter: str | None = Field(description="The chapter it starts, when the gallery follows the chapters.")
 
 
 class Storyboard(BaseModel):
@@ -134,7 +143,8 @@ class FileDetails(BaseModel):
     audio: list[AudioTrack]
     subtitles: list[SubtitleTrack]
     chapters: list[Chapter]
-    frames: list[Frame] = Field(description="Pictures taken across the video, for a gallery.")
+    frames: list[Frame] = Field(description="Pictures for a gallery: one at each chapter's start when it has 3 to "
+                                            "24; else evenly across it, 4 to 24 by its length.")
     storyboard: Storyboard | None = Field(description="For a player's seek bar: what each moment looks like.")
 
 
@@ -156,6 +166,7 @@ class CallbackInfo(BaseModel):
 class JobLinks(BaseModel):
     self: str = Field(description="GET: the job.")
     events: str = Field(description="GET: its live stream (text/event-stream), until it ends.")
+    log: str = Field(description="GET: what happened to it, line by line (log.txt: as a file).")
 
 
 class Job(BaseModel):
@@ -185,6 +196,7 @@ class Job(BaseModel):
     section: Section | None = Field(description="Only this part of the video was asked for.")
     attempts: int = Field(description="Tries so far.")
     retry_at: float | None = Field(description="When a queued job is tried again.")
+    hold_hours: int = Field(description="Without a destination: how long its files are kept after the download.")
     files: list[JobFile]
     callback: CallbackInfo | None
     created_at: float
@@ -192,6 +204,37 @@ class Job(BaseModel):
     finished_at: float | None
     updated_at: float
     links: JobLinks
+
+
+LogLevel = Literal["debug", "info", "warning", "error"]
+
+
+class JobLogLine(BaseModel):
+    seq: int = Field(description="Its number: ask for the lines after it to follow the log.")
+    at: float
+    level: LogLevel
+    source: Literal["videodrop", "yt-dlp", "process", "callback"] = Field(
+        description="videodrop; yt-dlp (and the ffmpeg it runs); the download's process (what it printed "
+                    "besides, a crash); a callback.")
+    message: str
+
+
+class JobLog(BaseModel):
+    lines: list[JobLogLine] = Field(description="Oldest first.")
+    more: bool = Field(description="There may be more after the last: ask again from it.")
+
+
+class ServerLogLine(BaseModel):
+    seq: int
+    at: float
+    level: LogLevel
+    source: str = Field(description="Which part of videodrop.", examples=["videodrop.scheduler"])
+    message: str
+    detail: str | None = Field(description="A traceback, when there was one.")
+
+
+class ServerLog(BaseModel):
+    lines: list[ServerLogLine] = Field(description="Oldest first.")
 
 
 class JobPage(BaseModel):

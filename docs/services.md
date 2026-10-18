@@ -200,7 +200,12 @@ the service.
   back. What a video is for (a music video, a clip) is its caller's
   business; songs are songdrop's.
 - **Alone**: paste a link on its page; with no destination the files are
-  held for a day (Settings, `hold_hours`), to download from the page.
+  held for a day (Settings, `hold_hours`; a job's own `hold_hours`), to
+  download from the page.
+- **A held file's life**: each file says when it goes (`expires_at`; the
+  page counts down). Asked for after that, its `download_url` answers
+  `410 Gone` with `{detail, again, removed_at}`; `POST again` (`…/retry`)
+  downloads it once more as the same job, so the same link works again.
 - **Plugs in through**: its API (`POST /api/v1/jobs`: asking twice for the
   same download while it runs answers the same job), three ways to follow a
   job (`GET /api/v1/jobs/{id}`; its live stream, `…/events`, Server-Sent
@@ -248,7 +253,9 @@ the service.
   Live`, `AC/DC` → `AC-DC`), the rest of `: | / \ " ? * < >`, control and
   invisible characters go. Letters of every language stay.
 - **Seeing a file** (`previews.py`, `GET …/files/{n}/details`): ffprobe's
-  reading of it (codecs, bitrates, tracks, chapters), 8 pictures across it,
+  reading of it (codecs, bitrates, tracks, chapters), a gallery (a picture
+  at each chapter's start when there are 3 to 24, else 4 to 24 across it by
+  its length),
   a storyboard (a picture every few seconds in one JPEG, for the player's
   seek bar) and its text subtitle tracks as WebVTT. ffmpeg decodes keyframes
   only (a 4K film's storyboard in about 15 s), right after the download, in
@@ -260,6 +267,19 @@ the service.
   the job's `song` (clipseerr sends the one it matched), else guessed from
   the title. Subtitles are a video's business; which song a video is, its
   caller's.
+- **Logs** (`journal.py`, `logs.py`, `redact.py`): each download has its
+  own log (`GET /api/v1/jobs/{id}/log`, `…/log.txt`; on its page): who
+  asked, each try, what yt-dlp said and what its process printed, the
+  fingerprint and the reuse decision, each step and its time, where the
+  files went, each callback, the held files' removal; its newest 3000
+  lines, kept until the job is forgotten. videodrop's own log goes to the
+  container and its newest 2000 lines to Settings → Log (`GET
+  /api/v1/log`): every change asked through the API and every error, with
+  the request's `X-Request-ID` (a 500 names it). Every line is cleaned
+  first: passwords in addresses, tokens and signatures in queries, the
+  `ip=` of signed video addresses, cookies and authorisation headers,
+  notification addresses are hidden; a line can't forge another (line
+  breaks, terminal escapes and control characters go).
 - **Issues** (`GET /api/v1/issues`, the page's Issues, counted in the
   sidebar): what needs a person: yt-dlp behind PyPI's newest release for
   more than two days (the update chain stopped: Renovate, then the nightly

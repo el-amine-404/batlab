@@ -2,7 +2,7 @@
  * The sidebar's entries. The router (app/router.tsx) has the screens; a new
  * screen is one page component, one route, and one entry here.
  */
-import { Bell, CircleAlert, CircleGauge, Cookie, Download, FolderOutput, HardDrive, type LucideIcon, Settings2,
+import { Bell, CircleAlert, CircleGauge, Cookie, Download, FolderOutput, HardDrive, type LucideIcon, ScrollText, Settings2,
          SlidersHorizontal, Zap } from "lucide-react";
 
 export type Entry = { path: string; label: string; icon: LucideIcon };
@@ -22,4 +22,5 @@ export const SETTINGS: Entry[] = [
   { path: "/settings/cookies", label: "Cookies", icon: Cookie },
   { path: "/settings/notifications", label: "Notifications", icon: Bell },
   { path: "/settings/status", label: "Status", icon: CircleGauge },
+  { path: "/settings/log", label: "Log", icon: ScrollText },
 ];

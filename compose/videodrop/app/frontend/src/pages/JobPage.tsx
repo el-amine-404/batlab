@@ -3,9 +3,11 @@ import type { ReactNode } from "react";
 import { Link, useParams } from "react-router";
 
 import { Address } from "@/components/common/Address";
+import { ScrollingText } from "@/components/common/ScrollingText";
 import { CopyButton } from "@/components/common/CopyButton";
 import { Size } from "@/components/common/Size";
 import { JobActions } from "@/components/jobs/JobActions";
+import { JobLog } from "@/components/jobs/JobLog";
 import { JobProgress } from "@/components/jobs/JobProgress";
 import { Thumbnail } from "@/components/jobs/JobRow";
 import { CODEC, CONTAINER, jobTitle, QUALITY, sectionText, STATUS } from "@/components/jobs/labels";
@@ -96,16 +98,15 @@ export function JobPage() {
         <Card className="p-4">
           <dl>
             <Row label="Link">
-              <div className="flex min-w-0 items-center gap-0.5">
-                <a href={job.url} target="_blank" rel="noreferrer" title="Open it on its site"
-                   className="scroll-thin min-w-0 overflow-x-auto py-1 whitespace-nowrap text-sky-300 hover:underline">{job.url}</a>
+              <div className="flex min-w-0 flex-1 items-center justify-end gap-0.5">
+                <ScrollingText text={job.url} href={job.url} className="py-1 text-sky-300 hover:underline" />
                 <CopyButton text={job.url} label="link" />
                 <Button variant="ghost" size="icon-sm" asChild>
                   <a href={job.url} target="_blank" rel="noreferrer" aria-label="Open it on its site" title="Open it on its site"><ExternalLink /></a>
                 </Button>
               </div>
             </Row>
-            <Row label="Into">{job.destination ? `${job.destination} (${job.folder})` : job.folder ?? "kept here, to download"}</Row>
+            <Row label="Into">{job.destination ? `${job.destination} (${job.folder})` : job.folder ?? `kept here ${job.hold_hours} h, to download`}</Row>
             <Row label="Options">{options(job)}</Row>
             {job.section && <Row label="Part">{sectionText(job.section)} ({clock(job.section.end - job.section.start)})</Row>}
             {job.song && <Row label="Song">{job.song.artist} – {job.song.title}</Row>}
@@ -122,9 +123,10 @@ export function JobPage() {
           </div>
           <Address label="Job" hint="GET, JSON" url={api} />
           <Address label="Live" hint="Server-Sent Events" url={`${api}/events`} />
+          <Address label="Log" hint="GET, JSON; log.txt as a file" url={`${api}/log`} />
           {job.callback && (
             <p className="text-xs text-muted-foreground">
-              Callback to <code>{job.callback.url}</code>{job.callback.signed && ", signed"}
+              Callback to <code className="break-all">{job.callback.url}</code>{job.callback.signed && ", signed"}
               {job.callback.last && (
                 <span className={job.callback.last.ok ? "text-success" : "text-destructive"}>
                   {" "}· {job.callback.last.event} {job.callback.last.ok ? "delivered" : `failed: ${job.callback.last.message}`}
@@ -134,6 +136,8 @@ export function JobPage() {
           )}
         </Card>
       </div>
+
+      <JobLog job={job} />
     </>
   );
 }

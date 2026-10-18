@@ -22,6 +22,7 @@ from .destinations import DestinationIn, DestinationStore
 from .domain import Conflict, Invalid, NotFound
 from .issues import Issues, ReleaseWatch
 from .jobs import JobIn, JobStore, section_text
+from .journal import Journal
 from .notifications import TYPES, NotificationStore, Notifier
 from .options import DEFAULT_TEMPLATE, OptionsPatch, Section, VideoOptions, resolve, to_output_template
 from .previews import Previews
@@ -53,6 +54,7 @@ class Services:
     releases: ReleaseWatch
     issues: Issues
     previews: Previews
+    journal: Journal
     started_at: float = field(default_factory=time.time)
     _tasks: list[asyncio.Task] = field(default_factory=list)
 
@@ -101,8 +103,17 @@ class Services:
         whether it is new. Its destination, options and file name are fixed
         now: a destination changed later changes the downloads after."""
         destination, options, template = self.plan(body.destination, body.options)
-        return self.jobs.create(body, destination=destination, options=options, template=template,
-                                base_url=base_url)
+        row, new = self.jobs.create(body, destination=destination, options=options, template=template,
+                                    base_url=base_url)
+        if new:
+            where = f"to {row['destination']} ({row['folder']})" if row["folder"] else \
+                f"kept here {self.jobs.hold_hours(row)} h for its caller"
+            part = f", only {Section(**dict(zip(('start', 'end'), json.loads(row['section'])))).label()}" \
+                if row["section"] else ""
+            self.journal.add(row["id"], f"Asked by {row['client'] or 'someone'}: {row['url']}, {where}{part}. "
+                                        f"Options: {row['options']}." + (" Callback to " + row["callback_url"]
+                                                                          if row["callback_url"] else ""))
+        return row, new
 
     async def probe(self, url: str, destination: str | None, options: OptionsPatch,
                     section: Section | None = None) -> dict:
@@ -150,11 +161,17 @@ class Services:
         now = now or time.time()
         settings = self.settings()
         forget_before = now - settings.keep_days * 86400 if settings.keep_days else None
-        held_before = now - settings.hold_hours * 3600
         # A job's held files are all in held_dir/<job id>, and expire together.
-        for file in self.jobs.expired_held(max(held_before, forget_before or 0)):
+        gone: dict[str, int] = {}
+        for file in self.jobs.expired_held(now, forget_before):
             placement.clear(self.config.held_dir / file["job_id"])
             self.jobs.file_removed(file["job_id"], file["position"])
+            gone[file["job_id"]] = file["job_hold"] or settings.hold_hours
+        for job_id, hours in gone.items():
+            self.journal.add(job_id, f"Its files were removed: they are kept {hours} h after the download. "
+                                     "Download again (POST …/retry) to have them back.")
+        if gone:
+            log.info("removed the held files of %d downloads, past their hold", len(gone))
         if forget_before:
             forgotten = self.jobs.forget(forget_before)
             if forgotten:
@@ -201,9 +218,11 @@ def build(config: Config, http: httpx.AsyncClient | None = None) -> Services:
     notifications = NotificationStore(db, TYPES)
     notifier = Notifier(notifications, http)
     broker = Broker()
-    callbacks = Callbacks(http, lambda job_id, last: _record_callback(jobs, job_id, last))
 
-    scheduler = Scheduler(config, jobs, settings, notifier.emit, callbacks, broker.publish)
+    journal = Journal(db)
+    jobs.hold_from(lambda: settings().hold_hours)
+    callbacks = Callbacks(http, lambda job_id, last: _record_callback(jobs, journal, job_id, last))
+    scheduler = Scheduler(config, jobs, settings, notifier.emit, callbacks, broker.publish, journal)
     jobs.live_from(scheduler.live)
     jobs.on_change(broker.publish)
     jobs.on_change(scheduler.wake)
@@ -217,10 +236,12 @@ def build(config: Config, http: httpx.AsyncClient | None = None) -> Services:
     return Services(config=config, db=db, http=http, settings=settings, destinations=destinations, jobs=jobs,
                     notifications=notifications, notifier=notifier, broker=broker, callbacks=callbacks,
                     scheduler=scheduler, prober=Prober(config.state_dir, config.deno, config.prober),
-                    releases=releases, issues=issues, previews=previews)
+                    releases=releases, issues=issues, previews=previews, journal=journal)
 
 
-def _record_callback(jobs: JobStore, job_id: str, last: dict) -> None:
+def _record_callback(jobs: JobStore, journal: Journal, job_id: str, last: dict) -> None:
     with suppress(NotFound):
         jobs.row(job_id)
         jobs.update(job_id, callback_last=last)
+        journal.add(job_id, f"Callback {last['event']}, try {last['tries']}: {last['message']}",
+                    "info" if last["ok"] else "warning", "callback")

@@ -6,6 +6,8 @@ LAN-only behind Caddy, without a login, like songdrop and clipseerr
 any other. Errors answer {"detail": "<sentence>"}, whatever went wrong."""
 
 import logging
+import secrets
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -18,7 +20,7 @@ from starlette.datastructures import MutableHeaders
 
 from .. import __version__, problems
 from ..config import load
-from ..domain import Conflict, Invalid, NotFound
+from ..domain import Conflict, Gone, Invalid, NotFound
 from ..services import Services, build
 from .routes import ROUTERS
 
@@ -41,7 +43,11 @@ Destinations (`/api/v1/destinations`) are named folders with a file-name
 template and options of their own: callers name one, never a path. Options
 come from the job, then its destination, then the settings.
 
-Errors answer `{"detail": "<sentence>"}`. Times are Unix seconds.
+Errors answer `{"detail": "<sentence>"}`. Times are Unix seconds. A held
+file asked for after its job's hold (`files[].expires_at`) answers 410 Gone,
+with `again`: POST there and the same job downloads it again. Each answer
+carries an `X-Request-ID` (yours, when you send one); videodrop's log names
+it beside each change and each error, and a 500 says it.
 """
 
 TAGS = [
@@ -95,6 +101,46 @@ class CompressSome:
         await (self._plain if plain or scope["type"] != "http" else self._gzip)(scope, receive, send)
 
 
+REQUEST_ID = "x-request-id"
+# A caller's own request id is kept when it looks like one.
+_ID_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.:")
+access = logging.getLogger("videodrop.http")
+
+
+class RequestLog:
+    """Each request gets an id (X-Request-ID, the caller's or a new one),
+    answered back and kept in scope["state"] for the error handler. A
+    change (POST, PUT, PATCH, DELETE) and every answer of 400 or more are
+    logged with it; reads, which callers and pages repeat all day, are not."""
+
+    def __init__(self, app):
+        self._app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self._app(scope, receive, send)
+        given = dict(scope.get("headers") or []).get(REQUEST_ID.encode(), b"").decode("latin-1")
+        request_id = given if 0 < len(given) <= 64 and set(given) <= _ID_CHARS else secrets.token_hex(6)
+        scope.setdefault("state", {})["request_id"] = request_id
+        started, status = time.monotonic(), [500]
+
+        async def start(message):
+            if message["type"] == "http.response.start":
+                status[0] = message["status"]
+                MutableHeaders(scope=message)["X-Request-ID"] = request_id
+            await send(message)
+
+        try:
+            await self._app(scope, receive, start)
+        finally:
+            method, path = scope.get("method", ""), scope.get("path", "")
+            if method not in ("GET", "HEAD", "OPTIONS") or status[0] >= 400:
+                client = (scope.get("client") or ("?",))[0]
+                level = logging.WARNING if status[0] >= 500 else logging.INFO
+                access.log(level, "%s %s %s %.0f ms from %s [%s]", method, path, status[0],
+                           (time.monotonic() - started) * 1000, client, request_id)
+
+
 class Headers:
     """Every answer's caching and security headers, set as it starts (pure
     ASGI: a live stream passes through untouched)."""
@@ -143,6 +189,7 @@ def create_app(services: Services) -> FastAPI:
     app.state.services = services
     app.add_middleware(CompressSome)
     app.add_middleware(Headers)
+    app.add_middleware(RequestLog)
 
     api = APIRouter(prefix="/api/v1")
     for router in ROUTERS:
@@ -154,14 +201,19 @@ def create_app(services: Services) -> FastAPI:
     for kind, status in ((NotFound, 404), (Conflict, 409), (Invalid, 422)):
         app.add_exception_handler(kind, lambda _request, exc, status=status: _error(status, str(exc)))
 
+    @app.exception_handler(Gone)
+    async def gone(_request: Request, exc: Gone):
+        return JSONResponse({"detail": str(exc), "again": exc.again, "removed_at": exc.removed_at}, status_code=410)
+
     @app.exception_handler(RequestValidationError)
     async def invalid_request(_request: Request, exc: RequestValidationError):
         return _error(422, problems.explain(exc.errors()))
 
     @app.exception_handler(Exception)
-    async def unexpected(_request: Request, exc: Exception):
-        log.exception("unhandled error", exc_info=exc)
-        return _error(500, "Something went wrong on the server.")
+    async def unexpected(request: Request, exc: Exception):
+        reference = request.scope.get("state", {}).get("request_id", "?")
+        log.error("unhandled error in %s %s [%s]", request.method, request.url.path, reference, exc_info=exc)
+        return _error(500, f"Something went wrong on the server (reference {reference}: videodrop's log says what).")
 
     # ---- the API reference, and the page -------------------------------------------------
 

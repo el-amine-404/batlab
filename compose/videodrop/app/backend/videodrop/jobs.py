@@ -16,9 +16,9 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from . import links
+from . import links, redact
 from .db import Database
-from .domain import ACTIVE, FINAL, Conflict, Invalid, NotFound, Status
+from .domain import ACTIVE, FINAL, Conflict, Gone, Invalid, NotFound, Status
 from .options import OptionsPatch, Section, VideoOptions
 
 CALLBACK_EVENTS = ("started", "progress", "finished", "failed", "cancelled")
@@ -55,6 +55,11 @@ class JobIn(BaseModel):
                                                       "around it (no re-encoding: it may start a few seconds "
                                                       "early). Its times end the file's name. Not for a "
                                                       "playlist.")
+    hold_hours: int | None = Field(None, ge=1, le=24 * 30,
+                                   description="Without a destination: how long its files are kept for the caller "
+                                               "after the download, in hours (each file's expires_at). Left out: "
+                                               "the settings' hold_hours. A file asked for after that answers 410 "
+                                               "Gone; POST /jobs/{id}/retry downloads it again, same job.")
     priority: int = Field(0, ge=-10, le=10, description="Higher goes first among queued jobs; then oldest first.")
     again: bool = Field(False, description="Download it even when an earlier download got the same file: the site "
                                            "serves the same video (its fingerprint), with the same options, to the "
@@ -141,6 +146,18 @@ class JobStore:
         # The scheduler's live progress of a running job, else None.
         self._live: Callable[[str], dict | None] = lambda job_id: None
         self._changed: list[Callable[[str], None]] = []
+        # The settings' hold_hours: how long held files are kept when the job didn't say.
+        self._hold_hours: Callable[[], int] = lambda: 24
+
+    def hold_from(self, hours: Callable[[], int]) -> None:
+        self._hold_hours = hours
+
+    def hold_hours(self, row: sqlite3.Row) -> int:
+        return row["hold_hours"] or self._hold_hours()
+
+    def expires_at(self, row: sqlite3.Row) -> float | None:
+        """When its held files go (none before it has finished)."""
+        return row["finished_at"] + self.hold_hours(row) * 3600 if row["finished_at"] else None
 
     def live_from(self, live: Callable[[str], dict | None]) -> None:
         self._live = live
@@ -168,14 +185,23 @@ class JobStore:
         base = self._held if row["root"] == "held" else self._root
         return base / row["path"]
 
-    def available(self, job_id: str, index: int) -> tuple[sqlite3.Row, Path]:
-        """A job's file n, still there; raises NotFound."""
-        self.row(job_id)
-        file = self._db.one("SELECT * FROM files WHERE job_id = ? AND position = ? AND removed_at IS NULL",
-                            (job_id, index))
-        path = self.file_path(file) if file else None
-        if not path or not path.is_file():
-            raise NotFound("That file isn't there any more.")
+    def available(self, job_id: str, index: int, base_url: str = "") -> tuple[sqlite3.Row, Path]:
+        """A job's file n, still there. Raises NotFound when there is no such
+        file, Gone when there was (removed after its hold, or moved away)."""
+        row = self.row(job_id)
+        file = self._db.one("SELECT * FROM files WHERE job_id = ? AND position = ?", (job_id, index))
+        if not file:
+            raise NotFound(f"Download {job_id!r} has no file {index}.")
+        path = self.file_path(file)
+        again = f"{base_url.rstrip('/')}/api/v1/jobs/{job_id}/retry"
+        if file["removed_at"] is not None:
+            when = time.strftime("%d %b %Y at %H:%M UTC", time.gmtime(file["removed_at"]))
+            raise Gone(f"This file was kept {self.hold_hours(row)} h after its download, then removed on {when}. "
+                       f"To have it again, POST {again} (the same job downloads it again), or ask for a new "
+                       "download.", again, file["removed_at"])
+        if not path.is_file():
+            raise Gone("This file isn't in its folder any more: it was moved or deleted there. To have it again, "
+                       f"POST {again}.", again)
         return file, path
 
     def every_file(self) -> list[Path]:
@@ -187,6 +213,7 @@ class JobStore:
         videodrop, for its files' download links; the address the job was
         asked through when none."""
         base = (base_url or row["base_url"] or "").rstrip("/")
+        expires = self.expires_at(row)
         files = []
         for file in self.files(row["id"]):
             available = file["removed_at"] is None and self.file_path(file).is_file()
@@ -194,6 +221,8 @@ class JobStore:
             files.append({"index": file["position"], "name": file["name"], "kind": file["kind"],
                           "size": file["size"], "path": file["path"] if file["root"] == "destination" else None,
                           "existed": bool(file["existed"]), "available": available,
+                          "expires_at": expires if file["root"] == "held" and available else None,
+                          "removed_at": file["removed_at"],
                           "checks": json.loads(file["checks"]) if file["checks"] else None,
                           "download_url": f"{base}{path}" if available else None})
         progress = self._live(row["id"]) if row["status"] == "running" else None
@@ -201,7 +230,8 @@ class JobStore:
             progress = json.loads(row["progress"]) or None
         callback = None
         if row["callback_url"]:
-            callback = {"url": row["callback_url"], "events": json.loads(row["callback_events"]),
+            # Its address as given, but a password in it is the caller's and isn't answered back.
+            callback = {"url": redact.secrets(row["callback_url"]), "events": json.loads(row["callback_events"]),
                         "signed": bool(row["callback_secret"]),
                         "last": json.loads(row["callback_last"]) if row["callback_last"] else None}
         return {
@@ -228,13 +258,15 @@ class JobStore:
             "section": dict(zip(("start", "end"), json.loads(row["section"]))) if row["section"] else None,
             "attempts": row["attempts"],
             "retry_at": row["retry_at"],
+            "hold_hours": self.hold_hours(row),
             "files": files,
             "callback": callback,
             "created_at": row["created_at"],
             "started_at": row["started_at"],
             "finished_at": row["finished_at"],
             "updated_at": row["updated_at"],
-            "links": {"self": f"{base}/api/v1/jobs/{row['id']}", "events": f"{base}/api/v1/jobs/{row['id']}/events"},
+            "links": {"self": f"{base}/api/v1/jobs/{row['id']}", "events": f"{base}/api/v1/jobs/{row['id']}/events",
+                      "log": f"{base}/api/v1/jobs/{row['id']}/log"},
         }
 
     def query(self, query: JobQuery) -> tuple[list[sqlite3.Row], int]:
@@ -272,25 +304,35 @@ class JobStore:
         events = body.callback_events if body.callback_events is not None else list(DEFAULT_CALLBACK_EVENTS)
         self._db.run(
             "INSERT INTO jobs (id, url, site, dedupe_key, destination, folder, template, options, priority, client, "
-            "status, callback_url, callback_secret, callback_events, base_url, song, again, section, created_at, "
-            "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "status, callback_url, callback_secret, callback_events, base_url, song, again, section, hold_hours, "
+            "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (job_id, url, links.site_of(url), key, slug, destination["folder"] if destination else None, template,
              json.dumps(options.model_dump()), body.priority, body.client, body.callback_url, body.callback_secret,
              json.dumps([e for e in CALLBACK_EVENTS if e in events]), base_url,
              body.song.model_dump_json() if body.song else None,
-             int(body.again), section_text(body.section), now, now))
+             int(body.again), section_text(body.section), body.hold_hours, now, now))
         self._touch(job_id)
         return self.row(job_id), True
 
     def retry(self, job_id: str) -> sqlite3.Row:
-        """A failed or cancelled job, queued again from the start."""
+        """A failed or cancelled job, or a finished one whose files are all
+        gone (removed after their hold, moved away), queued again from the
+        start: the same job, the same links."""
         row = self.row(job_id)
-        if row["status"] not in ("failed", "cancelled"):
-            raise Conflict("Only a failed or cancelled download can be tried again.")
-        self._db.run("UPDATE jobs SET status = 'queued', stage = NULL, error = NULL, attempts = 0, retry_at = NULL, "
-                     "progress = '{}', notes = '[]', started_at = NULL, finished_at = NULL, updated_at = ? "
-                     "WHERE id = ?",
-                     (time.time(), job_id))
+        if row["status"] == "finished":
+            files = self.files(job_id)
+            if any(f["removed_at"] is None and self.file_path(f).is_file() for f in files):
+                raise Conflict("Its files are still there: download them, or ask for a new download.")
+        elif row["status"] not in ("failed", "cancelled"):
+            raise Conflict("Only an ended download can be tried again.")
+
+        def work(conn):
+            conn.execute("DELETE FROM files WHERE job_id = ?", (job_id,))
+            conn.execute("UPDATE jobs SET status = 'queued', stage = NULL, error = NULL, attempts = 0, "
+                         "retry_at = NULL, progress = '{}', notes = '[]', fingerprint = NULL, reused_from = NULL, "
+                         "started_at = NULL, finished_at = NULL, updated_at = ? WHERE id = ?", (time.time(), job_id))
+
+        self._db.transaction(work)
         self._touch(job_id)
         return self.row(job_id)
 
@@ -355,9 +397,12 @@ class JobStore:
         return self._db.run("UPDATE jobs SET status = 'queued', stage = NULL, attempts = MAX(attempts - 1, 0), "
                             "progress = '{}', notes = '[]', updated_at = ? WHERE status = 'running'", (time.time(),))
 
-    def expired_held(self, before: float) -> list[sqlite3.Row]:
-        return self._db.all("SELECT files.* FROM files JOIN jobs ON jobs.id = files.job_id WHERE files.root = 'held' "
-                            "AND files.removed_at IS NULL AND jobs.finished_at < ?", (before,))
+    def expired_held(self, now: float, forget_before: float | None = None) -> list[sqlite3.Row]:
+        """Held files past their job's hold (or of a job about to be forgotten)."""
+        return self._db.all("SELECT files.*, jobs.hold_hours AS job_hold FROM files JOIN jobs ON jobs.id = files.job_id "
+                            "WHERE files.root = 'held' AND files.removed_at IS NULL AND jobs.finished_at IS NOT NULL "
+                            "AND (jobs.finished_at + COALESCE(jobs.hold_hours, ?) * 3600 < ? OR jobs.finished_at < ?)",
+                            (self._hold_hours(), now, forget_before or 0))
 
     def file_removed(self, job_id: str, position: int) -> None:
         self._db.run("UPDATE files SET removed_at = ? WHERE job_id = ? AND position = ?",

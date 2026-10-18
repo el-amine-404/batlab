@@ -1,8 +1,9 @@
 from importlib import metadata
+from typing import Literal
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Query, Request, Response
 
-from ... import __version__, cookies
+from ... import __version__, cookies, logs
 from ...domain import Invalid
 from ...settings import Settings, SettingsPatch
 from .. import schemas
@@ -37,6 +38,16 @@ def status(ctx: Ctx):
         "database_bytes": ctx.db.size(),
         "clients": ctx.jobs.clients(),
     }
+
+
+@router.get("/log", tags=["System"], summary="videodrop's own log, its newest lines", response_model=schemas.ServerLog)
+def server_log(after: int = Query(0, ge=0, description="Only the lines after this one (its seq): to follow it."),
+               level: Literal["debug", "info", "warning", "error"] = Query("info", description="This one and worse."),
+               limit: int = Query(500, ge=1, le=2000)):
+    """Kept in memory since the start, the newest 2000; the container's log
+    has all of it. Without secrets. A download's own log is
+    /jobs/{id}/log."""
+    return {"lines": logs.RECENT.lines(after, level, limit)}
 
 
 @router.get("/issues", tags=["System"], summary="What needs a person's eye", response_model=schemas.IssueList)
