@@ -1,14 +1,20 @@
 """Says when the Clio 4 or the Ford leaves its parking spot on the street,
 and when it is back.
 
-Frigate (config.yml, camera_2) follows the cars and has a zone per spot. It
-publishes an event on MQTT each time a car changes zone or goes from moving to
-parked. A car that drives into a spot has arrived; a car parked in a spot that
-drives out of it has left. Each is told the moment Frigate sees it, with
-Frigate's latest frame of the street (the cars boxed) and a close-up of the
-car from the 4K stream. Once the recording is written, a second message says
-which way the car went (or came from) and holds the clip, made small enough
-for Discord to play.
+Every CARWATCH_POLL seconds it looks at the spots itself: Frigate's latest
+frame of the street, the area around the spots, through the same YOLO model
+Frigate uses. A spot holds a car when a car's box covers CARWATCH_FILL of its
+zone (Frigate's zones, drawn around each parked car). A spot that changes,
+and stays changed for CARWATCH_CONFIRM seconds, is told: "left" or "is back",
+with a close-up from the 4K stream and the street. Once the recording is
+written, a second message says which way the car went (or came from), from
+the path of the car Frigate followed near the spot then, and holds the clip,
+made small enough for Discord to play.
+
+Frigate's own tracking is not enough for this: from above it loses a parked
+car every half hour and finds it again only when something moves near it,
+and it hands a parked car's identity to a car driving past. Its events are
+only used for the way a car went.
 
 A car with no spot of its own (the Sandero) is known by its look instead:
 Frigate's classifier (Settings > Classification) gives it a sub label, here
@@ -18,14 +24,6 @@ gone when it drives a car length away from there.
 It also says when someone stays at the cars: Frigate puts a person in the
 CARWATCH_PEOPLE_ZONE only after its loitering time there (30 s). Then the
 same: a close-up and the street at once, the clip after.
-
-Counting cars in a spot is not enough: Frigate looks for cars only where
-something moves, so after a restart a parked car stays unseen until someone
-walks past it, and would "arrive" then. Here a car first seen already in its
-spot has not arrived; it can only leave. Frigate also boxes part of a parked
-car at times, then all of it, and the box's bottom moves into or out of the
-spot: a car has to have moved CARWATCH_MOVE pixels (of the 960 wide frame)
-to arrive or leave.
 
 Messages go through Apprise (compose/apprise) to the "cameras" channel. It
 runs in Frigate's image, for OpenCV and ffmpeg; batlab_common
@@ -65,7 +63,14 @@ FRAME = os.environ.get("CARWATCH_FRAME", "http://frigate:1984/api/frame.jpeg?src
 WAYS = dict(pair.split("=", 1) for pair in
             os.environ.get("CARWATCH_WAYS", "left=left,right=right").split(","))
 # Seconds of the clip before and after the moment told.
-BEFORE, AFTER = 5, 15
+BEFORE, AFTER = 10, 15
+# Frigate's model, read from its config folder.
+MODEL = os.environ.get("CARWATCH_MODEL", "/models/yolov9-s-320.onnx")
+MODEL_SIZE = 320
+CAR = 2  # COCO's car
+POLL = int(os.environ.get("CARWATCH_POLL", "3"))
+CONFIRM = int(os.environ.get("CARWATCH_CONFIRM", "12"))
+FILL = float(os.environ.get("CARWATCH_FILL", "0.4"))
 # sub_label=name pairs of the cars followed wherever they park.
 FOLLOW = dict(pair.split("=", 1) for pair in
               os.environ.get("CARWATCH_FOLLOW", "sandero=Sandero").split(",") if pair)
@@ -222,21 +227,164 @@ def duration(seconds):
     return f"{minutes // 60} h {minutes % 60:02d}"
 
 
+def coordinates(zone):
+    """A Frigate zone's polygon in detect pixels."""
+    import numpy
+
+    points = zone["coordinates"]
+    points = points.split(",") if isinstance(points, str) else points
+    return (numpy.array([float(v) for v in points], numpy.float32).reshape(-1, 2) * [WIDTH, HEIGHT])
+
+
+class Spots:
+    """Which spots hold a car right now, by Frigate's model on the frame."""
+
+    def __init__(self):
+        self.model = None
+        self.zones = {}
+        self.loaded = 0.0
+
+    def load(self):
+        import openvino
+
+        if self.model is None:
+            self.model = openvino.Core().compile_model(MODEL, "CPU")
+        # The zones are drawn in Frigate's UI; read them again now and then.
+        if time.time() - self.loaded > 600:
+            zones = json.loads(get(f"{FRIGATE}/api/config") or b"{}")["cameras"][CAMERA]["zones"]
+            self.zones = {spot: coordinates(zones[spot]) for spot in SPOTS if spot in zones}
+            self.loaded = time.time()
+
+    def cars(self, frame, polygon):
+        """The cars' boxes in a square around one spot. The model is sure of a
+        parked car from above only with room around it: a square twice the
+        car, centred on it, scaled to the model (a tight crop loses it)."""
+        import cv2
+        import numpy
+
+        (x1, y1), (x2, y2) = polygon.min(0), polygon.max(0)
+        side = int(min(max(x2 - x1, y2 - y1) * 1.9, HEIGHT))
+        left = int(min(max((x1 + x2 - side) / 2, 0), WIDTH - side))
+        top = int(min(max((y1 + y2 - side) / 2, 0), HEIGHT - side))
+        crop = cv2.resize(frame[top:top + side, left:left + side], (MODEL_SIZE, MODEL_SIZE))
+        tensor = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB).transpose(2, 0, 1)[None].astype(numpy.float32) / 255
+        rows = self.model([tensor])[0][0].T
+        rows = rows[rows[:, 4 + CAR] > 0.4]
+        scale = side / MODEL_SIZE
+        boxes = [((cx - w / 2) * scale + left, (cy - h / 2) * scale + top,
+                  (cx + w / 2) * scale + left, (cy + h / 2) * scale + top)
+                 for cx, cy, w, h in rows[:, :4]]
+        keep = cv2.dnn.NMSBoxes([[b[0], b[1], b[2] - b[0], b[3] - b[1]] for b in boxes],
+                                [float(v) for v in rows[:, 4 + CAR]], 0.4, 0.5) if boxes else []
+        return [boxes[i] for i in numpy.array(keep).flatten()]
+
+    def look(self):
+        """spot -> (how much of it a car covers, that car's box), or None when
+        there is no frame."""
+        import cv2
+        import numpy
+
+        self.load()
+        data = get(f"{FRIGATE}/api/{CAMERA}/latest.jpg")
+        frame = data and cv2.imdecode(numpy.frombuffer(data, numpy.uint8), cv2.IMREAD_COLOR)
+        if frame is None or not self.zones:
+            return None
+        frame = cv2.resize(frame, (WIDTH, HEIGHT)) if frame.shape[:2] != (HEIGHT, WIDTH) else frame
+        seen = {}
+        for spot, polygon in self.zones.items():
+            boxes = self.cars(frame, polygon)
+            zone = numpy.zeros((HEIGHT, WIDTH), numpy.uint8)
+            cv2.fillPoly(zone, [polygon.astype(numpy.int32)], 1)
+            best, where = 0.0, None
+            for box in boxes:
+                covered = zone[int(max(box[1], 0)):int(box[3]), int(max(box[0], 0)):int(box[2])].sum() / zone.sum()
+                if covered > best:
+                    best, where = covered, box
+            seen[spot] = (best, where)
+        return seen
+
+
 class Watch:
     def __init__(self):
-        self.first = {}    # car (Frigate's id) -> the spot it was first seen in, or None
-        self.start = {}    # car -> where it was first seen, or parked: (x, y) of its box's bottom
-        self.parked = {}   # car -> the spot it is parked in
-        self.arrived = {}  # car -> the spot it was told arriving in
-        self.last = {}     # spot -> ("arrived" | "left", when), what was last told
+        self.spots = Spots()
+        self.alive, self.asked = False, float("-inf")
+        self.held = {}     # spot -> True (a car) or False, as last told or first seen
+        self.change = {}   # spot -> (True | False, since, box): what it looks like, not yet held
+        self.boxes = {}    # spot -> the box of the car last seen in it
+        self.trails = {}   # car (Frigate's id) -> [(when, x, y)] of its box's bottom middle
+        self.last = {}     # spot or label -> ("arrived" | "parked" | "left", when), last told
         self.origin = {}   # car -> where it was first seen; kept after it ends, until told
         self.seen = {}     # car -> where it was last seen; the same
         self.stopped = {}  # followed car -> where it is parked
         self.people = set()  # the people told as staying at the cars
         self.people_told = float("-inf")
 
-    def spot(self, zones):
-        return next((zone for zone in zones if zone in SPOTS), None)
+    def check(self, now):
+        """Look at the spots; tell a spot that changed CONFIRM seconds ago and
+        stayed so."""
+        if not self.live(now):
+            # A dark camera's last frame, or none, says nothing of the spots.
+            self.change.clear()
+            return
+        try:
+            seen = self.spots.look()
+        except Exception as error:  # a missed look is caught up by the next
+            log(f"look: {error}")
+            return
+        for spot, (covered, box) in (seen or {}).items():
+            full = covered >= FILL
+            if full:
+                self.boxes[spot] = box
+            if self.held.get(spot) == full:
+                self.change.pop(spot, None)
+                continue
+            if spot not in self.change or self.change[spot][0] != full:
+                self.change[spot] = (full, now, box or self.boxes.get(spot))
+                continue
+            _, since, where = self.change[spot]
+            if now - since < CONFIRM:
+                continue
+            self.change.pop(spot)
+            was = self.held.get(spot)
+            self.held[spot] = full
+            if was is None:
+                log(f"{SPOTS[spot]}: {'a car' if full else 'empty'} ({covered:.2f})")
+            else:
+                self.tell(spot, SPOTS[spot], "arrived" if full else "left", None, since,
+                          where or (0, 0, 0, 0))
+
+    def live(self, now):
+        """Whether the camera gives frames, from Frigate's stats every 30 s."""
+        if now - self.asked >= 30:
+            self.asked = now
+            try:
+                stats = json.loads(get(f"{FRIGATE}/api/stats") or b"{}")
+                self.alive = bool(stats["cameras"][CAMERA].get("camera_fps"))
+            except (ValueError, KeyError):
+                self.alive = False
+        return self.alive
+
+    def way(self, spot, kind, when):
+        """Which side the car went to (or came from): the car Frigate followed
+        nearest the spot about then, its last point (or first); None if none."""
+        polygon = self.spots.zones.get(spot)
+        if polygon is None:
+            return None
+        (x1, y1), (x2, y2) = polygon.min(0) - 30, polygon.max(0) + 30
+        middle = polygon.mean(0)
+        best = None
+        for trail in list(self.trails.values()):
+            near = [p for p in trail if when - 20 <= p[0] <= when + 15
+                    and x1 <= p[1] <= x2 and y1 <= p[2] <= y2]
+            if not near:
+                continue
+            end = trail[-1] if kind == "left" else trail[0]
+            far = math.dist(end[1:], middle)
+            if far >= MOVE and (best is None or far > best[0]):
+                best = (far, end)
+        if not best:
+            return None
+        return WAYS["left" if best[1][1] < WIDTH / 2 else "right"]
 
     def event(self, message):
         after = message.get("after") or {}
@@ -247,41 +395,19 @@ class Watch:
         if after.get("label") != "car":
             return
         car, when = after["id"], after.get("frame_time") or time.time()
-        spot = self.spot(after.get("current_zones") or [])
-        x1, _, x2, y2 = after.get("box") or (0, 0, 0, 0)
-        here = ((x1 + x2) / 2, y2)
-        self.first.setdefault(car, spot)
-        self.start.setdefault(car, here)
+        box = after.get("box") or (0, 0, 0, 0)
+        here = ((box[0] + box[2]) / 2, box[3])
+        self.trails.setdefault(car, []).append((when, *here))
         self.origin.setdefault(car, here)
         self.seen[car] = here
-        box = after.get("box") or (0, 0, 0, 0)
-        moved = math.dist(self.start[car], here) >= MOVE
         self.follow(after, car, when, here, box)
-        # A parked car Frigate had not seen is often found only as it starts
-        # to move: first seen in a spot is as good as parked there.
-        was = self.parked.get(car) or self.first[car]
-        if was and spot != was and not after.get("stationary") and moved:
-            self.parked.pop(car, None)
-            self.first[car] = None
-            self.start[car] = here
-            self.arrived.pop(car, None)
-            self.tell(was, SPOTS[was], "left", car, when, box)
-        elif (spot and self.first[car] != spot and self.arrived.get(car) != spot
-              and spot not in self.parked.values() and moved):
-            # Driven in from the street, the spot empty (a car passing close
-            # to a parked one is not arriving). Told once: a car manoeuvring
-            # in and out of the spot before it parks says nothing more.
-            self.arrived[car] = spot
-            self.tell(spot, SPOTS[spot], "arrived", car, when, box)
-        if spot and after.get("stationary") and car not in self.parked:
-            self.parked[car] = spot
-            self.start[car] = here
-            log(f"{SPOTS[spot]}: {car} parked")
         if message.get("type") == "end":
-            # Gone from the picture: driven off (told above, as it left its
-            # spot), or lost while parked, which says nothing.
-            for seen in (self.first, self.start, self.parked, self.arrived, self.stopped):
-                seen.pop(car, None)
+            self.stopped.pop(car, None)
+        # Ten minutes of paths: enough for the way of a car just told.
+        for key in [k for k, t in self.trails.items() if t[-1][0] < when - 600]:
+            self.trails.pop(key)
+            self.origin.pop(key, None)
+            self.seen.pop(key, None)
 
     def person(self, message, after):
         who, when = after["id"], after.get("frame_time") or time.time()
@@ -363,17 +489,17 @@ class Watch:
         log(f"told: {name} {kind} at {at} ({car})")
 
         video = self.later_clip(when - BEFORE, when + AFTER)
-        where = (self.seen if kind == "left" else self.origin).get(car)
-        way = WAYS["left" if where and where[0] < WIDTH / 2 else "right"] if where else None
+        if car is None:
+            way = self.way(key, kind, when)
+        else:
+            where = (self.seen if kind == "left" else self.origin).get(car)
+            way = WAYS["left" if where and where[0] < WIDTH / 2 else "right"] if where else None
         if kind == "left":
             words = f"***{name} went {way}***" if way else f"***{title}***"
         else:
             words = f"***{name} came from the {way}***" if way else f"***{title}***"
         notify(f"{words}\n{at}" + ("" if video else " · no clip"), "info", [(f"{key}.mp4", video)])
         log(f"told: {name} {kind} {way}, clip {len(video or b'')} bytes")
-        if car not in self.parked and car not in self.first and car not in self.stopped:
-            self.origin.pop(car, None)
-            self.seen.pop(car, None)
 
 
 def main():
@@ -383,12 +509,16 @@ def main():
         try:
             mqtt = Mqtt(BROKER, PORT, "frigate/events")
             log("connected")
+            looked = 0.0
             while True:
-                for payload in mqtt.messages(5):
+                for payload in mqtt.messages(1):
                     try:
                         watch.event(json.loads(payload))
                     except (ValueError, KeyError, TypeError) as error:
                         log(f"event: {error}")
+                if time.time() - looked >= POLL:
+                    looked = time.time()
+                    watch.check(looked)
                 with open(HEARTBEAT, "w") as out:
                     out.write(str(int(time.time())))
         except (OSError, ConnectionError) as error:

@@ -171,6 +171,8 @@ services:
       - ${CONFIGS_ROOT}/frigate/carwatch/carwatch.py:/app/carwatch.py:ro
       # Relative to this file, as for camwatch.
       - ../../lib/batlab-common/batlab_common:/opt/batlab-common/batlab_common:ro
+      # Frigate's YOLO model (build-model.sh), to look at the spots itself.
+      - ${VOLUMES_ROOT}/frigate/config/models:/models:ro
     environment:
       - TZ=${TZ}
       - PYTHONDONTWRITEBYTECODE=1
@@ -194,7 +196,8 @@ services:
       timeout: 5s
       start_period: 120s
       retries: 3
-    # A 4K frame and a 4K clip re-encoded, a few times a day.
+    # The model on two crops every 3 s (about 0.4 s of CPU), and a 4K frame
+    # and a 4K clip re-encoded, a few times a day.
     mem_limit: 768m
     cpus: 3
     read_only: true
