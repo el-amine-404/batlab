@@ -219,7 +219,7 @@ _SECOND_LEVEL = {"co", "com", "org", "net", "ac", "gov", "edu", "or", "ne", "go"
 _KINDS = (
     ("playlists", re.compile(r"playlist|album|set\b|collection|series|season|show", re.I)),
     ("channels", re.compile(r"channel|user|artist|profile|creator|model|uploader|tab\b|page\b", re.I)),
-    ("live streams", re.compile(r"live|stream", re.I)),
+    ("live streams", re.compile(r"live|stream(?!able)", re.I)),
     ("clips", re.compile(r"clip|short|reel|story", re.I)),
     ("podcasts", re.compile(r"podcast|episode", re.I)),
 )
