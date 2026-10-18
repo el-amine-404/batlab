@@ -13,6 +13,8 @@ services:
       - ${VOLUMES_ROOT}/homepage/images:/app/public/images
       - ${VOLUMES_ROOT}/homepage/logs:/app/config/logs
       - /etc/localtime:/etc/localtime:ro
+      # Only so the Storage widget can show the media disk's free space.
+      - ${DATA_ROOT}:/mnt/storage:ro
     environment:
       - HOMEPAGE_ALLOWED_HOSTS=homepage.homelab.lan
       - HOMEPAGE_VAR_JELLYFIN_KEY=${JELLYFIN_API_KEY}

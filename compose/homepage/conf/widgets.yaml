@@ -2,13 +2,33 @@
 # For configuration options and examples, please see:
 # https://gethomepage.dev/configs/info-widgets/
 
+- greeting:
+    text_size: xl
+    text: Potato homelab
+
 - resources:
+    label: lab2
+    expanded: true
     cpu: true
     memory: true
-    disk: /
+    cputemp: true
+    uptime: true
+    units: metric
+    tempmin: 30
+    tempmax: 90
+
+# /mnt/storage is the media disk, mounted read-only in docker-compose.yml.
+- resources:
+    label: Storage
+    expanded: true
+    disk:
+      - /
+      - /mnt/storage
 
 - search:
-    provider: google
+    provider: [google, duckduckgo]
+    focus: true
+    showSearchSuggestions: true
     target: _blank
 
 - openmeteo:
@@ -24,6 +44,6 @@
 - datetime:
     text_size: xl
     format:
-      dateStyle: short
+      dateStyle: medium
       timeStyle: short
       hour12: true

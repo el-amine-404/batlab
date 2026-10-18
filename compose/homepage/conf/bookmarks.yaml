@@ -2,16 +2,62 @@
 # For configuration options and examples, please see:
 # https://gethomepage.dev/configs/bookmarks
 
-- Quick Links:
-    - Github:
-        - abbr: GH
-          icon: github.png
-          href: https://github.com
-    - Reddit:
-        - abbr: RE
-          icon: reddit.png
-          href: https://reddit.com
+- Web:
     - YouTube:
-        - abbr: YT
-          icon: youtube.png
+        - icon: si-youtube
           href: https://youtube.com
+    - Reddit:
+        - icon: si-reddit
+          href: https://reddit.com
+    - GitHub:
+        - icon: si-github
+          href: https://github.com
+
+- Links:
+    - Router:
+        - icon: mdi-router-wireless
+          href: http://192.168.1.1
+          description: The ISP box
+    - batlab:
+        - icon: si-github
+          href: https://github.com/el-amine-404/batlab
+          description: This lab's code
+    - Renovate PRs:
+        - icon: si-renovate
+          href: https://github.com/el-amine-404/batlab/pulls
+          description: Image updates waiting
+    - Docs:
+        - icon: mdi-book-open-variant
+          href: https://github.com/el-amine-404/batlab/tree/main/docs
+          description: How the lab is set up
+
+- Guides:
+    - TRaSH Guides:
+        - icon: mdi-trash-can-outline
+          href: https://trash-guides.info
+          description: Quality profiles for the arrs
+    - Servarr Wiki:
+        - icon: mdi-book-search
+          href: https://wiki.servarr.com
+    - Homepage docs:
+        - icon: mdi-view-dashboard
+          href: https://gethomepage.dev
+    - Dashboard Icons:
+        - icon: mdi-palette-swatch
+          href: https://selfh.st/icons
+          description: Icon names for Homepage
+
+- Discover:
+    - awesome-selfhosted:
+        - icon: mdi-star
+          href: https://awesome-selfhosted.net
+    - selfh.st:
+        - icon: mdi-newspaper-variant
+          href: https://selfh.st
+          description: Weekly self-hosting news
+    - r/selfhosted:
+        - icon: si-reddit
+          href: https://reddit.com/r/selfhosted
+    - r/homelab:
+        - icon: si-reddit
+          href: https://reddit.com/r/homelab

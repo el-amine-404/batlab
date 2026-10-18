@@ -2,8 +2,8 @@
 # For configuration options and examples, please see:
 # https://gethomepage.dev/configs/services/
 #
-# Two tabs (settings.yaml): Apps, what the family opens, and Admin, what
-# keeps it running. Each group lists what is used most first. The dots come
+# Three tabs (settings.yaml): Apps, what the family opens; Media, the arr
+# stack; Lab, what keeps it running. Each group lists what is used most first. The dots come
 # from statusStyle in settings.yaml.
 
 # --- Apps ---------------------------------------------------------------
@@ -250,6 +250,8 @@
         href: http://cleanuparr.homelab.lan
         description: Clears stuck downloads
         siteMonitor: http://cleanuparr:11011
+
+# --- Lab -----------------------------------------------------------------
 
 - Network:
     - AdGuard Home:

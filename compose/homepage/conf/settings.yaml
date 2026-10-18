@@ -12,12 +12,18 @@ useEqualHeights: true
 statusStyle: dot
 hideVersion: true
 
+# Dark slate with frosted cards; the glow behind them is in custom.css.
+theme: dark
+color: slate
+cardBlur: sm
+
 # Type on the page to jump to a service; descriptions are searched too.
 quicklaunch:
   searchDescriptions: true
   hideVisitURL: true
 
-# Groups in services.yaml order. A tab shows only its own groups.
+# Groups in services.yaml order, then the bookmark groups. A tab shows only
+# its own groups: Apps for every day, Media for the arr stack, Lab for the rest.
 layout:
   Watch:
     tab: Apps
@@ -35,28 +41,44 @@ layout:
     style: row
     columns: 3
   Library:
-    tab: Admin
+    tab: Media
     icon: mdi-bookshelf
     style: row
-    columns: 5
+    columns: 3
   Downloads:
-    tab: Admin
+    tab: Media
     icon: mdi-download
     style: row
     columns: 3
   Network:
-    tab: Admin
+    tab: Lab
     icon: mdi-lan
     style: row
     columns: 3
   System:
-    tab: Admin
+    tab: Lab
     icon: mdi-server
     style: row
     columns: 4
   Backends:
-    tab: Admin
+    tab: Lab
     icon: mdi-api
     style: row
     columns: 5
     initiallyCollapsed: true
+  Web:
+    tab: Apps
+    style: row
+    columns: 3
+  Links:
+    tab: Lab
+    style: row
+    columns: 4
+  Guides:
+    tab: Lab
+    style: row
+    columns: 4
+  Discover:
+    tab: Lab
+    style: row
+    columns: 4

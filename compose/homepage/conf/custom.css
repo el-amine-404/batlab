@@ -1,0 +1,7 @@
+/* A soft glow behind the cards; cardBlur in settings.yaml frosts them. */
+#page_wrapper {
+  background-image:
+    radial-gradient(ellipse at top left, rgb(56 189 248 / 0.12), transparent 50%),
+    radial-gradient(ellipse at bottom right, rgb(167 139 250 / 0.12), transparent 50%);
+  background-attachment: fixed;
+}
