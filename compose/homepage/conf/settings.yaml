@@ -23,30 +23,42 @@ quicklaunch:
   hideVisitURL: true
 
 # Groups in services.yaml order, then the bookmark groups. A tab shows only
-# its own groups: Apps for every day, Media for the arr stack, Lab for the rest.
+# its own groups; no group shares a tab's name, so nothing reads twice.
 layout:
-  Watch:
-    tab: Apps
+  Movies & TV:
+    tab: Entertainment
     icon: mdi-movie-open
     style: row
-    columns: 4
+    columns: 3
   Music:
-    tab: Apps
+    tab: Entertainment
     icon: mdi-music
     style: row
+    columns: 3
+  Get music:
+    tab: Entertainment
+    icon: mdi-music-note-plus
+    style: row
     columns: 4
-  Home:
-    tab: Apps
-    icon: mdi-home
+  Photos & files:
+    tab: Home
+    icon: mdi-image-multiple
     style: row
     columns: 3
-  Library:
-    tab: Media
+  # Two small groups side by side rather than two near-empty rows.
+  House:
+    tab: Home
+    icon: mdi-home
+  AI:
+    tab: Home
+    icon: mdi-robot
+  Managers:
+    tab: Downloads
     icon: mdi-bookshelf
     style: row
     columns: 3
-  Downloads:
-    tab: Media
+  Downloaders:
+    tab: Downloads
     icon: mdi-download
     style: row
     columns: 3
@@ -67,7 +79,7 @@ layout:
     columns: 5
     initiallyCollapsed: true
   Web:
-    tab: Apps
+    tab: Home
     style: row
     columns: 3
   Links:

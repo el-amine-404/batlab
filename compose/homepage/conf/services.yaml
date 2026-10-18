@@ -2,13 +2,15 @@
 # For configuration options and examples, please see:
 # https://gethomepage.dev/configs/services/
 #
-# Three tabs (settings.yaml): Apps, what the family opens; Media, the arr
-# stack; Lab, what keeps it running. Each group lists what is used most first. The dots come
-# from statusStyle in settings.yaml.
+# Four tabs (settings.yaml), named so a newcomer knows where to look:
+# Entertainment to watch and listen, Home for the house and family files,
+# Downloads for what fetches the media, Lab for what keeps it running.
+# Each group lists what is used most first. The dots come from statusStyle
+# in settings.yaml.
 
-# --- Apps ---------------------------------------------------------------
+# --- Entertainment -----------------------------------------------------
 
-- Watch:
+- Movies & TV:
     - Jellyfin:
         icon: jellyfin
         href: http://jellyfin.homelab.lan
@@ -37,11 +39,6 @@
         href: http://nodecast.homelab.lan
         description: Live TV in the browser
         siteMonitor: http://nodecast:3000/api/auth/setup-required
-    - Dispatcharr:
-        icon: dispatcharr
-        href: http://dispatcharr.homelab.lan
-        description: Live TV channels for Jellyfin
-        siteMonitor: http://gluetun:9191/hdhr/discover.json
 
 - Music:
     - Navidrome:
@@ -60,6 +57,13 @@
         href: http://feishin.homelab.lan
         description: Player for Navidrome
         siteMonitor: http://feishin:9180
+    - Stanzarr:
+        icon: mdi-script-text
+        href: http://stanzarr.homelab.lan
+        description: Lyrics for the library
+        siteMonitor: http://stanzarr:6868/health
+
+- Get music:
     - Aurral:
         icon: mdi-music-circle
         href: http://aurral.homelab.lan
@@ -95,13 +99,10 @@
             - field: done
               label: Done
               format: size
-    - Stanzarr:
-        icon: mdi-script-text
-        href: http://stanzarr.homelab.lan
-        description: Lyrics for the library
-        siteMonitor: http://stanzarr:6868/health
 
-- Home:
+# --- Home --------------------------------------------------------------
+
+- Photos & files:
     - Immich:
         icon: immich
         href: http://immich.homelab.lan
@@ -122,24 +123,6 @@
           type: paperlessngx
           url: http://paperless:8000
           key: "{{HOMEPAGE_VAR_PAPERLESS_API_TOKEN}}"
-    - Frigate:
-        icon: frigate
-        href: http://frigate.homelab.lan
-        description: Home cameras, live view
-        siteMonitor: http://frigate:5000
-        widget:
-          type: frigate
-          # Port 5000 has no login and is only reachable on home_server.
-          url: http://frigate:5000
-    - Open WebUI:
-        icon: open-webui
-        href: http://open-webui.homelab.lan
-        description: Private AI chat
-        siteMonitor: http://open-webui:8080/health
-    - TV Remote:
-        icon: mdi-remote-tv
-        href: http://tv.homelab.lan
-        description: Remote for the Samsung TV
     - FileBrowser:
         icon: filebrowser
         href: http://filebrowser.homelab.lan
@@ -151,9 +134,31 @@
           username: "{{HOMEPAGE_VAR_FILEBROWSER_USER}}"
           password: "{{HOMEPAGE_VAR_FILEBROWSER_PASS}}"
 
-# --- Admin --------------------------------------------------------------
+- House:
+    - Frigate:
+        icon: frigate
+        href: http://frigate.homelab.lan
+        description: Home cameras, live view
+        siteMonitor: http://frigate:5000
+        widget:
+          type: frigate
+          # Port 5000 has no login and is only reachable on home_server.
+          url: http://frigate:5000
+    - TV Remote:
+        icon: mdi-remote-tv
+        href: http://tv.homelab.lan
+        description: Remote for the Samsung TV
 
-- Library:
+- AI:
+    - Open WebUI:
+        icon: open-webui
+        href: http://open-webui.homelab.lan
+        description: Private AI chat
+        siteMonitor: http://open-webui:8080/health
+
+# --- Downloads ---------------------------------------------------------
+
+- Managers:
     - Sonarr:
         icon: sonarr
         href: http://sonarr.homelab.lan
@@ -201,8 +206,13 @@
           type: bazarr
           url: http://bazarr:6767
           key: "{{HOMEPAGE_VAR_BAZARR_KEY}}"
+    - Dispatcharr:
+        icon: dispatcharr
+        href: http://dispatcharr.homelab.lan
+        description: Picks the live TV channels Jellyfin shows
+        siteMonitor: http://gluetun:9191/hdhr/discover.json
 
-- Downloads:
+- Downloaders:
     - qBittorrent:
         icon: qbittorrent
         href: http://qbittorrent.homelab.lan
@@ -251,7 +261,7 @@
         description: Clears stuck downloads
         siteMonitor: http://cleanuparr:11011
 
-# --- Lab -----------------------------------------------------------------
+# --- Lab ---------------------------------------------------------------
 
 - Network:
     - AdGuard Home:
@@ -321,6 +331,7 @@
         siteMonitor: http://dozzle:8080
 
 # APIs other services call; nobody opens them, so the group starts folded.
+
 - Backends:
     - Apprise:
         icon: apprise
