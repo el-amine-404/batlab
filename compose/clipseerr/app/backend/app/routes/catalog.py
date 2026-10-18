@@ -199,10 +199,10 @@ async def preview_file(youtube_id: str, request: Request):
     wanted = {"Range": request.headers.get("range") or "bytes=0-"}
     for again in (False, True):
         try:
-            url = await catalog.preview_url(youtube_id, again=again)
+            found = await catalog.preview_url(youtube_id, again=again)
         except Problem:
             raise Problem(404, "YouTube has no preview file for this video.") from None
-        upstream = await http.send(http.build_request("GET", url, headers=wanted,
+        upstream = await http.send(http.build_request("GET", found["url"], headers={**found["headers"], **wanted},
                                                       timeout=httpx.Timeout(30.0, connect=5.0)), stream=True)
         # A kept address YouTube no longer honours: found again, once.
         if upstream.status_code in (403, 410) and not again:

@@ -631,10 +631,10 @@ class Catalog:
             if isinstance(day, str):
                 video.released = day
 
-    async def preview_url(self, youtube_id: str, again: bool = False) -> str:
+    async def preview_url(self, youtube_id: str, again: bool = False) -> dict:
         """The address of a video's preview file (catalog/preview.py): kept 3 h,
         YouTube's last about 6. again: the kept one was refused, find a new one."""
-        key = f"yt:preview:{youtube_id}"
+        key = f"yt:preview2:{youtube_id}"
         if again:
             self._cache.forget(key)
 
