@@ -2,6 +2,7 @@ import { lazy } from "react";
 import { createBrowserRouter, Navigate } from "react-router";
 
 import { Layout } from "@/components/layout/Layout";
+import { RouteError } from "@/components/layout/RouteError";
 import { AlbumPage } from "@/pages/AlbumPage";
 import { ArtistPage } from "@/pages/ArtistPage";
 import { DiscoverPage } from "@/pages/DiscoverPage";
@@ -25,7 +26,13 @@ const StatusPage = lazy(() => import("@/pages/settings/StatusPage"));
 export const router = createBrowserRouter([
   {
     element: <Layout />,
+    // The layout itself breaking: the whole page.
+    errorElement: <RouteError />,
     children: [
+      {
+        // A screen breaking: only it is replaced, the sidebar stays.
+        errorElement: <RouteError />,
+        children: [
       { path: "/", element: <DiscoverPage /> },
       { path: "/releases", element: <ReleasesPage /> },
       { path: "/shelf/releases", element: <Navigate to="/releases" replace /> },
@@ -47,6 +54,8 @@ export const router = createBrowserRouter([
       { path: "/settings/general", element: <GeneralPage /> },
       { path: "/settings/status", element: <StatusPage /> },
       { path: "*", element: <NotFoundPage /> },
+        ],
+      },
     ],
   },
 ]);
