@@ -53,8 +53,8 @@ class Settings(BaseModel):
                                                                  "one gets the request.")
     hide_explicit: bool = Field(description="Leave explicit videos out of the lists.")
     hot_queries: list[str] = Field(description="The Hot category: YouTube searches, each giving its official videos.")
-    hot_feeds: list[str] = Field(description="The Hot category: feeds of videos (a clipfeed items URL, or any app "
-                                             "answering the same JSON).")
+    hot_feeds: list[str] = Field(description="The Hot category: JSON Feeds whose YouTube videos it shows when "
+                                             "they are real songs (subfeed's …/feed.json, or any JSON Feed).")
 
 
 class SettingsPatch(BaseModel):

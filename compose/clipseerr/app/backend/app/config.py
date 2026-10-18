@@ -37,7 +37,7 @@ class Config:
     # First values of the settings (settings.py).
     region: str
     storefront: str
-    # The Hot category's feeds: clipfeed item URLs (CLIPSEERR_HOT_FEEDS, comma-separated).
+    # The Hot category's feeds: JSON Feed addresses, subfeed's (CLIPSEERR_HOT_FEEDS, comma-separated).
     hot_feeds: tuple[str, ...]
     # Made on the first start only, when given (seed.py).
     apprise_url: str

@@ -1,0 +1,4 @@
+http://subfeed.homelab.lan {
+  import localSubnets
+	reverse_proxy @localSubnets http://subfeed:8830
+}

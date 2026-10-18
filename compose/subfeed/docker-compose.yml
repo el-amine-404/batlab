@@ -1,0 +1,64 @@
+name: ${SUBFEED_PROJECT_NAME:-subfeed}
+# What communities post, as feeds a program can read (docs/services.md):
+# every post of a subreddit, newest first, with what it links to and the
+# videos it carries, as JSON Feed, Atom and an API; a page to manage the feeds.
+# It judges nothing: clipseerr's Hot reads a feed and decides which videos are
+# songs. No account and no key: Reddit's public feed, PullPush's archive.
+#
+# Feeds, settings and notifications live in its database and change through
+# its page and API (/docs); SUBFEED_FEEDS and the Apprise address make them on
+# the first start only.
+services:
+  subfeed:
+    image: local/batlab-subfeed
+    build:
+      context: ./app
+      additional_contexts:
+        common: ../../lib/batlab-common
+      network: host
+      args:
+        BASE_IMAGE: ${IMAGE_SUBFEED_BASE}:${TAG_SUBFEED_BASE}
+        NODE_IMAGE: ${IMAGE_SUBFEED_NODE}:${TAG_SUBFEED_NODE}
+    # Rebuild on every `make up`, so code changes are always deployed.
+    pull_policy: build
+    container_name: subfeed
+    user: "${PUID}:${PGID}"
+    environment:
+      - TZ=${TZ}
+      - SUBFEED_PORT=8830
+      - SUBFEED_FEEDS=${SUBFEED_FEEDS:-sexymusicvideos=reddit:SexyMusicVideos}
+      - SUBFEED_PUBLIC_URL=http://subfeed.homelab.lan
+      # Feeds failing, and working again, to #alerts (docs/services.md, "Messages").
+      - SUBFEED_APPRISE_URL=http://apprise:8000/notify/subfeed
+      - SUBFEED_APPRISE_TAG=alerts
+    volumes:
+      # The database: feeds, the posts they found, settings, notifications.
+      - ${VOLUMES_ROOT}/subfeed:/state
+    tmpfs:
+      - /tmp
+    read_only: true
+    healthcheck:
+      test: ["CMD", "/opt/subfeed/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8830/api/v1/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - home_server
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    pids_limit: 64
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  home_server:
+    external: true
+    name: home_server

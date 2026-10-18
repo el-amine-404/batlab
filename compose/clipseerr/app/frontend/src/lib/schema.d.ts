@@ -1579,7 +1579,7 @@ export interface components {
             hot_queries: string[];
             /**
              * Hot Feeds
-             * @description The Hot category: feeds of videos (a clipfeed items URL, or any app answering the same JSON).
+             * @description The Hot category: JSON Feeds whose YouTube videos it shows when they are real songs (subfeed's …/feed.json, or any JSON Feed).
              */
             hot_feeds: string[];
             /** Regions */

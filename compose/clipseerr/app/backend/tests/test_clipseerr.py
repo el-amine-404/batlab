@@ -4,6 +4,7 @@ import asyncio
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -290,33 +291,121 @@ class PreviewBudget(unittest.TestCase):
 
 
 class HotFeeds(unittest.TestCase):
-    def test_a_clipfeed_feed_gives_its_real_songs(self):
+    def test_a_json_feed_gives_its_real_songs(self):
+        import httpx
+
+        from app.cache import Cache
+        from app.catalog import verdicts
+        from app.catalog.service import Catalog
+
+        body = {"version": "https://jsonfeed.org/version/1.1", "title": "r/X", "items": [
+            # subfeed names its videos…
+            {"id": "1", "url": "https://www.reddit.com/1", "title": "Ellize - Mystika - Official Music Video",
+             "_subfeed": {"videos": [{"provider": "youtube", "id": "fLCd0tXSLZU"}]}},
+            # …any other JSON Feed links to them.
+            {"id": "2", "url": "https://www.reddit.com/2", "title": "Crush", "external_url": "https://youtu.be/bbbbbbbbbbb"},
+            {"id": "3", "url": "https://www.reddit.com/3", "title": "Not judged yet",
+             "external_url": "https://www.youtube.com/watch?v=ccccccccccc"},
+            {"id": "4", "url": "https://www.reddit.com/4", "title": "A clip", "external_url": "https://v.redd.it/x"},
+            "not an item"]}
+        transport = httpx.MockTransport(lambda request: httpx.Response(200, json=body))
+        judged, told = [], []
+
+        async def judge(youtube_id):
+            judged.append(youtube_id)
+            return verdicts.Verdict("official", "music_video", "Newer", "Someone", 200, "2026-10-17",
+                                    checked_at=time.time())
+
+        with tempfile.TemporaryDirectory() as folder:
+            db = Database(Path(folder) / "t.db")
+            cache = Cache(db)
+            judge_of = verdicts.Verdicts(cache, on_judged=lambda: told.append(True), judge=judge)
+            judge_of.keep("fLCd0tXSLZU", verdicts.Verdict("likely", "upload", "Mystika", "Ellize", 180, "2026-10-16",
+                                                          checked_at=time.time()))
+            judge_of.keep("bbbbbbbbbbb", verdicts.Verdict("unofficial", "upload", "Crush (Cover)", "Fan",
+                                                          checked_at=time.time()))
+
+            async def run():
+                async with httpx.AsyncClient(transport=transport) as http:
+                    catalog = Catalog(cache, http, lambda: {})
+                    catalog.verdicts = judge_of
+                    first = await catalog._feed("http://subfeed:8830/api/v1/feeds/x/feed.json")
+                    await judge_of.drain()
+                    return first, await catalog._feed("http://subfeed:8830/api/v1/feeds/x/feed.json")
+
+            first, second = asyncio.run(run())
+            db.close()
+        self.assertEqual([(v["id"], v["title"], v["artist"], v["released"]) for v in first],
+                         [("yt:fLCd0tXSLZU", "Mystika", "Ellize", "2026-10-16")])
+        # The one not judged was judged in the background, once, and Hot told.
+        self.assertEqual((judged, told), (["ccccccccccc"], [True]))
+        self.assertEqual([v["id"] for v in second], ["yt:fLCd0tXSLZU", "yt:ccccccccccc"])
+
+    def test_something_else_than_a_json_feed_fails(self):
         import httpx
 
         from app.cache import Cache
         from app.catalog.service import Catalog
 
-        body = {"items": [
-            {"title": "Ellize - Mystika - Official Music Video",
-             "video": {"youtube_id": "fLCd0tXSLZU", "verdict": "likely", "title": "Mystika", "artist": "Ellize",
-                       "published": "2026-10-16", "duration": 180}},
-            {"title": "Crush", "video": {"youtube_id": "bbbbbbbbbbb", "verdict": "unofficial", "title": "Crush (Cover)",
-                                         "artist": "Fan"}},
-            {"title": "A clip", "video": None},
-            {"title": "x", "video": {"youtube_id": "not-an-id", "verdict": "official"}}]}
-        transport = httpx.MockTransport(lambda request: httpx.Response(200, json=body))
+        transport = httpx.MockTransport(lambda request: httpx.Response(200, json=["no"]))
         with tempfile.TemporaryDirectory() as folder:
             db = Database(Path(folder) / "t.db")
 
             async def run():
                 async with httpx.AsyncClient(transport=transport) as http:
-                    return await Catalog(Cache(db), http, lambda: {}).\
-                        _feed("http://clipfeed:8830/api/v1/feeds/x/items")
+                    return await Catalog(Cache(db), http, lambda: {})._feed("http://x/feed.json")
 
-            found = asyncio.run(run())
+            with self.assertRaises(ValueError):
+                asyncio.run(run())
             db.close()
-        self.assertEqual([(v["id"], v["title"], v["artist"], v["released"]) for v in found],
-                         [("yt:fLCd0tXSLZU", "Mystika", "Ellize", "2026-10-16")])
+
+
+class VerdictRules(unittest.TestCase):
+    def test_uploads(self):
+        from app.catalog.verdicts import song_of
+
+        self.assertEqual(song_of("Ellize - Mystika - Official Music Video", "Utopia Records"), ("Mystika", "Ellize"))
+        self.assertEqual(song_of('Madeline Monet - "PQTG" Official Music Video', "x"), ("PQTG", "Madeline Monet"))
+        self.assertEqual(song_of("Frozen (Official Video)", "Suzy Clue VEVO"), ("Frozen", "Suzy Clue"))
+
+    def test_the_artists_own_channel(self):
+        from app.catalog.verdicts import song_of
+
+        self.assertEqual(song_of("Tate McRae - Housewife (Official Video)", "Tate McRae", trusted=True),
+                         ("Housewife", "Tate McRae"))
+        self.assertEqual(song_of("Love - Live at Wembley", "Some Band", trusted=True),
+                         ("Love - Live at Wembley", "Some Band"))
+
+    def test_claims(self):
+        from app.catalog.verdicts import claims_official
+
+        self.assertTrue(claims_official("Orel - SABRA (video oficial)"))
+        self.assertFalse(claims_official("Lulu Liz Cohen - Crush (Cover)"))
+        self.assertFalse(claims_official("X - Song (Official Lyric Video)"))
+        self.assertFalse(claims_official("Megan Thee Stallion - Tina Tuesday Freestyle"))
+
+    def test_judging(self):
+        from app.catalog import verdicts, youtube
+
+        answers = {
+            "omv": {"title": "Tate McRae - Housewife (Official Video)", "author": "Tate McRae", "kind": "MUSIC_VIDEO_TYPE_OMV",
+                    "seconds": 200, "published": "2026-10-01", "playable": True},
+            "upload": {"title": "Orel - SABRA (video oficial)", "author": "Orel Music", "kind": None, "seconds": 180,
+                       "published": "2026-10-02", "playable": True},
+            "gone": {"title": "", "author": "", "kind": None, "seconds": None, "published": None, "playable": False},
+        }
+
+        async def song(region, youtube_id):
+            return answers[youtube_id]
+
+        async def search_raw(region, query, kind, limit=10):
+            return []
+
+        with mock.patch.object(youtube, "song", song), mock.patch.object(youtube, "search_raw", search_raw):
+            found = {key: asyncio.run(verdicts.judge(key)) for key in answers}
+        self.assertEqual({k: (v.verdict, v.title, v.artist) for k, v in found.items()},
+                         {"omv": ("official", "Housewife", "Tate McRae"), "upload": ("likely", "SABRA", "Orel"),
+                          "gone": ("unavailable", None, None)})
 
 
 class Views(unittest.TestCase):

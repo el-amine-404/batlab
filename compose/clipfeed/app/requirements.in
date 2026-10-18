@@ -1,8 +1,0 @@
-# The server; ytmusicapi is installed from VERSION_YTMUSICAPI (compose/versions.env),
-# where Renovate follows it: YouTube changes, and its fixes must arrive quickly.
-# requests is ytmusicapi's one dependency, pinned here with the rest.
-# The same pins as clipseerr (compose/clipseerr/app/backend): copy its requirements.txt after a change.
-fastapi==0.143.0
-uvicorn[standard]==0.54.0
-httpx==0.28.1
-requests==2.34.2

@@ -163,7 +163,7 @@
       "ignoreTests": true
     },
     {
-      "description": "What the apps built here (clipseerr, clipfeed, musicguard, tv-remote, songdrop) are made of: the build stages' Rust and Node, and the Python libraries and crates they pin, merge their minor and patch updates straight into main; the nightly updater rebuilds the apps from them, its health check and rollback the test",
+      "description": "What the apps built here (clipseerr, subfeed, musicguard, tv-remote, songdrop) are made of: the build stages' Rust and Node, and the Python libraries and crates they pin, merge their minor and patch updates straight into main; the nightly updater rebuilds the apps from them, its health check and rollback the test",
       "matchPackageNames": [
         "rust",
         "node",

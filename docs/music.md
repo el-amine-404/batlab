@@ -490,7 +490,8 @@ Jellyfin play. Its API reference is at `/api/docs` on the service.
   yesterday". Genres are YouTube's genre charts (only some countries have
   them: the US has eight), about 35 of Apple's, and *Hot* (sexy, twerk and
   uncensored music videos), newest first:
-  the real songs clipfeed found on r/SexyMusicVideos (below) and the official
+  the real songs among what r/SexyMusicVideos posts (subfeed's JSON Feed,
+  below; clipseerr judges each video, see *Hot's songs*) and the official
   videos of YouTube searches (twerk, sexy, uncensored… by default), both set
   in Settings, General. Search finds videos and artists. An artist's page
   joins YouTube Music's list (which stops at 150) with Apple's (dated), newest
@@ -512,6 +513,18 @@ Jellyfin play. Its API reference is at `/api/docs` on the service.
   10 min; every video clipseerr shows gets a green check when its song or its
   file is there, "Requested" while a request is under way, and its page says
   "In your library" (with "Get it again").
+- **Hot's songs.** A feed (any JSON Feed) says only what a community posted;
+  clipseerr asks YouTube Music about each post's first YouTube video
+  (`catalog/verdicts.py`): *official* when it is the artist's video or the
+  song, or an upload of a song YouTube Music has under the same title and
+  artist; *likely* when YouTube Music doesn't know the song (a small artist,
+  not on streaming yet) but the title says it is the official video and not
+  a cover, lyric video, reaction, live take or freestyle; *unofficial*
+  otherwise; *unavailable* when gone. Hot shows official and likely ones.
+  Verdicts are kept in the cache and judged in the background, three at a
+  time: a new video joins Hot a minute or so after the feed has it. They are
+  judged again after 7 days (30 for official ones), and all of them when the
+  rules change (`verdicts.RULES`).
 - **Hot's own.** "Add to Hot" on a video's page puts a video no feed or
   search found into Hot. Hot keeps every artist it has shown (their pages
   and pictures are found in the background), listed above its videos.
@@ -578,55 +591,59 @@ cd compose/clipseerr/app/frontend && CLIPSEERR_OPENAPI=http://clipseerr.homelab.
 When YouTube changes and the lists come back empty, Settings, Status says
 which source fails; a newer ytmusicapi (Renovate) is usually the fix.
 
-### clipfeed (subreddits as feeds)
+### subfeed (subreddits as feeds)
 
-`compose/clipfeed`, `clipfeed.homelab.lan` (its API reference opens there).
-It turns a community's posts into a feed a program can read: every post of a
-subreddit, newest first, with what it links to (`link.kind`: youtube,
-reddit_video, image, gallery, text, other); a YouTube video is checked with
-YouTube Music. It keeps and answers everything; its readers choose with
-parameters. clipseerr's Hot category reads `r/SexyMusicVideos`' real songs
-from it; any app can.
+`compose/subfeed`, `subfeed.homelab.lan` (its page; the API reference at
+`/docs`). It turns a community's posts into feeds a program can read: every
+post of a subreddit, newest first, with what it links to (`link`: video,
+reddit_video, image, gallery, text, other) and the videos it carries. It
+keeps and answers everything, and judges nothing; its readers choose with
+parameters. clipseerr's Hot reads r/SexyMusicVideos' posts with a YouTube
+video from it, and keeps the real songs.
 
-- **Reading.** Every feed is read every 30 min (`poll_minutes`): Reddit's own
-  Atom feed of the newest 100 posts (Reddit refuses its JSON without a login,
-  and answers 429 to an address that asks too often, so calls are 10 s apart,
-  and a refused feed waits longer before the next try), and PullPush's
-  archive when Reddit refuses. A new feed first takes its last 500 posts from
-  PullPush (a few days behind Reddit).
-- **Checking.** Each video once, with YouTube Music: *official* when it is the
-  artist's video or the song, or an upload of a song YouTube Music has under
-  the same title and artist (`song_id`); *likely* when YouTube Music doesn't
-  know the song (a small artist, not on streaming yet) but the title says it
-  is the official video and not a cover, lyric video, reaction, live take or
-  freestyle; *unofficial* otherwise; *unavailable* when gone. Verdicts are
-  checked again after 7 days (30 for official ones), and all of them when the
-  rules change (`verify.RULES`). On r/SexyMusicVideos' first 547 posts: 512
-  with a YouTube video (424 official, 19 likely), 16 Reddit videos, 16 text
-  posts, a few images and links elsewhere.
-- **API.** `GET /api/v1/feeds/{slug}/items` answers every post; the
-  parameters narrow it, and repeat for several values: `link` (the kinds
-  above), `verdict` (only posts with a video), `domain` (`youtu.be`,
-  `v.redd.it`), `q` (words of the title, the song or the artist), `author`,
-  `since` and `until` (Unix seconds), `unique=true` (one item a video: its
-  first post), `sort=posted|published`, `limit`, `offset`. Hot reads
-  `?link=youtube&verdict=official&verdict=likely&unique=true`.
-  `GET /api/v1/items` is every feed at once (`feed=` to choose), and
-  `GET /api/v1/feeds/{slug}/atom` the same for a feed reader. Feeds are
-  made and changed with `POST/PUT/DELETE /api/v1/feeds`, read now with
-  `POST /api/v1/feeds/{slug}/refresh`; `CLIPFEED_FEEDS`
-  (`slug=reddit:Subreddit,…`) makes them on the first start only.
+- **Reading.** Every feed is read every 30 min (`poll_minutes`; Settings,
+  General for new feeds): Reddit's own Atom feed of the newest 100 posts
+  (Reddit refuses its JSON without a login, and answers 429 to an address
+  that asks too often, so calls are 10 s apart and a `Retry-After` is
+  honoured), and PullPush's archive when Reddit refuses. A new feed first
+  takes its last 500 posts from PullPush (a few days behind Reddit). A read
+  that fails waits longer before the next one (doubling, up to 6 h); after
+  3 in a row the feed is *failing*: one message to `#alerts`, and another
+  when it works again. Posts are kept (Settings, General can forget the
+  old ones).
+- **Reading it.** `GET /api/v1/feeds/{slug}/feed.json` (JSON Feed 1.1, its
+  extra fields in `_subfeed`), `…/feed.atom` (any feed reader) and `…/posts`
+  (subfeed's JSON) take the same parameters, repeated for several values:
+  `link` (the kinds above), `video=youtube` (posts carrying a YouTube video),
+  `domain` (`youtu.be`, `v.redd.it`), `q` (words of the title), `author`,
+  `since` and `until` (Unix seconds), `unique=true` (one post a video: its
+  first), `limit`, `offset`. Hot reads
+  `…/feed.json?video=youtube&unique=true&limit=500`. Each answer carries an
+  `ETag`; sent back as `If-None-Match`, an unchanged feed answers 304 with no
+  body. The feed's page shows these addresses, filters included.
+- **Changing feeds.** On its page, or `POST /api/v1/feeds {"target":
+  "Name"}`, `PATCH` and `DELETE /api/v1/feeds/{slug}`, `POST …/refresh` to
+  read now. `SUBFEED_FEEDS` (`slug=reddit:Subreddit,…`) makes them on the
+  first start only.
+- **Telling.** Settings, Notifications: Apprise (`#alerts` here), Discord or
+  a Webhook, each with the events it wants: `feed.failing`,
+  `feed.recovered`, and `posts.new` for programs.
+
+It took clipfeed's database as it was (its posts and feeds; clipfeed's
+YouTube Music verdicts went, clipseerr keeps them now).
 
 ```bash
 # another subreddit
-curl -X POST http://clipfeed.homelab.lan/api/v1/feeds -H 'Content-Type: application/json' \
-  -d '{"title": "r/MusicVideos", "target": "MusicVideos"}'
-# tests (lib/batlab-common on the path)
-cd compose/clipfeed/app && PYTHONPATH=../../../lib/batlab-common python -m unittest discover -s tests
+curl -X POST http://subfeed.homelab.lan/api/v1/feeds -H 'Content-Type: application/json' \
+  -d '{"target": "MusicVideos"}'
+# tests, in the image
+docker run --rm --network none --entrypoint /opt/subfeed/.venv/bin/python \
+  -v "$PWD/compose/subfeed/app/backend/tests:/opt/subfeed/tests:ro" -w /opt/subfeed \
+  local/batlab-subfeed -m unittest discover -s tests
+# after changing requirements.in: as clipseerr's, in compose/subfeed/app/backend
+# after changing api/schemas.py: the page's types, from a running subfeed
+cd compose/subfeed/app/frontend && SUBFEED_OPENAPI=http://subfeed.homelab.lan/api/v1/openapi.json npm run gen:api
 ```
-
-It has the same Python packages as clipseerr: after changing clipseerr's
-`requirements.txt`, copy it to `compose/clipfeed/app/`.
 
 ## Aurral
 

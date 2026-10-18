@@ -63,6 +63,8 @@ class Catalog:
         self.hotlist = None
         # Every video shown, for the quick search (known.py), when there is one.
         self.known = None
+        # Which of a feed's videos are real songs (verdicts.py), when there is one.
+        self.verdicts = None
         # The last answer or failure of each source, for the status screen.
         self.health: dict[str, dict] = {}
 
@@ -227,10 +229,10 @@ class Catalog:
                                                           fresh=30 * MIN, stale=DAY))
 
     async def hot(self) -> Shelf:
-        """The Hot category, newest first: the videos of the feeds the
-        settings name (clipfeed: what r/SexyMusicVideos and the like post,
-        checked to be real songs) and the official videos of its YouTube
-        searches, each dated by YouTube."""
+        """The Hot category, newest first: the real songs of the feeds the
+        settings name (subfeed's JSON Feeds: what r/SexyMusicVideos and the
+        like post, judged here, verdicts.py) and the official videos of its
+        YouTube searches, each dated by YouTube."""
         region, settings = self.region, self._settings()
         queries, feeds = settings["hot_queries"], settings.get("hot_feeds") or []
         picks = self.hotlist.picks() if self.hotlist else []
@@ -271,26 +273,26 @@ class Catalog:
         return Shelf.model_validate(await self._cache.get(key, fetch, fresh=30 * MIN, stale=DAY))
 
     async def _feed(self, url: str) -> list[dict]:
-        """A feed's videos: a clipfeed items URL (or any app answering
-        {"items": [{"title", "video": {"youtube_id", "verdict", "title",
-        "artist", "published", "duration"}}]}); the real songs only (official
-        or likely), whatever else the feed holds."""
+        """A feed's real songs: any JSON Feed (https://www.jsonfeed.org; subfeed's
+        …/feed.json), each item's first YouTube video judged by verdicts.py.
+        A video not judged yet is left out until it is (Hot reads again then)."""
         response = await self._http.get(url, timeout=httpx.Timeout(15.0, connect=5.0))
         response.raise_for_status()
+        body = response.json()
+        if not isinstance(body, dict) or not isinstance(body.get("items"), list):
+            raise ValueError(f"{url} isn't a JSON Feed")
         videos = []
-        for item in (response.json() or {}).get("items") or []:
-            video = item.get("video") or {}
-            youtube_id = video.get("youtube_id")
-            if not youtube_id or not re.fullmatch(r"[\w-]{11}", youtube_id):
+        for item in body["items"]:
+            youtube_id = _first_youtube_id(item) if isinstance(item, dict) else None
+            verdict = self.verdicts.known(youtube_id) if youtube_id and self.verdicts else None
+            if not verdict or not verdict.real:
                 continue
-            if video.get("verdict") not in ("official", "likely"):
-                continue
-            artist = video.get("artist") or "Unknown artist"
-            title, credit = match.clean(video.get("title") or item.get("title") or "", artist)
+            artist = verdict.artist or "Unknown artist"
+            title, credit = match.clean(verdict.title or item.get("title") or "", artist)
             videos.append(Video(id=f"yt:{youtube_id}", source="youtube", youtube_id=youtube_id, title=title,
                                 artist=credit or artist, artists=[ArtistRef(name=n) for n in _credit_names(credit or artist)],
-                                thumbnail=youtube.thumbnail(youtube_id), duration=video.get("duration"),
-                                released=video.get("published"), official=True).model_dump())
+                                thumbnail=youtube.thumbnail(youtube_id), duration=verdict.duration,
+                                released=verdict.published, official=True).model_dump())
         return videos
 
     async def _date(self, items: list[dict]) -> None:
@@ -733,6 +735,21 @@ class Catalog:
             await self._resolve_hot_artists()
         except Exception as exc:
             log.warning("warming the catalog failed: %r", exc)
+
+
+# A YouTube video's id in a link to it (Shorts are clips, not music videos).
+_YOUTUBE_LINK = re.compile(r"(?:youtube\.com/(?:watch\?(?:[^\"'\s<>]*?&(?:amp;)?)?v=|embed/|live/)|youtu\.be/)([\w-]{11})(?![\w-])")
+
+
+def _first_youtube_id(item: dict) -> str | None:
+    """The first YouTube video of a JSON Feed item: subfeed names it (its
+    "_subfeed" extension), any other feed links to it."""
+    for video in ((item.get("_subfeed") or {}).get("videos") or []):
+        if isinstance(video, dict) and video.get("provider") == "youtube" and re.fullmatch(r"[\w-]{11}", str(video.get("id"))):
+            return video["id"]
+    text = " ".join(str(item.get(key) or "") for key in ("external_url", "url", "content_text", "content_html"))
+    found = _YOUTUBE_LINK.search(text)
+    return found.group(1) if found else None
 
 
 async def _dump(videos_coroutine) -> list[dict]:

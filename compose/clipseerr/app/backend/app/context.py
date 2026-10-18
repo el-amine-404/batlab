@@ -7,6 +7,7 @@ from . import config, events, libraries, notifications, outbound, services
 from .cache import Cache
 from .catalog.preview import Clips
 from .catalog.service import Catalog
+from .catalog.verdicts import Verdicts
 from .db import Database
 from .hotlist import HotList
 from .integrations import Integrations
@@ -22,6 +23,8 @@ settings = SettingsStore(db, conf)
 http = outbound.client()
 cache = Cache(db)
 catalog = Catalog(cache, http, settings)
+# Newly judged videos join Hot: its cached lists are dropped, read again when asked.
+catalog.verdicts = Verdicts(cache, on_judged=lambda: cache.forget("hot:"))
 clips = Clips(conf.state_dir / "previews")
 hotlist = HotList(db)
 catalog.hotlist = hotlist

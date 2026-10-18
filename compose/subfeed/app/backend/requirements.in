@@ -1,0 +1,4 @@
+# The server. Regenerate requirements.txt after a change (docs/music.md, subfeed).
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
+httpx==0.28.1

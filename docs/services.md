@@ -65,7 +65,7 @@ end up. The senders, and the name and avatar each shows on Discord, are in
 | `download-issues` | musicguard, songdrop, vpnguard, dubkeeper | files quarantined, suspect, flagged or held; songs missing after a download, back, or given up; VPN reconnects; upgrades that lost audio |
 | `requests` | clipseerr | a song or a music video asked for, got, or not found by any service |
 | `cameras` | camwatch, carwatch | a camera dark, and back; the Clio 4 or the Ford left its spot, or is back, with a close-up, the street, the way it went and the clip |
-| `alerts` | Netdata, NetAlertX, watchdog (data disk, self-test, SMART), mediascan, updater (failures) | something is wrong with the machine or the network |
+| `alerts` | Netdata, NetAlertX, watchdog (data disk, self-test, SMART), mediascan, updater (failures), subfeed | something is wrong with the machine or the network; a feed failing, and working again |
 | `updates` | updater, Diun | a service updated, a manual update waiting, a new image |
 
 Each message has a title, a Markdown body and a type (`info`, `success`,
@@ -108,6 +108,7 @@ Event names are `<thing>.<what happened>`:
 | --- | --- |
 | songdrop | `job.incomplete` (songs missing after a download), `song.recovered`, `song.gave_up`, `job.finished` |
 | clipseerr | `request.created`, `request.completed`, `request.failed` (`data.request`: the request, as its API gives it) |
+| subfeed | `feed.failing`, `feed.recovered`, `posts.new` (`data.feed`: the feed's slug; `data.posts`: the new posts, as its API gives them) |
 
 ## Shared code
 
@@ -146,29 +147,47 @@ service itself.
 the service.
 
 - **Job**: what there is (the newest music videos, charts, genres, search,
-  artists), and what was asked for: a song or a video, handed to the
-  services in order, followed, and announced.
+  artists, Hot), and what was asked for: a song or a video, handed to the
+  services in order, followed, and announced. It judges which videos are
+  real songs (YouTube Music, `catalog/verdicts.py`): the feeds Hot reads
+  only say what a community posted.
 - **Alone**: browse and watch with no service at all; requests wait for one.
 - **Plugs in through**: its services (Aurral, songdrop, MeTube, or any app
   through a Webhook), its notifications (Apprise, Discord, Webhook), its
-  libraries (Navidrome, a folder: what is there already), its API
-  (`/api/v1`: requests, the catalog, settings).
+  libraries (Navidrome, a folder: what is there already), Hot's feeds (any
+  JSON Feed: subfeed's here), its API (`/api/v1`: requests, the catalog,
+  settings).
 - **Owns**: `$VOLUMES_ROOT/clipseerr` (one SQLite database).
 - **Not its job**: downloading, checking or filing anything.
 
-### clipfeed: communities → checked video feeds
+### subfeed: communities → feeds
 
-`compose/clipfeed`, `clipfeed.homelab.lan`. API reference: `/api/docs`.
+`compose/subfeed`, `subfeed.homelab.lan`. API reference: `/docs`.
 
-- **Job**: what subreddits post, as feeds: every post, newest first, with
-  what it links to; YouTube videos checked to be real songs (YouTube Music).
-- **Alone**: needs nothing else; Reddit, PullPush and YouTube Music without
-  a key.
-- **Plugs in through**: its API (`/api/v1`: items as JSON, feeds to make and
-  change) and Atom feeds. clipseerr's Hot category reads it.
-- **Owns**: `$VOLUMES_ROOT/clipfeed` (one SQLite database).
-- **Not its job**: downloading, or deciding what to show: it answers
-  everything, and its readers filter (link kind, verdict, domain, words…).
+- **Job**: what communities post, as feeds a program can read: every post
+  of a subreddit, newest first, with what it links to and the videos it
+  carries, as [JSON Feed 1.1](https://www.jsonfeed.org/version/1.1/), Atom
+  and its own JSON. It judges nothing: whether a video is a song, or worth
+  showing, is for its readers.
+- **Alone**: needs nothing else; Reddit's public feed and PullPush's archive,
+  without a key. Its page makes and changes the feeds and shows their posts.
+- **Plugs in through**: its feeds (`/api/v1/feeds/{slug}/feed.json` and
+  `…/feed.atom`, with the same filters as `…/posts`; an `ETag` answers an
+  unchanged feed with a bodyless 304), its API (`/api/v1`: feeds, posts,
+  settings, notifications) and its events (Apprise, Discord, Webhook).
+  clipseerr's Hot reads r/SexyMusicVideos' JSON Feed.
+- **Owns**: `$VOLUMES_ROOT/subfeed` (one SQLite database, mode 600).
+- **Not its job**: deciding what a post is worth, or checking what it links
+  to; downloading anything.
+- **The `_subfeed` extension.** What JSON Feed has no field for is in each
+  item's `_subfeed`: `feed`, `post_id`, `link_kind` (video, reddit_video,
+  image, gallery, text, other), `domain` and `videos` (`[{"provider":
+  "youtube", "id", "url"}]`, every video it carries, in order). A reader
+  that knows nothing of it still has the post (`url`), what it links to
+  (`external_url`) and its text.
+- **A new source** (Lemmy, a forum) is one module in `subfeed/sources/`
+  (a `Source`: its newest posts, its history); a new video provider is one
+  line in `subfeed/links.py`.
 
 ### musicguard: inbox → checked library
 
@@ -232,6 +251,7 @@ the service.
 | Service | One job | API v1 | Docs at `/docs` | Settings API | Events |
 | --- | --- | --- | --- | --- | --- |
 | songdrop | yes | yes | yes | yes | its connections (Apprise here; Discord, Webhook) |
+| subfeed | yes | yes | yes | yes | its notifications (Apprise here; Discord, Webhook) |
 | musicguard | several, one module each | none | none | environment only | Apprise |
 | Stanzarr | yes | own (private project) | no | in its page | none |
 | camwatch | yes | none (needs none) | none | environment only | Apprise |

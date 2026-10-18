@@ -85,14 +85,14 @@ export default function GeneralPage() {
           <div>
             <Label htmlFor="hot">The Hot category</Label>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Newest first, from two kinds of source. Feeds: one address a line (8 at most), a clipfeed items
-              URL such as a subreddit's (clipfeed.homelab.lan/api/docs), only its real songs. Searches: one a
-              line (12 at most), the official videos YouTube finds.
+              Newest first, from two kinds of source. Feeds: one address a line (8 at most), any JSON Feed,
+              such as a subreddit's from subfeed (subfeed.homelab.lan, "Read it elsewhere"); clipseerr keeps
+              the videos that are real songs. Searches: one a line (12 at most), the official videos YouTube finds.
             </p>
           </div>
           <Label htmlFor="hot-feeds" className="text-xs text-muted-foreground">Feeds</Label>
           <textarea id="hot-feeds" rows={2} value={(form.hot_feeds ?? []).join("\n")} spellCheck={false}
-                    placeholder="http://clipfeed:8830/api/v1/feeds/sexymusicvideos/items?link=youtube&verdict=official&verdict=likely&unique=true&limit=500"
+                    placeholder="http://subfeed:8830/api/v1/feeds/sexymusicvideos/feed.json?video=youtube&unique=true&limit=500"
                     onChange={(e) => set("hot_feeds", e.target.value.split("\n").slice(0, 8))}
                     className="w-full resize-y rounded-lg border border-input bg-black/20 px-3 py-2 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40" />
           <Label htmlFor="hot" className="text-xs text-muted-foreground">YouTube searches</Label>
