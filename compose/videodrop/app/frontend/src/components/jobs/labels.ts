@@ -65,6 +65,7 @@ const STEPS: Record<string, string> = {
   SponsorBlock: "Finding the segments to cut",
   ModifyChapters: "Cutting segments",
   MoveFiles: "Moving the file",
+  Collect: "Checking the file (ffprobe)",
   lyrics: "Looking up the lyrics",
   check: "Checking the file (ffprobe)",
 };

@@ -244,7 +244,7 @@ def main() -> int:
         finally:
             srt.unlink(missing_ok=True)
 
-    class Collect(PostProcessor):
+    class CollectPP(PostProcessor):
         """Last step of each video: its lyrics when asked, its check, and its
         file, where it ended up. A file that fails its check is not kept."""
 
@@ -284,10 +284,10 @@ def main() -> int:
 
         # Cut at the keyframes around it, by ffmpeg, without re-encoding.
         ydl_params.update(download_ranges=download_range_func(None, [tuple(section)]), force_keyframes_at_cuts=False)
-    emit("stage", stage="downloading")
+    # Until a byte comes (or a step), it is starting: the site is being read.
     try:
         with yt_dlp.YoutubeDL(ydl_params) as ydl:
-            ydl.add_post_processor(Collect(), when="after_move")
+            ydl.add_post_processor(CollectPP(), when="after_move")
             found = ydl.extract_info(config["url"], download=False, process=False)
             if found.get("_type") in ("playlist", "multi_video"):
                 ydl.download([config["url"]])

@@ -323,6 +323,7 @@ class Scheduler:
         code = await run.process.wait()
         with suppress(TimeoutError):
             await asyncio.wait_for(printed, 5)
+        self._doing(run, None)
         self._journal.add(run.job_id, f"Its process ended (exit {code}) after "
                                       f"{time.monotonic() - run.began:.1f} s.", "debug" if code == 0 else "info")
         if code not in (0, 1) and not run.cancelled and not run.stopping:
@@ -452,8 +453,12 @@ class Scheduler:
             took = now - run.doing_since
             if run.doing == "downloading":
                 done = run.progress.get("downloaded_bytes")
-                speed = f", {_size(done / took)}/s on average" if done and took > 0 else ""
-                self._journal.add(run.job_id, f"Downloaded {_size(done)} in {took:.1f} s{speed}.")
+                if done:
+                    self._journal.add(run.job_id, f"Downloaded {_size(done)} in {took:.1f} s, "
+                                                  f"{_size(done / max(took, 0.001))}/s on average.")
+                else:
+                    # A part of a video: ffmpeg downloads it and says nothing until it's done.
+                    self._journal.add(run.job_id, f"Downloaded in {took:.1f} s.")
             else:
                 self._journal.add(run.job_id, f"{run.doing} took {took:.1f} s.", "debug")
         if what and what != run.doing:
