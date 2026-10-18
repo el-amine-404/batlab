@@ -124,7 +124,11 @@ class Known:
         # followed: "shak" is Shakira before the channels named after her.
         ranked = sorted(artists, key=lambda a: (titles.simple(a["name"]) != wanted, -self._credited(a["name"]),
                                                 -_count(a["subscribers"]), not a["thumbnail"]))
-        return [ArtistSummary(**dict(row)) for row in ranked[:8]], videos
+        found = [ArtistSummary(**dict(row)) for row in ranked[:8]]
+        for artist in found:
+            if artist.thumbnail and "/ytm/images/artist_avatar" in artist.thumbnail:
+                artist.thumbnail = None
+        return found, videos
 
     def _credited(self, name: str) -> int:
         phrase = " ".join(_WORD.findall(name.casefold()))

@@ -92,3 +92,8 @@ export function dated(date?: string | null): string {
 export function ytImage(id: string, size: "mq" | "hq" | "sd" | "maxres" = "mq"): string {
   return `https://i.ytimg.com/vi/${id}/${size === "maxres" ? "maxresdefault" : `${size}default`}.jpg`;
 }
+
+/** An artist's picture, or null for YouTube Music's grey "no picture" person (the page draws a letter instead). */
+export function realPicture(url?: string | null): string | null {
+  return url && !url.includes("/ytm/images/artist_avatar") ? url : null;
+}

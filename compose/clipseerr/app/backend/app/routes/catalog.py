@@ -107,6 +107,7 @@ async def search(q: str = Query("", max_length=200, description="Words of the ti
                  official: bool = Query(False, description="Only the artists' own videos, no fan uploads.")):
     found = await catalog.search(q)
     known.saw(found.videos, found.artists, list_id=f"search:{q.casefold()}")
+    found.artists = [a for a in found.artists if not catalog.artist_empty(a.id)]
     found.videos = await _sorted([v for v in _clean(found.videos) if v.official or not official], sort)
     found.total, found.offset = len(found.videos), offset
     found.videos = found.videos[offset:offset + limit]
@@ -119,6 +120,7 @@ async def search(q: str = Query("", max_length=200, description="Words of the ti
             "(the full search asks YouTube Music)", response_model=SearchResults)
 def quick_search(q: str = Query("", max_length=200, description="Words of the title or the artist; each may be cut short.")):
     artists, videos = known.search(q)
+    artists = [a for a in artists if not catalog.artist_empty(a.id)]
     videos = _clean(videos)
     library.mark(videos)
     catalog.known_views(videos)

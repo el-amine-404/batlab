@@ -403,7 +403,7 @@ class Catalog:
             return {"query": query, "videos": [v.model_dump() for v in videos],
                     "artists": [a.model_dump() for a in artists]}
 
-        found = SearchResults.model_validate(await self._get("youtube", f"yt:search3:{region}:{key}", fetch,
+        found = SearchResults.model_validate(await self._get("youtube", f"yt:search4:{region}:{key}", fetch,
                                                              fresh=30 * MIN, stale=DAY))
         found.total = len(found.videos)
         return found
@@ -439,6 +439,11 @@ class Catalog:
 
         return AlbumPage.model_validate(await self._get("youtube", f"yt:album:{region}:{album_id}", fetch,
                                                         fresh=7 * DAY, stale=90 * DAY))
+
+    def artist_empty(self, channel_id: str) -> bool:
+        """Its page was read, and holds no video and no album (an empty Topic channel): a dead end to suggest."""
+        page = self._cache.peek(f"yt:artist:{self.region}:{channel_id}")
+        return bool(page) and not page.get("videos") and not page.get("albums")
 
     async def artist_by_name(self, name: str) -> dict | None:
         """{"id", "name"}: the YouTube Music artist named so, for Apple's

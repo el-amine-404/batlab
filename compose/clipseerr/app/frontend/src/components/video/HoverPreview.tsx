@@ -9,9 +9,17 @@ const HOLD_MS = 450;
 /** Seconds of the video a preview plays, from about a third in (past the intro), then again. */
 const LENGTH = 15;
 const SOUND_KEY = "preview-sound";
+/**
+ * Seconds of playing before the preview shows: YouTube's player shows the
+ * video's title and its logo over the first seconds of any playback, and
+ * hides them after; the card's picture stays over it until then.
+ */
+const REVEAL = 2.5;
 
 // One preview at a time on the whole page: starting one stops the last.
 let stopCurrent: (() => void) | null = null;
+// The browser refused a preview's sound this visit: the next ones start muted, until the speaker is clicked.
+let soundRefused = false;
 
 function soundWanted(): boolean {
   try {
@@ -31,9 +39,17 @@ function soundAllowed(): boolean {
 }
 
 /** YouTube's player in a card: controlled through its iframe API, its own overlays kept out of sight. */
-function YouTubePreview({ id, from, sound, onProgress }: { id: string; from: number; sound: boolean; onProgress: (p: number) => void }) {
+function YouTubePreview({ id, from, sound, onProgress, onSoundBlocked }: {
+  id: string;
+  from: number;
+  sound: boolean;
+  onProgress: (p: number) => void;
+  onSoundBlocked: () => void;
+}) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [shown, setShown] = useState(false);
+  // When the sound was last turned on: a pause right after is the browser refusing it.
+  const unmutedAt = useRef(0);
   const send = (func: string, args: unknown[] = []) =>
     frame.current?.contentWindow?.postMessage(JSON.stringify({ event: "command", func, args }), "*");
 
@@ -55,10 +71,20 @@ function YouTubePreview({ id, from, sound, onProgress }: { id: string; from: num
       }
       heard = true;
       const info = data.info ?? {};
-      // Shown once it plays: the spinner and the big play button it starts with stay hidden.
-      if (info.playerState === 1) setShown(true);
+      // Sound on, and paused at once: the browser (Firefox by default) refuses
+      // sound a page didn't get a click for. Back to muted, and on playing.
+      if (info.playerState === 2 && Date.now() - unmutedAt.current < 2000) {
+        unmutedAt.current = 0;
+        send("mute");
+        send("playVideo");
+        onSoundBlocked();
+        return;
+      }
       if (typeof info.currentTime === "number") {
         const into = info.currentTime - from;
+        // Shown once it has played a moment: its loading, its big play button,
+        // its title and logo of the first seconds stay under the picture.
+        if (into >= REVEAL) setShown(true);
         onProgress(Math.min(1, Math.max(0, into / LENGTH)));
         // Round again from the start, rather than YouTube's end screen.
         if (into >= LENGTH) send("seekTo", [from, true]);
@@ -73,8 +99,10 @@ function YouTubePreview({ id, from, sound, onProgress }: { id: string; from: num
   useEffect(() => {
     if (!shown) return;
     if (sound) {
+      unmutedAt.current = Date.now();
       send("unMute");
       send("setVolume", [70]);
+      send("playVideo");
     } else {
       send("mute");
     }
@@ -125,7 +153,7 @@ export function useHoverPreview(video: Video) {
       stopCurrent?.();
       stopCurrent = stop;
       onStart?.();
-      setSound(soundWanted() && soundAllowed());
+      setSound(soundWanted() && soundAllowed() && !soundRefused);
       setPlaying(true);
     }, delay);
   };
@@ -135,6 +163,8 @@ export function useHoverPreview(video: Video) {
     event.preventDefault();
     event.stopPropagation();
     const next = !sound;
+    // A click is what the browser waits for: worth trying the sound again.
+    soundRefused = false;
     setSound(next);
     try {
       localStorage.setItem(SOUND_KEY, next ? "on" : "off");
@@ -167,9 +197,10 @@ export function useHoverPreview(video: Video) {
 
   const from = Math.round((video.duration ?? 90) / 3);
   const preview = playing ? (
-    <span className="absolute inset-0 overflow-hidden bg-black">
+    <span className="absolute inset-0 overflow-hidden">
       {video.youtube_id ? (
-        <YouTubePreview id={video.youtube_id} from={from} sound={sound} onProgress={setProgress} />
+        <YouTubePreview id={video.youtube_id} from={from} sound={sound} onProgress={setProgress}
+                        onSoundBlocked={() => { soundRefused = true; setSound(false); }} />
       ) : (
         <video className="pointer-events-none absolute inset-0 size-full object-cover" src={video.preview_url!} muted={!sound} autoPlay loop
                playsInline onTimeUpdate={(e) => setProgress(e.currentTarget.currentTime / (e.currentTarget.duration || 30))} />

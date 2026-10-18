@@ -63,6 +63,9 @@ def _image(thumbnails: list | None, size: int = 544) -> str | None:
     if not thumbnails:
         return None
     url = max(thumbnails, key=lambda t: t.get("width", 0) or 0).get("url")
+    # YouTube Music's grey "no picture" person: no picture, so the page draws its own.
+    if url and "/ytm/images/artist_avatar" in url:
+        return None
     if url and re.search(r"=w\d+-h\d+", url):
         url = re.sub(r"=w\d+-h\d+", f"=w{size}-h{size}", url)
     elif url and re.search(r"=s\d+", url):

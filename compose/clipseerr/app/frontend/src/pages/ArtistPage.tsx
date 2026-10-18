@@ -9,7 +9,7 @@ import { MoreLoader, useReveal } from "@/components/video/MoreLoader";
 import { GridSkeleton, VideoGrid } from "@/components/video/VideoGrid";
 import type { AlbumSummary } from "@/lib/api";
 import { useArtist } from "@/lib/queries";
-import { cn } from "@/lib/utils";
+import { cn, realPicture } from "@/lib/utils";
 
 import { ArtistRail } from "./SearchPage";
 
@@ -53,12 +53,12 @@ export function ArtistPage() {
   return (
     <>
       <div className="relative -mx-4 -mt-6 mb-8 overflow-hidden px-4 pt-10 pb-6 sm:-mx-6 sm:px-6 lg:-mx-10 lg:-mt-8 lg:px-10">
-        {data?.thumbnail && (
-          <img src={data.thumbnail} alt="" aria-hidden className="absolute inset-0 -z-10 size-full scale-110 object-cover opacity-25 blur-3xl" />
+        {realPicture(data?.thumbnail) && (
+          <img src={realPicture(data?.thumbnail)!} alt="" aria-hidden className="absolute inset-0 -z-10 size-full scale-110 object-cover opacity-25 blur-3xl" />
         )}
         <div className="flex flex-col items-start gap-5 sm:flex-row sm:items-end">
           <div className="size-32 shrink-0 overflow-hidden rounded-full bg-secondary shadow-2xl ring-1 ring-white/15 sm:size-40">
-            {data?.thumbnail ? <img src={data.thumbnail} alt="" className="size-full object-cover" />
+            {realPicture(data?.thumbnail) ? <img src={realPicture(data?.thumbnail)!} alt="" className="size-full object-cover" />
               : data ? (
                 // No picture on YouTube Music: the first letter, not a shimmer that looks like it is still loading.
                 <span className="flex size-full items-center justify-center text-5xl font-semibold text-muted-foreground">

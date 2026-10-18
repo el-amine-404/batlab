@@ -10,15 +10,15 @@ import { MoreLoader } from "@/components/video/MoreLoader";
 import { GridSkeleton, VideoGrid } from "@/components/video/VideoGrid";
 import { errorText, type ArtistSummary, type SearchResults } from "@/lib/api";
 import { prefetchArtist, useQuickSearch, useSearch } from "@/lib/queries";
-import { cn } from "@/lib/utils";
+import { cn, realPicture } from "@/lib/utils";
 
 export function ArtistBubble({ artist, note }: { artist: ArtistSummary; note?: string }) {
   return (
     <Link to={`/artist/${artist.id}`} onPointerEnter={() => prefetchArtist(artist.id)} onFocus={() => prefetchArtist(artist.id)}
           className="group flex w-28 shrink-0 flex-col items-center gap-2 rounded-xl p-2 text-center outline-none focus-visible:ring-[3px] focus-visible:ring-ring sm:w-32">
       <span className="flex size-24 items-center justify-center overflow-hidden rounded-full bg-secondary ring-1 ring-white/10 transition group-hover:ring-rose-400/50 sm:size-28">
-        {artist.thumbnail ? (
-          <img src={artist.thumbnail} alt="" loading="lazy" decoding="async" className="size-full object-cover" />
+        {realPicture(artist.thumbnail) ? (
+          <img src={realPicture(artist.thumbnail)!} alt="" loading="lazy" decoding="async" className="size-full object-cover" />
         ) : (
           // No picture on YouTube Music: the name's first letter, not an empty circle.
           <span aria-hidden className="text-3xl font-semibold text-muted-foreground">{artist.name.trim().charAt(0).toUpperCase()}</span>
