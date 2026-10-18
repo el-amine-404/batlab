@@ -124,7 +124,9 @@ function ShelfScreen({ id, query, eyebrow, extra, sort, onSort }: {
       {extra}
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="text-lg font-semibold tracking-tight">Videos</h2>
-        <SortControl options={listSorts(ownOrder(id))} value={sort} onChange={onSort} />
+        {/* Apple's lists carry no view counts: no order by them there. */}
+        <SortControl options={listSorts(ownOrder(id)).filter((o) => !(o.value === "views" && id.startsWith("am")))}
+                     value={sort} onChange={onSort} />
       </div>
       {isPending ? <GridSkeleton /> : (
         // The last order stays in sight, dimmed, while the new one comes.
