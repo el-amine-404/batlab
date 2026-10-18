@@ -6,22 +6,57 @@ disableIndexing: true
 
 title: Potato homelab
 
+# Same boxes in a row line up; the dot on every service is set here once.
+headerStyle: boxed
+useEqualHeights: true
+statusStyle: dot
+hideVersion: true
+
+# Type on the page to jump to a service; descriptions are searched too.
+quicklaunch:
+  searchDescriptions: true
+  hideVisitURL: true
+
+# Groups in services.yaml order. A tab shows only its own groups.
 layout:
-  Media:
+  Watch:
+    tab: Apps
+    icon: mdi-movie-open
+    style: row
+    columns: 4
+  Music:
+    tab: Apps
+    icon: mdi-music
+    style: row
+    columns: 4
+  Home:
+    tab: Apps
+    icon: mdi-home
     style: row
     columns: 3
   Library:
+    tab: Admin
+    icon: mdi-bookshelf
     style: row
-    columns: 3
+    columns: 5
   Downloads:
-    style: row
-    columns: 2
-  Network:
-    style: row
-    columns: 2
-  System:
+    tab: Admin
+    icon: mdi-download
     style: row
     columns: 3
-  Utilities:
+  Network:
+    tab: Admin
+    icon: mdi-lan
     style: row
-    columns: 2
+    columns: 3
+  System:
+    tab: Admin
+    icon: mdi-server
+    style: row
+    columns: 4
+  Backends:
+    tab: Admin
+    icon: mdi-api
+    style: row
+    columns: 5
+    initiallyCollapsed: true
