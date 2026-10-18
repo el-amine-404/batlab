@@ -102,6 +102,28 @@
 
 # --- Home --------------------------------------------------------------
 
+- Feeds:
+    - subfeed:
+        icon: mdi-rss
+        href: http://subfeed.homelab.lan
+        description: Subreddits as feeds (JSON Feed, Atom)
+        siteMonitor: http://subfeed:8830/api/v1/health
+        # No subfeed widget in Homepage; its /status counts the feeds.
+        widget:
+          type: customapi
+          url: http://subfeed:8830/api/v1/status
+          refreshInterval: 60000
+          mappings:
+            - field:
+                feeds: total
+              label: Feeds
+            - field:
+                feeds: failing
+              label: Failing
+            - field: posts
+              label: Posts
+              format: number
+
 - Photos & files:
     - Immich:
         icon: immich
@@ -206,26 +228,6 @@
           type: bazarr
           url: http://bazarr:6767
           key: "{{HOMEPAGE_VAR_BAZARR_KEY}}"
-    - subfeed:
-        icon: mdi-rss
-        href: http://subfeed.homelab.lan
-        description: Subreddits as feeds (JSON Feed, Atom)
-        siteMonitor: http://subfeed:8830/api/v1/health
-        # No subfeed widget in Homepage; its /status counts the feeds.
-        widget:
-          type: customapi
-          url: http://subfeed:8830/api/v1/status
-          refreshInterval: 60000
-          mappings:
-            - field:
-                feeds: total
-              label: Feeds
-            - field:
-                feeds: failing
-              label: Failing
-            - field: posts
-              label: Posts
-              format: number
     - Dispatcharr:
         icon: dispatcharr
         href: http://dispatcharr.homelab.lan
