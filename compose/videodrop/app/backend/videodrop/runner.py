@@ -128,6 +128,12 @@ def _stdout_for_events():
 def main() -> int:
     emit = Emitter(_stdout_for_events())
     config = json.loads(sys.stdin.readline())
+    if config.get("proxy"):
+        from . import egress
+
+        # The internet through the proxy, nothing else: for yt-dlp, ffmpeg, Deno and the lyrics alike.
+        os.environ.update(egress.environment(config["proxy"]))
+        egress.lock(config["proxy"])
 
     import yt_dlp
     from yt_dlp.postprocessor.common import PostProcessor
@@ -277,7 +283,7 @@ def main() -> int:
 
     ydl_params = params(options, config["output"], work_dir, rate_limit=config.get("rate_limit"),
                         max_filesize=config.get("max_filesize"), cookies=config.get("cookies"),
-                        deno=config.get("deno"))
+                        deno=config.get("deno"), proxy=config.get("proxy"))
     ydl_params.update(logger=Logger(), progress_hooks=[progress], postprocessor_hooks=[postprocessing])
     if section:
         from yt_dlp.utils import download_range_func

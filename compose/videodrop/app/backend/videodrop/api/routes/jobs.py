@@ -4,8 +4,10 @@ import mimetypes
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Query, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 
+from ... import links
 from ...broker import TooMany
 from ...domain import FINAL, STATUSES, Invalid, NotFound, Status
 from ...jobs import MAX_PAGE, JobIn, JobQuery
@@ -27,13 +29,14 @@ RECONNECT_MS = 3000
 @router.post("", status_code=201, summary="Ask for a download", response_model=schemas.Job,
              responses={**_PROBLEMS, 200: {"model": schemas.Job, "description": "The same download was already "
                                                                                   "queued or running: that job."}})
-def create_job(body: JobIn, ctx: Ctx, base: Base, response: Response):
+async def create_job(body: JobIn, ctx: Ctx, base: Base, response: Response):
     """Queued at once (201); its id follows it: GET it, stream it, or give a
     callback_url. Asking again for the same link, destination and options
     while it is queued or running answers that job (200), so a caller can
     retry a request safely. 422 when the link isn't one videodrop downloads
     (a site yt-dlp doesn't know, an address on this network)."""
-    row, new = ctx.submit(body, base)
+    await links.reachable(links.check(body.url))
+    row, new = await run_in_threadpool(ctx.submit, body, base)
     response.status_code = 201 if new else 200
     response.headers["Location"] = f"{base}/api/v1/jobs/{row['id']}"
     return ctx.jobs.public(row, base)

@@ -95,6 +95,11 @@ def main() -> int:
     os.dup2(2, 1)
     sys.stdout = sys.stderr
     config = json.load(sys.stdin)
+    if config.get("proxy"):
+        from . import egress
+
+        os.environ.update(egress.environment(config["proxy"]))
+        egress.lock(config["proxy"])
 
     import yt_dlp
     from yt_dlp.utils import DownloadError
@@ -104,7 +109,8 @@ def main() -> int:
 
     options = VideoOptions.model_validate(config["options"])
     home = Path("/nonexistent-probe")
-    ydl_params = params(options, config["output"], home, cookies=config.get("cookies"), deno=config.get("deno"))
+    ydl_params = params(options, config["output"], home, cookies=config.get("cookies"), deno=config.get("deno"),
+                        proxy=config.get("proxy"))
     ydl_params.update(simulate=True, skip_download=True, quiet=True, no_warnings=True, cachedir=False)
     if options.playlist:
         ydl_params["extract_flat"] = "in_playlist"

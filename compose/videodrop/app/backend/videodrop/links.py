@@ -8,6 +8,7 @@ import ipaddress
 import re
 import urllib.parse
 
+from . import egress
 from .domain import Invalid
 
 _YOUTUBE_ID = re.compile(r"^[\w-]{11}$")
@@ -25,6 +26,25 @@ def _host_allowed(host: str) -> bool:
     except ValueError:
         return "." in host and not host.endswith((".lan", ".local", ".internal", ".localhost", ".home.arpa"))
     return address.is_global
+
+
+# How a link's host is looked up (egress.resolve); the tests give their own.
+RESOLVE = egress.resolve
+
+
+async def reachable(url: str) -> None:
+    """Refuses a link whose host points inside this network now (Invalid),
+    so that it is said at once; the egress proxy refuses it again, by the
+    address it connects to, whatever the name says by then. A name that
+    doesn't resolve now isn't refused: the download says so if it still
+    doesn't."""
+    parts = urllib.parse.urlsplit(url)
+    try:
+        await RESOLVE(parts.hostname or "", parts.port or (443 if parts.scheme == "https" else 80))
+    except egress.Refused as exc:
+        raise Invalid(f"videodrop downloads from the internet, not from addresses on this network: {exc}.") from None
+    except (ConnectionError, OSError, ValueError):
+        pass
 
 
 def site_of(url: str) -> str:

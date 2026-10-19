@@ -26,6 +26,7 @@ from .journal import Journal
 from .notifications import TYPES, NotificationStore, Notifier
 from .options import DEFAULT_TEMPLATE, OptionsPatch, Section, VideoOptions, resolve, to_output_template
 from .previews import Previews
+from .egress import Proxy
 from .prober import Prober
 from .scheduler import Scheduler
 from .sites import Sites
@@ -57,6 +58,7 @@ class Services:
     previews: Previews
     journal: Journal
     sites: Sites
+    egress: Proxy
     started_at: float = field(default_factory=time.time)
     _tasks: list[asyncio.Task] = field(default_factory=list)
 
@@ -78,6 +80,7 @@ class Services:
         await self.callbacks.drain()
         await self.notifier.drain()
         self.previews.close()
+        self.egress.stop()
         await self.http.aclose()
         self.db.close()
 
@@ -121,6 +124,7 @@ class Services:
                     section: Section | None = None) -> dict:
         """What the link would download (probe.py), and where it would land."""
         url = links.check(url)
+        await links.reachable(url)
         row, resolved, template = self.plan(destination, options)
         # Read for the whole video (a section changed doesn't ask the site again), then made the section's.
         info = await self.prober.probe(url, resolved, to_output_template(template))
@@ -228,7 +232,10 @@ def build(config: Config, http: httpx.AsyncClient | None = None) -> Services:
     journal = Journal(db)
     jobs.hold_from(lambda: settings().hold_hours)
     callbacks = Callbacks(http, lambda job_id, last: _record_callback(jobs, journal, job_id, last))
-    scheduler = Scheduler(config, jobs, settings, notifier.emit, callbacks, broker.publish, journal)
+    # The downloads' and link checks' only way out (egress.py).
+    egress = Proxy()
+    proxy = egress.start()
+    scheduler = Scheduler(config, jobs, settings, notifier.emit, callbacks, broker.publish, journal, proxy)
     jobs.live_from(scheduler.live)
     jobs.on_change(broker.publish)
     jobs.on_change(scheduler.wake)
@@ -241,9 +248,9 @@ def build(config: Config, http: httpx.AsyncClient | None = None) -> Services:
         [jobs.file_path(f) for f in jobs.files(job_id) if f["kind"] == "video"]))
     return Services(config=config, db=db, http=http, settings=settings, destinations=destinations, jobs=jobs,
                     notifications=notifications, notifier=notifier, broker=broker, callbacks=callbacks,
-                    scheduler=scheduler, prober=Prober(config.state_dir, config.deno, config.prober),
+                    scheduler=scheduler, prober=Prober(config.state_dir, config.deno, config.prober, proxy),
                     releases=releases, issues=issues, previews=previews, journal=journal,
-                    sites=Sites(config.state_dir, http))
+                    sites=Sites(config.state_dir, http), egress=egress)
 
 
 def _record_callback(jobs: JobStore, journal: Journal, job_id: str, last: dict) -> None:

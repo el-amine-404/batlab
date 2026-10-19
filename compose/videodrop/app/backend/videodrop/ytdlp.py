@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from .egress import FFMPEG_PROTOCOLS
 from .options import VideoOptions
 
 _CODECS = {"h264": "vcodec:h264", "h265": "vcodec:h265", "vp9": "vcodec:vp9", "av1": "vcodec:av01"}
@@ -15,7 +16,8 @@ _COVERS = ("mp4", "mkv")
 
 
 def params(options: VideoOptions, output: str, work_dir: Path, *, rate_limit: float | None = None,
-           max_filesize: float | None = None, cookies: str | None = None, deno: str | None = None) -> dict:
+           max_filesize: float | None = None, cookies: str | None = None, deno: str | None = None,
+           proxy: str | None = None) -> dict:
     """YoutubeDL's parameters, without the logger and the hooks (runner.py
     adds them). output: the output template (options.to_output_template)."""
     sort = []
@@ -77,6 +79,11 @@ def params(options: VideoOptions, output: str, work_dir: Path, *, rate_limit: fl
         result["cookiefile"] = cookies
     if deno:
         result["js_runtimes"] = {"deno": {"path": deno}}
+    if proxy:
+        # Every request through videodrop's egress proxy (egress.py); ffmpeg, when it downloads, too, and
+        # only over the web: no file, rtmp, rtsp or udp it would reach on its own.
+        result["proxy"] = proxy
+        result["external_downloader_args"] = {"ffmpeg_i": ["-protocol_whitelist", FFMPEG_PROTOCOLS]}
     return result
 
 

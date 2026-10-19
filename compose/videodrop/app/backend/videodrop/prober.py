@@ -26,8 +26,9 @@ class ProbeFailed(Invalid):
 
 
 class Prober:
-    def __init__(self, state_dir: Path, deno: str | None, command: tuple[str, ...]):
+    def __init__(self, state_dir: Path, deno: str | None, command: tuple[str, ...], proxy: str | None = None):
         self._state_dir = state_dir
+        self._proxy = proxy
         self._deno = deno
         self._command = command
         self._slots: asyncio.Semaphore | None = None
@@ -45,7 +46,8 @@ class Prober:
             folder = Path(tempfile.mkdtemp(prefix="probe-"))
             try:
                 info = await self._run({"url": url, "options": options.model_dump(), "output": output,
-                                        "cookies": cookies.copy_for(self._state_dir, folder), "deno": self._deno})
+                                        "cookies": cookies.copy_for(self._state_dir, folder), "deno": self._deno,
+                                        "proxy": self._proxy})
             finally:
                 shutil.rmtree(folder, ignore_errors=True)
         self._cache[key] = (time.time(), info)

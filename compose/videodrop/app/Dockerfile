@@ -16,7 +16,7 @@ RUN npm ci --no-audit --no-fund --loglevel=error
 COPY frontend/ ./
 RUN npm run build
 
-FROM ${BASE_IMAGE}
+FROM ${BASE_IMAGE} AS app
 ARG YTDLP_VERSION
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 
@@ -46,3 +46,14 @@ ENV VIDEODROP_STATIC=/opt/videodrop/static \
 USER 1000:1000
 EXPOSE 8840
 ENTRYPOINT ["/opt/videodrop/.venv/bin/python", "-m", "videodrop"]
+
+# The tests, against the image as built: a failing test fails the build, so
+# `make up` never deploys it. The image keeps none of them, only the mark.
+FROM app AS tested
+COPY --chown=1000:1000 backend/tests /tmp/videodrop-tests/tests
+RUN cd /tmp/videodrop-tests \
+ && { HOME=/tmp python -m unittest discover -s tests > log 2>&1 || { tail -n 80 log; exit 1; }; } \
+ && tail -n 3 log && touch passed
+
+FROM app
+COPY --from=tested /tmp/videodrop-tests/passed /opt/videodrop/.tests-passed

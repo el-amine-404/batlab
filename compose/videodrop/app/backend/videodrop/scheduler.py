@@ -122,8 +122,10 @@ def backoff(attempt: int) -> float:
 class Scheduler:
     def __init__(self, config: Config, jobs: JobStore, settings: Callable[[], Settings],
                  emit: Callable[[Event], None], callbacks: Callbacks, publish: Callable[[str], None],
-                 journal: Journal):
+                 journal: Journal, proxy: str | None = None):
         self._config = config
+        # Where the download processes connect through (egress.py); None in the tests' fake ones.
+        self._proxy = proxy
         self._jobs = jobs
         self._settings = settings
         self._emit = emit
@@ -267,6 +269,7 @@ class Scheduler:
                 "cookies": cookies.copy_for(self._config.state_dir, work),
                 "deno": self._config.deno,
                 "song": json.loads(row["song"]) if row["song"] else None,
+                "proxy": self._proxy,
             }
             limits = [f"rate limit {settings.rate_limit_mib} MiB/s" if settings.rate_limit_mib else None,
                       f"files up to {settings.max_filesize_gb} GB" if settings.max_filesize_gb else None,

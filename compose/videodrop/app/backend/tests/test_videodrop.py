@@ -32,6 +32,17 @@ from videodrop.scheduler import TRANSIENT, backoff  # noqa: E402
 from videodrop.services import build  # noqa: E402
 from videodrop.runner import StepWatch  # noqa: E402
 from videodrop.ytdlp import fingerprint, params  # noqa: E402
+from videodrop import egress  # noqa: E402
+
+
+async def _resolve(host: str, port: int) -> list[str]:
+    """No DNS in the tests: inside.example.com points home, any other name out."""
+    if host.startswith("inside."):
+        raise egress.Refused(f"{host} points to 10.0.0.5, an address on this network, not the internet")
+    return ["93.184.215.14"]
+
+
+links.RESOLVE = _resolve
 
 FAKE = str(Path(__file__).with_name("fake_runner.py"))
 FAKE_PROBE = str(Path(__file__).with_name("fake_probe.py"))
@@ -372,6 +383,21 @@ class Api(unittest.TestCase):
         answer = self.client.post("/api/v1/jobs", json={"url": watch(video), **body})
         self.assertIn(answer.status_code, (200, 201), answer.text)
         return answer.json()
+
+    def test_a_link_pointing_home_is_refused_at_once(self):
+        for path, body in (("/api/v1/jobs", {"url": "https://inside.example.com/watch?v=okokokokok1"}),
+                           ("/api/v1/probe", {"url": "https://inside.example.com/watch?v=okokokokok1"})):
+            answer = self.client.post(path, json=body)
+            # Not a site yt-dlp knows comes first; a known site's name is checked the same way.
+            self.assertEqual(answer.status_code, 422, answer.text)
+        original = links.supported
+        links.supported = lambda url: True
+        try:
+            answer = self.client.post("/api/v1/jobs", json={"url": "https://inside.example.com/v/1"})
+        finally:
+            links.supported = original
+        self.assertEqual(answer.status_code, 422)
+        self.assertIn("points to 10.0.0.5", answer.json()["detail"])
 
     def test_download_into_a_destination_and_fetch_it(self):
         job = self.ask("okokokokok1", destination="music-videos", client="clipseerr")
