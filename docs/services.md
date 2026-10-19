@@ -61,7 +61,7 @@ end up. The senders, and the name and avatar each shows on Discord, are in
 
 | Channel (tag) | Who sends through Apprise | What |
 | --- | --- | --- |
-| `downloads` | musicguard, subtranslate | "Ready to play: Artist – Album", once Navidrome has it; subtitles translated by AI, or replaced by human ones |
+| `downloads` | musicguard, subtranslate, videodrop | "Ready to play: Artist – Album", once Navidrome has it; subtitles translated by AI, or replaced by human ones; "Downloaded: <title>", each video finished (a person's or an app's) |
 | `download-issues` | musicguard, songdrop, videodrop, vpnguard, dubkeeper | files quarantined, suspect, flagged or held; songs missing after a download, back, or given up; videos that failed, the media disk nearly full; VPN reconnects; upgrades that lost audio |
 | `requests` | clipseerr | a song or a music video asked for, got, or not found by any service |
 | `cameras` | camwatch, carwatch | a camera dark, and back; the Clio 4 or the Ford left its spot, or is back, with a close-up, the street, the way it went and the clip |

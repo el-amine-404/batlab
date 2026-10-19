@@ -599,8 +599,10 @@ class Scheduler:
             self._emit(Event("job.failed", f"Download failed: {title[:150]}", lines,
                              self._page(settings, f"/jobs/{job_id}"), {"job": snapshot}))
         else:
-            where = row["folder"] or "kept for its caller"
+            where = (f"Into {row['folder']}." if row["folder"]
+                     else f"Kept {self._jobs.hold_hours(row)} h, to download from its page.")
             files = [f["name"] for f in snapshot["files"] if f["kind"] == "video"]
-            self._emit(Event("job.finished", f"Downloaded: {title[:150]}", (f"Into {where}.", *files[:5]),
+            lines = (where, *files[:5], *([f"Asked by {row['client']}"] if row["client"] else ()))
+            self._emit(Event("job.finished", f"Downloaded: {title[:150]}", lines,
                              self._page(settings, f"/jobs/{job_id}"), {"job": snapshot}))
 

@@ -38,6 +38,8 @@ services:
       # beside songdrop's and musicguard's (docs/services.md, "Messages").
       - VIDEODROP_APPRISE_URL=http://apprise:8000/notify/videodrop
       - VIDEODROP_APPRISE_TAG=download-issues
+      # And each finished download to #downloads ("Downloaded: <title>").
+      - VIDEODROP_APPRISE_FINISHED_TAG=downloads
     volumes:
       # The database and the cookies.
       - ${VOLUMES_ROOT}/videodrop:/state

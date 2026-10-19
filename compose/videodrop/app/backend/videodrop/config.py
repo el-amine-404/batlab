@@ -37,9 +37,11 @@ class Config:
     seed: tuple[Seed, ...]
     # The page's address, for links in messages; a setting after the first start.
     public_url: str
-    # The first notification (Apprise), when given.
+    # The first notifications (Apprise), when given: failures and a full disk
+    # with apprise_tag; finished downloads with apprise_finished_tag, if any.
     apprise_url: str
     apprise_tag: str
+    apprise_finished_tag: str
     # The JavaScript runtime yt-dlp answers YouTube's challenge with.
     deno: str | None
     # The command a download runs as (runner.py, with this interpreter).
@@ -102,6 +104,7 @@ def load(env: Mapping[str, str] = os.environ) -> Config:
         public_url=_url("VIDEODROP_PUBLIC_URL", env.get("VIDEODROP_PUBLIC_URL", "")),
         apprise_url=_url("VIDEODROP_APPRISE_URL", env.get("VIDEODROP_APPRISE_URL", "")),
         apprise_tag=env.get("VIDEODROP_APPRISE_TAG", "").strip(),
+        apprise_finished_tag=env.get("VIDEODROP_APPRISE_FINISHED_TAG", "").strip(),
         deno=deno if deno and os.access(deno, os.X_OK) else None,
         runner=(sys.executable, "-m", "videodrop.runner"),
         prober=(sys.executable, "-m", "videodrop.probe"),

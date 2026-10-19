@@ -321,6 +321,24 @@ class FileChecks(unittest.TestCase):
             self.assertTrue(checks.check(video, 3)["ok"])
 
 
+class Seed(unittest.TestCase):
+    def test_apprise_for_failures_and_for_finished_downloads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "media").mkdir()
+            config = config_module.load({"VIDEODROP_STATE": str(Path(tmp) / "state"), "VIDEODROP_MEDIA": str(Path(tmp) / "media"),
+                                         "VIDEODROP_APPRISE_URL": "http://apprise:8000/notify/videodrop",
+                                         "VIDEODROP_APPRISE_TAG": "download-issues",
+                                         "VIDEODROP_APPRISE_FINISHED_TAG": "downloads"})
+            services = build(config)
+            services.seed()
+            services.seed()
+            made = {item["name"]: item for item in services.notifications.list()}
+            self.assertEqual(sorted(made), ["Apprise", "Finished downloads"])
+            self.assertEqual(made["Apprise"]["events"], ["job.failed", "disk.low"])
+            self.assertEqual(made["Finished downloads"]["events"], ["job.finished"])
+            self.assertIn("· downloads", made["Finished downloads"]["summary"])
+
+
 class Api(unittest.TestCase):
     """videodrop whole, against fake_runner.py."""
 

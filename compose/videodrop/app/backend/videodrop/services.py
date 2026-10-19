@@ -202,12 +202,16 @@ class Services:
             except (Conflict, Invalid) as exc:
                 log.warning("no destination %s from the environment: %s", seed.slug, exc)
         if self.config.apprise_url:
-            try:
-                self.notifications.create({"name": "Apprise", "type": "apprise",
-                                           "config": {"url": self.config.apprise_url,
-                                                      "tag": self.config.apprise_tag or None}})
-            except Invalid as exc:
-                log.warning("no Apprise notification from the environment: %s", exc)
+            wanted = [{"name": "Apprise", "type": "apprise",
+                       "config": {"url": self.config.apprise_url, "tag": self.config.apprise_tag or None}}]
+            if self.config.apprise_finished_tag:
+                wanted.append({"name": "Finished downloads", "type": "apprise", "events": ["job.finished"],
+                               "config": {"url": self.config.apprise_url, "tag": self.config.apprise_finished_tag}})
+            for item in wanted:
+                try:
+                    self.notifications.create(item)
+                except Invalid as exc:
+                    log.warning("no %s notification from the environment: %s", item["name"], exc)
         self.db.put(SEEDED, True)
 
 
