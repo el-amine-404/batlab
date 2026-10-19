@@ -3,7 +3,6 @@
 
 /* shadcn/ui tokens, dark only, like songdrop and clipseerr; videodrop's accent is sky to cyan. */
 :root {
-  color-scheme: dark;
   --radius: 0.875rem;
   --background: oklch(0.14 0.008 230);
   --foreground: oklch(0.97 0.004 230);
@@ -59,12 +58,22 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* Dark from the body down, not on the page itself: a password manager's frame (Bitwarden's "Save
+     login") is light, and Firefox paints a frame white where it is see-through when the page or the
+     frame's element says dark and its document doesn't. The frames here are only such extensions'. The
+     page's own scrollbar, which would follow the page's scheme, has its colours said instead. */
   html {
     -webkit-text-size-adjust: 100%;
     -webkit-tap-highlight-color: transparent;
+    background: var(--background);
+    scrollbar-color: oklch(1 0 0 / 0.2) var(--background);
   }
   body {
+    color-scheme: dark;
     @apply min-h-dvh bg-background font-sans text-foreground antialiased;
+  }
+  iframe {
+    color-scheme: normal;
   }
 }
 
