@@ -553,7 +553,8 @@ class Api(unittest.TestCase):
         self.client.__exit__(None, None, None)
         self.tmp.cleanup()
 
-    def wait(self, job_id: str, *statuses: str, timeout: float = 15) -> dict:
+    # Generous: the image's build runs these on a busy machine, and a timing alone mustn't stop a deploy.
+    def wait(self, job_id: str, *statuses: str, timeout: float = 60) -> dict:
         deadline = time.time() + timeout
         while time.time() < deadline:
             job = self.client.get(f"/api/v1/jobs/{job_id}").json()

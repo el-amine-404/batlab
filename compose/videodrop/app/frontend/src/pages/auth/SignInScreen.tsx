@@ -64,8 +64,9 @@ function Frame({ title, text, shake, children }: { title: string; text: ReactNod
       <div className="aurora fixed! -z-10" aria-hidden><span /><span /><span /></div>
 
       <section className="relative hidden overflow-hidden border-r border-white/5 lg:flex lg:flex-col lg:justify-center lg:px-14 xl:px-20">
-        <FallingFrames className="absolute inset-0 size-full" />
-        <div className="relative max-w-md">
+        {/* The frames fade out behind the words, to stay a background. */}
+        <FallingFrames className="absolute inset-0 size-full [mask-image:radial-gradient(ellipse_55%_45%_at_32%_50%,transparent_35%,black_80%)]" />
+        <div className="relative max-w-lg">
           <div className="mb-10 flex items-center gap-3 text-lg font-semibold tracking-tight">
             <Logo className="size-10" /> videodrop
           </div>
