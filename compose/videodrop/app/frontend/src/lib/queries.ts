@@ -61,7 +61,8 @@ export const useNotificationTypes = () =>
 export const useSettings = () => useQuery({ queryKey: keys.settings, queryFn: api.settings });
 export const useStatus = () => useQuery({ queryKey: keys.status, queryFn: api.status, refetchInterval: 30 * SECOND });
 /** What needs a person's eye; read again every minute and when a download ends. */
-export const useIssues = () => useQuery({ queryKey: keys.issues, queryFn: api.issues, refetchInterval: 60 * SECOND });
+export const useIssues = (enabled = true) =>
+  useQuery({ queryKey: keys.issues, queryFn: api.issues, refetchInterval: 60 * SECOND, enabled });
 /** A video file's details and pictures: they don't change, read once. */
 export const useFileDetails = (id: string, index: number, enabled = true) =>
   useQuery({ queryKey: keys.fileDetails(id, index), queryFn: () => api.fileDetails(id, index), enabled, staleTime: Infinity, retry: 1 });

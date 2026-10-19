@@ -169,6 +169,12 @@ class JobLinks(BaseModel):
     log: str = Field(description="GET: what happened to it, line by line (log.txt: as a file).")
 
 
+class AskedBy(BaseModel):
+    kind: Literal["user", "key"]
+    id: str
+    name: str
+
+
 class Job(BaseModel):
     id: str
     url: str
@@ -179,6 +185,8 @@ class Job(BaseModel):
     destination: str | None = Field(description="Its destination; none: its files are held for its caller.")
     folder: str | None = Field(description="Its destination's folder when it was asked for.")
     client: str | None
+    asked_by: AskedBy | None = Field(None, description="Who asked: a person signed in, or an app's API key, "
+                                                       "named as they were then. None before videodrop had accounts.")
     priority: int
     title: str | None = Field(description="Known once it starts.")
     uploader: str | None
@@ -525,6 +533,11 @@ class DiskStatus(BaseModel):
     min_free_bytes: int
 
 
+class EgressStatus(BaseModel):
+    connections: int = Field(description="Connections made to the internet for downloads and link checks.")
+    refused: int = Field(description="Connections refused: to an address on this network.")
+
+
 class SystemStatus(BaseModel):
     version: str
     yt_dlp: str = Field(description="yt-dlp's version.")
@@ -538,3 +551,120 @@ class SystemStatus(BaseModel):
     streams: int = Field(description="Live streams open.")
     database_bytes: int
     clients: list[str] = Field(description="Every client that asked for a download.")
+    egress: EgressStatus = Field(description="The downloads' way out (egress.py), since the start.")
+
+
+# ---- people, sessions and API keys --------------------------------------------------------
+
+Permission = Literal["download", "destinations", "everyone", "settings", "admin"]
+
+
+class PermissionInfo(BaseModel):
+    id: Permission
+    label: str
+    description: str
+
+
+class Me(BaseModel):
+    kind: Literal["user", "key"] = Field(description="A person signed in, or an app's API key.")
+    id: str
+    name: str
+    permissions: list[Permission] = Field(description="What it may do; an admin's lists them all.")
+
+
+class AuthState(BaseModel):
+    setup: bool = Field(description="Nobody exists yet: the page asks for the setup code and the first admin.")
+    me: Me | None = Field(None, description="Who this request is, when signed in.")
+    permissions: list[PermissionInfo]
+
+
+class SetupIn(BaseModel):
+    code: str = Field(min_length=4, max_length=40, description="The setup code: videodrop's log, or "
+                                                              "`python -m videodrop.admin setup-code`.")
+    username: str = Field(min_length=1, max_length=40)
+    name: str = Field("", max_length=60, description="How notifications and the page name them.")
+    password: str = Field(min_length=1, max_length=200)
+
+
+class LoginIn(BaseModel):
+    username: str = Field(min_length=1, max_length=40)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class PasswordIn(BaseModel):
+    current: str = Field(min_length=1, max_length=200)
+    new: str = Field(min_length=1, max_length=200)
+
+
+class Session(BaseModel):
+    id: str = Field(description="Its first characters: enough to tell them apart.")
+    created_at: float
+    last_seen_at: float
+    address: str | None
+    agent: str | None
+    current: bool = False
+
+
+class Account(BaseModel):
+    me: Me
+    username: str
+    sessions: list[Session]
+
+
+class User(BaseModel):
+    id: str
+    username: str
+    name: str
+    permissions: list[Permission]
+    enabled: bool
+    created_at: float
+    last_login_at: float | None
+    password_changed_at: float | None
+
+
+class UserList(BaseModel):
+    users: list[User]
+
+
+class UserIn(BaseModel):
+    username: str = Field(min_length=1, max_length=40, description="What they sign in with: letters, digits, . _ -.")
+    name: str = Field("", max_length=60, description="How the page and the notifications name them.")
+    password: str = Field(min_length=1, max_length=200, description="At least 10 characters; they can change it.")
+    permissions: list[Permission] = Field(default_factory=lambda: ["download"])
+
+
+class UserPatch(BaseModel):
+    name: str | None = Field(None, max_length=60)
+    permissions: list[Permission] | None = None
+    enabled: bool | None = Field(None, description="Off: they can't sign in, their sessions end.")
+
+
+class NewPassword(BaseModel):
+    password: str = Field(min_length=1, max_length=200)
+
+
+class ApiKey(BaseModel):
+    id: str
+    name: str
+    prefix: str = Field(description="The key's first characters, to recognise it.")
+    permissions: list[Permission]
+    created_at: float
+    last_used_at: float | None
+    last_address: str | None
+
+
+class ApiKeyList(BaseModel):
+    keys: list[ApiKey]
+
+
+class ApiKeyIn(BaseModel):
+    name: str = Field(min_length=1, max_length=40, description="The app it is for: clipseerr, homepage…")
+    permissions: list[Permission] = Field(default_factory=lambda: ["download", "destinations"])
+
+
+class ApiKeyMade(ApiKey):
+    key: str = Field(description="The key, shown this once: the app sends it as X-Api-Key.")
+
+
+class ApiKeyPatch(BaseModel):
+    permissions: list[Permission]

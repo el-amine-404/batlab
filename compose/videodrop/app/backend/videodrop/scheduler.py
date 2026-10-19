@@ -119,6 +119,13 @@ def backoff(attempt: int) -> float:
     return min(MAX_BACKOFF, 60 * 5 ** max(0, attempt - 1))
 
 
+
+def _asked_by(row) -> tuple[str, ...]:
+    """"Asked by Amine", "Asked by clipseerr": the person or the app's key,
+    named as they were then (the client a caller named, for older ones)."""
+    who = row["owner_name"] or row["client"]
+    return (f"Asked by {who}",) if who else ()
+
 class Scheduler:
     def __init__(self, config: Config, jobs: JobStore, settings: Callable[[], Settings],
                  emit: Callable[[Event], None], callbacks: Callbacks, publish: Callable[[str], None],
@@ -597,15 +604,14 @@ class Scheduler:
         settings = self._settings()
         title = row["title"] or row["url"]
         if event == "failed":
-            lines = (row["error"] or "No reason given.", f"Link: {row['url']}",
-                     *([f"Asked by {row['client']}"] if row["client"] else ()))
+            lines = (row["error"] or "No reason given.", f"Link: {row['url']}", *_asked_by(row))
             self._emit(Event("job.failed", f"Download failed: {title[:150]}", lines,
                              self._page(settings, f"/jobs/{job_id}"), {"job": snapshot}))
         else:
             where = (f"Into {row['folder']}." if row["folder"]
                      else f"Kept {self._jobs.hold_hours(row)} h, to download from its page.")
             files = [f["name"] for f in snapshot["files"] if f["kind"] == "video"]
-            lines = (where, *files[:5], *([f"Asked by {row['client']}"] if row["client"] else ()))
+            lines = (where, *files[:5], *_asked_by(row))
             self._emit(Event("job.finished", f"Downloaded: {title[:150]}", lines,
                              self._page(settings, f"/jobs/{job_id}"), {"job": snapshot}))
 

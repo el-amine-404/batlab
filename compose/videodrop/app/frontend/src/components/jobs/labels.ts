@@ -83,3 +83,8 @@ export function jobTitle(job: Job): string {
 export function sectionText(section: { start: number; end: number }): string {
   return `${clock(section.start)} → ${clock(section.end)}`;
 }
+
+/** Who asked: the person or the app's key; the client an app named, for downloads from before accounts. */
+export function askedBy(job: Job): string | null {
+  return job.asked_by?.name ?? job.client ?? null;
+}

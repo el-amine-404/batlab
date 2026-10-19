@@ -136,9 +136,52 @@ def _logs_and_holds(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE jobs ADD COLUMN hold_hours INTEGER")
 
 
+def _accounts(conn: sqlite3.Connection) -> None:
+    """People, their sessions and the apps' API keys (accounts.py), and who
+    asked for each download: "user:<id>" or "key:<id>", and their name then."""
+    conn.execute("""CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        name TEXT NOT NULL,
+        password TEXT NOT NULL,
+        permissions TEXT NOT NULL DEFAULT '[]',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL,
+        last_login_at REAL,
+        password_changed_at REAL
+    )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS sessions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+        created_at REAL NOT NULL,
+        expires_at REAL NOT NULL,
+        last_seen_at REAL NOT NULL,
+        address TEXT,
+        agent TEXT
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS sessions_user ON sessions (user_id)")
+    conn.execute("""CREATE TABLE IF NOT EXISTS api_keys (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        prefix TEXT NOT NULL,
+        hash TEXT NOT NULL UNIQUE,
+        permissions TEXT NOT NULL DEFAULT '[]',
+        created_by TEXT,
+        created_at REAL NOT NULL,
+        last_used_at REAL,
+        last_address TEXT
+    )""")
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
+    for column in ("owner", "owner_name"):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS jobs_owner ON jobs (owner, created_at)")
+
+
 # Step n brings user_version n-1 to n. A new step goes at the end; none is ever changed.
 MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (_checks_lyrics_and_lookups, _fingerprints,
-                                                                 _sections, _logs_and_holds)
+                                                                 _sections, _logs_and_holds, _accounts)
 
 
 class Database:
@@ -204,6 +247,9 @@ class Database:
     def put(self, key: str, value) -> None:
         self.run("INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
                  (key, json.dumps(value)))
+
+    def delete(self, key: str) -> None:
+        self.run("DELETE FROM kv WHERE key = ?", (key,))
 
     def size(self) -> int:
         """Bytes on disk, the write-ahead log included."""

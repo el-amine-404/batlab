@@ -8,6 +8,7 @@ import { Empty, Failed, Loading, PageHeader } from "@/components/layout/States";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { JobCounts, Status } from "@/lib/api";
+import { useCan } from "@/lib/auth";
 import { useCounts, useJobs } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
@@ -25,6 +26,7 @@ function count(counts: JobCounts | undefined, status: Status[]): number | undefi
 }
 
 export function DownloadsPage() {
+  const can = useCan();
   // The tab is in the address: a link (Issues) can open Failed.
   const [params, setParams] = useSearchParams();
   const tab = TABS.find((t) => t.key === params.get("tab")) ?? TABS[0];
@@ -37,8 +39,9 @@ export function DownloadsPage() {
 
   return (
     <>
-      <PageHeader title="Downloads" description="Videos asked for here or by other apps, as they go." />
-      <NewDownload />
+      <PageHeader title="Downloads"
+                  description={can("everyone") ? "Videos asked for here or by other apps, as they go." : "The videos you asked for, as they go."} />
+      {can("download") && <NewDownload />}
 
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex gap-1 overflow-x-auto rounded-lg border border-border bg-card p-1" role="tablist">

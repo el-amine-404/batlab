@@ -219,6 +219,28 @@ the service.
   callers name one, never a path) and its events (Apprise, Discord,
   Webhook). clipseerr sends "get the video" to the `music-videos`
   destination.
+- **Who may use it** (`accounts.py`, `api/auth.py`): nobody without an
+  account. People sign in on the page (scrypt-hashed passwords, an HttpOnly
+  SameSite session cookie that ends after 30 days unused; wrong passwords
+  slow down after five); apps send an API key (`X-Api-Key`, made in
+  Settings → API keys, shown once, kept as a hash). Each has permissions: ask
+  for downloads, save into destinations, see everyone's downloads (else
+  only one's own), change settings, admin (people and keys). Downloads,
+  their logs and the notifications name who asked. Only a key may ask for a
+  callback. Before anyone exists, the page makes the first admin with a
+  setup code from videodrop's log or `docker exec videodrop python -m
+  videodrop.admin setup-code`; the same tool resets a password and makes
+  keys. clipseerr's key is `VIDEODROP_CLIPSEERR_KEY`, Homepage's (read only,
+  everyone's counts) `VIDEODROP_HOMEPAGE_KEY`.
+- **Its way out** (`egress.py`): the downloads and link checks reach the
+  internet only, through a proxy on the loopback that resolves each host
+  itself, refuses any that points inside (a private, loopback, link-local
+  or CGNAT address, even once), and connects to the address it checked, so
+  a name can't point elsewhere by the time it is fetched. yt-dlp and ffmpeg
+  go through it (ffmpeg over the web only), and the download process can't
+  open any other connection. A link pointing home is refused when asked.
+- **Tests**: the image's build runs them (`backend/tests`); a failing one
+  fails `make up`.
 - **Owns**: `$VOLUMES_ROOT/videodrop` (one SQLite database, mode 600, and
   the cookies) and `media/.videodrop` (downloads in progress, held files).
 - **Not its job**: deciding what to download, or what a video is; songs.

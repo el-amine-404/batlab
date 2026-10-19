@@ -108,9 +108,14 @@ class JobQuery:
     q: str | None = None
     limit: int = 50
     offset: int = 0
+    # Only the downloads asked by this "user:<id>" or "key:<id>"; None: everyone's.
+    owner: str | None = None
 
     def where(self) -> tuple[str, tuple]:
         clauses, params = [], []
+        if self.owner:
+            clauses.append("owner = ?")
+            params.append(self.owner)
         if self.status:
             clauses.append(f"status IN ({','.join('?' * len(self.status))})")
             params += self.status
@@ -243,6 +248,8 @@ class JobStore:
             "destination": row["destination"],
             "folder": row["folder"],
             "client": row["client"],
+            "asked_by": ({"kind": row["owner"].split(":", 1)[0], "id": row["owner"].split(":", 1)[1],
+                          "name": row["owner_name"]} if row["owner"] else None),
             "priority": row["priority"],
             "title": row["title"],
             "uploader": row["uploader"],
@@ -276,8 +283,10 @@ class JobStore:
                             (*params, min(query.limit, MAX_PAGE), query.offset))
         return rows, total
 
-    def counts(self) -> dict[str, int]:
-        found = {row["status"]: row["n"] for row in self._db.all("SELECT status, COUNT(*) AS n FROM jobs GROUP BY status")}
+    def counts(self, owner: str | None = None) -> dict[str, int]:
+        """Of everyone's downloads, or of owner's."""
+        found = {row["status"]: row["n"] for row in self._db.all(
+            "SELECT status, COUNT(*) AS n FROM jobs WHERE ? IS NULL OR owner = ? GROUP BY status", (owner, owner))}
         return {status: found.get(status, 0) for status in ("queued", "running", "finished", "failed", "cancelled")}
 
     def clients(self) -> list[str]:
@@ -287,16 +296,17 @@ class JobStore:
     # ---- what the API changes ---------------------------------------------------------------
 
     def create(self, body: JobIn, *, destination: sqlite3.Row | None, options: VideoOptions, template: str,
-               base_url: str | None) -> tuple[sqlite3.Row, bool]:
-        """The new job, queued, and True; or the same job still queued or
-        running, and False."""
+               base_url: str | None, owner: str | None = None, owner_name: str | None = None
+               ) -> tuple[sqlite3.Row, bool]:
+        """The new job, queued, and True; or the same one of the same asker
+        still queued or running, and False."""
         url = links.check(body.url)
         slug = destination["slug"] if destination else None
         if body.section and options.playlist:
             raise Invalid("A section is a part of one video, not of a playlist: turn the playlist option off.")
         key = dedupe_key(url, slug, options, body.section)
-        same = self._db.one(f"SELECT * FROM jobs WHERE dedupe_key = ? AND status IN ({','.join('?' * len(ACTIVE))}) "
-                            "ORDER BY created_at LIMIT 1", (key, *ACTIVE))
+        same = self._db.one(f"SELECT * FROM jobs WHERE dedupe_key = ? AND owner IS ? AND status IN "
+                            f"({','.join('?' * len(ACTIVE))}) ORDER BY created_at LIMIT 1", (key, owner, *ACTIVE))
         if same:
             return same, False
         job_id = uuid.uuid4().hex
@@ -305,12 +315,13 @@ class JobStore:
         self._db.run(
             "INSERT INTO jobs (id, url, site, dedupe_key, destination, folder, template, options, priority, client, "
             "status, callback_url, callback_secret, callback_events, base_url, song, again, section, hold_hours, "
-            "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "owner, owner_name, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (job_id, url, links.site_of(url), key, slug, destination["folder"] if destination else None, template,
              json.dumps(options.model_dump()), body.priority, body.client, body.callback_url, body.callback_secret,
              json.dumps([e for e in CALLBACK_EVENTS if e in events]), base_url,
              body.song.model_dump_json() if body.song else None,
-             int(body.again), section_text(body.section), body.hold_hours, now, now))
+             int(body.again), section_text(body.section), body.hold_hours, owner, owner_name, now, now))
         self._touch(job_id)
         return self.row(job_id), True
 

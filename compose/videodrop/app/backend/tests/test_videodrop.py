@@ -332,6 +332,165 @@ class FileChecks(unittest.TestCase):
             self.assertTrue(checks.check(video, 3)["ok"])
 
 
+class AuthTests(unittest.TestCase):
+    """People, sessions and keys, through the API as the page and apps use it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        (root / "media").mkdir()
+        config = config_module.load({"VIDEODROP_STATE": str(root / "state"), "VIDEODROP_MEDIA": str(root / "media"),
+                                     "VIDEODROP_STATIC": str(root / "static"),
+                                     "VIDEODROP_DESTINATIONS": "music-videos=music-videos",
+                                     "VIDEODROP_CHECK_RELEASES": "0"})
+        self.services = build(replace(config, runner=(sys.executable, FAKE), prober=(sys.executable, FAKE_PROBE)))
+        self.app = create_app(self.services)
+        self.admin = TestClient(self.app)
+        self.admin.__enter__()
+
+    def tearDown(self):
+        self.admin.__exit__(None, None, None)
+        self.tmp.cleanup()
+
+    def page(self, client: TestClient, method: str, path: str, **kwargs):
+        """A change as the page asks it: with its header."""
+        return client.request(method, path, headers={"X-Videodrop-Page": "1"}, **kwargs)
+
+    def set_up_admin(self) -> None:
+        code = self.services.accounts.setup_code()
+        self.assertEqual(self.admin.post("/api/v1/auth/setup", json={"code": "WRONG-CODE-0000", "username": "amine",
+                                                                     "password": "a long password"}).status_code, 422)
+        answer = self.admin.post("/api/v1/auth/setup", json={"code": code.lower(), "username": "amine",
+                                                              "name": "Amine", "password": "a long password"})
+        self.assertEqual(answer.status_code, 200, answer.text)
+        self.assertIn("httponly", answer.headers["set-cookie"].lower())
+        self.assertIn("samesite=lax", answer.headers["set-cookie"].lower())
+
+    def test_nobody_is_let_in_before_setup_and_the_code_makes_the_admin(self):
+        anonymous = TestClient(self.app)
+        self.assertEqual(anonymous.get("/api/v1/health").status_code, 200)
+        state = anonymous.get("/api/v1/auth/state").json()
+        self.assertEqual((state["setup"], state["me"]), (True, None))
+        for path in ("/api/v1/jobs", "/api/v1/settings", "/api/v1/status", "/api/v1/sites", "/api/v1/users"):
+            answer = anonymous.get(path)
+            self.assertEqual(answer.status_code, 401, path)
+            self.assertIn("isn't set up yet", answer.json()["detail"])
+        self.set_up_admin()
+        state = self.admin.get("/api/v1/auth/state").json()
+        self.assertEqual((state["setup"], state["me"]["name"], state["me"]["kind"]), (False, "Amine", "user"))
+        self.assertEqual(len(state["me"]["permissions"]), 5)
+        # Once someone exists, setup is closed for good.
+        self.assertIsNone(self.services.accounts.setup_code())
+        self.assertEqual(anonymous.post("/api/v1/auth/setup", json={"code": "X" * 12, "username": "eve",
+                                                                    "password": "a long password"}).status_code, 409)
+        self.assertEqual(anonymous.get("/api/v1/jobs").status_code, 401)
+
+    def test_a_change_with_the_cookie_needs_the_pages_header(self):
+        self.set_up_admin()
+        url = watch("okokokokok1")
+        self.assertEqual(self.admin.post("/api/v1/jobs", json={"url": url}).status_code, 403)
+        job = self.page(self.admin, "POST", "/api/v1/jobs", json={"url": url}).json()
+        self.assertEqual(job["asked_by"]["name"], "Amine")
+        # A person can't make videodrop call an address: callbacks are an app's.
+        answer = self.page(self.admin, "POST", "/api/v1/jobs", json={"url": watch("okokokokok2"),
+                                                                    "callback_url": "http://10.0.0.1/"})
+        self.assertEqual(answer.status_code, 403)
+
+    def test_what_someone_may_do(self):
+        self.set_up_admin()
+        mine = self.page(self.admin, "POST", "/api/v1/jobs", json={"url": watch("okokokokok1"),
+                                                                  "destination": "music-videos"}).json()
+        made = self.page(self.admin, "POST", "/api/v1/users", json={"username": "bob", "name": "Bob",
+                                                                   "password": "bobs password!",
+                                                                   "permissions": ["download"]})
+        self.assertEqual(made.status_code, 201, made.text)
+        bob = TestClient(self.app)
+        self.assertEqual(bob.post("/api/v1/auth/login", json={"username": "BOB", "password": "bobs password!"}
+                                  ).status_code, 200)
+        # His own downloads only, and kept here: no destination.
+        self.assertEqual(self.page(bob, "POST", "/api/v1/jobs", json={"url": watch("okokokokok3"),
+                                                                     "destination": "music-videos"}).status_code, 403)
+        his = self.page(bob, "POST", "/api/v1/jobs", json={"url": watch("okokokokok3")}).json()
+        self.assertIsNone(his["destination"])
+        self.assertEqual([j["id"] for j in bob.get("/api/v1/jobs").json()["jobs"]], [his["id"]])
+        self.assertEqual(bob.get(f"/api/v1/jobs/{mine['id']}").status_code, 404)
+        self.assertEqual(self.page(bob, "POST", f"/api/v1/jobs/{mine['id']}/cancel").status_code, 404)
+        self.assertEqual(bob.get("/api/v1/jobs/counts").json()["queued"] + bob.get("/api/v1/jobs/counts").json()[
+            "running"] + bob.get("/api/v1/jobs/counts").json()["finished"], 1)
+        # Not his to change: settings, notifications, people.
+        self.assertEqual(self.page(bob, "PATCH", "/api/v1/settings", json={"max_parallel": 9}).status_code, 403)
+        self.assertEqual(bob.get("/api/v1/notifications").status_code, 403)
+        self.assertEqual(bob.get("/api/v1/users").status_code, 403)
+        self.assertEqual(bob.get("/api/v1/log").status_code, 403)
+        # The admin sees both.
+        self.assertEqual(len(self.admin.get("/api/v1/jobs").json()["jobs"]), 2)
+        # Turned off: his session ends at once.
+        bob_id = made.json()["id"]
+        self.assertEqual(self.page(self.admin, "PATCH", f"/api/v1/users/{bob_id}", json={"enabled": False}
+                                   ).status_code, 200)
+        self.assertEqual(bob.get("/api/v1/jobs").status_code, 401)
+
+    def test_the_last_admin_stays(self):
+        self.set_up_admin()
+        me = self.admin.get("/api/v1/auth/me").json()["me"]
+        self.assertEqual(self.page(self.admin, "PATCH", f"/api/v1/users/{me['id']}", json={"permissions": ["download"]}
+                                   ).status_code, 409)
+        self.assertEqual(self.page(self.admin, "DELETE", f"/api/v1/users/{me['id']}").status_code, 409)
+
+    def test_wrong_passwords_slow_down(self):
+        self.set_up_admin()
+        eve = TestClient(self.app)
+        for _ in range(5):
+            self.assertEqual(eve.post("/api/v1/auth/login", json={"username": "amine", "password": "guess guess"}
+                                      ).status_code, 422)
+        answer = eve.post("/api/v1/auth/login", json={"username": "amine", "password": "a long password"})
+        self.assertEqual(answer.status_code, 429)
+        self.assertGreater(int(answer.headers["retry-after"]), 0)
+
+    def test_a_new_password_ends_the_other_sessions(self):
+        self.set_up_admin()
+        other = TestClient(self.app)
+        other.post("/api/v1/auth/login", json={"username": "amine", "password": "a long password"})
+        self.assertEqual(other.get("/api/v1/jobs").status_code, 200)
+        self.assertEqual(self.page(self.admin, "PUT", "/api/v1/auth/password",
+                                   json={"current": "wrong one!", "new": "another long one"}).status_code, 422)
+        self.assertEqual(self.page(self.admin, "PUT", "/api/v1/auth/password",
+                                   json={"current": "a long password", "new": "another long one"}).status_code, 204)
+        self.assertEqual(other.get("/api/v1/jobs").status_code, 401)
+        self.assertEqual(self.admin.get("/api/v1/jobs").status_code, 200)
+        self.assertEqual(self.page(self.admin, "POST", "/api/v1/auth/logout").status_code, 204)
+        self.assertEqual(self.admin.get("/api/v1/jobs").status_code, 401)
+
+    def test_an_apps_key(self):
+        self.set_up_admin()
+        made = self.page(self.admin, "POST", "/api/v1/keys", json={"name": "clipseerr",
+                                                                  "permissions": ["download", "destinations"]}).json()
+        self.assertTrue(made["key"].startswith("vd_"))
+        self.assertNotIn("key", self.admin.get("/api/v1/keys").json()["keys"][0])
+        self.assertEqual(self.page(self.admin, "POST", "/api/v1/keys", json={"name": "x", "permissions": ["admin"]}
+                                   ).status_code, 422)
+        app = TestClient(self.app, headers={"X-Api-Key": made["key"]})
+        job = app.post("/api/v1/jobs", json={"url": watch("okokokokok4"), "destination": "music-videos",
+                                             "callback_url": "http://clipseerr:8820/hook"})
+        self.assertEqual(job.status_code, 201, job.text)
+        self.assertEqual(job.json()["asked_by"], {"kind": "key", "id": made["id"], "name": "clipseerr"})
+        bearer = TestClient(self.app, headers={"Authorization": f"Bearer {made['key']}"})
+        self.assertEqual(bearer.get("/api/v1/jobs").status_code, 200)
+        self.assertEqual(app.get("/api/v1/users").status_code, 403)
+        self.page(self.admin, "DELETE", f"/api/v1/keys/{made['id']}")
+        self.assertEqual(app.get("/api/v1/jobs").status_code, 401)
+        self.assertEqual(TestClient(self.app, headers={"X-Api-Key": "vd_nope"}).get("/api/v1/jobs").status_code, 401)
+
+    def test_nothing_that_signs_in_is_stored(self):
+        self.set_up_admin()
+        token = self.admin.cookies.get("videodrop_session")
+        key = self.page(self.admin, "POST", "/api/v1/keys", json={"name": "app", "permissions": []}).json()["key"]
+        raw = Path(self.services.config.database).read_bytes() + b"".join(
+            p.read_bytes() for p in Path(self.services.config.database).parent.glob("*.db-wal"))
+        for secret in (token, key, "a long password"):
+            self.assertNotIn(secret.encode(), raw)
+
+
 class Seed(unittest.TestCase):
     def test_apprise_for_failures_and_for_finished_downloads(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -363,7 +522,10 @@ class Api(unittest.TestCase):
                                      "VIDEODROP_CHECK_RELEASES": "0"})
         self.config = replace(config, runner=(sys.executable, FAKE), prober=(sys.executable, FAKE_PROBE))
         self.services = build(self.config)
-        self.client = TestClient(create_app(self.services))
+        # An app's key that may do all but manage people (the tests of accounts are AuthTests).
+        self.key, _ = self.services.accounts.create_key("tests", ["download", "destinations", "everyone", "settings"],
+                                                        None)
+        self.client = TestClient(create_app(self.services), headers={"X-Api-Key": self.key})
         self.client.__enter__()
 
     def tearDown(self):
@@ -492,7 +654,7 @@ class Api(unittest.TestCase):
         self.wait(job["id"], "finished")
         lines = self.client.get(job["links"]["log"]).json()["lines"]
         text = "\n".join(f"{line['source']} {line['message']}" for line in lines)
-        for said in ("Asked by clipseerr", "Try 1 of", "videodrop Fingerprint", "yt-dlp [info] okokokokok5",
+        for said in ("Asked by tests (through clipseerr)", "Try 1 of", "videodrop Fingerprint", "yt-dlp [info] okokokokok5",
                      "process a library's warning", "Made Fake Artist/", "Finished in"):
             self.assertIn(said, text)
         for secret in ("hunter2", "token=abc", "SECRETSIG", "203.0.113.9"):
@@ -613,7 +775,7 @@ class Api(unittest.TestCase):
         self.wait(job["id"], "running")
         self.client.__exit__(None, None, None)
         self.services = build(self.config)
-        self.client = TestClient(create_app(self.services))
+        self.client = TestClient(create_app(self.services), headers={"X-Api-Key": self.key})
         self.client.__enter__()
         again = self.wait(job["id"], "running")
         self.assertEqual(again["attempts"], 1)

@@ -3,6 +3,7 @@ from fastapi import APIRouter, Query
 from ... import links
 from ...domain import Invalid
 from .. import schemas
+from ..auth import need
 from ..deps import Ctx
 
 router = APIRouter(tags=["Links"])
@@ -23,10 +24,10 @@ def check_link(url: str = Query(..., max_length=2000)):
 
 @router.post("/probe", summary="What a link would download, without downloading it", response_model=schemas.Probe,
              responses={422: {"model": schemas.Problem}})
-async def probe_link(body: schemas.ProbeIn, ctx: Ctx):
+async def probe_link(body: schemas.ProbeIn, ctx: Ctx, who=need("download")):
     """Asks the site (a few seconds): the title, picture and source, the
     format the options pick with its size and bitrate, the subtitles there
     are, and where the file would land. Two at a time at most; an answer is
     kept 10 minutes. 422 with the site's reason when it can't be read."""
-    return await ctx.probe(body.url, body.destination, body.options, body.section)
+    return await ctx.probe(body.url, body.destination, body.options, body.section, who)
 

@@ -14,19 +14,20 @@ from dataclasses import dataclass, field
 import httpx
 
 from . import links, outbound, placement
+from .accounts import Accounts, Principal
 from .broker import Broker
 from .callbacks import Callbacks
 from .config import Config
 from .db import Database
 from .destinations import DestinationIn, DestinationStore
-from .domain import Conflict, Invalid, NotFound
+from .domain import Conflict, Forbidden, Invalid, NotFound
 from .issues import Issues, ReleaseWatch
 from .jobs import JobIn, JobStore, section_text
 from .journal import Journal
 from .notifications import TYPES, NotificationStore, Notifier
 from .options import DEFAULT_TEMPLATE, OptionsPatch, Section, VideoOptions, resolve, to_output_template
-from .previews import Previews
 from .egress import Proxy
+from .previews import Previews
 from .prober import Prober
 from .scheduler import Scheduler
 from .sites import Sites
@@ -59,12 +60,18 @@ class Services:
     journal: Journal
     sites: Sites
     egress: Proxy
+    accounts: Accounts
     started_at: float = field(default_factory=time.time)
     _tasks: list[asyncio.Task] = field(default_factory=list)
 
     async def start(self) -> None:
         self.broker.bind(asyncio.get_running_loop())
         self.seed()
+        code = self.accounts.setup_code()
+        if code:
+            log.warning("videodrop has no account yet: open its page and make the first one, an admin, with the "
+                        "setup code %s (also given by: docker exec videodrop python -m videodrop.admin setup-code)",
+                        code)
         self.scheduler.start()
         loop = asyncio.get_running_loop()
         self._tasks = [loop.create_task(self._keep_house(), name="housekeeping")]
@@ -103,27 +110,47 @@ class Services:
                            base=settings.defaults)
         return row, resolved, row["template"] if row else DEFAULT_TEMPLATE
 
-    def submit(self, body: JobIn, base_url: str | None) -> tuple[sqlite3.Row, bool]:
-        """The job (new, or the same one already queued or running) and
-        whether it is new. Its destination, options and file name are fixed
-        now: a destination changed later changes the downloads after."""
+    @staticmethod
+    def allowed_destination(who: Principal | None, destination: str | None) -> str | None:
+        """The destination who may ask for: without that permission, none
+        (the files are kept here), and asking for one is refused."""
+        if who is None or who.can("destinations"):
+            return destination
+        if destination:
+            raise Forbidden(f"{who.name} may only keep downloads here, not save them into a destination: an admin "
+                            "gives that permission.")
+        return ""
+
+    def submit(self, body: JobIn, base_url: str | None, who: Principal | None = None) -> tuple[sqlite3.Row, bool]:
+        """The job (new, or the same one of who's already queued or running)
+        and whether it is new. Its destination, options and file name are
+        fixed now: a destination changed later changes the downloads after.
+        A callback is an app's: only an API key may ask for one (a person on
+        the page would otherwise make videodrop call any address here)."""
+        if who is not None and who.kind != "key" and body.callback_url:
+            raise Forbidden("Callbacks are for apps: ask with an API key (Settings → API keys).")
+        body = body.model_copy(update={"destination": self.allowed_destination(who, body.destination)})
         destination, options, template = self.plan(body.destination, body.options)
         row, new = self.jobs.create(body, destination=destination, options=options, template=template,
-                                    base_url=base_url)
+                                    base_url=base_url, owner=who.owner if who else None,
+                                    owner_name=who.name if who else None)
         if new:
             where = f"to {row['destination']} ({row['folder']})" if row["folder"] else \
                 f"kept here {self.jobs.hold_hours(row)} h for its caller"
             part = f", only {Section(**dict(zip(('start', 'end'), json.loads(row['section'])))).label()}" \
                 if row["section"] else ""
-            self.journal.add(row["id"], f"Asked by {row['client'] or 'someone'}: {row['url']}, {where}{part}. "
+            asker = row["owner_name"] or row["client"] or "someone"
+            via = f" (through {row['client']})" if row["client"] and row["owner_name"] not in (None, row["client"]) else ""
+            self.journal.add(row["id"], f"Asked by {asker}{via}: {row['url']}, {where}{part}. "
                                         f"Options: {row['options']}." + (" Callback to " + row["callback_url"]
                                                                           if row["callback_url"] else ""))
         return row, new
 
     async def probe(self, url: str, destination: str | None, options: OptionsPatch,
-                    section: Section | None = None) -> dict:
+                    section: Section | None = None, who: Principal | None = None) -> dict:
         """What the link would download (probe.py), and where it would land."""
         url = links.check(url)
+        destination = self.allowed_destination(who, destination)
         await links.reachable(url)
         row, resolved, template = self.plan(destination, options)
         # Read for the whole video (a section changed doesn't ask the site again), then made the section's.
@@ -250,7 +277,7 @@ def build(config: Config, http: httpx.AsyncClient | None = None) -> Services:
                     notifications=notifications, notifier=notifier, broker=broker, callbacks=callbacks,
                     scheduler=scheduler, prober=Prober(config.state_dir, config.deno, config.prober, proxy),
                     releases=releases, issues=issues, previews=previews, journal=journal,
-                    sites=Sites(config.state_dir, http), egress=egress)
+                    sites=Sites(config.state_dir, http), egress=egress, accounts=Accounts(db))
 
 
 def _record_callback(jobs: JobStore, journal: Journal, job_id: str, last: dict) -> None:

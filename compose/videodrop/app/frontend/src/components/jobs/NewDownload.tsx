@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api, ApiError, errorText, type OptionsPatch, type Section, type VideoOptions } from "@/lib/api";
+import { useCan } from "@/lib/auth";
 import { useDestinations, useJobsChanged, useSettings } from "@/lib/queries";
 import { useDebounced } from "@/lib/useDebounced";
 import { cn } from "@/lib/utils";
@@ -35,6 +36,8 @@ function dropUnset<T extends object>(value: T): Partial<T> {
 export function NewDownload() {
   const navigate = useNavigate();
   const changed = useJobsChanged();
+  // Without the permission, downloads are only kept here: no choice of destination.
+  const toDestinations = useCan()("destinations");
   const { data: settings } = useSettings();
   const { data: destinations } = useDestinations();
   // /?url=<link> opens with the link filled in (a bookmark, another app's link).
@@ -49,7 +52,7 @@ export function NewDownload() {
 
   const list = destinations?.destinations ?? [];
   // Until a choice is made: the settings' default destination, else kept here.
-  const destination = chosen ?? (settings?.default_destination || HELD);
+  const destination = !toDestinations ? HELD : chosen ?? (settings?.default_destination || HELD);
   const destinationRow = list.find((d) => d.slug === destination);
   const inherited = settings ? ({ ...settings.defaults, ...dropUnset(destinationRow?.options ?? {}) } as VideoOptions) : undefined;
 
@@ -97,7 +100,6 @@ export function NewDownload() {
         priority: 0,
         section,
         again,
-        client: "videodrop page",
       });
       const fresh = job.created_at > Date.now() / 1000 - 10;
       toast.success(!fresh ? "Asked for already: that one goes on" : probe.data?.target?.earlier && !again ? "Queued: the earlier file will be reused" : "Queued", {
@@ -137,8 +139,10 @@ export function NewDownload() {
           </div>
           <div className="flex flex-col gap-1.5 sm:w-64">
             <Label htmlFor="new-destination">Save to</Label>
-            <Select value={destination} onValueChange={setChosen}>
-              <SelectTrigger id="new-destination"><SelectValue /></SelectTrigger>
+            <Select value={destination} onValueChange={setChosen} disabled={!toDestinations}>
+              <SelectTrigger id="new-destination" title={toDestinations ? undefined : "Saving into a destination needs that permission: an admin gives it."}>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 {list.map((d) => (
                   <SelectItem key={d.slug} value={d.slug}>

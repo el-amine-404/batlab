@@ -40,6 +40,10 @@ export default function StatusPage() {
             )}
           </Row>
           <Row label="Cookies">{data.cookies.present ? (data.cookies.expired ? <span className="text-warning">run out</span> : "saved") : "none"}</Row>
+          <Row label="Way out">
+            {data.egress.connections} connections to the internet
+            {data.egress.refused ? <span className="text-warning"> · {data.egress.refused} refused (addresses on this network)</span> : " · none refused"}
+          </Row>
           <Row label="Live streams open">{data.streams}</Row>
           <Row label="Apps that asked">{data.clients.join(", ") || "none yet"}</Row>
           <Row label="Database">{formatBytes(data.database_bytes)}</Row>

@@ -1,27 +1,33 @@
 /**
  * The sidebar's entries. The router (app/router.tsx) has the screens; a new
- * screen is one page component, one route, and one entry here.
+ * screen is one page component, one route, and one entry here. need: the
+ * permission it is shown for (the server refuses the rest anyway).
  */
-import { Bell, CircleAlert, CircleGauge, Cookie, Download, FolderOutput, Globe, HardDrive, type LucideIcon, ScrollText, Settings2,
-         SlidersHorizontal, Zap } from "lucide-react";
+import { Bell, CircleAlert, CircleGauge, Cookie, Download, FolderOutput, Globe, HardDrive, KeyRound, type LucideIcon, ScrollText,
+         Settings2, SlidersHorizontal, UserRound, Users, Zap } from "lucide-react";
 
-export type Entry = { path: string; label: string; icon: LucideIcon };
+import type { Permission } from "@/lib/api";
+
+export type Entry = { path: string; label: string; icon: LucideIcon; need?: Permission };
 
 export const BROWSE: Entry[] = [
   { path: "/", label: "Downloads", icon: Download },
-  { path: "/destinations", label: "Destinations", icon: FolderOutput },
+  { path: "/destinations", label: "Destinations", icon: FolderOutput, need: "settings" },
   { path: "/sites", label: "Sites", icon: Globe },
-  { path: "/issues", label: "Issues", icon: CircleAlert },
+  { path: "/issues", label: "Issues", icon: CircleAlert, need: "settings" },
 ];
 
 /** Shown under Settings while one of them is open. */
 export const SETTINGS: Entry[] = [
-  { path: "/settings/general", label: "General", icon: SlidersHorizontal },
-  { path: "/settings/downloads", label: "Downloads", icon: Zap },
-  { path: "/settings/options", label: "Default options", icon: Settings2 },
-  { path: "/settings/storage", label: "Storage", icon: HardDrive },
-  { path: "/settings/cookies", label: "Cookies", icon: Cookie },
-  { path: "/settings/notifications", label: "Notifications", icon: Bell },
+  { path: "/settings/account", label: "Your account", icon: UserRound },
+  { path: "/settings/general", label: "General", icon: SlidersHorizontal, need: "settings" },
+  { path: "/settings/downloads", label: "Downloads", icon: Zap, need: "settings" },
+  { path: "/settings/options", label: "Default options", icon: Settings2, need: "settings" },
+  { path: "/settings/storage", label: "Storage", icon: HardDrive, need: "settings" },
+  { path: "/settings/cookies", label: "Cookies", icon: Cookie, need: "settings" },
+  { path: "/settings/notifications", label: "Notifications", icon: Bell, need: "settings" },
+  { path: "/settings/people", label: "People", icon: Users, need: "admin" },
+  { path: "/settings/keys", label: "API keys", icon: KeyRound, need: "admin" },
   { path: "/settings/status", label: "Status", icon: CircleGauge },
-  { path: "/settings/log", label: "Log", icon: ScrollText },
+  { path: "/settings/log", label: "Log", icon: ScrollText, need: "settings" },
 ];

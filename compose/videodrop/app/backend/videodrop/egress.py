@@ -114,6 +114,7 @@ class Proxy:
         self._open = 0
         self.url = ""
         self.refused = 0
+        self.connections = 0
 
     def start(self) -> str:
         """Starts it on 127.0.0.1, a free port; its URL ("http://127.0.0.1:43121")."""
@@ -179,6 +180,7 @@ class Proxy:
         except (ConnectionError, OSError, TimeoutError) as exc:
             await self._answer(client_writer, 502, str(exc) or f"couldn't reach {host}")
             return
+        self.connections += 1
         log.debug("%s %s:%s in %.0f ms", method, host, port, (time.monotonic() - started) * 1000)
         try:
             if path is None:

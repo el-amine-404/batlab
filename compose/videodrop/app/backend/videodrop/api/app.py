@@ -6,12 +6,13 @@ LAN-only behind Caddy, without a login, like songdrop and clipseerr
 any other. Errors answer {"detail": "<sentence>"}, whatever went wrong."""
 
 import logging
+import mimetypes
 import secrets
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -20,9 +21,11 @@ from starlette.datastructures import MutableHeaders
 
 from .. import __version__, problems
 from ..config import load
-from ..domain import Conflict, Gone, Invalid, NotFound
+from ..domain import Conflict, Forbidden, Gone, Invalid, NotFound, Unauthorized
 from ..services import Services, build
-from .routes import ROUTERS
+from .auth import principal
+from .routes import PUBLIC, ROUTERS
+from .routes.auth import TooSoon
 
 log = logging.getLogger("videodrop")
 
@@ -105,13 +108,16 @@ REQUEST_ID = "x-request-id"
 # A caller's own request id is kept when it looks like one.
 _ID_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.:")
 access = logging.getLogger("videodrop.http")
+# The page's manifest (its install and Share menu entry): browsers want its own type.
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 
 class RequestLog:
     """Each request gets an id (X-Request-ID, the caller's or a new one),
     answered back and kept in scope["state"] for the error handler. A
     change (POST, PUT, PATCH, DELETE) and every answer of 400 or more are
-    logged with it; reads, which callers and pages repeat all day, are not."""
+    logged with it, and who asked (a person's or a key's name); reads,
+    which callers and pages repeat all day, are not."""
 
     def __init__(self, app):
         self._app = app
@@ -136,9 +142,11 @@ class RequestLog:
             method, path = scope.get("method", ""), scope.get("path", "")
             if method not in ("GET", "HEAD", "OPTIONS") or status[0] >= 400:
                 client = (scope.get("client") or ("?",))[0]
+                who = scope["state"].get("principal")
                 level = logging.WARNING if status[0] >= 500 else logging.INFO
-                access.log(level, "%s %s %s %.0f ms from %s [%s]", method, path, status[0],
-                           (time.monotonic() - started) * 1000, client, request_id)
+                access.log(level, "%s %s %s %.0f ms from %s%s [%s]", method, path, status[0],
+                           (time.monotonic() - started) * 1000, client,
+                           f" by {who.name} ({who.kind})" if who else "", request_id)
 
 
 class Headers:
@@ -192,14 +200,28 @@ def create_app(services: Services) -> FastAPI:
     app.add_middleware(RequestLog)
 
     api = APIRouter(prefix="/api/v1")
-    for router in ROUTERS:
+    for router in PUBLIC:
         api.include_router(router)
+    for router in ROUTERS:
+        api.include_router(router, dependencies=[Depends(principal)])
     app.include_router(api)
 
     # ---- errors: {"detail": "<sentence>"} ------------------------------------------
 
-    for kind, status in ((NotFound, 404), (Conflict, 409), (Invalid, 422)):
+    for kind, status in ((NotFound, 404), (Conflict, 409), (Invalid, 422), (Forbidden, 403)):
         app.add_exception_handler(kind, lambda _request, exc, status=status: _error(status, str(exc)))
+
+    @app.exception_handler(TooSoon)
+    async def too_soon(_request: Request, exc: TooSoon):
+        response = _error(429, str(exc))
+        response.headers["Retry-After"] = str(exc.seconds)
+        return response
+
+    @app.exception_handler(Unauthorized)
+    async def unauthorized(_request: Request, exc: Unauthorized):
+        response = _error(401, str(exc))
+        response.headers["WWW-Authenticate"] = 'ApiKey header="X-Api-Key"'
+        return response
 
     @app.exception_handler(Gone)
     async def gone(_request: Request, exc: Gone):

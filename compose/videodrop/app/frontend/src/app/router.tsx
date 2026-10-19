@@ -20,6 +20,10 @@ const CookiesPage = lazy(() => import("@/pages/settings/CookiesPage"));
 const NotificationsPage = lazy(() => import("@/pages/settings/NotificationsPage"));
 const StatusPage = lazy(() => import("@/pages/settings/StatusPage"));
 const LogPage = lazy(() => import("@/pages/settings/LogPage"));
+const AccountPage = lazy(() => import("@/pages/settings/AccountPage"));
+const PeoplePage = lazy(() => import("@/pages/settings/PeoplePage"));
+const KeysPage = lazy(() => import("@/pages/settings/KeysPage"));
+const SharePage = lazy(() => import("@/pages/SharePage"));
 
 export const router = createBrowserRouter([
   {
@@ -37,7 +41,11 @@ export const router = createBrowserRouter([
           { path: "/destinations", element: <DestinationsPage /> },
           { path: "/issues", element: <IssuesPage /> },
           { path: "/sites", element: <SitesPage /> },
-          { path: "/settings", element: <Navigate to="/settings/general" replace /> },
+          { path: "/share", element: <SharePage /> },
+          { path: "/settings", element: <Navigate to="/settings/account" replace /> },
+          { path: "/settings/account", element: <AccountPage /> },
+          { path: "/settings/people", element: <PeoplePage /> },
+          { path: "/settings/keys", element: <KeysPage /> },
           { path: "/settings/general", element: <GeneralPage /> },
           { path: "/settings/downloads", element: <DownloadSettingsPage /> },
           { path: "/settings/options", element: <DefaultOptionsPage /> },

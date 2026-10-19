@@ -10,7 +10,7 @@ import { JobActions } from "@/components/jobs/JobActions";
 import { JobLog } from "@/components/jobs/JobLog";
 import { JobProgress } from "@/components/jobs/JobProgress";
 import { Thumbnail } from "@/components/jobs/JobRow";
-import { CODEC, CONTAINER, jobTitle, QUALITY, sectionText, STATUS } from "@/components/jobs/labels";
+import { askedBy, CODEC, CONTAINER, jobTitle, QUALITY, sectionText, STATUS } from "@/components/jobs/labels";
 import { VideoFile } from "@/components/jobs/VideoFile";
 import { Failed, Loading } from "@/components/layout/States";
 import { Badge } from "@/components/ui/badge";
@@ -61,7 +61,7 @@ export function JobPage() {
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={status.variant}>{status.label}</Badge>
-            {job.client && <Badge variant="muted">by {job.client}</Badge>}
+            {askedBy(job) && <Badge variant="muted">by {askedBy(job)}</Badge>}
             {job.section && <Badge variant="muted">part {sectionText(job.section)}</Badge>}
           </div>
           <h1 className="text-xl font-semibold tracking-tight break-words sm:text-2xl">{jobTitle(job)}</h1>

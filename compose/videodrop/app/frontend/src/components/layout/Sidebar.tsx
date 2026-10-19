@@ -1,9 +1,10 @@
-import { Braces, ChevronDown, Settings, X } from "lucide-react";
+import { Braces, ChevronDown, LogOut, Settings, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, NavLink, useLocation } from "react-router";
 
 import { BROWSE, type Entry, SETTINGS } from "@/app/navigation";
 import { Logo } from "@/components/Logo";
+import { signOut, useCan, useMe } from "@/lib/auth";
 import { type Live, useCounts, useIssues, useStatus } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
@@ -49,7 +50,10 @@ export function Sidebar({ live, onClose }: { live: Live; onClose: () => void }) 
   const { pathname } = useLocation();
   const { data: status } = useStatus();
   const { data: counts } = useCounts();
-  const { data: issues } = useIssues();
+  const me = useMe();
+  const can = useCan();
+  const shown = (entry: Entry) => !entry.need || can(entry.need);
+  const { data: issues } = useIssues(can("settings"));
   const inSettings = pathname.startsWith("/settings");
   // Open while a settings page shows; can be opened from elsewhere too.
   const [open, setOpen] = useState(inSettings);
@@ -76,7 +80,7 @@ export function Sidebar({ live, onClose }: { live: Live; onClose: () => void }) 
 
       <nav aria-label="Main" className="flex-1 overflow-y-auto px-3 pb-4">
         <div className="flex flex-col gap-0.5">
-          {BROWSE.map((entry) => <EntryLink key={entry.path} entry={entry} {...badges[entry.path]} />)}
+          {BROWSE.filter(shown).map((entry) => <EntryLink key={entry.path} entry={entry} {...badges[entry.path]} />)}
           <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-controls="settings-menu"
                   className={cn(item, "w-full", inSettings && "text-foreground")}>
             <Settings className="size-4 shrink-0" />
@@ -86,7 +90,7 @@ export function Sidebar({ live, onClose }: { live: Live; onClose: () => void }) 
           {open && (
             <div id="settings-menu" className="relative flex flex-col gap-0.5">
               <span className="absolute top-1 bottom-1 left-[19px] w-px bg-border" aria-hidden />
-              {SETTINGS.map((entry) => <EntryLink key={entry.path} entry={entry} nested />)}
+              {SETTINGS.filter(shown).map((entry) => <EntryLink key={entry.path} entry={entry} nested />)}
             </div>
           )}
         </div>
@@ -96,7 +100,22 @@ export function Sidebar({ live, onClose }: { live: Live; onClose: () => void }) 
         </a>
       </nav>
 
-      <div className="flex items-center justify-between gap-2 border-t border-border px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-xs text-muted-foreground/70">
+      <div className="flex items-center gap-2.5 border-t border-border px-3 pt-3">
+        <Link to="/settings/account" className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-accent" title="Your account">
+          <span aria-hidden className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/20 text-xs font-semibold text-sky-300">
+            {me.name.charAt(0).toUpperCase()}
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-medium">{me.name}</span>
+            <span className="block truncate text-[11px] text-muted-foreground">{me.permissions.includes("admin") ? "Admin" : "Member"}</span>
+          </span>
+        </Link>
+        <button type="button" onClick={() => void signOut()} aria-label="Sign out" title="Sign out"
+                className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
+          <LogOut className="size-4" />
+        </button>
+      </div>
+      <div className="flex items-center justify-between gap-2 px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-xs text-muted-foreground/70">
         <Link to="/settings/status" className="hover:text-foreground"
               title={status ? `Status, and the versions it runs: yt-dlp ${status.yt_dlp}` : undefined}>
           videodrop {status ? `v${status.version}` : ""}

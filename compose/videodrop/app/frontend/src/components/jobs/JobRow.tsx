@@ -7,7 +7,7 @@ import { clock, duration, timeAgo } from "@/lib/utils";
 
 import { JobActions } from "./JobActions";
 import { JobProgress } from "./JobProgress";
-import { jobTitle, sectionText, STATUS } from "./labels";
+import { askedBy, jobTitle, sectionText, STATUS } from "./labels";
 
 export function Thumbnail({ job, className = "h-16 w-28" }: { job: Job; className?: string }) {
   return (
@@ -45,7 +45,7 @@ export function JobRow({ job }: { job: Job }) {
         <p className="truncate text-xs text-muted-foreground">
           {[job.uploader, job.site, job.section && `part ${sectionText(job.section)}`, where,
             expires && `removed in ${duration(expires - Date.now() / 1000)}`, gone && "files removed", job.reused_from && "file reused",
-            job.client && `by ${job.client}`, timeAgo(job.created_at)].filter(Boolean).join(" · ")}
+            askedBy(job) && `by ${askedBy(job)}`, timeAgo(job.created_at)].filter(Boolean).join(" · ")}
         </p>
         <JobProgress job={job} />
         {job.status === "failed" && job.error && <p className="line-clamp-2 text-xs text-destructive" title={job.error}>{job.error}</p>}

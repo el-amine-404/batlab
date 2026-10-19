@@ -3,9 +3,10 @@ from fastapi import APIRouter, Response
 from ... import events
 from ...notifications import NotificationIn
 from .. import schemas
+from ..auth import need
 from ..deps import Ctx
 
-router = APIRouter(prefix="/notifications", tags=["Notifications"])
+router = APIRouter(prefix="/notifications", tags=["Notifications"], dependencies=[need("settings")])
 _PROBLEMS = {404: {"model": schemas.Problem}, 422: {"model": schemas.Problem}}
 
 
