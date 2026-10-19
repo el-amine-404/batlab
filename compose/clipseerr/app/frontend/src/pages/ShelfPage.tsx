@@ -4,6 +4,7 @@ import { Failed, Loading, PageHeader } from "@/components/layout/States";
 import { listSorts, type ListSort, SortControl } from "@/components/ui/sort";
 import { MoreLoader, useReveal } from "@/components/video/MoreLoader";
 import { shelfIcon } from "@/components/video/ShelfRow";
+import { Checked } from "@/components/video/Checked";
 import { Updated } from "@/components/video/Updated";
 import { GridSkeleton, VideoGrid } from "@/components/video/VideoGrid";
 import type { HotArtist } from "@/lib/api";
@@ -116,7 +117,9 @@ function ShelfScreen({ id, query, eyebrow, extra, sort, onSort }: {
           <>
             {first.subtitle && <span className="block">{first.subtitle}</span>}
             <span className="mt-0.5 block text-xs text-muted-foreground/70">
-              {total} videos{first.updated_at ? " · " : ""}<Updated at={first.updated_at} />
+              {total} videos
+              {first.checks ? <> · <Checked checks={first.checks} /></>
+                            : <>{first.updated_at ? " · " : ""}<Updated at={first.updated_at} /></>}
             </span>
           </>
         ) : " "}

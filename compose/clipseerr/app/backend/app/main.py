@@ -7,6 +7,7 @@ page. The page is a client of the API like any other.
 
 import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
@@ -42,10 +43,12 @@ Times are Unix seconds.
 
 async def _housekeeping() -> None:
     """Keeps the front page warm and the cache small."""
+    catalog.warm_every = WARM_EVERY
     while True:
         await catalog.warm()
         cache.prune(CACHE_KEEP)
         db.tidy()
+        catalog.next_warm_at = time.time() + WARM_EVERY
         await asyncio.sleep(WARM_EVERY)
 
 

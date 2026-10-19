@@ -208,6 +208,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/previews/{youtube_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A video's preview for its card: a 15 s clip with its sound, from a third in; cut on first ask, then kept */
+        get: operations["preview_file_api_v1_previews__youtube_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/previews/{youtube_id}/prepare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cut a preview's clip, answering once it's ready: 404 when the video has none, 429 when previews are resting */
+        post: operations["prepare_preview_api_v1_previews__youtube_id__prepare_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/files/{token}": {
         parameters: {
             query?: never;
@@ -873,6 +907,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/hooks/videodrop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * videodrop's callback: a download of one of clipseerr's requests ended
+         * @description videodrop's callback_url (its API's /jobs). Only wakes the engine: it asks videodrop itself, so a forged call changes nothing.
+         */
+        post: operations["videodrop_hook_api_v1_hooks_videodrop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1084,6 +1138,47 @@ export interface components {
             audio: string[];
             /** Video */
             video: string[];
+        };
+        /** Checks */
+        Checks: {
+            /**
+             * Checked At
+             * @description When the list was last made again from its sources (Unix time).
+             */
+            checked_at: number;
+            /**
+             * Changed At
+             * @description When that last changed its videos (Unix time); None: not since clipseerr began keeping count.
+             */
+            changed_at?: number | null;
+            /**
+             * Added
+             * @description Videos the change at changed_at added.
+             * @default 0
+             */
+            added: number;
+            /**
+             * Removed
+             * @description Videos the change at changed_at took out.
+             * @default 0
+             */
+            removed: number;
+            /**
+             * Next At
+             * @description When it is made again next, at the latest (Unix time).
+             */
+            next_at?: number | null;
+            /**
+             * Searches
+             * @description YouTube searches among its sources.
+             * @default 0
+             */
+            searches: number;
+            /**
+             * Sources
+             * @description Its feeds, each read on its own schedule.
+             */
+            sources?: components["schemas"]["SourceCheck"][];
         };
         /** Credit */
         Credit: {
@@ -1629,6 +1724,43 @@ export interface components {
              * @description When its oldest part was fetched from its source (Unix time).
              */
             updated_at?: number | null;
+            /** @description Hot only: when it was checked, changed, and is checked next. */
+            checks?: components["schemas"]["Checks"] | null;
+        };
+        /** SourceCheck */
+        SourceCheck: {
+            /**
+             * Name
+             * @description Where a list reads from: "r/SexyMusicVideos".
+             */
+            name: string;
+            /** Url */
+            url?: string | null;
+            /**
+             * Checked At
+             * @description When it was last read (Unix time).
+             */
+            checked_at?: number | null;
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /**
+             * Message
+             * @description What that read found, in its words.
+             */
+            message?: string | null;
+            /**
+             * Next At
+             * @description When it is read next (Unix time).
+             */
+            next_at?: number | null;
+            /**
+             * Changed At
+             * @description When it last had something new (Unix time).
+             */
+            changed_at?: number | null;
         };
         /** SourceHealth */
         SourceHealth: {
@@ -2602,6 +2734,102 @@ export interface operations {
             };
             /** @description Bad Gateway */
             502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    preview_file_api_v1_previews__youtube_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                youtube_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/mp4": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    prepare_preview_api_v1_previews__youtube_id__prepare_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                youtube_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4466,6 +4694,37 @@ export interface operations {
         };
     };
     songdrop_hook_api_v1_hooks_songdrop_post: {
+        parameters: {
+            query?: {
+                request?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Health"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    videodrop_hook_api_v1_hooks_videodrop_post: {
         parameters: {
             query?: {
                 request?: string;

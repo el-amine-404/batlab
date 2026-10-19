@@ -70,6 +70,27 @@ class Versions(BaseModel):
     songs: list[Version]
 
 
+class SourceCheck(BaseModel):
+    name: str = Field(description='Where a list reads from: "r/SexyMusicVideos".')
+    url: str | None = None
+    checked_at: float | None = Field(None, description="When it was last read (Unix time).")
+    ok: bool = True
+    message: str | None = Field(None, description="What that read found, in its words.")
+    next_at: float | None = Field(None, description="When it is read next (Unix time).")
+    changed_at: float | None = Field(None, description="When it last had something new (Unix time).")
+
+
+class Checks(BaseModel):
+    checked_at: float = Field(description="When the list was last made again from its sources (Unix time).")
+    changed_at: float | None = Field(None, description="When that last changed its videos (Unix time); "
+                                                       "None: not since clipseerr began keeping count.")
+    added: int = Field(0, description="Videos the change at changed_at added.")
+    removed: int = Field(0, description="Videos the change at changed_at took out.")
+    next_at: float | None = Field(None, description="When it is made again next, at the latest (Unix time).")
+    searches: int = Field(0, description="YouTube searches among its sources.")
+    sources: list[SourceCheck] = Field(default_factory=list, description="Its feeds, each read on its own schedule.")
+
+
 class Shelf(BaseModel):
     id: str
     title: str
@@ -78,6 +99,7 @@ class Shelf(BaseModel):
     items: list[Video]
     total: int = Field(description="Items the shelf has in all; items may hold only the first.")
     updated_at: float | None = Field(None, description="When its oldest part was fetched from its source (Unix time).")
+    checks: Checks | None = Field(None, description="Hot only: when it was checked, changed, and is checked next.")
 
 
 class Category(BaseModel):

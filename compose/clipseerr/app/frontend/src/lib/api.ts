@@ -10,6 +10,7 @@ type Schemas = components["schemas"];
 export type Video = Schemas["Video"];
 export type VideoDetail = Schemas["VideoDetail"];
 export type Shelf = Schemas["Shelf"];
+export type Checks = Schemas["Checks"];
 export type Version = Schemas["Version"];
 export type Versions = Schemas["Versions"];
 export type Credits = Schemas["Credits"];

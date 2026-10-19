@@ -10,6 +10,7 @@ from .db import Database
 
 PICKS = "hot_picks"
 ARTISTS = "hot_artists"
+CHANGES = "hot_changes"
 MAX_PICKS = 1000
 
 
@@ -49,6 +50,29 @@ class HotList:
             kept = [v for v in picks if v["id"] != video_id]
             self._db.put(PICKS, kept)
             return len(kept) != len(picks)
+
+    # ---- changes ------------------------------------------------------------------------
+
+    def changes(self, ids: list[str]) -> dict:
+        """When Hot's videos last changed, and by how many: ids are what it
+        has now. {"changed_at": None, …} until a change is seen."""
+        now = time.time()
+        new = set(ids)
+        with self._lock:
+            old = self._db.get(CHANGES)
+            if old is None:
+                old = {"ids": sorted(new), "changed_at": None, "added": 0, "removed": 0}
+                self._db.put(CHANGES, old)
+            elif new != set(old["ids"]):
+                before = set(old["ids"])
+                old = {"ids": sorted(new), "changed_at": now, "added": len(new - before), "removed": len(before - new)}
+                self._db.put(CHANGES, old)
+        return {key: old[key] for key in ("changed_at", "added", "removed")}
+
+    def last_changes(self) -> dict:
+        """The last changes() found, without counting: a list made with a source failing proves nothing."""
+        found = self._db.get(CHANGES) or {"changed_at": None, "added": 0, "removed": 0}
+        return {key: found[key] for key in ("changed_at", "added", "removed")}
 
     # ---- artists ------------------------------------------------------------------------
 

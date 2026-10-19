@@ -653,6 +653,64 @@ class HotListTests(unittest.TestCase):
             db.close()
 
 
+class HotChecks(unittest.TestCase):
+    def test_hot_counts_its_changes(self):
+        from app.hotlist import HotList
+
+        with tempfile.TemporaryDirectory() as folder:
+            db = Database(Path(folder) / "t.db")
+            hot = HotList(db)
+            self.assertEqual(hot.changes(["yt:a", "yt:b"]), {"changed_at": None, "added": 0, "removed": 0})
+            self.assertEqual(hot.changes(["yt:b", "yt:a"])["changed_at"], None)
+            changed = hot.changes(["yt:a", "yt:c", "yt:d"])
+            self.assertEqual((changed["added"], changed["removed"]), (2, 1))
+            self.assertIsNotNone(changed["changed_at"])
+            # The same again: the last change stays, with its counts.
+            self.assertEqual(hot.changes(["yt:d", "yt:c", "yt:a"]), changed)
+            self.assertEqual(hot.last_changes(), changed)
+            db.close()
+
+    def test_next_check_and_a_subfeed_feeds_status(self):
+        import httpx
+
+        from app.cache import Cache
+        from app.catalog.service import HOT_FRESH, Catalog
+
+        status = {"slug": "x", "title": "r/X", "home_url": "https://www.reddit.com/r/X/",
+                  "last": {"at": 100.0, "ok": True, "message": "0 new of Reddit's last 100 posts"},
+                  "next_at": 1900.0, "changed_at": 50.0}
+        asked = []
+
+        def answer(request):
+            asked.append(str(request.url))
+            return httpx.Response(200, json=status)
+
+        with tempfile.TemporaryDirectory() as folder:
+            db = Database(Path(folder) / "t.db")
+
+            async def run():
+                async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as http:
+                    catalog = Catalog(Cache(db), http, lambda: {})
+                    now = time.time()
+                    # No warming known: when it goes stale.
+                    self.assertEqual(catalog._next_check(now, HOT_FRESH), now + HOT_FRESH)
+                    # Else the first warming once stale: every 20 min from 5 min on, stale at 30 → 45.
+                    catalog.warm_every, catalog.next_warm_at = 1200, now + 300
+                    self.assertEqual(catalog._next_check(now, HOT_FRESH), now + 300 + 2 * 1200)
+                    # Stale already: the read that found it so is checking it.
+                    self.assertEqual(catalog._next_check(now - 3600, HOT_FRESH), now - 3600 + HOT_FRESH)
+                    found = await catalog._feed_check("http://subfeed:8830/api/v1/feeds/x/feed.json?video=youtube")
+                    other = await catalog._feed_check("https://example.com/feed.xml")
+                    return found, other
+
+            found, other = asyncio.run(run())
+            db.close()
+        self.assertEqual(asked, ["http://subfeed:8830/api/v1/feeds/x"])
+        self.assertEqual((found.name, found.checked_at, found.next_at, found.changed_at, found.message),
+                         ("r/X", 100.0, 1900.0, 50.0, "0 new of Reddit's last 100 posts"))
+        self.assertIsNone(other)
+
+
 class AurralFeed(unittest.TestCase):
     def entry(self, status, label, **more):
         return {"kind": "track_download", "jobId": "j", "status": status, "statusLabel": label, "source": "slskd",

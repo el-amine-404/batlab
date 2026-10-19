@@ -31,6 +31,14 @@ export function timeLeft(seconds: number, now = Date.now() / 1000): string {
   return `${Math.round(delta / 3600)} h`;
 }
 
+/** How long since seconds, rounded: "40 min", "5 h", "3 d". */
+export function elapsed(seconds: number, now = Date.now() / 1000): string {
+  const delta = Math.max(0, now - seconds);
+  if (delta < 3600) return `${Math.max(1, Math.round(delta / 60))} min`;
+  if (delta < 86400) return `${Math.round(delta / 3600)} h`;
+  return `${Math.round(delta / 86400)} d`;
+}
+
 /** 90 → "1.5 h"; for delays in minutes. */
 export function duration(minutes: number): string {
   if (minutes < 60) return `${minutes} min`;

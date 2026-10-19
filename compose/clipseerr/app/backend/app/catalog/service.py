@@ -18,7 +18,8 @@ from ..cache import Cache, tracking
 from ..problems import Problem
 from . import language, lrclib, match, youtube
 from .apple import GENRES, Apple
-from .models import (AlbumPage, ArtistPage, ArtistRef, AudioMatch, Category, CategoryGroup, Credits, Lyrics, SearchResults, Shelf,
+from .models import (AlbumPage, ArtistPage, ArtistRef, AudioMatch, Category, CategoryGroup, Checks, Credits, Lyrics, SearchResults, Shelf,
+                     SourceCheck,
                      Version, Versions, Video, VideoDetail)
 
 log = logging.getLogger("clipseerr.catalog")
@@ -26,6 +27,8 @@ log = logging.getLogger("clipseerr.catalog")
 MIN = 60
 HOUR = 3600
 DAY = 86400
+# Hot is made again from its feeds and searches once this old.
+HOT_FRESH = 30 * MIN
 SHELF_PREVIEW = 24
 # Apple's newest: released within this many days, from its top 200.
 RECENT_DAYS = 45
@@ -67,6 +70,9 @@ class Catalog:
         self.verdicts = None
         # The last answer or failure of each source, for the status screen.
         self.health: dict[str, dict] = {}
+        # When the housekeeping loop warms the lists next, and how often (main.py): Hot's next check.
+        self.next_warm_at: float | None = None
+        self.warm_every: float | None = None
 
     @property
     def region(self) -> str:
@@ -265,12 +271,58 @@ class Catalog:
                     items.append(item)
             await self._date(items)
             items.sort(key=lambda i: i.get("released") or "", reverse=True)
+            changes = {"changed_at": None, "added": 0, "removed": 0}
             if self.hotlist:
                 self.hotlist.saw(items)
+                failed = any(isinstance(r, Exception) for r in found)
+                changes = self.hotlist.last_changes() if failed else self.hotlist.changes([i["id"] for i in items])
             return Shelf(id="hot", title="Hot", subtitle="Sexy, twerk and uncensored music videos, newest first.",
-                         source="youtube", items=items, total=len(items)).model_dump()
+                         source="youtube", items=items, total=len(items),
+                         checks=Checks(checked_at=time.time(), searches=len(queries), **changes)).model_dump()
 
-        return Shelf.model_validate(await self._cache.get(key, fetch, fresh=30 * MIN, stale=DAY))
+        shelf = Shelf.model_validate(await self._cache.get(key, fetch, fresh=HOT_FRESH, stale=DAY))
+        if shelf.checks:
+            shelf.checks.next_at = self._next_check(shelf.checks.checked_at, HOT_FRESH)
+            checked = await asyncio.gather(*(self._feed_check(url) for url in feeds))
+            shelf.checks.sources = [c for c in checked if c]
+        return shelf
+
+    def _next_check(self, checked_at: float, fresh: float) -> float:
+        """When a list read at checked_at, fresh for fresh seconds, is read
+        again: by the first warming after it goes stale, or by the very read
+        that finds it stale."""
+        due = checked_at + fresh
+        upcoming = self.next_warm_at
+        if due <= time.time() or not upcoming or not self.warm_every:
+            return due
+        while upcoming < due:
+            upcoming += self.warm_every
+        return upcoming
+
+    async def _feed_check(self, url: str) -> SourceCheck | None:
+        """How a subfeed feed reads its community (its /feeds/<slug>: last
+        read, next, last change); None for a feed that isn't subfeed's."""
+        path = url.split("?", 1)[0]
+        if not path.endswith("/feed.json"):
+            return None
+        status_url = path.removesuffix("/feed.json")
+
+        async def fetch():
+            response = await self._http.get(status_url, timeout=httpx.Timeout(5.0, connect=3.0))
+            response.raise_for_status()
+            return response.json()
+
+        try:
+            body = await self._cache.get(f"feedcheck:{status_url}", fetch, fresh=MIN, stale=MIN)
+        except Exception as exc:
+            log.debug("no status for feed %s: %r", url, exc)
+            return None
+        if not isinstance(body, dict) or "next_at" not in body:
+            return None
+        last = body.get("last") or {}
+        return SourceCheck(name=body.get("title") or body.get("slug") or status_url, url=body.get("home_url"),
+                           checked_at=last.get("at"), ok=last.get("ok", True), message=last.get("message"),
+                           next_at=body.get("next_at"), changed_at=body.get("changed_at"))
 
     async def _feed(self, url: str) -> list[dict]:
         """A feed's real songs: any JSON Feed (https://www.jsonfeed.org; subfeed's
