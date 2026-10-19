@@ -194,7 +194,7 @@ export default function PeoplePage() {
                   {person.name.charAt(0).toUpperCase()}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                     <p className="font-medium">{person.name}</p>
                     <span className="text-xs text-muted-foreground">@{person.username}</span>
                     {self && <Badge variant="muted">you</Badge>}

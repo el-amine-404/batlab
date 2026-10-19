@@ -141,12 +141,20 @@ export default function KeysPage() {
             <li key={key.id} className="flex items-center gap-3 rounded-xl border border-border bg-card p-3 sm:p-4">
               <KeyRound className="size-5 shrink-0 text-muted-foreground" />
               <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-baseline gap-x-2">
                   <p className="font-medium">{key.name}</p>
-                  <code className="text-xs text-muted-foreground">{key.prefix}…</code>
+                  <code className="text-xs text-muted-foreground" title="The key's first characters, to recognise it">{key.prefix}…</code>
                 </div>
                 <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                  {labels(key.permissions)} · {key.last_used_at ? `used ${timeAgo(key.last_used_at)}${key.last_address ? ` from ${key.last_address}` : ""}` : "never used"}
+                  {labels(key.permissions)} · {key.last_used_at ? (
+                    <>
+                      used {timeAgo(key.last_used_at)}
+                      {key.last_address && (
+                        // The name says which app or device; the address is kept for whoever needs it.
+                        <span title={key.last_address}> by {key.last_host ?? key.last_address}</span>
+                      )}
+                    </>
+                  ) : "never used"}
                 </p>
               </div>
               <Button variant="ghost" size="icon-sm" aria-label={`Change ${key.name}`} onClick={() => { setEditing(key); setOpen(true); }}><Pencil /></Button>

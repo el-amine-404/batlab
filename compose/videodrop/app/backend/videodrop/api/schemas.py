@@ -601,6 +601,8 @@ class Session(BaseModel):
     created_at: float
     last_seen_at: float
     address: str | None
+    host: str | None = Field(None, description="What the address is called on the network (a device's name), "
+                                               "when it has a name.")
     agent: str | None
     current: bool = False
 
@@ -651,6 +653,8 @@ class ApiKey(BaseModel):
     created_at: float
     last_used_at: float | None
     last_address: str | None
+    last_host: str | None = Field(None, description="What last_address is called on the network: the app's "
+                                                    "container (homepage, clipseerr), a device; None without a name.")
 
 
 class ApiKeyList(BaseModel):

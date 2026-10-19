@@ -957,6 +957,11 @@ export interface components {
             last_used_at: number | null;
             /** Last Address */
             last_address: string | null;
+            /**
+             * Last Host
+             * @description What last_address is called on the network: the app's container (homepage, clipseerr), a device; None without a name.
+             */
+            last_host?: string | null;
         };
         /** ApiKeyIn */
         ApiKeyIn: {
@@ -992,6 +997,11 @@ export interface components {
             last_used_at: number | null;
             /** Last Address */
             last_address: string | null;
+            /**
+             * Last Host
+             * @description What last_address is called on the network: the app's container (homepage, clipseerr), a device; None without a name.
+             */
+            last_host?: string | null;
             /**
              * Key
              * @description The key, shown this once: the app sends it as X-Api-Key.
@@ -2281,6 +2291,11 @@ export interface components {
             last_seen_at: number;
             /** Address */
             address: string | null;
+            /**
+             * Host
+             * @description What the address is called on the network (a device's name), when it has a name.
+             */
+            host?: string | null;
             /** Agent */
             agent: string | null;
             /**

@@ -21,6 +21,7 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 
+from . import net
 from .db import Database
 from .domain import Conflict, Invalid, NotFound
 
@@ -71,6 +72,10 @@ def check_password(password: str, stored: str) -> bool:
 
 # Checked against when the name is unknown: a wrong name takes as long as a wrong password.
 _DUMMY = hash_password(secrets.token_hex(16))
+
+
+def _code(text: str) -> str:
+    return "".join(c for c in text.upper() if c.isalnum())
 
 
 def token_hash(token: str) -> str:
@@ -190,8 +195,9 @@ class Accounts:
             expected = self._db.get(SETUP_CODE)
             if not self.needs_setup():
                 raise Conflict("videodrop is set up already: sign in.")
-            given = code.strip().upper().replace(" ", "")
-            if not expected or not hmac.compare_digest(given.encode(), expected.encode()):
+            # The dashes are for reading: with or without them, any case.
+            given, wanted = _code(code), _code(expected or "")
+            if not wanted or not hmac.compare_digest(given.encode(), wanted.encode()):
                 raise Invalid("That isn't the setup code.")
             user = self._create(username, name, password, ["admin"])
             self._db.delete(SETUP_CODE)
@@ -332,7 +338,7 @@ class Accounts:
 
     def sessions(self, user_id: str) -> list[dict]:
         return [{"id": row["id"][:12], "created_at": row["created_at"], "last_seen_at": row["last_seen_at"],
-                 "address": row["address"], "agent": row["agent"]}
+                 "address": row["address"], "host": net.name_of(row["address"]), "agent": row["agent"]}
                 for row in self._db.all("SELECT * FROM sessions WHERE user_id = ? AND expires_at >= ? "
                                         "ORDER BY last_seen_at DESC", (user_id, time.time()))]
 
@@ -390,4 +396,5 @@ class Accounts:
     def _key_public(row: sqlite3.Row) -> dict:
         return {"id": row["id"], "name": row["name"], "prefix": row["prefix"],
                 "permissions": json.loads(row["permissions"]), "created_at": row["created_at"],
-                "last_used_at": row["last_used_at"], "last_address": row["last_address"]}
+                "last_used_at": row["last_used_at"], "last_address": row["last_address"],
+                "last_host": net.name_of(row["last_address"])}

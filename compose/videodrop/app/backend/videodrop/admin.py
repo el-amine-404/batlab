@@ -47,7 +47,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "setup-code":
             code = accounts.setup_code()
-            print(code if code else "videodrop is set up already: sign in, or reset-password.")
+            print(f"{code}\n(12 letters and digits; the dashes are only for reading)" if code
+                  else "videodrop is set up already: sign in, or reset-password.")
         elif args.command == "users":
             for user in accounts.users():
                 state = "" if user["enabled"] else " (turned off)"

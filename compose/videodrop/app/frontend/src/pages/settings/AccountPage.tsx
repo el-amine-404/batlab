@@ -139,7 +139,9 @@ export default function AccountPage() {
               <MonitorSmartphone className="size-4 shrink-0 text-muted-foreground" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate">{device(session.agent)} {session.current && <Badge variant="muted" className="ml-1">this one</Badge>}</span>
-                <span className="block truncate text-xs text-muted-foreground">{session.address} · {timeAgo(session.last_seen_at)}</span>
+                <span className="block truncate text-xs text-muted-foreground">
+                  <span title={session.address ?? undefined}>{session.host ?? session.address}</span> · {timeAgo(session.last_seen_at)}
+                </span>
               </span>
             </li>
           ))}

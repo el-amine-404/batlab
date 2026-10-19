@@ -75,6 +75,12 @@ function SignIn() {
   );
 }
 
+/** "57lj y5bs-l5nr" → "57LJ-Y5BS-L5NR": its 12 letters and digits, the dashes put in as it is typed (or pasted). */
+function formatCode(typed: string): string {
+  const raw = typed.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
+  return raw.match(/.{1,4}/g)?.join("-") ?? "";
+}
+
 function Setup() {
   const [code, setCode] = useState("");
   const [username, setUsername] = useState("");
@@ -104,11 +110,13 @@ function Setup() {
     <Frame title="Set up videodrop" text="Make the first account: the admin, who then adds the others and decides what each may do.">
       <form onSubmit={submit} className="flex flex-col gap-4">
         <Field id="setup-code" label="Setup code"
-               hint={<>In videodrop's log, or given by <code className="text-foreground">docker exec videodrop python -m videodrop.admin setup-code</code> on the server.</>}>
+               hint={<>12 letters and digits; the dashes are put in for you. It is in videodrop's log, or given by{" "}
+                       <code className="text-foreground">docker exec videodrop python -m videodrop.admin setup-code</code> on the server.</>}>
           <div className="relative">
             <KeyRound className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input id="setup-code" className="pl-9 font-mono tracking-widest uppercase" placeholder="XXXX-XXXX-XXXX" autoComplete="off"
-                   spellCheck={false} required autoFocus value={code} onChange={(e) => setCode(e.target.value)} />
+            <Input id="setup-code" className="pl-9 font-mono tracking-widest" placeholder="ABCD-EFGH-JKLM" autoComplete="off"
+                   autoCapitalize="characters" spellCheck={false} required autoFocus inputMode="text" maxLength={14}
+                   value={code} onChange={(e) => setCode(formatCode(e.target.value))} />
           </div>
         </Field>
         <Field id="setup-user" label="User name" hint="What you sign in with: letters, digits, . _ and -.">
@@ -128,7 +136,7 @@ function Setup() {
         </Field>
         {mismatch && <p className="text-sm text-destructive">The two passwords differ.</p>}
         {problem && <p role="alert" className="text-sm text-destructive">{problem}</p>}
-        <Button type="submit" disabled={busy || !code || !username || password.length < 10 || mismatch || !again}>
+        <Button type="submit" disabled={busy || code.length < 14 || !username || password.length < 10 || mismatch || !again}>
           {busy ? <Loader2 className="animate-spin" /> : <ShieldCheck />} Make the admin account
         </Button>
       </form>

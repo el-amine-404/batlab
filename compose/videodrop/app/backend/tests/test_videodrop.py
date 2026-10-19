@@ -360,7 +360,8 @@ class AuthTests(unittest.TestCase):
         code = self.services.accounts.setup_code()
         self.assertEqual(self.admin.post("/api/v1/auth/setup", json={"code": "WRONG-CODE-0000", "username": "amine",
                                                                      "password": "a long password"}).status_code, 422)
-        answer = self.admin.post("/api/v1/auth/setup", json={"code": code.lower(), "username": "amine",
+        # The dashes are only for reading: typed without them, in lower case, it is the same code.
+        answer = self.admin.post("/api/v1/auth/setup", json={"code": code.replace("-", "").lower(), "username": "amine",
                                                               "name": "Amine", "password": "a long password"})
         self.assertEqual(answer.status_code, 200, answer.text)
         self.assertIn("httponly", answer.headers["set-cookie"].lower())
@@ -489,6 +490,26 @@ class AuthTests(unittest.TestCase):
             p.read_bytes() for p in Path(self.services.config.database).parent.glob("*.db-wal"))
         for secret in (token, key, "a long password"):
             self.assertNotIn(secret.encode(), raw)
+
+
+class AddressNames(unittest.TestCase):
+    def test_an_address_is_named_by_the_network(self):
+        from videodrop import net
+
+        names = {"172.19.10.30": "homepage.home_server", "192.168.1.20": "pixel-7.lan", "8.8.8.8": "dns.google"}
+
+        def resolve(address):
+            if address not in names:
+                raise OSError("no name")
+            return names[address], [], [address]
+
+        self.assertEqual(net.name_of("172.19.10.30", resolve), "homepage")
+        self.assertEqual(net.name_of("192.168.1.20", resolve), "pixel-7")
+        self.assertEqual(net.name_of("8.8.8.8", resolve), "dns.google")
+        self.assertEqual(net.name_of("127.0.0.1", resolve), "videodrop itself")
+        self.assertIsNone(net.name_of("10.9.9.9", resolve))
+        self.assertIsNone(net.name_of("testclient", resolve))
+        self.assertIsNone(net.name_of(None, resolve))
 
 
 class Seed(unittest.TestCase):
