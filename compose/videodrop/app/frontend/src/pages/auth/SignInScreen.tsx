@@ -1,12 +1,15 @@
-import { KeyRound, Loader2, LogIn, ShieldCheck } from "lucide-react";
-import { type FormEvent, type ReactNode, useState } from "react";
+import { ClipboardPaste, Eye, EyeOff, FolderDown, KeyRound, Loader2, LogIn, type LucideIcon, PlayCircle, ShieldCheck,
+         TriangleAlert } from "lucide-react";
+import { type ComponentProps, type FormEvent, type KeyboardEvent, type ReactNode, useState } from "react";
 
+import { FallingFrames } from "@/components/auth/FallingFrames";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, errorText } from "@/lib/api";
 import { restart } from "@/lib/auth";
+import { cn } from "@/lib/utils";
 
 function Field({ id, label, hint, children }: { id: string; label: string; hint?: ReactNode; children: ReactNode }) {
   return (
@@ -18,18 +21,87 @@ function Field({ id, label, hint, children }: { id: string; label: string; hint?
   );
 }
 
-function Frame({ title, text, children }: { title: string; text: ReactNode; children: ReactNode }) {
+/** A password box with an eye to show what is typed, and a word when Caps Lock is on. */
+function PasswordInput({ className, ...props }: Omit<ComponentProps<typeof Input>, "type">) {
+  const [shown, setShown] = useState(false);
+  const [caps, setCaps] = useState(false);
+  const watch = (event: KeyboardEvent<HTMLInputElement>) => setCaps(event.getModifierState("CapsLock"));
   return (
-    <div className="flex min-h-dvh items-center justify-center px-4 py-10">
-      <div className="backdrop" aria-hidden />
-      <div className="w-full max-w-sm">
-        <div className="mb-6 flex flex-col items-center gap-3 text-center">
-          <Logo className="size-12" />
-          <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-          <p className="text-sm text-muted-foreground">{text}</p>
-        </div>
-        <div className="rounded-xl border border-border bg-card/80 p-5 shadow-xl backdrop-blur">{children}</div>
+    <>
+      <div className="relative">
+        <Input {...props} type={shown ? "text" : "password"} className={cn("pr-11", className)} onKeyUp={watch} onKeyDown={watch}
+               onBlur={() => setCaps(false)} />
+        <button type="button" onClick={() => setShown(!shown)} aria-label={shown ? "Hide the password" : "Show the password"}
+                aria-pressed={shown} title={shown ? "Hide it" : "Show it"}
+                className="absolute top-1/2 right-1.5 flex size-8 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
+          {shown ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+        </button>
       </div>
+      {caps && (
+        <p className="flex items-center gap-1.5 text-xs text-warning" role="status">
+          <TriangleAlert className="size-3.5" /> Caps Lock is on.
+        </p>
+      )}
+    </>
+  );
+}
+
+const STEPS: { icon: LucideIcon; title: string; text: string }[] = [
+  { icon: ClipboardPaste, title: "Paste a link", text: "From YouTube or one of a thousand other sites." },
+  { icon: FolderDown, title: "Pick where it goes", text: "Into the library for Jellyfin, or kept here for you." },
+  { icon: PlayCircle, title: "Watch or download it", text: "In the browser, with its chapters and subtitles." },
+];
+
+/**
+ * The screen before signing in: a sky that drifts (the aurora) behind it all;
+ * on a large screen, videodrop's idea on the left, frames falling into a
+ * tray, and the form on the right. Nothing in it comes from the downloads:
+ * whoever isn't signed in sees nothing anyone asked for.
+ */
+function Frame({ title, text, shake, children }: { title: string; text: ReactNode; shake?: number; children: ReactNode }) {
+  return (
+    <div className="relative min-h-dvh lg:grid lg:grid-cols-[minmax(0,1.1fr)_minmax(26rem,1fr)]">
+      <div className="aurora fixed! -z-10" aria-hidden><span /><span /><span /></div>
+
+      <section className="relative hidden overflow-hidden border-r border-white/5 lg:flex lg:flex-col lg:justify-center lg:px-14 xl:px-20">
+        <FallingFrames className="absolute inset-0 size-full" />
+        <div className="relative max-w-md">
+          <div className="mb-10 flex items-center gap-3 text-lg font-semibold tracking-tight">
+            <Logo className="size-10" /> videodrop
+          </div>
+          <h2 className="text-4xl leading-tight font-semibold tracking-tight xl:text-5xl">
+            Paste a link.{" "}
+            <span className="bg-gradient-to-r from-sky-300 to-cyan-300 bg-clip-text text-transparent">Get the video.</span>
+          </h2>
+          <ol className="mt-10 flex flex-col gap-5">
+            {STEPS.map(({ icon: Icon, title: step, text: about }, n) => (
+              <li key={step} className="flex gap-4">
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-sky-300/20 bg-sky-400/10 text-sky-300 backdrop-blur">
+                  <Icon className="size-5" />
+                </span>
+                <span>
+                  <span className="block font-medium"><span className="mr-1.5 text-muted-foreground tabular-nums">{n + 1}.</span>{step}</span>
+                  <span className="block text-sm text-muted-foreground">{about}</span>
+                </span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
+
+      <section className="flex min-h-dvh items-center justify-center px-4 py-10 lg:min-h-0">
+        <div className="w-full max-w-sm">
+          <div className="mb-6 flex flex-col items-center gap-3 text-center">
+            <Logo className="size-12 lg:hidden" />
+            <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+            <p className="text-sm text-muted-foreground">{text}</p>
+          </div>
+          {/* key: a new value plays the shake again. */}
+          <div key={shake} className={cn("rounded-xl border border-white/10 bg-card/70 p-5 shadow-2xl shadow-black/40 backdrop-blur-xl", shake && "shake")}>
+            {children}
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
@@ -39,6 +111,7 @@ function SignIn() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const [shake, setShake] = useState(0);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -50,25 +123,26 @@ function SignIn() {
     } catch (caught) {
       setProblem(errorText(caught, "Couldn't sign in."));
       setPassword("");
+      setShake((n) => n + 1);
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <Frame title="Sign in to videodrop" text="Ask an admin for an account if you don't have one.">
+    <Frame title="Sign in to videodrop" text="Ask an admin for an account if you don't have one." shake={shake}>
       <form onSubmit={submit} className="flex flex-col gap-4">
         <Field id="login-user" label="User name">
           <Input id="login-user" autoComplete="username" autoCapitalize="none" spellCheck={false} required autoFocus
                  value={username} onChange={(e) => setUsername(e.target.value)} />
         </Field>
         <Field id="login-password" label="Password">
-          <Input id="login-password" type="password" autoComplete="current-password" required
-                 value={password} onChange={(e) => setPassword(e.target.value)} />
+          <PasswordInput id="login-password" autoComplete="current-password" required
+                         value={password} onChange={(e) => setPassword(e.target.value)} />
         </Field>
         {problem && <p role="alert" className="text-sm text-destructive">{problem}</p>}
         <Button type="submit" disabled={busy || !username || !password}>
-          {busy ? <Loader2 className="animate-spin" /> : <LogIn />} Sign in
+          {busy ? <><Loader2 className="animate-spin" /> Signing in…</> : <><LogIn /> Sign in</>}
         </Button>
       </form>
     </Frame>
@@ -89,6 +163,7 @@ function Setup() {
   const [again, setAgain] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const [shake, setShake] = useState(0);
   const mismatch = again.length > 0 && again !== password;
 
   const submit = async (event: FormEvent) => {
@@ -101,13 +176,14 @@ function Setup() {
       restart();
     } catch (caught) {
       setProblem(errorText(caught, "Couldn't set up."));
+      setShake((n) => n + 1);
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <Frame title="Set up videodrop" text="Make the first account: the admin, who then adds the others and decides what each may do.">
+    <Frame title="Set up videodrop" text="Make the first account: the admin, who then adds the others and decides what each may do." shake={shake}>
       <form onSubmit={submit} className="flex flex-col gap-4">
         <Field id="setup-code" label="Setup code"
                hint={<>12 letters and digits; the dashes are put in for you. It is in videodrop's log, or given by{" "}
@@ -127,17 +203,17 @@ function Setup() {
           <Input id="setup-name" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
         <Field id="setup-password" label="Password" hint="At least 10 characters.">
-          <Input id="setup-password" type="password" autoComplete="new-password" required minLength={10}
-                 value={password} onChange={(e) => setPassword(e.target.value)} />
+          <PasswordInput id="setup-password" autoComplete="new-password" required minLength={10}
+                         value={password} onChange={(e) => setPassword(e.target.value)} />
         </Field>
         <Field id="setup-again" label="Password again">
-          <Input id="setup-again" type="password" autoComplete="new-password" required aria-invalid={mismatch}
-                 value={again} onChange={(e) => setAgain(e.target.value)} />
+          <PasswordInput id="setup-again" autoComplete="new-password" required aria-invalid={mismatch}
+                         value={again} onChange={(e) => setAgain(e.target.value)} />
         </Field>
         {mismatch && <p className="text-sm text-destructive">The two passwords differ.</p>}
         {problem && <p role="alert" className="text-sm text-destructive">{problem}</p>}
         <Button type="submit" disabled={busy || code.length < 14 || !username || password.length < 10 || mismatch || !again}>
-          {busy ? <Loader2 className="animate-spin" /> : <ShieldCheck />} Make the admin account
+          {busy ? <><Loader2 className="animate-spin" /> Making it…</> : <><ShieldCheck /> Make the admin account</>}
         </Button>
       </form>
     </Frame>
