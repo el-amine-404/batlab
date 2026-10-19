@@ -25,8 +25,6 @@ services:
         NODE_IMAGE: ${IMAGE_VIDEODROP_NODE}:${TAG_VIDEODROP_NODE}
         DENO_IMAGE: ${IMAGE_VIDEODROP_DENO}:${TAG_VIDEODROP_DENO}
         YTDLP_VERSION: ${VERSION_YTDLP}
-        # The date and commit of its last change (the Makefile's BATLAB_REVISION).
-        VERSION: ${BATLAB_REVISION:-dev}
     # Rebuild on every `make up`, so code changes are always deployed.
     pull_policy: build
     container_name: videodrop
