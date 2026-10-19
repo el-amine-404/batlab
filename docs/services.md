@@ -151,8 +151,8 @@ the service.
   artists, Hot), and what was asked for: a song or a video, handed to the
   services in order, followed, and announced. It judges which videos are
   real songs (YouTube Music, `catalog/verdicts.py`): the feeds Hot reads
-  only say what a community posted. Hot is made again about every 30 min
-  (the 20-min warming, once 30 min old); its page says when it was checked,
+  only say what a community posted. Hot is made again by the first 20-min
+  warming once it is 30 min old (so about every 40 min); its page says when it was checked,
   whether that changed it (or for how long nothing has), when it is checked
   next, and, on hover, when subfeed last read Reddit and reads it next.
 - **Alone**: browse and watch with no service at all; requests wait for one.

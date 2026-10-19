@@ -27,8 +27,8 @@ export function Checked({ checks }: { checks: Checks }) {
   const details = (
     <span className="flex flex-col gap-1.5">
       <span>
-        Checked {at(checks.checked_at)}: clipseerr makes the list again from its sources about every 30 min
-        {checks.next_at ? `, next at ${new Date(checks.next_at * 1000).toLocaleTimeString([], { timeStyle: "short" })}` : ""}.
+        Checked {at(checks.checked_at)}: clipseerr makes the list again from its sources once it is 30 min old
+        (looked at every 20 min){checks.next_at ? `; next at ${new Date(checks.next_at * 1000).toLocaleTimeString([], { timeStyle: "short" })}` : ""}.
       </span>
       <span>
         {checks.changed_at
