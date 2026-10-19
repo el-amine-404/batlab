@@ -20,6 +20,31 @@ backup: a cleanly stopped database is consistent on disk, so the raw volume is
 the recovery path, and the previous dump stays in the snapshot. Do not exclude
 the raw volume while the Paperless stack is ever left stopped.
 
+Then `scripts/dump-sqlite.py` copies every SQLite database in the Docker
+volumes (the apps' own: the *arr apps, Jellyfin, videodrop, clipseerr…) into
+`/mnt/docker-volumes/database-dumps/sqlite/<its path>`, through SQLite's backup
+API: one transaction each, so the copy is whole even while the app writes. The
+live files restic also reads can be caught mid-write (the database, its -wal
+and its -shm read at different moments). Each copy is made by a process running
+as the file's owner (no root-owned -wal or -shm left for the app), checked, and
+only then replaces the last one. Caches and logs (`logs.db`, `cache/`) are left
+out, as in `conf/excludes.txt`. A database that fails keeps its last good copy
+and fails the run, after the snapshot.
+
+To restore an app's database: stop the app, then put the copy back in place of
+the live file and delete its `-wal` and `-shm`:
+
+```sh
+make down STACK=videodrop
+sudo restic restore latest --target /tmp/r \
+  --include /mnt/docker-volumes/database-dumps/sqlite/videodrop/videodrop.db
+sudo install -o potato -g potato -m 600 \
+  /tmp/r/mnt/docker-volumes/database-dumps/sqlite/videodrop/videodrop.db \
+  /mnt/docker-volumes/videodrop/videodrop.db
+sudo rm -f /mnt/docker-volumes/videodrop/videodrop.db-wal /mnt/docker-volumes/videodrop/videodrop.db-shm
+make up STACK=videodrop
+```
+
 ## One-time installation on the server
 
 Install the required packages:

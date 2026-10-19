@@ -17,6 +17,11 @@ trap 'healthcheck_ping "$?"' EXIT
 
 "$SCRIPT_DIR/dump-databases.sh"
 
+# Whole copies of the SQLite databases (dump-sqlite.py). One that fails keeps
+# its last good copy; the snapshot still runs, and the run then fails.
+sqlite_failed=0
+"$SCRIPT_DIR/dump-sqlite.py" || sqlite_failed=1
+
 paths=()
 while IFS= read -r path; do
   [[ -z "$path" || "$path" == \#* ]] && continue
@@ -48,3 +53,8 @@ restic forget --prune --retry-lock 2h \
   --keep-weekly "${RESTIC_KEEP_WEEKLY:-4}" \
   --keep-monthly "${RESTIC_KEEP_MONTHLY:-12}" \
   --keep-yearly "${RESTIC_KEEP_YEARLY:-3}"
+
+if ((sqlite_failed)); then
+  echo "Some SQLite databases weren't copied (see above): their last good copies are in the snapshot" >&2
+  exit 1
+fi
