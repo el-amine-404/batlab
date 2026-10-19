@@ -40,7 +40,10 @@ COPY --from=common batlab_common /opt/batlab-common/batlab_common
 COPY --from=page /src/dist ./static
 RUN .venv/bin/python -m compileall -q videodrop /opt/batlab-common
 
-ENV VIDEODROP_STATIC=/opt/videodrop/static \
+# Last, so a new version rebuilds nothing before it.
+ARG VERSION=dev
+ENV VIDEODROP_VERSION=${VERSION} \
+    VIDEODROP_STATIC=/opt/videodrop/static \
     PYTHONPATH=/opt/videodrop:/opt/batlab-common \
     PATH=/opt/videodrop/.venv/bin:$PATH
 USER 1000:1000

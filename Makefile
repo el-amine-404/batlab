@@ -41,8 +41,12 @@ PGID := $(shell id -g)
 
 .PHONY: help list setup network up down restart pull config logs ps check-stack check-all-confirm
 
+# A stack's revision, handed to compose as BATLAB_REVISION: the date and commit
+# of the last change to it (or to lib, which its images may copy), so an app
+# built here can say which version it is.
 define compose-loop
 @for s in $(TARGETS); do \
+	export BATLAB_REVISION=$$(git -C $(REPO_ROOT) log -1 --format=%cd-%h --date=format:%Y.%m.%d -- compose/$$s lib 2>/dev/null); \
 	if [ -n "$(SERVICE)" ]; then \
 		if [ "$(1)" = "down" ]; then \
 			echo "==> rm -s -f $$s (service: $(SERVICE))"; \

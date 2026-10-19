@@ -227,6 +227,8 @@
               label: Downloading
             - field: queued
               label: Queued
+            - field: finished
+              label: Done
             - field: failed
               label: Failed
     - qBittorrent:

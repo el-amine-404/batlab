@@ -97,8 +97,9 @@ export function Sidebar({ live, onClose }: { live: Live; onClose: () => void }) 
       </nav>
 
       <div className="flex items-center justify-between gap-2 border-t border-border px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-xs text-muted-foreground/70">
-        <Link to="/settings/status" className="hover:text-foreground">
-          videodrop {status ? `v${status.version}` : ""}
+        <Link to="/settings/status" className="hover:text-foreground"
+              title={status ? `videodrop ${status.version}: the date and commit of its last change · yt-dlp ${status.yt_dlp}` : undefined}>
+          videodrop {status ? status.version.replace(/-[0-9a-f]+$/, "") : ""}
         </Link>
         <span className="flex items-center gap-1.5" title="Whether this page gets the downloads' changes as they happen">
           <span className={cn("size-1.5 rounded-full", LIVE[live].dot)} /> {LIVE[live].label}
