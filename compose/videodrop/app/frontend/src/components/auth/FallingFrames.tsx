@@ -18,8 +18,7 @@ function tile(width: number, height: number, anywhere: boolean): Tile {
 
 /**
  * The logo's idea, slowly: small blank video frames (some with a play
- * sign) fall at different depths and fade into a glowing tray at the
- * bottom. A canvas, about 60 drawings a second while the tab is seen;
+ * sign) fall at different depths and fade into a soft glow at the bottom. A canvas, about 60 drawings a second while the tab is seen;
  * paused when it isn't, one still drawing for whoever asks for less motion.
  */
 export function FallingFrames({ className }: { className?: string }) {
@@ -52,18 +51,13 @@ export function FallingFrames({ className }: { className?: string }) {
       context.clearRect(0, 0, width, height);
       const tray = height - 36;
 
-      // The tray: a glowing line the frames land in.
-      const glow = context.createLinearGradient(0, 0, width, 0);
-      glow.addColorStop(0, "rgba(56,189,248,0)");
-      glow.addColorStop(0.5, "rgba(34,211,238,0.55)");
-      glow.addColorStop(1, "rgba(56,189,248,0)");
-      context.fillStyle = glow;
-      context.fillRect(width * 0.1, tray, width * 0.8, 2);
-      const haze = context.createRadialGradient(width / 2, tray, 0, width / 2, tray, width * 0.45);
-      haze.addColorStop(0, "rgba(34,211,238,0.12)");
+      // Where they land: a soft glow, no edge. Painted over the whole canvas, so the gradient fades out
+      // on every side instead of being cut by the box it is drawn in.
+      const haze = context.createRadialGradient(width / 2, tray + 40, 0, width / 2, tray + 40, width * 0.5);
+      haze.addColorStop(0, "rgba(34,211,238,0.1)");
       haze.addColorStop(1, "rgba(34,211,238,0)");
       context.fillStyle = haze;
-      context.fillRect(0, tray - width * 0.2, width, width * 0.4);
+      context.fillRect(0, 0, width, height);
 
       for (const t of [...tiles].sort((a, b) => a.depth - b.depth)) {
         if (!still) t.y += (14 + t.depth * 46) * step;

@@ -55,7 +55,7 @@ const STEPS: { icon: LucideIcon; title: string; text: string }[] = [
 /**
  * The screen before signing in: a sky that drifts (the aurora) behind it all;
  * on a large screen, videodrop's idea on the left, frames falling into a
- * tray, and the form on the right. Nothing in it comes from the downloads:
+ * soft glow, and the form on the right. Nothing in it comes from the downloads:
  * whoever isn't signed in sees nothing anyone asked for.
  */
 function Frame({ title, text, shake, children }: { title: string; text: ReactNode; shake?: number; children: ReactNode }) {
@@ -63,7 +63,7 @@ function Frame({ title, text, shake, children }: { title: string; text: ReactNod
     <div className="relative min-h-dvh lg:grid lg:grid-cols-[minmax(0,1.1fr)_minmax(26rem,1fr)]">
       <div className="aurora fixed! -z-10" aria-hidden><span /><span /><span /></div>
 
-      <section className="relative hidden overflow-hidden border-r border-white/5 lg:flex lg:flex-col lg:justify-center lg:px-14 xl:px-20">
+      <section className="relative hidden overflow-hidden lg:flex lg:flex-col lg:justify-center lg:px-14 xl:px-20">
         {/* The frames fade out behind the words, to stay a background. */}
         <FallingFrames className="absolute inset-0 size-full [mask-image:radial-gradient(ellipse_55%_45%_at_32%_50%,transparent_35%,black_80%)]" />
         <div className="relative max-w-lg">
