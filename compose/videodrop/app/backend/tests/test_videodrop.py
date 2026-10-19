@@ -333,8 +333,8 @@ class Seed(unittest.TestCase):
             services.seed()
             services.seed()
             made = {item["name"]: item for item in services.notifications.list()}
-            self.assertEqual(sorted(made), ["Apprise", "Finished downloads"])
-            self.assertEqual(made["Apprise"]["events"], ["job.failed", "disk.low"])
+            self.assertEqual(sorted(made), ["Download problems", "Finished downloads"])
+            self.assertEqual(made["Download problems"]["events"], ["job.failed", "disk.low"])
             self.assertEqual(made["Finished downloads"]["events"], ["job.finished"])
             self.assertIn("· downloads", made["Finished downloads"]["summary"])
 
