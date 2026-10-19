@@ -48,6 +48,7 @@ services:
       - CLIPSEERR_AURRAL_API_KEY=${AURRAL_API_KEY:-}
       - CLIPSEERR_SONGDROP_URL=http://songdrop:${SONGDROP_HTTP_PORT:-8810}
       - CLIPSEERR_VIDEODROP_URL=http://videodrop:8840
+      - CLIPSEERR_VIDEODROP_API_KEY=${VIDEODROP_CLIPSEERR_KEY:-}
       # The first libraries (Settings, Libraries): Navidrome's songs, through
       # Caddy's :4534 (a scan asked there never reaches Navidrome), with the
       # token Homepage reads it with; and the music videos folder.

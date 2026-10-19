@@ -217,11 +217,14 @@
         href: http://videodrop.homelab.lan
         description: Videos for whoever asks (clipseerr, a pasted link)
         siteMonitor: http://videodrop:8840/api/v1/health
-        # No videodrop widget in Homepage; its /jobs/counts counts the downloads.
+        # No videodrop widget in Homepage; its /jobs/counts counts the downloads,
+        # with a key that may see everyone's (VIDEODROP_HOMEPAGE_KEY).
         widget:
           type: customapi
           url: http://videodrop:8840/api/v1/jobs/counts
           refreshInterval: 30000
+          headers:
+            X-Api-Key: "{{HOMEPAGE_VAR_VIDEODROP_KEY}}"
           mappings:
             - field: running
               label: Downloading

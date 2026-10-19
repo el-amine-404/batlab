@@ -15,6 +15,8 @@ class Videodrop(ServiceType):
     homepage = "http://videodrop.homelab.lan"
     fields = (
         Field("base_url", "Address", "url", placeholder="http://videodrop:8840", default="http://videodrop:8840"),
+        Field("api_key", "API key", "secret", required=False,
+              help="In videodrop: Settings, API keys; it needs Ask for downloads and Save into destinations."),
         Field("destination", "Destination", "text", default="music-videos",
               help="One of videodrop's destinations (its page, Destinations): where the video goes."),
         Field("quality", "Quality", "select", default="best",
@@ -37,6 +39,10 @@ class Videodrop(ServiceType):
     def kinds(self, config):
         return ("video",)
 
+    @staticmethod
+    def _headers(config: dict) -> dict:
+        return {"X-Api-Key": config["api_key"]} if config.get("api_key") else {}
+
     async def submit(self, ctx: Context, request: dict, config: dict) -> Update:
         youtube_id = request["media"].get("video_id")
         if not youtube_id:
@@ -56,13 +62,14 @@ class Videodrop(ServiceType):
             "callback_url": f"{ctx.callback_base}/hooks/videodrop?request={request['id']}",
             "callback_events": ["finished", "failed", "cancelled"],
         }
-        job = (await outbound.call(ctx.http, "POST", f"{config['base_url']}/api/v1/jobs", json=body)).json()
+        job = (await outbound.call(ctx.http, "POST", f"{config['base_url']}/api/v1/jobs", json=body,
+                                    headers=self._headers(config))).json()
         return Update("sent", "Queued in videodrop.", external_id=job["id"])
 
     async def poll(self, ctx: Context, request: dict, attempt: dict, config: dict) -> Update:
         try:
-            job = (await outbound.call(ctx.http, "GET",
-                                       f"{config['base_url']}/api/v1/jobs/{attempt['external_id']}")).json()
+            job = (await outbound.call(ctx.http, "GET", f"{config['base_url']}/api/v1/jobs/{attempt['external_id']}",
+                                       headers=self._headers(config))).json()
         except outbound.SendFailed as exc:
             if " 404" in str(exc):
                 return Update("failed", "videodrop no longer has this download.")
@@ -89,8 +96,12 @@ class Videodrop(ServiceType):
         await outbound.call(ctx.http, "GET", f"{config['base_url']}/api/v1/health")
         destination = config.get("destination") or "music-videos"
         try:
-            await outbound.call(ctx.http, "GET", f"{config['base_url']}/api/v1/destinations/{destination}")
+            await outbound.call(ctx.http, "GET", f"{config['base_url']}/api/v1/destinations/{destination}",
+                                headers=self._headers(config))
         except outbound.SendFailed as exc:
+            if " 401" in str(exc):
+                raise outbound.SendFailed("videodrop answers, but wants an API key: make one in its Settings, API "
+                                          "keys, and give it here.") from exc
             if " 404" in str(exc):
                 raise outbound.SendFailed(f"videodrop answers, but has no destination {destination!r}.") from exc
             raise

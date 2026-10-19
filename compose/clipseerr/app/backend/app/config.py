@@ -46,6 +46,7 @@ class Config:
     aurral_api_key: str
     songdrop_url: str
     videodrop_url: str
+    videodrop_api_key: str
     # The first libraries (seed.py): Navidrome, and the music videos folder.
     navidrome_url: str
     navidrome_user: str
@@ -76,6 +77,7 @@ def load() -> Config:
         aurral_api_key=_text("CLIPSEERR_AURRAL_API_KEY"),
         songdrop_url=_text("CLIPSEERR_SONGDROP_URL"),
         videodrop_url=_text("CLIPSEERR_VIDEODROP_URL"),
+        videodrop_api_key=_text("CLIPSEERR_VIDEODROP_API_KEY"),
         navidrome_url=_text("CLIPSEERR_NAVIDROME_URL"),
         navidrome_user=_text("CLIPSEERR_NAVIDROME_USER"),
         navidrome_password=_text("CLIPSEERR_NAVIDROME_PASSWORD"),

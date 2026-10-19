@@ -933,11 +933,17 @@ class VideodropService(unittest.TestCase):
             db.put(seed.KEY, True)
             db.put(seed.LIBRARIES_KEY, True)
             services = Integrations(db, "service", TYPES)
-            conf = mock.Mock(videodrop_url="http://videodrop:8840")
+            conf = mock.Mock(videodrop_url="http://videodrop:8840", videodrop_api_key="vd_key")
             seed.run(db, conf, services, mock.Mock(), mock.Mock())
             [item] = services.items()
             self.assertEqual((item["id"], item["type"], item["position"], item["config"]["destination"]),
                              ("m1", "videodrop", 2, "music-videos"))
+            # Its API key from the environment, at every start, unless it has one.
+            self.assertEqual(item["config"]["api_key"], "vd_key")
+            services.update("m1", {"name": item["name"], "type": item["type"],
+                                   "config": {**item["config"], "api_key": "vd_own"}})
+            seed.run(db, conf, services, mock.Mock(), mock.Mock())
+            self.assertEqual(services.items()[0]["config"]["api_key"], "vd_own")
             services.delete("m1")
             seed.run(db, conf, services, mock.Mock(), mock.Mock())
             self.assertEqual(services.items(), [], "once: a removed videodrop isn't made again")
