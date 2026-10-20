@@ -123,7 +123,12 @@ everything; Frigate is the alarm and the index.
   night's frames (grain 1.6, a car against the paving 30 to 72, headlights
   on a parked car under 14) but no car came or went at night in the data.
   The message ("Ford spot · car left · went left", with how long it was
-  taken or empty) comes once the car has settled, about 30 s after, with a
+  taken or empty) comes once the car has settled: 8 s after by day, when
+  Frigate followed the car and the model sees the spot taken (or empty)
+  too (`CARWATCH_QUICK` 2 s after the 6 s still, instead of 20 s: 15 and 18 s
+  after the Ford began to leave on 2026-10-19, against 33 and 36); 30 s
+  after otherwise (at dusk the model sees too few cars, and one of Frigate's
+  tracks can jump from a parked car to the street in a second), with a
   close-up from the 4K stream, the street and the clip from 10 s before it
   began, at most 60 s. carwatch records the clips itself: ffmpeg copies
   go2rtc's sub stream (H.264 960x576, about 600 kbit/s, which Discord plays

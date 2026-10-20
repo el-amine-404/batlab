@@ -5,7 +5,8 @@ Every CARWATCH_POLL seconds it looks at Frigate's latest frame of the street.
 Each spot (Frigate's zones, drawn around each parked car) is a patch of that
 frame. Once nothing has moved in it for CARWATCH_SETTLE seconds it is
 compared with how it looked when last settled. When it stays different for
-CARWATCH_CONFIRM seconds, and a car drove in or out of it then, that is told:
+CARWATCH_CONFIRM seconds (CARWATCH_QUICK by day, when Frigate and the model
+both saw the car do it), and a car drove in or out of it then, that is told:
 "car left" when the car Frigate followed went from inside the spot to a car
 length away, "car arrived" when it came from there and stopped inside.
 Neither alone is enough. Frigate hands a parked car's identity to a car
@@ -93,6 +94,9 @@ CAR = 2  # COCO's car
 POLL = float(os.environ.get("CARWATCH_POLL", "2"))
 SETTLE = float(os.environ.get("CARWATCH_SETTLE", "6"))
 CONFIRM = float(os.environ.get("CARWATCH_CONFIRM", "20"))
+# By day, a change Frigate followed a car making and the model sees too is
+# told after QUICK seconds instead: both already vouch for it.
+QUICK = float(os.environ.get("CARWATCH_QUICK", "2"))
 # How far apart two looks at a spot may be (mean difference in grey levels,
 # the light evened out): STILL between looks a few seconds apart, SAME against
 # its settled look. A car coming or going changes it by CHANGE at least (25 to
@@ -604,7 +608,8 @@ class Watch:
             spot.ref, spot.scene, spot.calm, spot.since, spot.stir = pixels, whole, now, None, 0
             return
         spot.since = spot.since or now
-        if now - spot.since < CONFIRM:
+        if now - spot.since < CONFIRM and not (now - spot.since >= QUICK and not night
+                                                and self.vouched(spot, now, pixels)):
             return
         start, before, stir = spot.calm or spot.since, spot.ref, spot.stir
         # Its new look, whatever made it.
@@ -615,6 +620,17 @@ class Watch:
             self.night(spot, start, now, before, pixels, stir)
         else:
             self.decide(spot, start, now)
+
+    def vouched(self, spot, now, pixels):
+        """Whether Frigate followed a car into (or out of) the spot as it
+        changed, and the model sees it so since it settled. When the model
+        sees nothing (at dusk), CONFIRM it is: one of Frigate's tracks can
+        jump from a parked car to the street in a second."""
+        if spot.held is None or difference(pixels, spot.ref) < CHANGE:
+            return False
+        kind, _ = self.path(spot, (spot.calm or spot.since) - 30, now)
+        return kind is not None and (kind == "arrived") != spot.held \
+            and spot.model(now, SETTLE + QUICK) == (kind == "arrived")
 
     def decide(self, spot, start, now):
         """The spot changed from start to now: tell it when a car drove in or
