@@ -55,14 +55,15 @@ ENTRYPOINT ["/opt/songdrop/.venv/bin/python", "-m", "app"]
 FROM app AS tested
 USER root
 RUN uv pip install --python /opt/songdrop/.venv/bin/python --no-cache "httpx==0.28.1"
+# Beside the app, where they find it (tests/ imports app from its parent).
+COPY --chown=spotdl backend/tests /opt/songdrop/tests
+COPY --from=common --chown=spotdl tests /opt/songdrop/common-tests
 USER spotdl
-COPY --chown=spotdl backend/tests /tmp/songdrop-tests/tests
-COPY --from=common --chown=spotdl tests /tmp/songdrop-tests/common
-RUN cd /tmp/songdrop-tests \
- && { { HOME=/tmp /opt/songdrop/.venv/bin/python -m unittest discover -s tests \
-      && HOME=/tmp /opt/songdrop/.venv/bin/python -m unittest discover -s common -p "test_[ae]*.py"; } \
-      > log 2>&1 || { tail -n 80 log; exit 1; }; } \
- && grep -E "^(Ran|OK)" log && touch passed
+RUN cd /opt/songdrop \
+ && { { HOME=/tmp .venv/bin/python -m unittest discover -s tests \
+        && HOME=/tmp .venv/bin/python -m unittest discover -s common-tests -p "test_[ae]*.py"; } \
+      > /tmp/log 2>&1 || { tail -n 80 /tmp/log; exit 1; }; } \
+ && grep -E "^(Ran|OK)" /tmp/log && touch /tmp/passed
 
 FROM app
-COPY --from=tested /tmp/songdrop-tests/passed /opt/songdrop/.tests-passed
+COPY --from=tested /tmp/passed /opt/songdrop/.tests-passed
