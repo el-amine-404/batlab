@@ -12,7 +12,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import seed  # noqa: E402
+from app import outbound, seed  # noqa: E402
 from app.catalog import match  # noqa: E402
 from app.db import Database  # noqa: E402
 from app.integrations import Integrations, Invalid  # noqa: E402
@@ -893,6 +893,23 @@ class VideodropService(unittest.TestCase):
                 return await call(Context(http, "http://clipseerr:8820/api/v1"))
 
         return asyncio.run(go()), sent
+
+    def test_songdrops_test_checks_the_key(self):
+        kind = TYPES["songdrop"]
+        config = {"base_url": "http://songdrop:8810", "api_key": "sd_key"}
+        health = {"json": {"ok": True, "version": "1.1.0"}}
+        me = {"json": {"me": {"kind": "key", "id": "k", "name": "clipseerr", "permissions": ["download"]},
+                       "username": "clipseerr", "sessions": []}}
+        said, sent = self.run_with({("GET", "/api/v1/health"): (200, health), ("GET", "/api/v1/auth/me"): (200, me)},
+                                   lambda ctx: kind.test(ctx, config))
+        self.assertEqual(said, "songdrop answers, and takes downloads from clipseerr.")
+        self.assertEqual(sent[1].headers["x-api-key"], "sd_key")
+        reader = {"json": {**me["json"], "me": {**me["json"]["me"], "permissions": []}}}
+        for answer, clue in (((401, {"json": {"detail": "no"}}), "wants an API key"), ((200, reader), "may not ask")):
+            with self.assertRaises(outbound.SendFailed) as caught:
+                self.run_with({("GET", "/api/v1/health"): (200, health), ("GET", "/api/v1/auth/me"): answer},
+                              lambda ctx: kind.test(ctx, config))
+            self.assertIn(clue, str(caught.exception))
 
     def test_submit_names_the_destination(self):
         kind = TYPES["videodrop"]

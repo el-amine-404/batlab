@@ -65,4 +65,15 @@ class Songdrop(ServiceType):
 
     async def test(self, ctx: Context, config: dict) -> str:
         await outbound.call(ctx.http, "GET", f"{config['base_url']}/api/v1/health")
-        return "songdrop answers."
+        try:
+            me = (await outbound.call(ctx.http, "GET", f"{config['base_url']}/api/v1/auth/me",
+                                      headers=self._headers(config))).json()["me"]
+        except outbound.SendFailed as exc:
+            if " 401" in str(exc):
+                raise outbound.SendFailed("songdrop answers, but wants an API key: make one in its Settings, API keys, "
+                                          "and give it here.") from exc
+            raise
+        if not {"download", "admin"} & set(me.get("permissions") or ()):
+            raise outbound.SendFailed(f"songdrop knows the key ({me.get('name')}), but it may not ask for downloads: "
+                                      "give it that in songdrop's Settings, API keys.")
+        return f"songdrop answers, and takes downloads from {me.get('name')}."
