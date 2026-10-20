@@ -264,7 +264,10 @@ class Formats(Harness):
 class Api(Harness):
     def setUp(self):
         super().setUp()
-        self.client = TestClient(create_app(self.ctx))
+        self.app = create_app(self.ctx)
+        # An app's key that may change everything but people (the tests of who may are Access's).
+        key, _ = self.ctx.accounts.create_key("tests", ["feeds", "settings"], None)
+        self.client = TestClient(self.app, headers={"X-Api-Key": key})
 
     def test_feeds_and_errors(self):
         made = self.client.post("/api/v1/feeds", json={"target": "https://www.reddit.com/r/SexyMusicVideos/"})
@@ -330,6 +333,55 @@ class Api(Harness):
         self.assertIn("frame-ancestors 'none'", page.headers["content-security-policy"])
 
 
+class Access(Harness):
+    """Who may read and change: everyone is known; reading needs nothing more."""
+
+    def setUp(self):
+        super().setUp()
+        self.app = create_app(self.ctx)
+        self.make()
+        self.source.newest_posts = [post("a", 100, "aaaaaaaaaaa")]
+        self.poll()
+
+    def test_nobody_unknown_reads_or_changes(self):
+        anonymous = TestClient(self.app)
+        self.assertEqual(anonymous.get("/api/v1/health").status_code, 200)
+        self.assertEqual(anonymous.get("/api/v1/auth/state").json()["setup"], True)
+        for path in ("/api/v1/feeds", "/api/v1/posts", "/api/v1/status", "/api/v1/settings",
+                     "/api/v1/feeds/sexymusicvideos/feed.json", "/api/v1/feeds/sexymusicvideos/feed.atom",
+                     "/api/v1/notifications", "/api/v1/users"):
+            self.assertEqual(anonymous.get(path).status_code, 401, path)
+        self.assertEqual(anonymous.post("/api/v1/feeds", json={"target": "Other"}).status_code, 401)
+
+    def test_a_reading_key_reads_and_changes_nothing(self):
+        key, _ = self.ctx.accounts.create_key("clipseerr", [], None)
+        reader = TestClient(self.app, headers={"X-Api-Key": key})
+        self.assertEqual(reader.get("/api/v1/feeds").json()["feeds"][0]["slug"], "sexymusicvideos")
+        self.assertEqual(reader.get("/api/v1/status").status_code, 200)
+        refused = reader.post("/api/v1/feeds", json={"target": "Other"})
+        self.assertEqual(refused.status_code, 403)
+        self.assertIn("clipseerr may not manage feeds", refused.json()["detail"])
+        for method, path in (("patch", "/api/v1/feeds/sexymusicvideos"), ("delete", "/api/v1/feeds/sexymusicvideos"),
+                             ("post", "/api/v1/feeds/sexymusicvideos/refresh"), ("patch", "/api/v1/settings")):
+            self.assertEqual(reader.request(method.upper(), path, json={}).status_code, 403, path)
+        self.assertEqual(reader.get("/api/v1/notifications").status_code, 403)
+
+    def test_a_feed_reader_puts_its_key_in_the_address_and_the_feed_leaves_it_out(self):
+        key, _ = self.ctx.accounts.create_key("reader", [], None)
+        reader = TestClient(self.app)
+        feed = reader.get(f"/api/v1/feeds/sexymusicvideos/feed.json?video=youtube&limit=1&key={key}")
+        self.assertEqual(feed.status_code, 200)
+        self.assertNotIn(key, feed.text)
+        self.assertEqual(feed.json()["feed_url"],
+                         "http://testserver/api/v1/feeds/sexymusicvideos/feed.json?video=youtube&limit=1")
+        atom = reader.get(f"/api/v1/feeds/sexymusicvideos/feed.atom?key={key}")
+        self.assertEqual(atom.status_code, 200)
+        self.assertNotIn(key, atom.text)
+        # Only the feeds: the rest of the API wants the header.
+        self.assertEqual(reader.get(f"/api/v1/feeds?key={key}").status_code, 401)
+        self.assertEqual(reader.get("/api/v1/feeds/sexymusicvideos/feed.json?key=sf_wrong").status_code, 401)
+
+
 class Migration(unittest.TestCase):
     def test_clipfeeds_database_is_taken_as_it_is(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -380,8 +432,19 @@ class Seeding(unittest.TestCase):
             ctx.feeds.delete("x")
             ctx.seed()
             self.assertEqual([r["slug"] for r in ctx.feeds.rows()], ["smv"])
-            self.assertEqual([(n["type"], n["summary"]) for n in ctx.notifications.list()],
-                             [("apprise", "apprise:8000/notify/subfeed · alerts")])
+            self.assertEqual([(n["name"], n["type"], n["summary"]) for n in ctx.notifications.list()],
+                             [("Feed problems", "apprise", "apprise:8000/notify/subfeed · alerts")])
+            ctx.db.close()
+
+    def test_the_first_starts_apprise_is_named_for_what_it_tells(self):
+        with tempfile.TemporaryDirectory() as folder:
+            ctx = build(config_module.load({"SUBFEED_STATE": folder}), sources={"reddit": FakeSource()})
+            ctx.notifications.create({"name": "Apprise", "type": "apprise", "config": {"url": "http://apprise:8000/notify/subfeed"}})
+            ctx.notifications.create({"name": "Apprise", "type": "discord",
+                                      "config": {"webhook_url": "https://discord.com/api/webhooks/1/x"}})
+            ctx.seed()
+            self.assertEqual(sorted((n["name"], n["type"]) for n in ctx.notifications.list()),
+                             [("Apprise", "discord"), ("Feed problems", "apprise")])
             ctx.db.close()
 
 

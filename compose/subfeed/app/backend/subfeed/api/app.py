@@ -1,15 +1,16 @@
 """subfeed's web server: the API (/api/v1, routes/), its reference (/docs)
 and the page (everything else).
 
-LAN-only behind Caddy, without a login, like songdrop and clipseerr
-(docs/services.md, "The API contract"). The page is a client of the API like
-any other. Errors answer {"detail": "<sentence>"}, whatever went wrong."""
+LAN-only behind Caddy. Everyone who uses it is known: a person signed in on
+the page (its session cookie) or an app with its API key (api/auth.py); the
+page is a client of the API like any other. Errors answer
+{"detail": "<sentence>"}, whatever went wrong."""
 
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -19,7 +20,8 @@ from .. import __version__, problems
 from ..config import load
 from ..domain import Conflict, Invalid, NotFound
 from ..services import Services, build
-from .routes import ROUTERS
+from .auth import RequestLog, gate, principal
+from .routes import OWN_CHECK, PUBLIC, ROUTERS
 
 log = logging.getLogger("subfeed")
 
@@ -35,6 +37,11 @@ the posts carrying a YouTube video, one post a video. subfeed says what a post
 links to and which videos it carries; what they are is for its readers to
 judge.
 
+Who asks is known: a person signed in on the page, or an app with its API
+key (`X-Api-Key`, made in Settings → API keys; a feed reader may put it in
+the feed's address, `?key=…`). Reading needs nothing more; changing feeds,
+settings and notifications needs the permission.
+
 Reads answer an `ETag`: send it back as `If-None-Match` and an unchanged
 answer is a bodyless `304`. Errors answer `{"detail": "<sentence>"}`. Times
 are Unix seconds, except JSON Feed's and Atom's own (RFC 3339).
@@ -47,6 +54,8 @@ TAGS = [
                                               "posts."},
     {"name": "Settings", "description": "What Settings, General changes."},
     {"name": "System", "description": "Health and status."},
+    {"name": "Account", "description": "Signing in, and one's own account."},
+    {"name": "People and keys", "description": "Who may use subfeed, and the apps' API keys: the admins'."},
 ]
 
 # The page loads only its own files, and YouTube's pictures of the videos.
@@ -83,11 +92,16 @@ def create_app(services: Services) -> FastAPI:
     app = FastAPI(title="subfeed", version=__version__, description=DESCRIPTION, docs_url=None, redoc_url=None,
                   openapi_url="/api/v1/openapi.json", openapi_tags=TAGS, lifespan=lifespan)
     app.state.services = services
+    # People and keys (api/auth.py): their refusals answered, the accounts the routes use.
+    gate.install(app, services.accounts)
     app.add_middleware(GZipMiddleware, minimum_size=1024)
+    app.add_middleware(RequestLog, name="subfeed")
 
     api = APIRouter(prefix="/api/v1")
-    for router in ROUTERS:
+    for router in PUBLIC + OWN_CHECK:
         api.include_router(router)
+    for router in ROUTERS:
+        api.include_router(router, dependencies=[Depends(principal)])
     app.include_router(api)
 
     # ---- errors: {"detail": "<sentence>"} ------------------------------------------
@@ -100,9 +114,10 @@ def create_app(services: Services) -> FastAPI:
         return _error(422, problems.explain(exc.errors()))
 
     @app.exception_handler(Exception)
-    async def unexpected(_request: Request, exc: Exception):
-        log.exception("unhandled error", exc_info=exc)
-        return _error(500, "Something went wrong on the server.")
+    async def unexpected(request: Request, exc: Exception):
+        reference = request.scope.get("state", {}).get("request_id", "?")
+        log.error("unhandled error in %s %s [%s]", request.method, request.url.path, reference, exc_info=exc)
+        return _error(500, f"Something went wrong on the server (reference {reference}: subfeed's log says what).")
 
     # ---- headers ------------------------------------------------------------------------
 

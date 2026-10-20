@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from . import outbound
+from .accounts import Accounts, open_accounts
 from .config import Config
 from .db import Database
 from .domain import Conflict, Invalid, NotFound
@@ -26,6 +27,8 @@ from .sources import Source, registry
 log = logging.getLogger("subfeed")
 
 SEEDED = "seeded"
+# The notification the environment makes: feeds failing, and working again (to #alerts).
+APPRISE_NAME = "Feed problems"
 TIDY_EVERY = 6 * 3600
 
 
@@ -41,11 +44,13 @@ class Services:
     notifications: NotificationStore
     notifier: Notifier
     poller: Poller
+    accounts: Accounts
     started_at: float = field(default_factory=time.time)
     _housekeeping: asyncio.Task | None = None
 
     async def start(self) -> None:
         self.seed()
+        self.accounts.announce(log)
         self.poller.start()
         self._housekeeping = asyncio.get_running_loop().create_task(self._tidy(), name="housekeeping")
 
@@ -70,6 +75,8 @@ class Services:
     def seed(self) -> None:
         """On the first start only: the feeds and the notification the
         environment names. After that, the API owns them."""
+        # The notification the first start made was called Apprise, which says how, not what: named for what it tells.
+        self.db.run("UPDATE notifications SET name = ? WHERE name = 'Apprise' AND type = 'apprise'", (APPRISE_NAME,))
         if self.db.get(SEEDED):
             return
         for seed in self.config.seed:
@@ -84,7 +91,7 @@ class Services:
                 log.warning("no feed %s from the environment: %s", seed.slug, exc)
         if self.config.apprise_url:
             try:
-                self.notifications.create({"name": "Apprise", "type": "apprise",
+                self.notifications.create({"name": APPRISE_NAME, "type": "apprise",
                                            "config": {"url": self.config.apprise_url,
                                                       "tag": self.config.apprise_tag or None}})
             except Invalid as exc:
@@ -112,4 +119,4 @@ def build(config: Config, sources: Mapping[str, Source] | None = None,
     poller = Poller(feeds, posts, sources, settings, notifier.emit)
     feeds.on_change(poller.wake)
     return Services(config=config, db=db, http=http, sources=sources, settings=settings, feeds=feeds, posts=posts,
-                    notifications=notifications, notifier=notifier, poller=poller)
+                    notifications=notifications, notifier=notifier, poller=poller, accounts=open_accounts(db))

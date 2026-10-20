@@ -11,7 +11,7 @@ RUN npm ci --no-audit --no-fund --loglevel=error
 COPY frontend/ ./
 RUN npm run build
 
-FROM ${BASE_IMAGE}
+FROM ${BASE_IMAGE} AS app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /opt/subfeed
@@ -26,7 +26,22 @@ COPY --from=page /src/dist ./static
 RUN .venv/bin/python -m compileall -q subfeed /opt/batlab-common
 
 ENV SUBFEED_STATIC=/opt/subfeed/static \
-    PYTHONPATH=/opt/batlab-common
+    PYTHONPATH=/opt/subfeed:/opt/batlab-common \
+    PATH=/opt/subfeed/.venv/bin:$PATH
 USER 1000:1000
 EXPOSE 8830
 ENTRYPOINT ["/opt/subfeed/.venv/bin/python", "-m", "subfeed"]
+
+# The tests, against the image as built: subfeed's, and batlab-common's of the
+# accounts it runs on. A failing test fails the build, so `make up` never
+# deploys it. The image keeps none of them, only the mark.
+FROM app AS tested
+COPY --chown=1000:1000 backend/tests /tmp/subfeed-tests/tests
+COPY --from=common --chown=1000:1000 tests /tmp/subfeed-tests/common
+RUN cd /tmp/subfeed-tests \
+ && { { HOME=/tmp python -m unittest discover -s tests && HOME=/tmp python -m unittest discover -s common -p "test_[ae]*.py"; } \
+      > log 2>&1 || { tail -n 80 log; exit 1; }; } \
+ && grep -E "^(Ran|OK)" log && touch passed
+
+FROM app
+COPY --from=tested /tmp/subfeed-tests/passed /opt/subfeed/.tests-passed

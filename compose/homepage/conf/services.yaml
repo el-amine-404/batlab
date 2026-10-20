@@ -85,11 +85,14 @@
         href: http://subfeed.homelab.lan
         description: Subreddits as feeds (JSON Feed, Atom)
         siteMonitor: http://subfeed:8830/api/v1/health
-        # No subfeed widget in Homepage; its /status counts the feeds.
+        # No subfeed widget in Homepage; its /status counts the feeds, read
+        # with a key that only reads (SUBFEED_HOMEPAGE_KEY).
         widget:
           type: customapi
           url: http://subfeed:8830/api/v1/status
           refreshInterval: 60000
+          headers:
+            X-Api-Key: "{{HOMEPAGE_VAR_SUBFEED_KEY}}"
           mappings:
             - field:
                 feeds: total

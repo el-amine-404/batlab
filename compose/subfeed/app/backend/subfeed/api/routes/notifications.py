@@ -3,10 +3,11 @@ from fastapi import APIRouter, Response
 from ... import events
 from ...notifications import NotificationIn
 from .. import schemas
+from ..auth import need
 from ..deps import Ctx
 
-router = APIRouter(prefix="/notifications", tags=["Notifications"])
-_PROBLEMS = {404: {"model": schemas.Problem}, 422: {"model": schemas.Problem}}
+router = APIRouter(prefix="/notifications", tags=["Notifications"], dependencies=[need("settings")])
+_PROBLEMS = {403: {"model": schemas.Problem}, 404: {"model": schemas.Problem}, 422: {"model": schemas.Problem}}
 
 
 @router.get("/types", summary="The notification types, their fields, and the events to choose from",

@@ -1,6 +1,8 @@
 """The posts, three ways: the API's own JSON (/posts), JSON Feed for
 programs and Atom for feed readers. All take the same filters, and answer
-304 to a reader that has the answer already (If-None-Match)."""
+304 to a reader that has the answer already (If-None-Match). The feeds also
+take an API key in their address (?key=…), for a feed reader that can't send
+a header; the addresses they write into themselves leave it out."""
 
 from typing import Annotated
 
@@ -9,9 +11,12 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from ... import formats
 from ...posts import PostQuery
 from .. import schemas
+from ..auth import gate, without_key
 from ..deps import Ctx, etag, unchanged, validated
 
-router = APIRouter(tags=["Posts"])
+router = APIRouter(tags=["Posts"], dependencies=[Depends(gate.principal)])
+# What feed readers read: the key may be in the address.
+feeds = APIRouter(tags=["Posts"], dependencies=[Depends(gate.principal_or_address_key)])
 _PROBLEMS = {404: {"model": schemas.Problem}, 422: {"model": schemas.Problem}}
 _NOT_MODIFIED = {304: {"description": "The reader's copy (If-None-Match) is current."}}
 
@@ -64,7 +69,7 @@ def _page(request: Request, response: Response, query: PostQuery, ctx: Ctx):
     return {"posts": posts, "total": total, "limit": query.limit, "offset": query.offset}
 
 
-@router.get("/feeds/{slug}/feed.json", summary="One feed as JSON Feed 1.1, for programs",
+@feeds.get("/feeds/{slug}/feed.json", summary="One feed as JSON Feed 1.1, for programs",
             response_model=schemas.JsonFeed, response_model_exclude_none=True,
             responses={200: {"content": {"application/feed+json": {}}}, **_PROBLEMS, **_NOT_MODIFIED})
 def feed_json(slug: str, request: Request, query: Filters, ctx: Ctx, limit: int = Query(100, ge=1, le=500)):
@@ -77,15 +82,15 @@ def feed_json(slug: str, request: Request, query: Filters, ctx: Ctx, limit: int 
     query.feeds, query.limit = [slug], limit
     posts, total = ctx.posts.query(query)
     following = query.offset + len(posts)
-    next_url = str(request.url.include_query_params(offset=following)) if following < total else None
-    body = schemas.JsonFeed.model_validate(formats.json_feed(feed, posts, feed_url=str(request.url),
+    next_url = without_key(str(request.url.include_query_params(offset=following))) if following < total else None
+    body = schemas.JsonFeed.model_validate(formats.json_feed(feed, posts, feed_url=without_key(str(request.url)),
                                                              next_url=next_url))
     response = Response(body.model_dump_json(by_alias=True, exclude_none=True), media_type="application/feed+json")
     validated(response, tag)
     return response
 
 
-@router.get("/feeds/{slug}/feed.atom", summary="One feed as Atom, for any feed reader",
+@feeds.get("/feeds/{slug}/feed.atom", summary="One feed as Atom, for any feed reader",
             response_class=Response,
             responses={200: {"content": {"application/atom+xml": {}}}, **_PROBLEMS, **_NOT_MODIFIED})
 def feed_atom(slug: str, request: Request, query: Filters, ctx: Ctx, limit: int = Query(50, ge=1, le=200)):
@@ -97,6 +102,6 @@ def feed_atom(slug: str, request: Request, query: Filters, ctx: Ctx, limit: int 
         return same
     query.feeds, query.limit = [slug], limit
     posts, _total = ctx.posts.query(query)
-    response = Response(formats.atom(feed, posts, self_url=str(request.url)), media_type="application/atom+xml")
+    response = Response(formats.atom(feed, posts, self_url=without_key(str(request.url))), media_type="application/atom+xml")
     validated(response, tag)
     return response

@@ -12,6 +12,9 @@ import { PostsPage } from "@/pages/PostsPage";
 const NotificationsPage = lazy(() => import("@/pages/settings/NotificationsPage"));
 const GeneralPage = lazy(() => import("@/pages/settings/GeneralPage"));
 const StatusPage = lazy(() => import("@/pages/settings/StatusPage"));
+const AccountPage = lazy(() => import("@/pages/settings/AccountPage"));
+const PeoplePage = lazy(() => import("@/pages/settings/PeoplePage"));
+const KeysPage = lazy(() => import("@/pages/settings/KeysPage"));
 
 export const router = createBrowserRouter([
   {
@@ -26,7 +29,10 @@ export const router = createBrowserRouter([
           { path: "/", element: <FeedsPage /> },
           { path: "/feeds/:slug", element: <FeedPage /> },
           { path: "/posts", element: <PostsPage /> },
-          { path: "/settings", element: <Navigate to="/settings/notifications" replace /> },
+          { path: "/settings", element: <Navigate to="/settings/account" replace /> },
+          { path: "/settings/account", element: <AccountPage /> },
+          { path: "/settings/people", element: <PeoplePage /> },
+          { path: "/settings/keys", element: <KeysPage /> },
           { path: "/settings/notifications", element: <NotificationsPage /> },
           { path: "/settings/general", element: <GeneralPage /> },
           { path: "/settings/status", element: <StatusPage /> },
