@@ -1,0 +1,4 @@
+# Images the nightly clean keeps although no compose stack runs them: scripts
+# start them on demand with docker run. One reference per line.
+
+batlab/pgsocr:1     # subextract's OCR worker; a rebuild re-runs OCR on every video

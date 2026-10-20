@@ -45,7 +45,7 @@ COPY --from=common --chown=1000:1000 tests /tmp/subfeed-tests/common
 RUN cd /tmp/subfeed-tests \
  && { { HOME=/tmp python -m unittest discover -s tests && HOME=/tmp python -m unittest discover -s common -p "test_[ae]*.py"; } \
       > log 2>&1 || { tail -n 80 log; exit 1; }; } \
- && admin --help > /dev/null \
+ && SUBFEED_STATE=/tmp/admin-check admin setup-code > /dev/null \
  && grep -E "^(Ran|OK)" log && touch passed
 
 FROM app

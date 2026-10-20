@@ -17,6 +17,14 @@ services:
       - ${VOLUMES_ROOT}/jellyfin/conf:/config
       - ${VOLUMES_ROOT}/jellyfin/data:/server_data
       - ${VOLUMES_ROOT}/jellyfin/cache:/cache
+      # A 30 GB filesystem of its own (setup-storage.sh): a live TV stream left
+      # open fills it instead of the root SSD. transcodes/transcodes exists only
+      # inside it: without the mount the container fails to start.
+      - type: bind
+        source: ${VOLUMES_ROOT}/jellyfin/transcodes/transcodes
+        target: /cache/transcodes
+        bind:
+          create_host_path: false
       - ${VOLUMES_ROOT}/jellyfin/log:/log
       - ${DATA_ROOT}:/data:ro
       - /etc/localtime:/etc/localtime:ro

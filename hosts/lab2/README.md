@@ -33,6 +33,7 @@ NIC    Intel I219-LM, 1 Gbit, enp0s31f6, static 192.168.1.201
 | USB 2 only | `systemd/batlab-usb2-only.service`, `watchdog/scripts/usb2-only.sh` | every root-hub USB 3 port disabled at boot, so devices connect at 480M (~35 MB/s) | the JMS578 bridge hangs under USB 3; installed by `recover-data-disk.sh --usb2` | drop with a new enclosure: `systemctl disable batlab-usb2-only` |
 | Disk revival | `watchdog/scripts/revive-data-disk.sh`, `WATCHDOG_DATA_USB_PORT=usb1-port1` | every 2 min: dead mount cleared, disk mounted, its USB 2 port power-cycled, USB 3 as a last resort | the disk does not come back from USB 3 to USB 2 by itself (2026-10-01, -03, -17) | with a new enclosure |
 | Freeze and panic reboot | `systemd/system.conf.d/watchdog.conf`, `sysctl.d/90-batlab-panic.conf` | iTCO hardware watchdog at 60 s; reboot 10 s after a panic | 2026-10-17 21:48: down with nothing in the journal | never |
+| Jellyfin transcode disk | `compose/jellyfin/setup-storage.sh` | 30 GB ext4 image at `$VOLUMES_ROOT/jellyfin/transcodes`, `/etc/fstab` | the root SSD is 221 GB; an open live TV stream filled 37.8 GB of it on 2026-10-20 | if 4K transcodes run out of room |
 | SMART monitoring | `smartd.conf` | root SSD and data disk by serial | USB names move between reboots | check both with `smartctl -a` once |
 | Battery | BIOS | charge limit ~80% if offered, power on after AC loss | a worn battery kept at 100% swells | check for swelling now and then |
 

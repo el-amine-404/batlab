@@ -12,7 +12,8 @@ Two pieces keep those pins current without hand-editing:
   checkout, compares each running container's image with what the checkout now
   says, and recreates the services listed in `conf/auto-services.txt`. It waits
   for the healthcheck, rolls back to the previous image if the new one does not
-  come up, and removes the old image once the new one is healthy. A service
+  come up, and keeps the old image to roll back to: the janitor (`janitor/`)
+removes versions older than that one. A service
   built locally (songdrop, clipseerr, subfeed, videodrop, musicguard, tv-remote) is
   rebuilt instead of pulled whenever its *build fingerprint* changes: its build
   settings, with the pins from `compose/versions.env` they pass as build args,
@@ -22,7 +23,8 @@ Two pieces keep those pins current without hand-editing:
   name stays the same. The fingerprint each was last built from is kept in
   the state directory (`built/<service>`); the first night after
   installation records what runs. A rebuild is always recreated, the previous
-  build kept as `local/batlab-rollback:<service>` until the new one is healthy.
+  build kept as `local/batlab-rollback:<service>`, moved to the next build's
+predecessor at each rebuild.
 
 ```
 Renovate ─── automerge? ──▶ main ── nightly git pull ──▶ running image differs?

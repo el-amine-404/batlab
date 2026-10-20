@@ -314,7 +314,9 @@ FAKE_RUNNER = textwrap.dedent('''
 
 class JobsTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        # A job's thread may still write its job.json as the test ends (stop() doesn't wait for it): what it leaves
+        # in the folder isn't the test's failure.
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         root = Path(self.tmp.name)
         (root / "inbox").mkdir()
         runner = root / "fake_runner.py"

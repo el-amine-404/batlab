@@ -129,6 +129,14 @@ no longer answer: with the full guide it ran at 20% an hour. Cancelling it
 waits for the logo downloads in flight, several minutes. Jellyfin keeps the XMLTV file in `/cache/xmltv`; after changing the
 guide in Dispatcharr, delete it before refreshing or Jellyfin reuses the old one.
 
+Jellyfin records each live channel it plays into a file in
+`/cache/transcodes` until it closes the stream, and a client that stops
+without closing it leaves it recording: on 2026-10-19 the TV's Tizen app left
+*Arryadia* running for 26 hours, 37.8 GB, and the root disk reached 98%. The
+live TV guard (`janitor/`) closes a stream that grows for 10 minutes with no
+one playing it, and the transcode folder is a 30 GB filesystem of its own
+(`compose/jellyfin/setup-storage.sh`).
+
 ## What goes through the VPN
 
 Streams, the playlist, the guide download and channel logos (Dispatcharr's
