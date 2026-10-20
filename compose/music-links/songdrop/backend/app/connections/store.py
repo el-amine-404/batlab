@@ -73,7 +73,8 @@ class Connections:
 
     def _read(self, seed: "Seed | None") -> list[dict]:
         try:
-            return json.loads(self._path.read_text(encoding="utf-8"))["connections"]
+            items = json.loads(self._path.read_text(encoding="utf-8"))["connections"]
+            return self._renamed(items, seed)
         except FileNotFoundError:
             pass
         except (OSError, ValueError, KeyError):
@@ -90,6 +91,21 @@ class Connections:
         items = [{"id": uuid.uuid4().hex[:12], "name": seed.name, "type": seed.type, "enabled": True,
                   "events": list(events.DEFAULTS), "config": config}]
         self._write(items)
+        return items
+
+    def _renamed(self, items: list[dict], seed: "Seed | None") -> list[dict]:
+        """The first start's connection was called Apprise ("Apprise · download-issues"), which says how,
+        not what: the one the environment still names is called as the seed is now, once."""
+        if not seed:
+            return items
+        changed = False
+        for item in items:
+            if (item.get("type") == seed.type and str(item.get("name", "")).startswith("Apprise")
+                    and item.get("config", {}).get("url") == seed.config.get("url") and item["name"] != seed.name):
+                item["name"] = seed.name
+                changed = True
+        if changed:
+            self._write(items)
         return items
 
     def _write(self, items: list[dict]) -> None:

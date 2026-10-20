@@ -3,10 +3,11 @@ import logging
 from fastapi import APIRouter, Request, Response
 
 from .. import cookies, preferences, problems, schemas
+from ..auth import need
 from ..context import base_settings, manager
 
 log = logging.getLogger("songdrop")
-router = APIRouter(tags=["Settings"])
+router = APIRouter(tags=["Settings"], dependencies=[need("settings")])
 
 
 @router.get("/settings", summary="The current settings", response_model=schemas.Settings)

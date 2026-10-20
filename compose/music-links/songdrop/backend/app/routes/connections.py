@@ -3,9 +3,10 @@ from fastapi import APIRouter, Response
 from .. import events, schemas
 from ..connections import TYPES
 from ..connections.store import ConnectionIn
+from ..auth import need
 from ..context import connections
 
-router = APIRouter(tags=["Connections"])
+router = APIRouter(tags=["Connections"], dependencies=[need("settings")])
 _PROBLEMS = {404: {"model": schemas.Problem}, 422: {"model": schemas.Problem}}
 
 

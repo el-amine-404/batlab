@@ -110,10 +110,12 @@ class Problem(BaseModel):
 
 class Gate:
     def __init__(self, app: str, permissions: dict[str, tuple[str, str]], *, user_default: list[str],
-                 key_default: list[str], key_for: str = "clipseerr, Homepage, a script"):
+                 key_default: list[str], key_for: str = "clipseerr, Homepage, a script", package: str | None = None):
         """app: its name, as sentences and the cookie say it. permissions:
         the same as its Accounts'. user_default, key_default: what a new
-        person, a new key, may do unless told otherwise."""
+        person, a new key, may do unless told otherwise. package: its Python
+        package, when it isn't called as the app (songdrop's is app)."""
+        setup_command = f"docker exec {app} python -m {package or app}.admin setup-code"
         self.app = app
         self.permissions = permissions
         self.cookie = f"{app}_session"
@@ -148,7 +150,7 @@ class Gate:
 
         class SetupIn(BaseModel):
             code: str = Field(min_length=4, max_length=40, description=f"The setup code: {app}'s log, or "
-                                                                      f"`python -m {app}.admin setup-code`.")
+                                                                      f"`{setup_command}`.")
             username: str = Field(min_length=1, max_length=40)
             name: str = Field("", max_length=60, description="How notifications and the page name them.")
             password: str = Field(min_length=1, max_length=200)
@@ -299,7 +301,7 @@ class Gate:
         @public.post("/setup", summary="Make the first account, an admin, with the setup code",
                      response_model=Me, responses=problems,
                      description=f"Only while nobody exists. The code is in {app}'s log, and given by "
-                                 f"`docker exec {app} python -m {app}.admin setup-code`. Signs the new admin in.")
+                                 f"`{setup_command}`. Signs the new admin in.")
         async def setup(body: SetupIn, request: Request, response: Response):
             accounts = _accounts(request)
             where = address(request)

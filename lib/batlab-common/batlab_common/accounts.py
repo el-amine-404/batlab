@@ -269,9 +269,11 @@ class Accounts:
     """app: its name, in sentences ("songdrop is set up already").
     permissions: {name: (label, description)}, in the order the page shows
     them, "admin" among them. key_prefix: the start of its keys ("sd_"), so
-    a key for another app is told apart at once."""
+    a key for another app is told apart at once. package: its Python
+    package, which `python -m <package>.admin` names (songdrop's is app)."""
 
-    def __init__(self, db, app: str, permissions: dict[str, tuple[str, str]], key_prefix: str):
+    def __init__(self, db, app: str, permissions: dict[str, tuple[str, str]], key_prefix: str,
+                 package: str | None = None):
         if "admin" not in permissions:
             raise ValueError("the permissions include admin")
         self._db = db
@@ -279,6 +281,8 @@ class Accounts:
         self.permissions = permissions
         self.names = tuple(permissions)
         self.key_prefix = key_prefix
+        # The shell command that gives the setup code (admin.py), as the log and the page say it.
+        self.setup_command = f"docker exec {app} python -m {package or app}.admin setup-code"
         self._lock = threading.Lock()
         self.throttle = Throttle()
         for statement in SCHEMA:
@@ -324,7 +328,7 @@ class Accounts:
         if code:
             log.warning("%s has no account yet: open its page and make the first one, an admin, with the setup "
                         "code %s (12 letters and digits; the dashes are only for reading). Also given by: "
-                        "docker exec %s python -m %s.admin setup-code", self.app, code, self.app, self.app)
+                        "%s", self.app, code, self.setup_command)
 
     def setup(self, code: str, username: str, name: str, password: str) -> dict:
         """The first person, an admin, when the code is right."""

@@ -1,6 +1,6 @@
 import { AlertCircle, ArrowDownToLine, ChevronDown, Link2, Loader2, SlidersHorizontal, X } from "lucide-react";
-import { type FormEvent, useMemo, useState } from "react";
-import { useNavigate } from "react-router";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -64,7 +64,12 @@ function DetectionLine({ url, detection, checking }: { url: string; detection: D
 
 export function LinkForm({ onCreated }: { onCreated: () => void }) {
   const navigate = useNavigate();
-  const [url, setUrl] = useState("");
+  // A link sent here (/?url=…: the bookmark, the phone's Share menu) fills the box; the address is left clean.
+  const [params, setParams] = useSearchParams();
+  const [url, setUrl] = useState(() => params.get("url") ?? "");
+  useEffect(() => {
+    if (params.has("url")) setParams({}, { replace: true });
+  }, [params, setParams]);
   const [submitting, setSubmitting] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
   const spec = useOptionsSpec();

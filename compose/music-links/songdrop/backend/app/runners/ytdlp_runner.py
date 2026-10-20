@@ -191,6 +191,16 @@ def main() -> None:
         "fragment_retries": 5,
         "cachedir": os.path.join(job_dir, ".cache"),
     }
+    if config.get("proxy"):
+        # Only the internet (batlab_common/egress.py): every request through songdrop's egress proxy, which
+        # refuses the home network; ffmpeg, when it downloads (a clip), too, and only web protocols; and no
+        # other connection from this process.
+        from batlab_common import egress
+
+        os.environ.update(egress.environment(config["proxy"]))
+        egress.lock(config["proxy"], "songdrop")
+        base["proxy"] = config["proxy"]
+        base["external_downloader_args"] = {"ffmpeg_i": ["-protocol_whitelist", egress.FFMPEG_PROTOCOLS]}
     if config.get("deno"):
         base["js_runtimes"] = {"deno": {"path": config["deno"]}}
     if config.get("cookies"):

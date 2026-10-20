@@ -28,6 +28,15 @@ export type ConnectionType = Schemas["ConnectionType"];
 export type ConnectionTypes = Schemas["ConnectionTypes"];
 export type TestResult = Schemas["TestResult"];
 export type SystemStatus = Schemas["SystemStatus"];
+export type Me = Schemas["Me"];
+export type Permission = Me["permissions"][number];
+export type AuthState = Schemas["AuthState"];
+export type Account = Schemas["Account"];
+export type User = Schemas["User"];
+export type UserIn = Schemas["UserIn"];
+export type UserPatch = Schemas["UserPatch"];
+export type ApiKey = Schemas["ApiKey"];
+export type ApiKeyMade = Schemas["ApiKeyMade"];
 
 /** Waiting to start, or downloading. */
 export const ACTIVE: JobStatus[] = ["queued", "running"];
@@ -43,12 +52,21 @@ export class ApiError extends Error {
   }
 }
 
+/** Fired when the server says nobody is signed in (401): the sign-in screen comes back. */
+export const SIGNED_OUT = "songdrop:signed-out";
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`/api/v1${path}`, {
       ...init,
-      headers: { Accept: "application/json", ...(typeof init.body === "string" ? { "Content-Type": "application/json" } : {}) },
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        // The page's own changes say so: what another site's page can't (batlab_common/web.py).
+        "X-Songdrop-Page": "1",
+        ...(typeof init.body === "string" ? { "Content-Type": "application/json" } : {}),
+      },
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
@@ -61,6 +79,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     } catch {
       // not JSON: a proxy's error page
     }
+    if (response.status === 401 && !path.startsWith("/auth/")) window.dispatchEvent(new Event(SIGNED_OUT));
     throw new ApiError(detail ?? `The server answered ${response.status}.`, response.status);
   }
   if (response.status === 204) return undefined as T;
@@ -101,6 +120,25 @@ export const api = {
     request<TestResult>(id ? `/connections/${id}/test` : "/connections/test", json("POST", body)),
 
   status: () => request<SystemStatus>("/system/status"),
+  health: () => request<{ ok: boolean; version: string }>("/health"),
+
+  authState: () => request<AuthState>("/auth/state"),
+  setup: (body: Schemas["SetupIn"]) => request<Me>("/auth/setup", json("POST", body)),
+  login: (username: string, password: string) => request<Me>("/auth/login", json("POST", { username, password })),
+  logout: () => request<void>("/auth/logout", { method: "POST" }),
+  account: () => request<Account>("/auth/me"),
+  changePassword: (current: string, next: string) => request<void>("/auth/password", json("PUT", { current, new: next })),
+  signOutElsewhere: () => request<Account>("/auth/sessions", { method: "DELETE" }),
+
+  users: () => request<{ users: User[] }>("/users"),
+  createUser: (body: UserIn) => request<User>("/users", json("POST", body)),
+  updateUser: (id: string, body: UserPatch) => request<User>(`/users/${encodeURIComponent(id)}`, json("PATCH", body)),
+  resetPassword: (id: string, password: string) => request<void>(`/users/${encodeURIComponent(id)}/password`, json("PUT", { password })),
+  deleteUser: (id: string) => request<void>(`/users/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  keys: () => request<{ keys: ApiKey[] }>("/keys"),
+  createKey: (name: string, permissions: Permission[]) => request<ApiKeyMade>("/keys", json("POST", { name, permissions })),
+  updateKey: (id: string, permissions: Permission[]) => request<ApiKey>(`/keys/${encodeURIComponent(id)}`, json("PATCH", { permissions })),
+  deleteKey: (id: string) => request<void>(`/keys/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };
 
 /** The message of anything thrown by api.*, for a toast. */

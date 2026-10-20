@@ -27,7 +27,8 @@ def _when(at: float | None) -> str:
 
 def run(accounts: Accounts, key_default: list[str], argv: list[str] | None = None) -> int:
     app = accounts.app
-    parser = argparse.ArgumentParser(prog=f"python -m {app}.admin", description=f"{app}'s people and API keys.")
+    prog = accounts.setup_command.removeprefix(f"docker exec {app} ").removesuffix(" setup-code")
+    parser = argparse.ArgumentParser(prog=prog, description=f"{app}'s people and API keys.")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("setup-code", help="the code that makes the first admin, while nobody exists")
     commands.add_parser("users", help="the people, what they may do, when they last signed in")

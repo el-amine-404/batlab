@@ -13,7 +13,8 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # batlab_common: in the image on PYTHONPATH, in the repository in lib/.
-sys.path.insert(1, str(Path(__file__).resolve().parents[5] / "lib" / "batlab-common"))
+if len(Path(__file__).resolve().parents) > 5:
+    sys.path.insert(1, str(Path(__file__).resolve().parents[5] / "lib" / "batlab-common"))
 
 from batlab_common import fingerprint, notify, previews  # noqa: E402
 

@@ -21,6 +21,82 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether songdrop is set up, and who this is */
+        get: operations["auth_state_api_v1_auth_state_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make the first account, an admin, with the setup code
+         * @description Only while nobody exists. The code is in songdrop's log, and given by `docker exec songdrop python -m app.admin setup-code`. Signs the new admin in.
+         */
+        post: operations["setup_api_v1_auth_setup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign in: the session cookie
+         * @description Sets the HttpOnly session cookie the page uses (30 days unused at
+         *     most). Apps use an API key instead. After 5 wrong tries in 15 minutes,
+         *     from one address or for one name, each try waits longer (429).
+         */
+        post: operations["login_api_v1_auth_login_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sign out: this session ends */
+        post: operations["logout_api_v1_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/options": {
         parameters: {
             query?: never;
@@ -62,10 +138,19 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Every job, newest first */
+        /**
+         * Every job, newest first: one's own, or everyone's with the permission
+         * @description Answers an ETag: the page polls every second or two while something
+         *     runs, and gets a bodyless 304 while nothing changed.
+         */
         get: operations["list_jobs_api_v1_jobs_get"];
         put?: never;
-        /** Download a link */
+        /**
+         * Download a link
+         * @description Queues the link and answers at once with the job. 400: a link songdrop
+         *     can't take; 403: a callback asked without an API key; 422: an option
+         *     that isn't valid.
+         */
         post: operations["create_job_api_v1_jobs_post"];
         delete?: never;
         options?: never;
@@ -84,7 +169,10 @@ export interface paths {
         get: operations["get_job_api_v1_jobs__job_id__get"];
         put?: never;
         post?: never;
-        /** Remove a finished job and its files */
+        /**
+         * Remove a finished job and its files
+         * @description Copies already in the output folder stay. 409 while it runs: cancel it first.
+         */
         delete: operations["delete_job_api_v1_jobs__job_id__delete"];
         options?: never;
         head?: never;
@@ -100,7 +188,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Stop a queued or running job */
+        /**
+         * Stop a queued or running job
+         * @description A queued job is cancelled at once; a running one stops within seconds,
+         *     keeping the songs it finished.
+         */
         post: operations["cancel_job_api_v1_jobs__job_id__cancel_post"];
         delete?: never;
         options?: never;
@@ -117,7 +209,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Try a missing song again now */
+        /**
+         * Try a missing song again now
+         * @description `index` is the missing song's `index` in `errors`. Works in any state,
+         *     also after songdrop gave up. 404: the song has no link of its own; 409:
+         *     the job is running.
+         */
         post: operations["retry_song_api_v1_jobs__job_id__errors__index__retry_post"];
         delete?: never;
         options?: never;
@@ -132,7 +229,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Download one song */
+        /**
+         * Download one song
+         * @description 410 once the job has expired.
+         */
         get: operations["download_file_api_v1_jobs__job_id__files__file_id__get"];
         put?: never;
         post?: never;
@@ -149,7 +249,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Download a job's songs as one zip */
+        /**
+         * Download a job's songs as one zip
+         * @description 409 while the job runs.
+         */
         get: operations["download_archive_api_v1_jobs__job_id__archive_get"];
         put?: never;
         post?: never;
@@ -173,7 +276,11 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Change some settings; the others keep their value */
+        /**
+         * Change some settings; the others keep their value
+         * @description Applies to the next job and survives a restart. 422 with the reason when
+         *     a value isn't valid; nothing is changed then.
+         */
         patch: operations["patch_settings_api_v1_settings_patch"];
         trace?: never;
     };
@@ -186,7 +293,11 @@ export interface paths {
         };
         /** Whether YouTube cookies are saved, and until when */
         get: operations["cookie_status_api_v1_cookies_get"];
-        /** Save a cookies.txt (the request body is the file) */
+        /**
+         * Save a cookies.txt (the request body is the file)
+         * @description The body is the cookies.txt itself (Netscape format, at most 1 MB, with
+         *     youtube.com cookies): `curl -X PUT --data-binary @cookies.txt …`.
+         */
         put: operations["put_cookies_api_v1_cookies_put"];
         post?: never;
         /** Remove the saved cookies */
@@ -335,10 +446,258 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Who this is, and their sessions */
+        get: operations["get_me_api_v1_auth_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Change your password; your other sessions end */
+        put: operations["change_password_api_v1_auth_password_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Sign out everywhere else */
+        delete: operations["sign_out_elsewhere_api_v1_auth_sessions_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The people who can sign in */
+        get: operations["list_users_api_v1_users_get"];
+        put?: never;
+        /** Add someone */
+        post: operations["add_user_api_v1_users_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One person */
+        get: operations["get_user_api_v1_users__user_id__get"];
+        put?: never;
+        post?: never;
+        /** Remove someone; what they asked for stays */
+        delete: operations["remove_user_api_v1_users__user_id__delete"];
+        options?: never;
+        head?: never;
+        /** Change someone's name, permissions, or turn them off */
+        patch: operations["change_user_api_v1_users__user_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/users/{user_id}/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Give someone a new password; their sessions end */
+        put: operations["reset_password_api_v1_users__user_id__password_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The apps' API keys */
+        get: operations["list_keys_api_v1_keys_get"];
+        put?: never;
+        /** Make an API key; it is shown this once */
+        post: operations["add_key_api_v1_keys_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/keys/{key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove an API key: the app using it is refused from now on */
+        delete: operations["remove_key_api_v1_keys__key_id__delete"];
+        options?: never;
+        head?: never;
+        /** Change what a key may do */
+        patch: operations["change_key_api_v1_keys__key_id__patch"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** Account */
+        Account: {
+            me: components["schemas"]["Me"];
+            /** Username */
+            username: string;
+            /** Sessions */
+            sessions: components["schemas"]["Session"][];
+        };
+        /** ApiKey */
+        ApiKey: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Prefix
+             * @description The key's first characters, to recognise it.
+             */
+            prefix: string;
+            /** Permissions */
+            permissions: ("download" | "everyone" | "settings" | "admin")[];
+            /** Created At */
+            created_at: number;
+            /** Last Used At */
+            last_used_at: number | null;
+            /** Last Address */
+            last_address: string | null;
+            /**
+             * Last Host
+             * @description What last_address is called on the network: the app's container (homepage, clipseerr), a device; None without a name.
+             */
+            last_host?: string | null;
+        };
+        /** ApiKeyIn */
+        ApiKeyIn: {
+            /**
+             * Name
+             * @description The app it is for: clipseerr, a script…
+             */
+            name: string;
+            /** Permissions */
+            permissions?: ("download" | "everyone" | "settings" | "admin")[];
+        };
+        /** ApiKeyList */
+        ApiKeyList: {
+            /** Keys */
+            keys: components["schemas"]["ApiKey"][];
+        };
+        /** ApiKeyMade */
+        ApiKeyMade: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Prefix
+             * @description The key's first characters, to recognise it.
+             */
+            prefix: string;
+            /** Permissions */
+            permissions: ("download" | "everyone" | "settings" | "admin")[];
+            /** Created At */
+            created_at: number;
+            /** Last Used At */
+            last_used_at: number | null;
+            /** Last Address */
+            last_address: string | null;
+            /**
+             * Last Host
+             * @description What last_address is called on the network: the app's container (homepage, clipseerr), a device; None without a name.
+             */
+            last_host?: string | null;
+            /**
+             * Key
+             * @description The key, shown this once: the app sends it as X-Api-Key.
+             */
+            key: string;
+        };
+        /** ApiKeyPatch */
+        ApiKeyPatch: {
+            /** Permissions */
+            permissions: ("download" | "everyone" | "settings" | "admin")[];
+        };
+        /** AskedBy */
+        AskedBy: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "user" | "key";
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
+        /** AuthState */
+        AuthState: {
+            /**
+             * Setup
+             * @description Nobody exists yet: the page asks for the setup code and the first admin.
+             */
+            setup: boolean;
+            /** @description Who this request is, when signed in. */
+            me?: components["schemas"]["Me"] | null;
+            /** Permissions */
+            permissions: components["schemas"]["PermissionInfo"][];
+        };
         /** Choice */
         Choice: {
             /** Value */
@@ -566,6 +925,11 @@ export interface components {
         Health: {
             /** Ok */
             ok: boolean;
+            /**
+             * Version
+             * @description songdrop's release.
+             */
+            version: string;
         };
         /** Job */
         Job: {
@@ -624,6 +988,8 @@ export interface components {
             notes: components["schemas"]["JobNote"][];
             /** Archive Url */
             archive_url: string | null;
+            /** @description Who asked: a person signed in, or an app's API key, named as they were then. None before songdrop had accounts. */
+            asked_by?: components["schemas"]["AskedBy"] | null;
         };
         /** JobCounts */
         JobCounts: {
@@ -713,6 +1079,31 @@ export interface components {
              */
             url: string;
         };
+        /** LoginIn */
+        LoginIn: {
+            /** Username */
+            username: string;
+            /** Password */
+            password: string;
+        };
+        /** Me */
+        Me: {
+            /**
+             * Kind
+             * @description A person signed in, or an app's API key.
+             * @enum {string}
+             */
+            kind: "user" | "key";
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Permissions
+             * @description What it may do; an admin's lists them all.
+             */
+            permissions: ("download" | "everyone" | "settings" | "admin")[];
+        };
         /**
          * MissingSong
          * @description A song of the job that is missing (the job's errors).
@@ -740,6 +1131,11 @@ export interface components {
             max_tries: number;
             /** Next Retry At */
             next_retry_at: number | null;
+        };
+        /** NewPassword */
+        NewPassword: {
+            /** Password */
+            password: string;
         };
         /** OptionField */
         OptionField: {
@@ -783,6 +1179,25 @@ export interface components {
                 [key: string]: components["schemas"]["EngineOptions"];
             };
         };
+        /** PasswordIn */
+        PasswordIn: {
+            /** Current */
+            current: string;
+            /** New */
+            new: string;
+        };
+        /** PermissionInfo */
+        PermissionInfo: {
+            /**
+             * Id
+             * @enum {string}
+             */
+            id: "download" | "everyone" | "settings" | "admin";
+            /** Label */
+            label: string;
+            /** Description */
+            description: string;
+        };
         /** Problem */
         Problem: {
             /**
@@ -790,6 +1205,32 @@ export interface components {
              * @description What went wrong, as a sentence a person can read.
              */
             detail: string;
+        };
+        /** Session */
+        Session: {
+            /**
+             * Id
+             * @description Its first characters: enough to tell them apart.
+             */
+            id: string;
+            /** Created At */
+            created_at: number;
+            /** Last Seen At */
+            last_seen_at: number;
+            /** Address */
+            address: string | null;
+            /**
+             * Host
+             * @description What the address is called on the network (a device's name), when it has a name.
+             */
+            host?: string | null;
+            /** Agent */
+            agent: string | null;
+            /**
+             * Current
+             * @default false
+             */
+            current: boolean;
         };
         /** Settings */
         Settings: {
@@ -871,8 +1312,31 @@ export interface components {
                 };
             } | null;
         };
+        /** SetupIn */
+        SetupIn: {
+            /**
+             * Code
+             * @description The setup code: songdrop's log, or `docker exec songdrop python -m app.admin setup-code`.
+             */
+            code: string;
+            /** Username */
+            username: string;
+            /**
+             * Name
+             * @description How notifications and the page name them.
+             * @default
+             */
+            name: string;
+            /** Password */
+            password: string;
+        };
         /** SystemStatus */
         SystemStatus: {
+            /**
+             * Version
+             * @description songdrop's release.
+             */
+            version: string;
             /** Started At */
             started_at: number;
             /** Tools */
@@ -896,6 +1360,63 @@ export interface components {
             version: string | null;
             /** Role */
             role: string;
+        };
+        /** User */
+        User: {
+            /** Id */
+            id: string;
+            /** Username */
+            username: string;
+            /** Name */
+            name: string;
+            /** Permissions */
+            permissions: ("download" | "everyone" | "settings" | "admin")[];
+            /** Enabled */
+            enabled: boolean;
+            /** Created At */
+            created_at: number;
+            /** Last Login At */
+            last_login_at: number | null;
+            /** Password Changed At */
+            password_changed_at: number | null;
+        };
+        /** UserIn */
+        UserIn: {
+            /**
+             * Username
+             * @description What they sign in with: letters, digits, . _ -.
+             */
+            username: string;
+            /**
+             * Name
+             * @description How the page and the notifications name them.
+             * @default
+             */
+            name: string;
+            /**
+             * Password
+             * @description At least 10 characters; they can change it.
+             */
+            password: string;
+            /** Permissions */
+            permissions?: ("download" | "everyone" | "settings" | "admin")[];
+        };
+        /** UserList */
+        UserList: {
+            /** Users */
+            users: components["schemas"]["User"][];
+        };
+        /** UserPatch */
+        UserPatch: {
+            /** Name */
+            name?: string | null;
+            /** Permissions */
+            permissions?: ("download" | "everyone" | "settings" | "admin")[] | null;
+            /**
+             * Enabled
+             * @description Off: they can't sign in, their sessions end.
+             */
+            enabled?: boolean | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -936,6 +1457,164 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Health"];
                 };
+            };
+        };
+    };
+    auth_state_api_v1_auth_state_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthState"];
+                };
+            };
+        };
+    };
+    setup_api_v1_auth_setup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetupIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Me"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    login_api_v1_auth_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Me"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    logout_api_v1_auth_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -1010,6 +1689,13 @@ export interface operations {
                     "application/json": components["schemas"]["JobList"];
                 };
             };
+            /** @description The caller's copy (If-None-Match) is current. */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     create_job_api_v1_jobs_post: {
@@ -1036,6 +1722,15 @@ export interface operations {
             };
             /** @description Bad Request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1753,6 +2448,618 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SystemStatus"];
+                };
+            };
+        };
+    };
+    get_me_api_v1_auth_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Account"];
+                };
+            };
+        };
+    };
+    change_password_api_v1_auth_password_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    sign_out_elsewhere_api_v1_auth_sessions_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Account"];
+                };
+            };
+        };
+    };
+    list_users_api_v1_users_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserList"];
+                };
+            };
+        };
+    };
+    add_user_api_v1_users_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_user_api_v1_users__user_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    remove_user_api_v1_users__user_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    change_user_api_v1_users__user_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    reset_password_api_v1_users__user_id__password_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewPassword"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    list_keys_api_v1_keys_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyList"];
+                };
+            };
+        };
+    };
+    add_key_api_v1_keys_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApiKeyIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyMade"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    remove_key_api_v1_keys__key_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    change_key_api_v1_keys__key_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApiKeyPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKey"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };

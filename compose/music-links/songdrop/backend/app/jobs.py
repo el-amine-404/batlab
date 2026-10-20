@@ -80,6 +80,10 @@ class Job:
     # Told the job (as GET /api/v1/jobs/{id} gives it) when it ends, and when
     # a later try ends.
     callback_url: str | None = None
+    # Who asked: "user:<id>" or "key:<id>" (batlab_common/accounts.py), and their name then. None for
+    # the jobs from before songdrop had accounts.
+    owner: str | None = None
+    owner_name: str | None = None
     # Songs in progress, index -> {"name", "percent"}; not saved.
     current: dict = field(default_factory=dict, repr=False)
 
@@ -109,6 +113,11 @@ class JobManager:
         self._stopping = threading.Event()
         self._threads: list[threading.Thread] = []
         self._busy = 0  # workers on a job or a retry now
+        self._changes = 0  # each change of a job (_save, _apply) and removal: version()
+        # The egress proxy's address (batlab_common/egress.py), which the yt-dlp runner connects through:
+        # any link's site, but nothing on the home network. Not spotDL's: it only takes Spotify's links,
+        # and reaches only Spotify, YouTube Music and the lyrics sites. None in the tests.
+        self.proxy: str | None = None
 
     # ---- lifecycle -------------------------------------------------------
 
@@ -166,7 +175,8 @@ class JobManager:
     def max_tries(self) -> int:
         return 1 + len(self.settings.retry_minutes)
 
-    def submit(self, detection: Detection, options, callback_url: str | None = None) -> dict:
+    def submit(self, detection: Detection, options, callback_url: str | None = None, owner: str | None = None,
+               owner_name: str | None = None) -> dict:
         job = Job(
             id=uuid.uuid4().hex,
             url=detection.url,
@@ -176,6 +186,8 @@ class JobManager:
             options=options.model_dump(),
             created_at=time.time(),
             callback_url=callback_url,
+            owner=owner,
+            owner_name=owner_name,
         )
         self._dir(job.id).mkdir(parents=True)
         with self._lock:
@@ -185,10 +197,21 @@ class JobManager:
         self._queue.put(job.id)
         return snapshot
 
-    def list(self) -> list[dict]:
+    def list(self, owner: str | None = None) -> list[dict]:
+        """Every job, newest first; owner: only those it asked for."""
         with self._lock:
             jobs = sorted(self._jobs.values(), key=lambda job: job.created_at, reverse=True)
-            return [self._public(job) for job in jobs]
+            return [self._public(job) for job in jobs if owner is None or job.owner == owner]
+
+    def owner(self, job_id: str) -> str | None:
+        """Who asked for it ("user:<id>", "key:<id>"); None for a job from before accounts."""
+        with self._lock:
+            return self._find(job_id).owner
+
+    def version(self) -> str:
+        """Changes whenever any job does (its status, progress, files): the page's ETag of the list."""
+        with self._lock:
+            return f"{len(self._jobs)}:{self._changes}"
 
     def get(self, job_id: str) -> dict:
         with self._lock:
@@ -230,6 +253,7 @@ class JobManager:
             if job.status in ACTIVE:
                 raise JobError(409, "Cancel it first; it's still running.")
             del self._jobs[job.id]
+            self._changes += 1
         shutil.rmtree(self._dir(job.id), ignore_errors=True)
 
     def file(self, job_id: str, file_id: str) -> tuple[Path, str]:
@@ -342,6 +366,7 @@ class JobManager:
             "max_items": settings.max_items,
             "deno": settings.deno,
             "cookies": cookie_file,
+            "proxy": self.proxy,
         }
         return [settings.app_python, str(RUNNERS / "ytdlp_runner.py")], config
 
@@ -569,6 +594,7 @@ class JobManager:
             lines.append(f"... and {len(job.errors) - 10} more")
         for note in job.notes[:5]:
             lines.append(f"- {note['name']}: {note['message']}")
+        lines.extend(_asked_by(job))
         data = {"job": self._public(job)}
         subject = f"songdrop · {name} ({got})"
         self._emit(Event("job.finished", subject, tuple(lines), self._link("/activity/history"), data))
@@ -580,10 +606,12 @@ class JobManager:
         data = {"job": self._public(job), "song": entry["name"], "tries": entry["tries"]}
         if got:
             self._emit(Event("song.recovered", f"songdrop · got {entry['name']} on try {entry['tries']}",
-                             (f"From {name}. It's on its way to the library.",), self._link("/activity/history"), data))
+                             (f"From {name}. It's on its way to the library.", *_asked_by(job)),
+                             self._link("/activity/history"), data))
         else:
             self._emit(Event("song.gave_up", f"songdrop · gave up on {entry['name']} after {entry['tries']} tries",
-                             (f"From {name}: {entry['message']}", "Press \"Retry now\" on the page to try once more."),
+                             (f"From {name}: {entry['message']}", "Press \"Retry now\" on the page to try once more.",
+                              *_asked_by(job)),
                              self._link("/activity/missing"), data))
 
     def _call_back(self, job: Job) -> None:
@@ -602,6 +630,8 @@ class JobManager:
         process.stdout.close()
 
     def _apply(self, job: Job, job_dir: Path, event: dict) -> None:
+        # Each event changes what the list shows (progress too, which isn't saved): version().
+        self._changes += 1
         kind = event.get("type")
         index = event.get("index")
         if kind == "meta":
@@ -791,6 +821,7 @@ class JobManager:
         return job
 
     def _save(self, job: Job) -> None:
+        self._changes += 1
         path = self._dir(job.id) / JOB_FILE
         if not path.parent.is_dir():
             return
@@ -852,7 +883,14 @@ class JobManager:
             ],
             "notes": [dict(item) for item in job.notes],
             "archive_url": f"/api/v1/jobs/{job.id}/archive" if len(job.files) > 1 and job.status not in ACTIVE else None,
+            "asked_by": ({"kind": job.owner.split(":", 1)[0], "id": job.owner.split(":", 1)[1], "name": job.owner_name}
+                         if job.owner else None),
         }
+
+
+def _asked_by(job: Job) -> tuple[str, ...]:
+    """"Asked by Amine", "Asked by clipseerr": the person or the app's key, named as they were then."""
+    return (f"Asked by {job.owner_name}",) if job.owner_name else ()
 
 
 def _minutes(seconds: float) -> str:

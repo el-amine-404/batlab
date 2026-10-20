@@ -1,5 +1,5 @@
 import { Menu } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router";
 import { Toaster } from "sonner";
 
@@ -8,6 +8,7 @@ import { JobsProvider } from "@/lib/jobs";
 import { cn } from "@/lib/utils";
 
 import { Sidebar } from "./Sidebar";
+import { Loading } from "./States";
 
 /** The frame of every screen: the sidebar (a drawer on a phone) and the screen. */
 export function Layout() {
@@ -49,7 +50,10 @@ export function Layout() {
 
       <main className="px-4 pt-6 pb-[max(4rem,env(safe-area-inset-bottom))] sm:px-6 lg:ml-64 lg:px-10 lg:pt-10">
         <div className="mx-auto w-full max-w-4xl">
-          <Outlet />
+          {/* Settings and System load their code when opened (app/navigation.tsx). */}
+          <Suspense fallback={<Loading />}>
+            <Outlet />
+          </Suspense>
         </div>
       </main>
       <Toaster theme="dark" position="bottom-right" richColors closeButton />

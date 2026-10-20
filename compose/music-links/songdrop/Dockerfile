@@ -20,7 +20,7 @@ RUN npm ci --no-audit --no-fund --loglevel=error
 COPY docs/ ./
 RUN npm run build
 
-FROM ${BASE_IMAGE}
+FROM ${BASE_IMAGE} AS app
 ARG YTDLP_VERSION
 USER root
 RUN uv pip install --python /app/.venv/bin/python --no-cache "yt-dlp[default]==${YTDLP_VERSION}"
@@ -47,3 +47,22 @@ ENV PYTHONUNBUFFERED=1 \
 USER spotdl
 EXPOSE 8810
 ENTRYPOINT ["/opt/songdrop/.venv/bin/python", "-m", "app"]
+
+# The tests, against the image as built: songdrop's, and batlab-common's of
+# the accounts and the egress proxy it runs on. httpx (FastAPI's test client,
+# for the API's tests) only here: the image itself keeps none of it, only the
+# mark. A failing test fails the build, so `make up` never deploys it.
+FROM app AS tested
+USER root
+RUN uv pip install --python /opt/songdrop/.venv/bin/python --no-cache "httpx==0.28.1"
+USER spotdl
+COPY --chown=spotdl backend/tests /tmp/songdrop-tests/tests
+COPY --from=common --chown=spotdl tests /tmp/songdrop-tests/common
+RUN cd /tmp/songdrop-tests \
+ && { { HOME=/tmp /opt/songdrop/.venv/bin/python -m unittest discover -s tests \
+      && HOME=/tmp /opt/songdrop/.venv/bin/python -m unittest discover -s common -p "test_[ae]*.py"; } \
+      > log 2>&1 || { tail -n 80 log; exit 1; }; } \
+ && grep -E "^(Ran|OK)" log && touch passed
+
+FROM app
+COPY --from=tested /tmp/songdrop-tests/passed /opt/songdrop/.tests-passed

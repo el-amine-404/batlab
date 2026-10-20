@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Query
 
 from .. import folders, schemas
+from ..auth import need
 from ..context import manager
 
-router = APIRouter(tags=["Folders"])
+router = APIRouter(tags=["Folders"], dependencies=[need("settings")])
 
 
 @router.get("/folders", summary="The folders inside one under the output root, for choosing the output folder",

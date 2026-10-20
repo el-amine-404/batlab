@@ -16,6 +16,7 @@ RetryState = Literal["waiting", "queued", "retrying", "gave_up", "failed"]
 
 class Health(BaseModel):
     ok: bool
+    version: str = Field(description="songdrop's release.")
 
 
 class Problem(BaseModel):
@@ -92,6 +93,12 @@ class JobNote(BaseModel):
     message: str
 
 
+class AskedBy(BaseModel):
+    kind: Literal["user", "key"]
+    id: str
+    name: str
+
+
 class Job(BaseModel):
     id: str
     url: str
@@ -113,6 +120,8 @@ class Job(BaseModel):
     errors: list[MissingSong]
     notes: list[JobNote]
     archive_url: str | None
+    asked_by: AskedBy | None = Field(None, description="Who asked: a person signed in, or an app's API key, named as "
+                                                       "they were then. None before songdrop had accounts.")
 
 
 class JobList(BaseModel):
@@ -249,6 +258,7 @@ class JobCounts(BaseModel):
 
 
 class SystemStatus(BaseModel):
+    version: str = Field(description="songdrop's release.")
     started_at: float
     tools: list[Tool]
     disks: list[Disk]
