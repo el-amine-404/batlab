@@ -30,6 +30,7 @@ from videodrop.domain import Invalid  # noqa: E402
 from videodrop.options import DEFAULTS, Section, check_template, resolve, safe_path, to_output_template  # noqa: E402
 from videodrop.scheduler import TRANSIENT, backoff  # noqa: E402
 from videodrop.services import build  # noqa: E402
+from videodrop.settings import SettingsPatch  # noqa: E402
 from videodrop.runner import StepWatch  # noqa: E402
 from videodrop.ytdlp import fingerprint, params  # noqa: E402
 from batlab_common import egress  # noqa: E402
@@ -344,6 +345,7 @@ class AuthTests(unittest.TestCase):
                                      "VIDEODROP_DESTINATIONS": "music-videos=music-videos",
                                      "VIDEODROP_CHECK_RELEASES": "0"})
         self.services = build(replace(config, runner=(sys.executable, FAKE), prober=(sys.executable, FAKE_PROBE)))
+        self.services.settings.update(SettingsPatch(min_free_gb=0))
         self.app = create_app(self.services)
         self.admin = TestClient(self.app)
         self.admin.__enter__()
@@ -523,6 +525,8 @@ class Api(unittest.TestCase):
                                      "VIDEODROP_CHECK_RELEASES": "0"})
         self.config = replace(config, runner=(sys.executable, FAKE), prober=(sys.executable, FAKE_PROBE))
         self.services = build(self.config)
+        # Downloads wait while the disk is nearly full: the machine's, here (a busy build's can be). Not a test's business.
+        self.services.settings.update(SettingsPatch(min_free_gb=0))
         # An app's key that may do all but manage people (the tests of accounts are AuthTests).
         self.key, _ = self.services.accounts.create_key("tests", ["download", "destinations", "everyone", "settings"],
                                                         None)
