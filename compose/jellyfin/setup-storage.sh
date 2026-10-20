@@ -34,7 +34,7 @@ fi
 if [ ! -e "$img" ]; then
   fallocate -l "$size" "$img"
   # No reserved blocks: the whole size is for transcodes.
-  mkfs.ext4 -q -m 0 -L jellyfin-transcodes "$img"
+  mkfs.ext4 -q -m 0 -L jf-transcodes "$img"   # 16 characters at most
 fi
 
 mkdir -p "$mnt"

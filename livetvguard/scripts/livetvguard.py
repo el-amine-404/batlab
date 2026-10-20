@@ -182,7 +182,10 @@ def main(argv: list[str] | None = None) -> int:
         state = {}
 
     try:
-        if run("docker", "inspect", "-f", "{{.State.Running}}", "jellyfin").strip() != "true":
+        # Starting, or stopped: its API answers 503 until healthy, and a stream
+        # it held died with the old process.
+        if run("docker", "inspect", "-f", "{{if .State.Health}}{{.State.Health.Status}}{{end}}",
+               "jellyfin").strip() != "healthy":
             return 0
         folder = transcodes_dir()
         seen = viewing(json.loads(jellyfin("/Sessions?activeWithinSeconds=300", key)))
