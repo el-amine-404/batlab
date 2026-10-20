@@ -1,7 +1,7 @@
 import { Volume2, VolumeX } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import type { Video } from "@/lib/api";
+import { PAGE_HEADERS, type Video } from "@/lib/api";
 
 /** How long the pointer rests on a card, or a finger holds it, before its preview plays. */
 const HOVER_MS = 700;
@@ -27,7 +27,7 @@ async function clipFor(youtubeId: string): Promise<"ready" | "none" | "resting">
   if (ready.has(youtubeId)) return "ready";
   if (Date.now() < restingUntil) return "resting";
   try {
-    const answer = await fetch(`/api/v1/previews/${youtubeId}/prepare`, { method: "POST" });
+    const answer = await fetch(`/api/v1/previews/${youtubeId}/prepare`, { method: "POST", headers: PAGE_HEADERS });
     if (answer.ok) {
       ready.add(youtubeId);
       return "ready";

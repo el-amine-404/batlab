@@ -4,6 +4,7 @@ the same routes for both, under /services and /notifications."""
 from fastapi import APIRouter, Response
 
 from .. import events, outbound, schemas
+from ..auth import need
 from ..context import engine, http, library, library_store, notification_store, notifier, service_store
 from ..integrations import IntegrationIn
 from ..services import Context
@@ -29,7 +30,8 @@ async def _test_library(raw: dict, item_id: str | None = None) -> dict:
 
 
 def _routes(prefix: str, tag: str, store, test, event_list, changed=engine.wake, noun: str | None = None) -> APIRouter:
-    router = APIRouter(prefix=prefix, tags=[tag])
+    # Settings' own: services, notifications and libraries hold addresses and secrets.
+    router = APIRouter(prefix=prefix, tags=[tag], dependencies=[need("settings")])
     noun = noun or tag.lower().rstrip("s")
 
     @router.get("/types", summary=f"The {noun} types and their fields", response_model=schemas.IntegrationTypes)

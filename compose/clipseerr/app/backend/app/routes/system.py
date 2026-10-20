@@ -1,13 +1,18 @@
 import asyncio
+import logging
 from importlib.metadata import version
 
 from fastapi import APIRouter
 
 from .. import __version__, schemas
+from ..auth import Who, need
 from ..context import cache, catalog, engine, requests, settings, started_at
 from ..settings import REGIONS, STOREFRONTS, SettingsPatch
 
+# Anyone may: whether clipseerr is up.
+public = APIRouter(tags=["System"])
 router = APIRouter(tags=["System"])
+log = logging.getLogger("clipseerr")
 VERSION = __version__
 
 
@@ -16,22 +21,23 @@ def _settings_out() -> dict:
             "storefronts": [{"value": k, "label": v} for k, v in sorted(STOREFRONTS.items(), key=lambda i: i[1])]}
 
 
-@router.get("/health", summary="Whether clipseerr runs", response_model=schemas.Health)
+@public.get("/health", summary="Whether clipseerr runs", response_model=schemas.Health)
 def health():
-    return {"ok": True}
+    return {"ok": True, "version": VERSION}
 
 
 @router.get("/settings", tags=["Settings"], summary="The settings, and the choices for each",
-            response_model=schemas.SettingsOut)
+            response_model=schemas.SettingsOut, dependencies=[need("settings")])
 def get_settings():
     return _settings_out()
 
 
 @router.patch("/settings", tags=["Settings"], summary="Change some settings", response_model=schemas.SettingsOut,
-              responses={422: {"model": schemas.Problem}})
-async def patch_settings(body: SettingsPatch):
+              responses={422: {"model": schemas.Problem}}, dependencies=[need("settings")])
+async def patch_settings(body: SettingsPatch, who: Who):
     before = settings()
     settings.update(body)
+    log.info("%s changed the settings: %s", who.name, body.model_dump(exclude_unset=True))
     after = settings()
     if (before["region"], before["storefront"]) != (after["region"], after["storefront"]):
         # Another country's charts: have them ready before the page asks.
@@ -57,7 +63,7 @@ def status():
 
 
 @router.post("/system/cache/clear", summary="Forget what the sources answered (fetched again when asked)",
-             response_model=schemas.Health)
+             response_model=schemas.Health, dependencies=[need("settings")])
 async def clear_cache():
     cache.forget("")
     return {"ok": True}

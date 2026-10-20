@@ -1,0 +1,28 @@
+"""clipseerr's accounts from the server's shell (batlab_common/admin.py):
+
+    docker exec clipseerr python -m app.admin setup-code
+    docker exec clipseerr python -m app.admin users
+    docker exec -it clipseerr python -m app.admin reset-password <user name>
+    docker exec clipseerr python -m app.admin add-key <name> [--can request]
+    docker exec clipseerr python -m app.admin keys
+"""
+
+import sys
+
+from batlab_common.admin import run
+
+from .accounts import KEY_DEFAULT, open_accounts
+from .config import load
+from .db import Database
+
+
+def main(argv: list[str] | None = None) -> int:
+    db = Database(load().database)
+    try:
+        return run(open_accounts(db), KEY_DEFAULT, argv)
+    finally:
+        db.close()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

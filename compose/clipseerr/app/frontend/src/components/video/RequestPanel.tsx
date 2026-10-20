@@ -3,6 +3,7 @@ import { Link } from "react-router";
 
 import { Button } from "@/components/ui/button";
 import { ACTIVE, type Kind, type Request, type VideoDetail } from "@/lib/api";
+import { useCan, useMe } from "@/lib/auth";
 import { useAsk, useRequestAction, useStatus, useVideoRequests } from "@/lib/queries";
 import { ago, cn, upcoming } from "@/lib/utils";
 
@@ -28,6 +29,13 @@ function KindCard({ video, kind, request, chain }: { video: VideoDetail; kind: K
   const unavailable = kind === "video" && !video.youtube_id;
   const noService = chain.length === 0;
   const owned = video.library?.includes(kind) ?? false;
+  const me = useMe();
+  const can = useCan();
+  const mayAsk = can("request");
+  // Someone else's request (or one from before accounts) is theirs to follow, unless one may see everyone's.
+  const theirs = !!request?.asked_by && request.asked_by.kind === me.kind && request.asked_by.id === me.id;
+  const followable = can("everyone") || theirs;
+  const refusal = "Asking takes the permission \u201cAsk for songs and videos\u201d: an admin gives it.";
 
   return (
     <div className={cn("flex flex-col gap-3 rounded-xl border border-border bg-card p-4",
@@ -50,6 +58,7 @@ function KindCard({ video, kind, request, chain }: { video: VideoDetail; kind: K
             {request.quality && <span className="text-xs font-medium text-muted-foreground">{request.quality}</span>}
           </div>
           {request.message && <p className="text-xs text-muted-foreground">{request.message}</p>}
+          {request.asked_by && <p className="text-xs text-muted-foreground">Asked by {theirs ? "you" : request.asked_by.name}</p>}
           {request.status === "completed" && <Downloads videoId={video.id} kind={kind} />}
           {request.status === "downloading" && typeof attempt?.progress === "number" && (
             <div className="h-1.5 overflow-hidden rounded-full bg-secondary">
@@ -57,16 +66,18 @@ function KindCard({ video, kind, request, chain }: { video: VideoDetail; kind: K
             </div>
           )}
           <div className="flex flex-wrap gap-2">
-            {request.status === "failed" && (
+            {request.status === "failed" && followable && mayAsk && (
               <Button size="sm" variant="secondary" disabled={busy} onClick={() => action.mutate({ id: request.id, action: "retry" })}>
                 <RotateCw /> Ask again
               </Button>
             )}
-            <Button size="sm" variant="ghost" asChild>
-              <Link to={`/requests/${request.id}`}>
-                Details <ArrowRight />
-              </Link>
-            </Button>
+            {followable && (
+              <Button size="sm" variant="ghost" asChild>
+                <Link to={`/requests/${request.id}`}>
+                  Details <ArrowRight />
+                </Link>
+              </Button>
+            )}
           </div>
         </div>
       ) : owned ? (
@@ -79,18 +90,21 @@ function KindCard({ video, kind, request, chain }: { video: VideoDetail; kind: K
             {kind === "audio" ? "A library has this song already." : "This video's file is in a library already."}
           </p>
           <Downloads videoId={video.id} kind={kind} />
-          <Button size="sm" variant="ghost" className="self-start" onClick={() => ask.mutate(kind)} disabled={busy || unavailable || noService}>
+          <Button size="sm" variant="ghost" className="self-start" onClick={() => ask.mutate(kind)} disabled={busy || unavailable || noService || !mayAsk}
+                  title={mayAsk ? undefined : refusal}>
             {ask.isPending ? <Loader2 className="animate-spin" /> : <RotateCw />} Get it again
           </Button>
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          <Button onClick={() => ask.mutate(kind)} disabled={busy || unavailable || noService} className="w-full">
+          <Button onClick={() => ask.mutate(kind)} disabled={busy || unavailable || noService || !mayAsk} className="w-full">
             {ask.isPending ? <Loader2 className="animate-spin" /> : <Icon />}
             {copy.action}
           </Button>
           <p className="text-[11px] text-muted-foreground">
-            {unavailable
+            {!mayAsk
+              ? refusal
+              : unavailable
               ? upcoming(video.released)
                 ? `Out ${ago(video.released)}: the video can be got once it is on YouTube.`
                 : "Not on YouTube: there is no video file to get."

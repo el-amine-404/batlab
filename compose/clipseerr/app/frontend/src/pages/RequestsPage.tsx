@@ -9,6 +9,7 @@ import { StatusBadge } from "@/components/video/StatusBadge";
 import { Thumb } from "@/components/video/Thumb";
 import { ACTIVE, type Request } from "@/lib/api";
 import { useRequestAction, useRequests } from "@/lib/queries";
+import { useCan, useMe } from "@/lib/auth";
 import { cn, timeAgo } from "@/lib/utils";
 
 const TABS = [
@@ -20,6 +21,9 @@ const TABS = [
 
 export function RequestActions({ request, compact = false }: { request: Request; compact?: boolean }) {
   const action = useRequestAction();
+  const can = useCan();
+  // The list holds only what one may see; changing it takes asking for songs and videos.
+  if (!can("request")) return null;
   const busy = action.isPending;
   const size = compact ? "icon-sm" : "sm";
   const active = ACTIVE.includes(request.status);
@@ -57,6 +61,8 @@ function current(request: Request) {
 
 function Row({ request }: { request: Request }) {
   const attempt = current(request);
+  const me = useMe();
+  const mine = request.asked_by?.kind === me.kind && request.asked_by.id === me.id;
   const KindIcon = request.kind === "audio" ? Music2 : Film;
   return (
     <li className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5 pr-3 sm:gap-4">
@@ -83,7 +89,9 @@ function Row({ request }: { request: Request }) {
         )}
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1">
-        <span className="text-[11px] text-muted-foreground tabular-nums">{timeAgo(request.created_at)}</span>
+        <span className="text-[11px] text-muted-foreground tabular-nums">
+          {timeAgo(request.created_at)}{request.asked_by && !mine && <> · {request.asked_by.name}</>}
+        </span>
         <RequestActions request={request} compact />
       </div>
     </li>
@@ -95,10 +103,11 @@ export function RequestsPage() {
   const tab = TABS.find((t) => t.value === params.get("show"))?.value ?? "all";
   const [filter, setFilter] = useState("");
   const { data, error, refetch, isPending } = useRequests(tab, filter.trim());
+  const everyone = useCan()("everyone");
 
   return (
     <>
-      <PageHeader eyebrow="Requests" title="What was asked for"
+      <PageHeader eyebrow="Requests" title={everyone ? "What was asked for" : "What you asked for"}
                   description="Each request goes to the services in order, and on to the next when one fails." />
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="inline-flex rounded-xl border border-border bg-black/20 p-1" role="tablist">

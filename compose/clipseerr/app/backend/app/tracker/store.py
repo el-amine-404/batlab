@@ -37,6 +37,8 @@ def _row(row) -> dict:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "finished_at": row["finished_at"],
+        "asked_by": ({"kind": row["owner"].split(":", 1)[0], "id": row["owner"].split(":", 1)[1],
+                      "name": row["owner_name"]} if row["owner"] else None),
     }
 
 
@@ -44,13 +46,14 @@ class Requests:
     def __init__(self, db: Database):
         self._db = db
 
-    def create(self, kind: str, media: dict) -> dict:
+    def create(self, kind: str, media: dict, owner: str | None = None, owner_name: str | None = None) -> dict:
+        """owner: who asks ("user:<id>", "key:<id>"), and their name: what the page and notifications say."""
         now = time.time()
         request_id = uuid.uuid4().hex[:16]
         self._db.run("INSERT INTO requests (id, kind, status, video_key, payload, attempts, message, created_at, "
-                     "updated_at) VALUES (?, ?, 'queued', ?, ?, '[]', ?, ?, ?)",
+                     "updated_at, owner, owner_name) VALUES (?, ?, 'queued', ?, ?, '[]', ?, ?, ?, ?, ?)",
                      (request_id, kind, media["video_key"], json.dumps({"media": media, "round": 0}),
-                      "Waiting for a service.", now, now))
+                      "Waiting for a service.", now, now, owner, owner_name))
         return self.get(request_id)
 
     def get(self, request_id: str) -> dict:
@@ -94,8 +97,20 @@ class Requests:
         return [_row(r) for r in self._db.all(f"SELECT * FROM requests WHERE video_key IN ({marks}) "
                                               "ORDER BY created_at DESC", tuple(video_keys))]
 
-    def list(self, status: str = "all", limit: int = 50, offset: int = 0, query: str = "") -> tuple[list[dict], int]:
+    def owner(self, request_id: str) -> str | None:
+        """Who asked for it; None for a request from before clipseerr had accounts."""
+        row = self._db.one("SELECT owner FROM requests WHERE id = ?", (request_id,))
+        if not row:
+            raise NotFound("No such request.")
+        return row["owner"]
+
+    def list(self, status: str = "all", limit: int = 50, offset: int = 0, query: str = "",
+             owner: str | None = None) -> tuple[list[dict], int]:
+        """owner: only the requests it made."""
         where, params = [], []
+        if owner is not None:
+            where.append("owner = ?")
+            params.append(owner)
         if status in FILTERS:
             where.append(f"status IN ({','.join('?' * len(FILTERS[status]))})")
             params.extend(FILTERS[status])
@@ -109,8 +124,11 @@ class Requests:
                             (*params, limit, offset))
         return [_row(r) for r in rows], total
 
-    def counts(self) -> dict[str, int]:
-        rows = self._db.all("SELECT status, COUNT(*) AS n FROM requests GROUP BY status")
+    def counts(self, owner: str | None = None) -> dict[str, int]:
+        if owner is None:
+            rows = self._db.all("SELECT status, COUNT(*) AS n FROM requests GROUP BY status")
+        else:
+            rows = self._db.all("SELECT status, COUNT(*) AS n FROM requests WHERE owner = ? GROUP BY status", (owner,))
         by_status = {r["status"]: r["n"] for r in rows}
         counts = {name: sum(by_status.get(s, 0) for s in statuses) for name, statuses in FILTERS.items()}
         counts["all"] = sum(by_status.values())

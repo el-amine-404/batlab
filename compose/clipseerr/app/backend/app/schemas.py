@@ -17,6 +17,7 @@ AttemptState = Literal["sent", "downloading", "completed", "failed"]
 
 class Health(BaseModel):
     ok: bool
+    version: str | None = None
 
 
 class Problem(BaseModel):
@@ -85,6 +86,12 @@ class Attempt(BaseModel):
     updated_at: float
 
 
+class AskedBy(BaseModel):
+    kind: Literal["user", "key"]
+    id: str
+    name: str
+
+
 class Request(BaseModel):
     id: str
     kind: Kind
@@ -97,6 +104,8 @@ class Request(BaseModel):
     created_at: float
     updated_at: float
     finished_at: float | None
+    asked_by: AskedBy | None = Field(None, description="Who asked: a person signed in, or an app's API key, named as "
+                                                       "they were then. None before clipseerr had accounts.")
 
 
 class RequestIn(BaseModel):

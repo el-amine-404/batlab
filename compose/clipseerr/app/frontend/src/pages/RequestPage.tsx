@@ -76,7 +76,9 @@ export function RequestPage() {
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <StatusBadge status={data.status} />
             {data.quality && <span className="text-sm font-medium">{data.quality}</span>}
-            <span className="text-xs text-muted-foreground">asked {timeAgo(data.created_at)}</span>
+            <span className="text-xs text-muted-foreground">
+              asked {timeAgo(data.created_at)}{data.asked_by && <> by {data.asked_by.name}</>}
+            </span>
           </div>
           {data.message && <p className="mt-2 text-sm text-muted-foreground">{data.message}</p>}
           {data.status === "completed" && (

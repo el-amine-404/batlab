@@ -1,10 +1,14 @@
 /**
  * The sidebar's entries. The router (app/router.tsx) has the screens; a new
- * screen is one page component, one route, and one entry here.
+ * screen is one page component, one route, and one entry here. need: the
+ * permission it is shown for (the server refuses the rest anyway).
  */
-import { Cable, CalendarClock, CircleGauge, Library, Compass, Disc3, Inbox, type LucideIcon, Search, Bell, SlidersHorizontal, Tags } from "lucide-react";
+import { Bell, Cable, CalendarClock, CircleGauge, Compass, Disc3, Inbox, KeyRound, Library, type LucideIcon, Search,
+         SlidersHorizontal, Tags, UserRound, Users } from "lucide-react";
 
-export type Entry = { path: string; label: string; icon: LucideIcon; counter?: "active" };
+import type { Permission } from "@/lib/api";
+
+export type Entry = { path: string; label: string; icon: LucideIcon; counter?: "active"; need?: Permission };
 
 export const BROWSE: Entry[] = [
   { path: "/", label: "Discover", icon: Compass },
@@ -16,9 +20,12 @@ export const BROWSE: Entry[] = [
 ];
 
 export const SETTINGS: Entry[] = [
-  { path: "/settings/services", label: "Services", icon: Cable },
-  { path: "/settings/notifications", label: "Notifications", icon: Bell },
-  { path: "/settings/libraries", label: "Libraries", icon: Library },
-  { path: "/settings/general", label: "General", icon: SlidersHorizontal },
+  { path: "/settings/account", label: "Your account", icon: UserRound },
+  { path: "/settings/services", label: "Services", icon: Cable, need: "settings" },
+  { path: "/settings/notifications", label: "Notifications", icon: Bell, need: "settings" },
+  { path: "/settings/libraries", label: "Libraries", icon: Library, need: "settings" },
+  { path: "/settings/general", label: "General", icon: SlidersHorizontal, need: "settings" },
+  { path: "/settings/people", label: "People", icon: Users, need: "admin" },
+  { path: "/settings/keys", label: "API keys", icon: KeyRound, need: "admin" },
   { path: "/settings/status", label: "Status", icon: CircleGauge },
 ];

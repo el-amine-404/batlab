@@ -5,6 +5,7 @@ from fastapi import APIRouter, Response
 from pydantic import BaseModel, Field
 
 from .. import schemas
+from ..auth import need
 from ..catalog.models import HotArtist, Video
 from ..context import catalog, hotlist
 
@@ -25,7 +26,8 @@ def picks():
     return {"ids": hotlist.pick_ids()}
 
 
-@router.put("/picks/{video_id}", summary="Add a video to Hot", response_model=Picks, responses=_404)
+@router.put("/picks/{video_id}", summary="Add a video to Hot", response_model=Picks, responses=_404,
+            dependencies=[need("settings")])
 async def add_pick(video_id: str):
     detail = await catalog.video(video_id)
     # The video as lists give it, under its YouTube id when it has one: Hot's entries play.
@@ -37,7 +39,8 @@ async def add_pick(video_id: str):
     return {"ids": hotlist.pick_ids()}
 
 
-@router.delete("/picks/{video_id}", summary="Take a video out of Hot's picks (its yt: id)", status_code=204)
+@router.delete("/picks/{video_id}", summary="Take a video out of Hot's picks (its yt: id)", status_code=204,
+               dependencies=[need("settings")])
 def remove_pick(video_id: str):
     hotlist.unpick(video_id)
     return Response(status_code=204)

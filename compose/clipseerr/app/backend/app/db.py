@@ -95,6 +95,12 @@ class Database:
         with self._lock:
             for statement in SCHEMA:
                 self._conn.execute(statement)
+            # Who asked for each request (accounts.py): "user:<id>" or "key:<id>", and their name then.
+            columns = {row[1] for row in self._conn.execute("PRAGMA table_info(requests)")}
+            for column in ("owner", "owner_name"):
+                if column not in columns:
+                    self._conn.execute(f"ALTER TABLE requests ADD COLUMN {column} TEXT")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS requests_owner ON requests (owner, created_at)")
 
     def all(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
         with self._lock:

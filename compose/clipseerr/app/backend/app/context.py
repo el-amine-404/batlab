@@ -4,6 +4,7 @@ engine following requests, made once at start and shared by the routes."""
 import time
 
 from . import config, events, libraries, notifications, outbound, services
+from .accounts import open_accounts
 from .cache import Cache
 from .catalog.preview import Clips
 from .catalog.service import Catalog
@@ -19,6 +20,8 @@ from .tracker.store import Requests
 started_at = time.time()
 conf = config.load()
 db = Database(conf.database)
+# People and keys (accounts.py), in clipseerr's database.
+accounts = open_accounts(db)
 settings = SettingsStore(db, conf)
 http = outbound.client()
 cache = Cache(db)

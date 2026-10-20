@@ -15,7 +15,7 @@ RUN npm ci --no-audit --no-fund --loglevel=error
 COPY frontend/ ./
 RUN npm run build
 
-FROM ${BASE_IMAGE}
+FROM ${BASE_IMAGE} AS app
 ARG YTMUSICAPI_VERSION
 ARG YTDLP_VERSION
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
@@ -49,3 +49,21 @@ ENV CLIPSEERR_STATIC=/opt/clipseerr/static \
 USER 1000:1000
 EXPOSE 8820
 ENTRYPOINT ["/opt/clipseerr/.venv/bin/python", "-m", "app"]
+
+# The tests, against the image as built: clipseerr's, and batlab-common's of
+# the accounts it runs on. A failing test fails the build, so `make up` never
+# deploys it. The image keeps none of them, only the mark.
+FROM app AS tested
+USER root
+# Beside the app, where they find it (tests/ imports app from its parent).
+COPY --chown=1000:1000 backend/tests /opt/clipseerr/tests
+COPY --from=common --chown=1000:1000 tests /opt/clipseerr/common-tests
+USER 1000:1000
+RUN cd /opt/clipseerr \
+ && { { HOME=/tmp .venv/bin/python -m unittest discover -s tests \
+        && HOME=/tmp .venv/bin/python -m unittest discover -s common-tests -p "test_[ae]*.py"; } \
+      > /tmp/log 2>&1 || { tail -n 80 /tmp/log; exit 1; }; } \
+ && grep -E "^(Ran|OK)" /tmp/log && touch /tmp/passed
+
+FROM app
+COPY --from=tested /tmp/passed /opt/clipseerr/.tests-passed

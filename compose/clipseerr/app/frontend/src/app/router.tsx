@@ -22,6 +22,9 @@ const NotificationsPage = lazy(() => import("@/pages/settings/NotificationsPage"
 const LibrariesPage = lazy(() => import("@/pages/settings/LibrariesPage"));
 const GeneralPage = lazy(() => import("@/pages/settings/GeneralPage"));
 const StatusPage = lazy(() => import("@/pages/settings/StatusPage"));
+const AccountPage = lazy(() => import("@/pages/settings/AccountPage"));
+const PeoplePage = lazy(() => import("@/pages/settings/PeoplePage"));
+const KeysPage = lazy(() => import("@/pages/settings/KeysPage"));
 
 export const router = createBrowserRouter([
   {
@@ -47,7 +50,10 @@ export const router = createBrowserRouter([
       { path: "/watch/:id", element: <WatchPage /> },
       { path: "/requests", element: <RequestsPage /> },
       { path: "/requests/:id", element: <RequestPage /> },
-      { path: "/settings", element: <Navigate to="/settings/services" replace /> },
+      { path: "/settings", element: <Navigate to="/settings/account" replace /> },
+      { path: "/settings/account", element: <AccountPage /> },
+      { path: "/settings/people", element: <PeoplePage /> },
+      { path: "/settings/keys", element: <KeysPage /> },
       { path: "/settings/services", element: <ServicesPage /> },
       { path: "/settings/notifications", element: <NotificationsPage /> },
       { path: "/settings/libraries", element: <LibrariesPage /> },

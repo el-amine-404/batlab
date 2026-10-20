@@ -245,6 +245,8 @@ class Engine:
         else:
             subject, kind_of = f"Couldn't get: {credit(media)}", "failure"
             lines = [f"**{kind}**", request.get("message") or "Every service failed."]
+        if (request.get("asked_by") or {}).get("name"):
+            lines.append(f"Asked by {request['asked_by']['name']}")
         if watch:
             lines.append(f"[Watch on YouTube]({watch})")
         self._emit(Event(name, subject, tuple(lines), kind_of, url, media.get("thumbnail"),
