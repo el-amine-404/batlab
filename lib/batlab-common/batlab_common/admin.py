@@ -7,6 +7,7 @@ accounts and calls run():
     docker exec -it <app> python -m <app>.admin reset-password <user name>
     docker exec <app> python -m <app>.admin add-key <name> [--can download]
     docker exec <app> python -m <app>.admin keys
+    docker exec <app> python -m <app>.admin remove-key <name>
 
 reset-password asks for the new password (or makes one with --generate and
 prints it); the person's sessions end. add-key prints the key, once.
@@ -40,6 +41,8 @@ def run(accounts: Accounts, key_default: list[str], argv: list[str] | None = Non
     key.add_argument("--can", default=",".join(key_default),
                      help=f"of {', '.join(n for n in accounts.names if n != 'admin')} (empty: reads only)")
     commands.add_parser("keys", help="the API keys")
+    remove = commands.add_parser("remove-key", help="an API key removed: the app using it is refused from now on")
+    remove.add_argument("name")
     args = parser.parse_args(argv)
 
     try:
@@ -76,6 +79,13 @@ def run(accounts: Accounts, key_default: list[str], argv: list[str] | None = Non
             for item in accounts.keys():
                 print(f"{item['name']:<20} {item['prefix']}…  {', '.join(item['permissions']) or 'reads only':<30} "
                       f"last used {_when(item['last_used_at'])}")
+        elif args.command == "remove-key":
+            found = next((k for k in accounts.keys() if k["name"].casefold() == args.name.casefold()), None)
+            if not found:
+                print(f"No key is called {args.name!r}.", file=sys.stderr)
+                return 1
+            accounts.delete_key(found["id"])
+            print(f"API key {found['name']} removed: the app using it is refused from now on.")
     except Refusal as exc:
         print(exc, file=sys.stderr)
         return 1

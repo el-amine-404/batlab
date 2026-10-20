@@ -105,6 +105,33 @@ class Store(unittest.TestCase):
             self.assertNotIn(secret.encode(), raw)
 
 
+class Shell(unittest.TestCase):
+    """admin.py: the commands whoever runs the server types."""
+
+    def test_a_key_made_and_removed(self):
+        import contextlib
+        import io
+
+        from batlab_common import admin
+
+        with tempfile.TemporaryDirectory() as folder:
+            db = Database(Path(folder) / "accounts.db")
+            accounts = Accounts(db, "testapp", PERMISSIONS, key_prefix="ta_", package="app")
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(admin.run(accounts, ["download"], ["add-key", "reader", "--can", ""]), 0)
+                self.assertEqual(admin.run(accounts, ["download"], ["setup-code"]), 0)
+            self.assertIn("ta_", out.getvalue())
+            self.assertEqual([k["name"] for k in accounts.keys()], ["reader"])
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(admin.run(accounts, ["download"], ["remove-key", "READER"]), 0)
+            self.assertEqual(accounts.keys(), [])
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(admin.run(accounts, ["download"], ["remove-key", "reader"]), 1)
+            self.assertEqual(accounts.setup_command, "docker exec testapp python -m app.admin setup-code")
+            db.close()
+
+
 class Throttling(unittest.TestCase):
     def test_after_five_failures_each_try_waits(self):
         throttle = Throttle()

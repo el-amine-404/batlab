@@ -5,6 +5,7 @@
     docker exec -it videodrop python -m videodrop.admin reset-password <user name>
     docker exec videodrop python -m videodrop.admin add-key <name> [--can download,destinations]
     docker exec videodrop python -m videodrop.admin keys
+    docker exec videodrop python -m videodrop.admin remove-key <name>
 """
 
 import sys

@@ -5,6 +5,7 @@
     docker exec -it clipseerr python -m app.admin reset-password <user name>
     docker exec clipseerr python -m app.admin add-key <name> [--can request]
     docker exec clipseerr python -m app.admin keys
+    docker exec clipseerr python -m app.admin remove-key <name>
 """
 
 import sys

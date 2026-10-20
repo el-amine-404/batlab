@@ -5,6 +5,7 @@
     docker exec -it songdrop python -m app.admin reset-password <user name>
     docker exec songdrop python -m app.admin add-key <name> [--can download]
     docker exec songdrop python -m app.admin keys
+    docker exec songdrop python -m app.admin remove-key <name>
 """
 
 import sys

@@ -5,6 +5,7 @@
     docker exec -it subfeed python -m subfeed.admin reset-password <user name>
     docker exec subfeed python -m subfeed.admin add-key <name> [--can feeds]
     docker exec subfeed python -m subfeed.admin keys
+    docker exec subfeed python -m subfeed.admin remove-key <name>
 """
 
 import sys
