@@ -24,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { ACTIVE, api, errorText, type Job, type MissingSong, RETRYING } from "@/lib/api";
+import { useMe } from "@/lib/auth";
 import { cn, formatBytes, timeAgo, timeLeft } from "@/lib/utils";
 
 import { engineVariant, kindLabel } from "./labels";
@@ -48,6 +49,7 @@ function songCount(job: Job): string {
 
 /** One download: a line with its status; opened, its songs and what is missing. */
 export function JobRow({ job, onChange, startOpen }: { job: Job; onChange: () => void; startOpen?: boolean }) {
+  const me = useMe();
   const active = ACTIVE.includes(job.status);
   const [open, setOpen] = useState(startOpen ?? active);
   const [acting, setActing] = useState(false);
@@ -87,6 +89,7 @@ export function JobRow({ job, onChange, startOpen }: { job: Job; onChange: () =>
             <span className={cn("size-1.5 shrink-0 rounded-full", dot(engineVariant(job.engine, job.site)))} />
             <span className="truncate">
               {job.site} {kindLabel(job.kind)} · {songCount(job)} · {timeAgo(job.created_at)}
+              {job.asked_by && !(job.asked_by.kind === me.kind && job.asked_by.id === me.id) && <> · {job.asked_by.name}</>}
             </span>
           </p>
         </div>
