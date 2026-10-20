@@ -21,7 +21,7 @@ def run(db: Database, conf: Config, services: Integrations, notifications: Integ
     _libraries(db, conf, libraries)
     _first_start(db, conf, services, notifications)
     _videodrop(db, conf, services)
-    _videodrop_key(conf, services)
+    _api_keys(conf, services)
 
 
 def _first_start(db: Database, conf: Config, services: Integrations, notifications: Integrations) -> None:
@@ -66,20 +66,20 @@ def _videodrop(db: Database, conf: Config, services: Integrations) -> None:
     db.put(VIDEODROP_KEY, True)
 
 
-def _videodrop_key(conf: Config, services: Integrations) -> None:
-    """Every start: a videodrop service without an API key takes the
-    environment's (videodrop wants one since it has accounts). One given
-    on the page is never replaced."""
-    if not conf.videodrop_api_key:
-        return
+def _api_keys(conf: Config, services: Integrations) -> None:
+    """Every start: a videodrop or songdrop service without an API key takes
+    the environment's (they want one since they have accounts). One given on
+    the page is never replaced."""
+    keys = {"videodrop": conf.videodrop_api_key, "songdrop": conf.songdrop_api_key}
     for item in services.items():
-        if item["type"] != "videodrop" or item["config"].get("api_key"):
+        key = keys.get(item["type"])
+        if not key or item["config"].get("api_key"):
             continue
         try:
             services.update(item["id"], {"name": item["name"], "type": item["type"], "enabled": item["enabled"],
                                          "events": item["events"] or None,
-                                         "config": {**item["config"], "api_key": conf.videodrop_api_key}})
-            log.info("service %s has videodrop's API key from the environment now", item["name"])
+                                         "config": {**item["config"], "api_key": key}})
+            log.info("service %s has %s's API key from the environment now", item["name"], item["type"])
         except Invalid as exc:
             log.warning("service %s: no API key from the environment: %s", item["name"], exc)
 

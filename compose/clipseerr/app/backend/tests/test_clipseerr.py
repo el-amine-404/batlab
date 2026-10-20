@@ -936,8 +936,14 @@ class VideodropService(unittest.TestCase):
             db.put(seed.KEY, True)
             db.put(seed.LIBRARIES_KEY, True)
             services = Integrations(db, "service", TYPES)
-            conf = mock.Mock(videodrop_url="http://videodrop:8840", videodrop_api_key="vd_key")
+            db.run("INSERT INTO integrations (id, family, name, type, enabled, position, config, created_at) "
+                   "VALUES ('s1', 'service', 'songdrop', 'songdrop', 1, 1, ?, 0)",
+                   (json.dumps({"base_url": "http://songdrop:8810"}),))
+            conf = mock.Mock(videodrop_url="http://videodrop:8840", videodrop_api_key="vd_key", songdrop_api_key="sd_key")
             seed.run(db, conf, services, mock.Mock(), mock.Mock())
+            # songdrop's from the environment too.
+            self.assertEqual(services.find("s1")["config"]["api_key"], "sd_key")
+            services.delete("s1")
             [item] = services.items()
             self.assertEqual((item["id"], item["type"], item["position"], item["config"]["destination"]),
                              ("m1", "videodrop", 2, "music-videos"))

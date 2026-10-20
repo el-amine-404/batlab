@@ -15,6 +15,8 @@ class Songdrop(ServiceType):
     description = "Downloads the song's YouTube Music audio through yt-dlp. Always finds it; lossy."
     fields = (
         Field("base_url", "Address", "url", placeholder="http://songdrop:8810", default="http://songdrop:8810"),
+        Field("api_key", "API key", "secret", required=False,
+              help="In songdrop: Settings, API keys; it needs Ask for downloads."),
         Field("source", "Download", "select", default="song",
               choices=(Choice("song", "The song (official audio), else the video's sound"),
                        Choice("video", "Always the video's sound"))),
@@ -22,6 +24,10 @@ class Songdrop(ServiceType):
 
     def kinds(self, config):
         return ("audio",)
+
+    @staticmethod
+    def _headers(config: dict) -> dict:
+        return {"X-Api-Key": config["api_key"]} if config.get("api_key") else {}
 
     async def submit(self, ctx: Context, request: dict, config: dict) -> Update:
         media = request["media"]
@@ -31,13 +37,14 @@ class Songdrop(ServiceType):
             raise outbound.SendFailed("This song has no YouTube upload for songdrop to download.")
         body = {"url": watch_url(youtube_id, music=True),
                 "callback_url": f"{ctx.callback_base}/hooks/songdrop?request={request['id']}"}
-        job = (await outbound.call(ctx.http, "POST", f"{config['base_url']}/api/v1/jobs", json=body)).json()
+        job = (await outbound.call(ctx.http, "POST", f"{config['base_url']}/api/v1/jobs", json=body,
+                                   headers=self._headers(config))).json()
         return Update("sent", "Queued in songdrop.", external_id=job["id"])
 
     async def poll(self, ctx: Context, request: dict, attempt: dict, config: dict) -> Update:
         try:
-            job = (await outbound.call(ctx.http, "GET",
-                                       f"{config['base_url']}/api/v1/jobs/{attempt['external_id']}")).json()
+            job = (await outbound.call(ctx.http, "GET", f"{config['base_url']}/api/v1/jobs/{attempt['external_id']}",
+                                       headers=self._headers(config))).json()
         except outbound.SendFailed as exc:
             if " 404" in str(exc):
                 return Update("failed", "songdrop no longer has this job.")
