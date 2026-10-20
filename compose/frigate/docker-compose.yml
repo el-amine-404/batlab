@@ -155,9 +155,10 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Tells Discord when the Clio 4 or the Ford leaves its spot, and when it is
-  # back, with a close-up, a picture of the street, which way it went and the
-  # clip (carwatch/carwatch.py), from Frigate's events on the broker.
+  # Tells Discord when a car leaves the Clio 4's or the Ford's spot, and when
+  # one parks there, with a close-up, a picture of the street, which way it
+  # went and the clip (carwatch/carwatch.py): from Frigate's frames, its
+  # events on the broker, and its recording of the sub stream.
   carwatch:
     # Frigate's image, already here, for its OpenCV and ffmpeg.
     image: ${IMAGE_FRIGATE}:${TAG_FRIGATE}
@@ -199,8 +200,8 @@ services:
       timeout: 5s
       start_period: 120s
       retries: 3
-    # The model on the iGPU, 9 crops every 2 s (0.3 s), and a 4K frame and a
-    # 4K clip re-encoded, a few times a day.
+    # The model on the iGPU, 9 crops every 2 s (0.3 s) by day; ffmpeg copying
+    # the sub stream (no decoding), and a 4K frame a few times a day.
     devices:
       - /dev/dri:/dev/dri
     group_add:
@@ -208,6 +209,7 @@ services:
     mem_limit: 768m
     cpus: 3
     read_only: true
+    # The last 5 min of the sub stream for the clips (about 25 MB).
     tmpfs:
       - /tmp:size=256m
     cap_drop:

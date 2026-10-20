@@ -85,29 +85,56 @@ everything; Frigate is the alarm and the index.
   zone does not reach.
 - **carwatch** (`compose/frigate/carwatch`, in Frigate's image for its
   OpenVINO, OpenCV and ffmpeg) watches the two spots, not the cars: any car
-  in the Clio 4's or the Ford's spot counts. It runs Frigate's
-  YOLO model on Frigate's latest frame, on 9 squares of three sizes around
-  the spots, on the iGPU (0.3 s). One square is not enough: from above, a
-  dark car beside another is found in some framings and missed in others. A
-  spot holds a car when a car's box covers 40% of its zone
-  (`CARWATCH_FILL`). Looks are every 2 s. A car in an empty spot on two
-  looks in a row is told at once, while it parks (a car driving past never
-  covers that much). A spot is told empty when 75% of the looks of the last
-  12 s (`CARWATCH_CONFIRM`) say so, so a van passing in front of a parked
-  car, or a stray miss, changes nothing. The
-  message ("Ford spot · car arrived", "Clio 4 spot · car left", with how
-  long it was taken or empty) has a close-up from the 4K stream and the
-  street; about 45 s later a second one says which way the car went ("went
-  left/right": the last point of the car Frigate followed near the spot;
-  "came from" for one arriving) with the clip, 10 s before to 15 s after,
-  re-encoded to 1280 px H.264 for Discord. Frigate's own tracking is not
-  used for the spots: from above it loses a parked car every half hour, finds
-  it again only when something moves near it, and gave the parked Clio's
-  identity to a car driving past. A dark camera (Frigate's `camera_fps` 0)
-  changes nothing. Its times follow `CARWATCH_TZ` in `compose/.env`
-  (`Etc/GMT-1` on lab2: the zone data there puts Casablanca at UTC+0, the
-  phones and the DVR at UTC+1). `docker logs carwatch` shows each spot's
-  first state and each message.
+  in the Clio 4's or the Ford's spot counts. Every 2 s it looks at Frigate's
+  latest frame. Each spot (its zone) is a patch of it; once nothing has moved
+  there for 6 s (`CARWATCH_SETTLE`) it is compared with its last settled
+  look. A car coming or going changes it by 25 to 36 grey levels (a person,
+  a door or a shadow, under 10; `CARWATCH_CHANGE` 18). When it stays changed
+  for 20 s (`CARWATCH_CONFIRM`), it is told only with proof that a car did
+  it:
+  - by day, the path of a car Frigate followed from the spot to 130 px away
+    ("left") or from there into it ("arrived"). A car driving past starts
+    and ends away from the spot, so it never counts. Frigate's tracking
+    alone is not enough: from above it loses parked cars and finds them
+    again, and hands their identity to cars driving past, so it "drives
+    out" of a spot every few minutes (the cause of 460 false messages on
+    2026-10-19). A change with no path waits 5 min (`CARWATCH_PENDING`) for
+    one: a car that pulls out and waits in the street is followed only when
+    it goes.
+  - by day also, Frigate's YOLO model on 9 squares around the spots (a car
+    covering 40% of a spot, `CARWATCH_FILL`). A look finding fewer than 4
+    cars (`CARWATCH_MIN_CARS`; a row of them is always parked there) missed
+    them and is ignored. The model overrules the rest (no "left" while it
+    sees the car), stands in for a path Frigate missed, and tells a change
+    nobody saw (the camera off, a white car at night) once it reads the
+    spot the other way for 5 min (`CARWATCH_DRIFT`): "seen 08:05, not seen
+    leaving".
+  - at night (the camera in infrared, frames without colour) Frigate
+    follows almost no car and the model sees none. A change is told when
+    the spot's shape changed (headlights change a parked car's light, not
+    its shape), a car-sized patch moved around it, and it got brighter
+    (left: the cars there are darker than the paving in infrared) or darker
+    (arrived).
+  When the whole picture changes at once (the infrared switching at dusk
+  and dawn, a cloud), that is the light, not a car. Tested on 2026-10-19's
+  recordings, one frame every 2 s: the Ford's three departures and arrivals
+  that were recorded whole are told, with the way, and nothing else, with
+  every threshold moved up or down. The night rules are checked on that
+  night's frames (grain 1.6, a car against the paving 30 to 72, headlights
+  on a parked car under 14) but no car came or went at night in the data.
+  The message ("Ford spot · car left · went left", with how long it was
+  taken or empty) comes once the car has settled, about 30 s after, with a
+  close-up from the 4K stream, the street and the clip from 10 s before it
+  began, at most 60 s. carwatch records the clips itself: ffmpeg copies
+  go2rtc's sub stream (H.264 960x576, about 600 kbit/s, which Discord plays
+  as it is) into 5 s pieces in its /tmp, the last 5 min kept. Frigate
+  records the street only around its detections, so its clips were often
+  missing. A message without a clip says nothing of one. A dark camera
+  (Frigate's `camera_fps` 0) changes nothing. Its times follow
+  `CARWATCH_TZ` in `compose/.env` (`Etc/GMT-1` on lab2: the zone data there
+  puts Casablanca at UTC+0, the phones and the DVR at UTC+1).
+  `docker logs carwatch` shows each spot's first state, each change it did
+  not tell and why, and each message.
 - **The Sandero** parks anywhere, so it has no zone: Frigate's object
   classifier tells it from the other cars. Each car Frigate follows is
   cropped from the frame and given up to 16 guesses; when 60% agree (at least
