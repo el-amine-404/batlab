@@ -184,6 +184,7 @@ setup: check-env
 		$(VOLUMES_ROOT)/filebrowser \
 		$(VOLUMES_ROOT)/frigate/config \
 		$(VOLUMES_ROOT)/frigate/media \
+		$(VOLUMES_ROOT)/frigate/carwatch \
 		$(VOLUMES_ROOT)/songdrop/jobs \
 		$(VOLUMES_ROOT)/songdrop/spotdl-temp \
 		$(VOLUMES_ROOT)/homepage/icons \
@@ -301,6 +302,8 @@ setup: check-env
 		$(DATA_ROOT)/inbox \
 		$(DATA_ROOT)/soulseek \
 		$(DATA_ROOT)/.quarantine/musicguard
+	# carwatch runs as 10001 (compose/frigate).
+	sudo chown 10001:10001 $(VOLUMES_ROOT)/frigate/carwatch
 
 	@echo "==> Symlinking .env to all stacks..."
 	@for d in compose/*; do \

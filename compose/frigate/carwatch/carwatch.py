@@ -4,7 +4,9 @@ street, and when a car parks there: any car, the spot is what is watched.
 Every CARWATCH_POLL seconds it looks at Frigate's latest frame of the street.
 Each spot (Frigate's zones, drawn around each parked car) is a patch of that
 frame. Once nothing has moved in it for CARWATCH_SETTLE seconds it is
-compared with how it looked when last settled. When it stays different for
+compared with how it looked when last settled. A change that keeps its
+texture (a shadow, headlights, the car beside it) is not a car. When it
+stays different for
 CARWATCH_CONFIRM seconds (CARWATCH_QUICK by day, when Frigate and the model
 both saw the car do it), and a car drove in or out of it then, that is told:
 "car left" when the car Frigate followed went from inside the spot to a car
@@ -51,6 +53,7 @@ import json
 import math
 import os
 import select
+import signal
 import socket
 import struct
 import subprocess
@@ -78,7 +81,8 @@ FRAME = os.environ.get("CARWATCH_FRAME", "http://frigate:1984/api/frame.jpeg?src
 # The stream recorded for the clips: go2rtc's sub stream, H.264 that Discord
 # plays as it is, about 600 kbit/s.
 STREAM = os.environ.get("CARWATCH_STREAM", "rtsp://frigate:8554/camera_2_sub")
-BUFFER = int(os.environ.get("CARWATCH_BUFFER", "300"))
+# 15 min: a change the model is the first to see (DRIFT) still has its clip.
+BUFFER = int(os.environ.get("CARWATCH_BUFFER", "900"))
 CLIPS = "/tmp/clips"
 # Which way a car went: the side of the picture it was last seen on (first
 # seen, for one arriving).
@@ -126,6 +130,8 @@ STRUCTURE, CARSIZE, BAND, DARKER = 0.5, 0.4, 120, 0.05
 # How long a change with no car seen driving waits for one: a car that pulls
 # out, then stops in the street for someone, is followed only when it goes.
 PENDING = int(os.environ.get("CARWATCH_PENDING", "300"))
+# Or until the model sees the spot the other way for WAIT seconds since.
+WAIT = int(os.environ.get("CARWATCH_WAIT", "60"))
 DRIFT = int(os.environ.get("CARWATCH_DRIFT", "300"))
 # OpenVINO's device for the model: the iGPU, else the CPU.
 DEVICE = os.environ.get("CARWATCH_DEVICE", "GPU")
@@ -143,8 +149,13 @@ LOITER = 30
 FFMPEG = os.environ.get("CARWATCH_FFMPEG", "/usr/lib/ffmpeg/8.0/bin/ffmpeg")
 NOTIFY_URL = os.environ.get("CARWATCH_NOTIFY_URL", "")
 NOTIFY_TAG = os.environ.get("CARWATCH_NOTIFY_TAG", "cameras")
-# Discord takes 10 MB a message.
+# Discord takes 10 MiB a message, all its files together; Apprise takes the
+# message as JSON, the files in base64 (APPRISE_UPLOAD_MAX_MEMORY_SIZE in
+# compose/apprise). A clip is made to fit what the pictures leave.
 LARGEST = 9_000_000
+# What each spot holds and when it last changed, kept across restarts: at
+# night only a spot whose state is known can be told.
+STATE = os.environ.get("CARWATCH_STATE", "/state/spots.json")
 KEEPALIVE = 60
 HEARTBEAT = "/tmp/heartbeat"
 
@@ -293,9 +304,9 @@ class Recorder:
                 pass
         return sorted(found)
 
-    def clip(self, start, end):
-        """The recording from start to end as an MP4 Discord plays, or None:
-        waits for end to be written first."""
+    def clip(self, start, end, room=LARGEST):
+        """The recording from start to end as an MP4 Discord plays, at most
+        room bytes, or None: waits for end to be written first."""
         time.sleep(max(0, end + 6 - time.time()))
         pieces = self.pieces()
         chosen = [(when, path) for i, (when, path) in enumerate(pieces)
@@ -315,18 +326,25 @@ class Recorder:
                 [FFMPEG, "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", pieces,
                  "-ss", str(max(0, start - chosen[0][0])), "-t", str(end - start), "-an", "-c", "copy",
                  "-movflags", "+faststart", made], capture_output=True)
-            if not done.returncode and os.path.getsize(made) > LARGEST:
-                small = os.path.join(folder, "small.mp4")
+            # Too big: encoded again at the bitrate that fits, lower each try.
+            for share in (0.85, 0.6, 0.4):
+                if done.returncode or os.path.getsize(made) <= room:
+                    break
+                rate = int(room * 8 * share / (end - start))
+                small = os.path.join(folder, f"small{share}.mp4")
                 done = subprocess.run([FFMPEG, "-v", "error", "-y", "-i", made, "-c:v", "libx264", "-preset",
-                                       "veryfast", "-crf", "32", "-movflags", "+faststart", small],
-                                      capture_output=True)
+                                       "veryfast", "-b:v", str(rate), "-maxrate", str(rate), "-bufsize", str(rate),
+                                       "-movflags", "+faststart", small], capture_output=True)
                 made = small
             if done.returncode:
                 log(f"clip: {done.stderr.decode(errors='replace')[-300:]}")
                 return None
             with open(made, "rb") as file:
                 data = file.read()
-        return data if len(data) <= LARGEST else None
+        if len(data) > room:
+            log(f"clip: {len(data)} bytes, more than the {room} left")
+            return None
+        return data
 
 
 def notify(text, kind, files=()):
@@ -423,12 +441,14 @@ class Spot:
         # Around it, where a car coming or going moves.
         self.band = (max(x - BAND, 0), max(y - BAND, 0), min(x + w + BAND, WIDTH), min(y + h + BAND, HEIGHT))
         self.held = None      # True: a car, False: empty, None: not known yet
+        self.changed = 0.0    # when held last changed (or was first known)
         self.ref = None       # its pixels when last settled
         self.scene = None     # the whole picture then
         self.calm = None      # when it last looked as settled
         self.recent = []      # [(when, pixels)] of the last SETTLE seconds
         self.since = None     # when it first looked settled and different
         self.pending = None   # when a change began that no car was seen making
+        self.waited = None    # when that change settled
         self.stir = 0         # the most pixels around it that moved between two looks, since calm
         self.seen = []        # [(when, a car)] of the model's looks that saw
         self.told = None      # ("arrived" | "left", when), last told
@@ -439,10 +459,10 @@ class Spot:
         x1, y1, x2, y2 = self.box
         return grey[y1:y2, x1:x2][self.mask].astype(numpy.float32)
 
-    def model(self, now, seconds):
-        """True or False when the model's looks of the last seconds agree on it
-        (90%, and enough of them), None otherwise."""
-        looks = [car for when, car in self.seen if when > now - seconds]
+    def model(self, now, seconds, after=0.0):
+        """True or False when the model's looks of the last seconds (after
+        after) agree on it (90%, and enough of them), None otherwise."""
+        looks = [car for when, car in self.seen if when > max(now - seconds, after)]
         if len(looks) < max(4, seconds / POLL / 4):
             return None
         share = sum(looks) / len(looks)
@@ -547,9 +567,39 @@ class Watch:
             polygon = coordinates(zones[zone])
             old = before.get(zone)
             same = old is not None and old.polygon.shape == polygon.shape and numpy.allclose(old.polygon, polygon)
-            spots.append(old if same else Spot(zone, name, polygon))
+            if not same:
+                old = Spot(zone, name, polygon)
+                self.restore(old)
+            spots.append(old)
         self.spots = spots
         self.loaded = time.time()
+
+    def save(self):
+        """What each spot holds, for a restart."""
+        state = {spot.zone: {"polygon": spot.polygon.tolist(), "held": spot.held, "changed": spot.changed,
+                             "told": spot.told} for spot in self.spots if spot.held is not None}
+        try:
+            with open(STATE + ".new", "w") as out:
+                json.dump(state, out)
+            os.replace(STATE + ".new", STATE)
+        except OSError as error:
+            log(f"state: {error}")
+
+    def restore(self, spot):
+        """What spot held before a restart, when its zone is the same."""
+        import numpy
+
+        try:
+            with open(STATE) as file:
+                kept = json.load(file).get(spot.zone)
+        except (OSError, ValueError):
+            return
+        if not kept or numpy.array(kept["polygon"]).shape != spot.polygon.shape \
+                or not numpy.allclose(kept["polygon"], spot.polygon):
+            return
+        spot.held, spot.changed = kept["held"], kept["changed"]
+        spot.told = tuple(kept["told"]) if kept.get("told") else None
+        log(f"{spot.name}: {'a car' if spot.held else 'empty'}, as before the restart")
 
     def check(self, now, frame=None):
         """Look at the spots; tell a spot that changed and settled, when a car
@@ -581,7 +631,8 @@ class Watch:
         self.previous = (now, grey)
         for spot in self.spots:
             if model is not None:
-                spot.seen = [s for s in spot.seen if s[0] > now - DRIFT] + [(now, model[spot.zone])]
+                # A minute more than DRIFT: drift() finds when they turned.
+                spot.seen = [s for s in spot.seen if s[0] > now - DRIFT - 60] + [(now, model[spot.zone])]
             if moved is not None:
                 x1, y1, x2, y2 = spot.band
                 spot.stir = max(spot.stir, int(moved[y1:y2, x1:x2].sum()))
@@ -597,6 +648,8 @@ class Watch:
         if spot.held is None:
             spot.held = spot.model(now, 60)
             if spot.held is not None:
+                spot.changed = now
+                self.save()
                 log(f"{spot.name}: {'a car' if spot.held else 'empty'}")
         if spot.ref is None or difference(pixels, spot.ref) <= SAME:
             spot.ref, spot.scene, spot.calm, spot.since, spot.stir = pixels, whole, now, None, 0
@@ -611,15 +664,23 @@ class Watch:
         if now - spot.since < CONFIRM and not (now - spot.since >= QUICK and not night
                                                 and self.vouched(spot, now, pixels)):
             return
-        start, before, stir = spot.calm or spot.since, spot.ref, spot.stir
+        start, before, stir, settled = spot.calm or spot.since, spot.ref, spot.stir, spot.since
         # Its new look, whatever made it.
         spot.ref, spot.scene, spot.calm, spot.since, spot.stir = pixels, whole, now, None, 0
-        if difference(pixels, before) < CHANGE:
+        change, like = difference(pixels, before), likeness(pixels, before)
+        if change < CHANGE:
+            return
+        log(f"{spot.name}: changed by {change:.0f}, likeness {like:.2f}")
+        if like > STRUCTURE:
+            # A car gone or come replaces the spot's texture (0.15 at most on
+            # 2026-10-20); a shadow, headlights, or the car beside it
+            # overhanging shift its light (0.87 when the Ford spot's car left).
+            log(f"{spot.name}: looks different; not told, its texture is the same (a shadow, the car beside it)")
             return
         if night:
             self.night(spot, start, now, before, pixels, stir)
         else:
-            self.decide(spot, start, now)
+            self.decide(spot, start, now, settled)
 
     def vouched(self, spot, now, pixels):
         """Whether Frigate followed a car into (or out of) the spot as it
@@ -632,28 +693,31 @@ class Watch:
         return kind is not None and (kind == "arrived") != spot.held \
             and spot.model(now, SETTLE + QUICK) == (kind == "arrived")
 
-    def decide(self, spot, start, now):
-        """The spot changed from start to now: tell it when a car drove in or
-        out then, and the model does not see otherwise."""
+    def decide(self, spot, start, now, settled):
+        """The spot changed from start to now, and looked as now since
+        settled: tell it when a car drove in or out then, and the model does
+        not see otherwise."""
         kind, far = self.path(spot, start - 30, now)
         model = spot.model(now, CONFIRM)
+        # The model's looks since it settled are of its new look: two that
+        # agree are enough to overrule a path (in the sun it misses most).
+        since = [car for when, car in spot.seen if when >= settled]
+        against = since[0] if len(since) >= 2 and since.count(since[0]) == len(since) else model
         if kind is None and model is not None and spot.held is not None and model != spot.held:
             # Frigate missed the car moving; the model saw the spot change.
             kind = "arrived" if model else "left"
         if kind is None:
-            spot.pending = start
-            log(f"{spot.name}: looks different; waiting for a car seen driving in or out")
+            spot.pending, spot.waited = start, now
+            log(f"{spot.name}: looks different; waiting for a car seen driving in or out, or the model")
             return
         why = None
         if (kind == "arrived") == spot.held:
             why = f"a car {'came' if kind == 'arrived' else 'went'}, but it already {'held one' if spot.held else 'was empty'}"
-        elif model is not None and model != (kind == "arrived"):
-            why = f"the model sees it {'taken' if model else 'empty'}"
+        elif against is not None and against != (kind == "arrived"):
+            why = f"the model sees it {'taken' if against else 'empty'}"
         if why:
             log(f"{spot.name}: looks different; not told, {why}")
             return
-        spot.pending = None
-        spot.held = kind == "arrived"
         self.tell(spot, kind, start, now, far)
 
     def night(self, spot, start, now, before, pixels, stir):
@@ -663,9 +727,7 @@ class Watch:
         light = pixels.mean() / max(before.mean(), 1.0) - 1
         kind = "left" if light >= DARKER else "arrived" if light <= -DARKER else None
         why = None
-        if likeness(pixels, before) > STRUCTURE:
-            why = "its shape is the same (headlights?)"
-        elif stir < CARSIZE * spot.area:
+        if stir < CARSIZE * spot.area:
             why = "nothing car-sized moved"
         elif kind is None:
             why = "it got neither darker nor brighter"
@@ -678,13 +740,12 @@ class Watch:
         if why:
             log(f"{spot.name}: looks different at night; not told, {why}")
             return
-        spot.pending = None
-        spot.held = kind == "arrived"
         self.tell(spot, kind, start, now, self.path(spot, start - 30, now)[1])
 
     def waiting(self, spot, now):
         """A change no car was seen making: told when one is seen driving off
-        (or in) within PENDING seconds."""
+        (or in) within PENDING seconds, or when the model sees the spot the
+        other way on 90% of its looks for WAIT seconds since it settled."""
         if spot.pending is None:
             return
         if now - spot.pending > PENDING:
@@ -692,28 +753,36 @@ class Watch:
             spot.pending = None
             return
         kind, far = self.path(spot, spot.pending - 30, now)
+        model = spot.model(now, now - spot.waited, after=spot.waited) if now - spot.waited >= WAIT else None
+        if kind is None and model is not None and spot.held is not None and model != spot.held:
+            kind, far = ("arrived" if model else "left"), None
         if kind is None or (kind == "arrived") == spot.held:
             return
         model = spot.model(now, CONFIRM)
         if model is not None and model != (kind == "arrived"):
             return
-        start, spot.pending = spot.pending, None
-        spot.held = kind == "arrived"
-        self.tell(spot, kind, start, now, far)
+        self.tell(spot, kind, spot.pending, now, far)
 
     def drift(self, spot, now):
         """A change Frigate and the patches missed (the camera was off, or the
         car left at night unfollowed), told once the model sees it for DRIFT
-        seconds."""
-        model = spot.model(now, DRIFT)
-        if model is None or spot.held is None or model == spot.held:
+        seconds. Only looks since the spot last changed count: those before
+        saw what it held then."""
+        if spot.held is None:
             return
-        if now - spot.seen[0][0] < DRIFT - 2 * POLL:
+        model = spot.model(now, DRIFT, after=spot.changed)
+        if model is None or model == spot.held:
+            return
+        looks = [(when, car) for when, car in spot.seen if when > spot.changed]
+        if now - looks[0][0] < DRIFT - 2 * POLL:
             return  # not DRIFT seconds of looks yet
-        spot.held, spot.pending = model, None
+        # When it first read the other way, and kept to it.
+        cars = [car for _, car in looks]
+        first = next(when for i, (when, car) in enumerate(looks)
+                     if car == model and cars[i:].count(model) >= 0.9 * len(cars[i:]))
         kind = "arrived" if model else "left"
-        log(f"{spot.name}: the model sees it {'taken' if model else 'empty'} for {DRIFT // 60} min")
-        self.tell(spot, kind, None, now, None)
+        log(f"{spot.name}: the model sees it {'taken' if model else 'empty'} since {first:.0f}")
+        self.tell(spot, kind, None, now, None, first)
 
     def path(self, spot, start, end):
         """("left" | "arrived", the far end of its path) for a car Frigate
@@ -786,7 +855,8 @@ class Watch:
         at = datetime.fromtimestamp(when).strftime("%H:%M:%S")
         pictures = [("person.jpg", self.near(box)), ("street.jpg", picture())]
         # From when they came near, to a little after.
-        video = self.recorder.clip(when - LOITER - BEFORE, when + AFTER)
+        room = LARGEST - sum(len(data or b"") for _, data in pictures)
+        video = self.recorder.clip(when - LOITER - BEFORE, when + AFTER, room)
         notify(f"***Someone at the cars***\n{at} · there {LOITER} s and more", "warning",
                pictures + [("person.mp4", video)])
         log(f"told: someone at the cars at {at} ({who}), clip {len(video or b'')} bytes")
@@ -833,13 +903,15 @@ class Watch:
         threading.Thread(target=self.report, args=(title, line, kind, way, pictures, label, when - BEFORE,
                                                    when + AFTER), daemon=True).start()
 
-    def tell(self, spot, kind, start, end, far):
+    def tell(self, spot, kind, start, end, far, first=None):
         """A spot's car arrived or left: start is when the spot began to
-        change (None when not seen), end when it settled, far where the car
-        came from or went."""
+        change (None when not seen: first is then when the model first saw it
+        changed), end when it settled, far where the car came from or went."""
         before = spot.told
-        when = start or end
+        when = start or first or end
         spot.told = (kind, when)
+        spot.held, spot.changed, spot.pending = kind == "arrived", end, None
+        self.save()
         title = f"{spot.name} · car {kind}"
         line = datetime.fromtimestamp(when).strftime("%H:%M:%S")
         if start is None:
@@ -849,7 +921,8 @@ class Watch:
         way = WAYS["left" if far[0] < WIDTH / 2 else "right"] if far else None
         x1, y1, x2, y2 = spot.box
         pictures = [(f"{spot.zone}.jpg", self.near((x1, y1, x2, y2))), ("street.jpg", picture())]
-        clip = (start - BEFORE, min(end, start + LONGEST)) if start else None
+        clip = (start - BEFORE, min(end, start + LONGEST)) if start else \
+            (first - LOITER, first + AFTER) if first else None
         threading.Thread(target=self.report, args=(title, line, kind, way, pictures, spot.zone) + (clip or (None, None)),
                          daemon=True).start()
 
@@ -857,13 +930,18 @@ class Watch:
         """One message: what happened, the pictures and the clip."""
         if way:
             title += f" · went {way}" if kind == "left" else f" · came from the {way}"
-        video = self.recorder.clip(start, end) if start is not None else None
+        room = LARGEST - sum(len(data or b"") for _, data in pictures)
+        video = self.recorder.clip(start, end, room) if start is not None else None
         notify(f"***{title}***\n{line}", "info" if kind == "left" else "success",
                pictures + [(f"{name}.mp4", video)])
         log(f"told: {title} · {line}, clip {len(video or b'')} bytes")
 
 
 def main():
+    # Stopped (docker stop): out at once. Python's own exit tears OpenVINO
+    # down from another thread, and glibc aborts ("longjmp causes
+    # uninitialized stack frame").
+    signal.signal(signal.SIGTERM, lambda *_: os._exit(0))
     watch = Watch()
     log(f"watching {CAMERA} on {BROKER}:{PORT}; spots {SPOTS}")
     while True:
