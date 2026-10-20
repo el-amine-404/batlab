@@ -679,10 +679,11 @@ class HotChecks(unittest.TestCase):
         status = {"slug": "x", "title": "r/X", "home_url": "https://www.reddit.com/r/X/",
                   "last": {"at": 100.0, "ok": True, "message": "0 new of Reddit's last 100 posts"},
                   "next_at": 1900.0, "changed_at": 50.0}
-        asked = []
+        asked, keys = [], []
 
         def answer(request):
             asked.append(str(request.url))
+            keys.append(request.headers.get("x-api-key"))
             return httpx.Response(200, json=status)
 
         with tempfile.TemporaryDirectory() as folder:
@@ -691,6 +692,7 @@ class HotChecks(unittest.TestCase):
             async def run():
                 async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as http:
                     catalog = Catalog(Cache(db), http, lambda: {})
+                    catalog.feed_key = "sf_reads"
                     now = time.time()
                     # No warming known: when it goes stale.
                     self.assertEqual(catalog._next_check(now, HOT_FRESH), now + HOT_FRESH)
@@ -706,6 +708,7 @@ class HotChecks(unittest.TestCase):
             found, other = asyncio.run(run())
             db.close()
         self.assertEqual(asked, ["http://subfeed:8830/api/v1/feeds/x"])
+        self.assertEqual(keys, ["sf_reads"])  # subfeed's key, as it asks
         self.assertEqual((found.name, found.checked_at, found.next_at, found.changed_at, found.message),
                          ("r/X", 100.0, 1900.0, 50.0, "0 new of Reddit's last 100 posts"))
         self.assertIsNone(other)

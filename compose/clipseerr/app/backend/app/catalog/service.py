@@ -73,6 +73,11 @@ class Catalog:
         # When the housekeeping loop warms the lists next, and how often (main.py): Hot's next check.
         self.next_warm_at: float | None = None
         self.warm_every: float | None = None
+        # The API key Hot's feeds are read with (subfeed's: CLIPSEERR_HOT_FEEDS_KEY); empty, none.
+        self.feed_key = ""
+
+    def _feed_headers(self) -> dict[str, str]:
+        return {"X-Api-Key": self.feed_key} if self.feed_key else {}
 
     @property
     def region(self) -> str:
@@ -308,7 +313,7 @@ class Catalog:
         status_url = path.removesuffix("/feed.json")
 
         async def fetch():
-            response = await self._http.get(status_url, timeout=httpx.Timeout(5.0, connect=3.0))
+            response = await self._http.get(status_url, headers=self._feed_headers(), timeout=httpx.Timeout(5.0, connect=3.0))
             response.raise_for_status()
             return response.json()
 
@@ -328,7 +333,7 @@ class Catalog:
         """A feed's real songs: any JSON Feed (https://www.jsonfeed.org; subfeed's
         …/feed.json), each item's first YouTube video judged by verdicts.py.
         A video not judged yet is left out until it is (Hot reads again then)."""
-        response = await self._http.get(url, timeout=httpx.Timeout(15.0, connect=5.0))
+        response = await self._http.get(url, headers=self._feed_headers(), timeout=httpx.Timeout(15.0, connect=5.0))
         response.raise_for_status()
         body = response.json()
         if not isinstance(body, dict) or not isinstance(body.get("items"), list):

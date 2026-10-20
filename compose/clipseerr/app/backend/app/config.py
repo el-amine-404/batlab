@@ -39,6 +39,8 @@ class Config:
     storefront: str
     # The Hot category's feeds: JSON Feed addresses, subfeed's (CLIPSEERR_HOT_FEEDS, comma-separated).
     hot_feeds: tuple[str, ...]
+    # The API key they are read with: subfeed asks everyone who reads it for one (a key that only reads).
+    hot_feeds_key: str
     # Made on the first start only, when given (seed.py).
     apprise_url: str
     apprise_tag: str
@@ -71,6 +73,7 @@ def load() -> Config:
         region=(_text("CLIPSEERR_REGION") or "US").upper(),
         storefront=(_text("CLIPSEERR_STOREFRONT") or "us").lower(),
         hot_feeds=tuple(u.strip() for u in _text("CLIPSEERR_HOT_FEEDS").split(",") if u.strip()),
+        hot_feeds_key=_text("CLIPSEERR_HOT_FEEDS_KEY"),
         apprise_url=_text("CLIPSEERR_APPRISE_URL"),
         apprise_tag=_text("CLIPSEERR_APPRISE_TAG"),
         aurral_url=_text("CLIPSEERR_AURRAL_URL"),

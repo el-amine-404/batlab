@@ -40,6 +40,8 @@ services:
       # The Hot category's feeds (compose/subfeed): r/SexyMusicVideos' posts with a YouTube
       # video, one post a video; clipseerr keeps the real songs (catalog/verdicts.py).
       - CLIPSEERR_HOT_FEEDS=http://subfeed:8830/api/v1/feeds/sexymusicvideos/feed.json?video=youtube&unique=true&limit=500
+      # Read with subfeed's key for clipseerr (one that only reads).
+      - CLIPSEERR_HOT_FEEDS_KEY=${SUBFEED_CLIPSEERR_KEY:-}
       # The first services, in the order they are asked: songs from Aurral
       # (Soulseek first: lossless when shared), else songdrop (YouTube Music,
       # lossy); videos from videodrop, into its music-videos destination (on
