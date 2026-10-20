@@ -1,0 +1,10 @@
+[Unit]
+Description=Check Jellyfin's live TV streams every 2 minutes
+
+[Timer]
+OnBootSec=5m
+OnUnitActiveSec=2m
+Unit=batlab-livetvguard.service
+
+[Install]
+WantedBy=timers.target

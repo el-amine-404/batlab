@@ -12,10 +12,13 @@ Two pieces keep those pins current without hand-editing:
   checkout, compares each running container's image with what the checkout now
   says, and recreates the services listed in `conf/auto-services.txt`. It waits
   for the healthcheck, rolls back to the previous image if the new one does not
-  come up, and keeps the old image to roll back to: the janitor (`janitor/`)
-removes versions older than that one. A service
-  built locally (songdrop, clipseerr, subfeed, videodrop, musicguard, tv-remote) is
-  rebuilt instead of pulled whenever its *build fingerprint* changes: its build
+  come up, and keeps the old image to roll back to: docker prune
+  (`dockerprune/`) removes versions older than that one. A container with a
+  file or directory of the checkout bind-mounted is restarted when the pull
+  changes it: git replaces a changed file, and a container goes on reading the
+  old one until it restarts (Netdata sent its old cards for three days that
+  way, 2026-10-20). A service built locally (songdrop, clipseerr, subfeed,
+  videodrop, musicguard, tv-remote) is rebuilt instead of pulled whenever its *build fingerprint* changes: its build
   settings, with the pins from `compose/versions.env` they pass as build args,
   and the git trees of its build contexts. A new base image digest (Debian's
   security fixes, ffmpeg's among them), a new yt-dlp, spotDL, ytmusicapi or

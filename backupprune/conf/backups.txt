@@ -1,0 +1,8 @@
+# Folders of copies taken by hand before a migration or an upgrade, and how
+# many days each is kept. The date in a folder's name (YYYYMMDD) is its age: a
+# folder without one is never removed. ~ is the home of the user the timer
+# runs as; ${VOLUMES_ROOT} comes from compose/.env.
+#
+# pattern                        days
+~/pre-*                          14
+${VOLUMES_ROOT}/*-backup-*       30

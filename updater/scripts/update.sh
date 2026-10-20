@@ -175,8 +175,8 @@ update_service() {
       reason="$(wait_until_healthy "$container")"; then
       notify updates "Updated $service" success \
         "Image" "$new_image${new_id:+ (${new_id:7:12})}" "Previous" "$previous"
-      # The old image stays, to roll back to without a download; the janitor
-      # (janitor/) keeps that one previous version and removes older ones.
+      # The old image stays, to roll back to without a download; docker prune
+      # (dockerprune/) keeps that one previous version and removes older ones.
       return 0
     fi
   fi

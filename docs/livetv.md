@@ -133,7 +133,7 @@ Jellyfin records each live channel it plays into a file in
 `/cache/transcodes` until it closes the stream, and a client that stops
 without closing it leaves it recording: on 2026-10-19 the TV's Tizen app left
 *Arryadia* running for 26 hours, 37.8 GB, and the root disk reached 98%. The
-live TV guard (`janitor/`) closes a stream that grows for 10 minutes with no
+live TV guard (`livetvguard/`) closes a stream that grows for 10 minutes with no
 one playing it, and the transcode folder is a 30 GB filesystem of its own
 (`compose/jellyfin/setup-storage.sh`).
 

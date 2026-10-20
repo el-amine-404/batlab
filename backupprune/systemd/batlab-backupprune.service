@@ -1,5 +1,5 @@
 [Unit]
-Description=Remove old images, build cache and stray containers from the root disk
+Description=Remove dated backup folders past their retention
 Wants=network-online.target
 After=network-online.target docker.service
 
@@ -8,7 +8,7 @@ Type=oneshot
 User=potato
 Group=potato
 WorkingDirectory=/home/potato/batlab
-ExecStart=/usr/bin/python3 /home/potato/batlab/janitor/scripts/janitor.py clean
+ExecStart=/usr/bin/python3 /home/potato/batlab/backupprune/scripts/backupprune.py
 Nice=10
 IOSchedulingClass=idle
 TimeoutStartSec=1h

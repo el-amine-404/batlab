@@ -1,0 +1,11 @@
+[Unit]
+Description=Remove old backup folders every night
+
+[Timer]
+OnCalendar=*-*-* 09:00:00
+Persistent=true
+RandomizedDelaySec=15m
+Unit=batlab-backupprune.service
+
+[Install]
+WantedBy=timers.target

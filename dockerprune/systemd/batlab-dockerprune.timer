@@ -1,11 +1,11 @@
 [Unit]
-Description=Clean the root disk every night, after the updater
+Description=Prune Docker every night, after the updater
 
 [Timer]
 OnCalendar=*-*-* 08:30:00
 Persistent=true
 RandomizedDelaySec=15m
-Unit=batlab-janitor.service
+Unit=batlab-dockerprune.service
 
 [Install]
 WantedBy=timers.target

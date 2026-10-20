@@ -3,7 +3,7 @@
 # image on the SSD, loop-mounted at $VOLUMES_ROOT/jellyfin/transcodes from
 # /etc/fstab. On 2026-10-20 a live TV stream nobody watched grew to 37.8 GB in
 # that folder and nearly filled the root disk; now it can fill only this.
-# The live TV guard (janitor/) closes such a stream long before. Run once on
+# The live TV guard (livetvguard/) closes such a stream long before. Run once on
 # the server, with Jellyfin stopped:
 #   make down STACK=jellyfin
 #   sudo compose/jellyfin/setup-storage.sh [SIZE]    # default: 30G
