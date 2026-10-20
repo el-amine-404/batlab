@@ -317,6 +317,15 @@ class Accounts:
                 self._db.run("INSERT OR REPLACE INTO account_state (key, value) VALUES ('setup_code', ?)", (code,))
         return code
 
+    def announce(self, log) -> None:
+        """At start, while nobody exists: the setup code, in the log, where
+        whoever runs the server finds it."""
+        code = self.setup_code()
+        if code:
+            log.warning("%s has no account yet: open its page and make the first one, an admin, with the setup "
+                        "code %s (12 letters and digits; the dashes are only for reading). Also given by: "
+                        "docker exec %s python -m %s.admin setup-code", self.app, code, self.app, self.app)
+
     def setup(self, code: str, username: str, name: str, password: str) -> dict:
         """The first person, an admin, when the code is right."""
         with self._lock:

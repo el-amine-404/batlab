@@ -20,6 +20,9 @@ on another homelab.lan name, can't act as whoever is signed in here.
 """
 
 import logging
+import secrets
+import time
+import urllib.parse
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, Request, Response
@@ -27,6 +30,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyCookie, APIKeyHeader, APIKeyQuery
 from pydantic import BaseModel, Field
+from starlette.datastructures import MutableHeaders
 
 from .accounts import SESSION_MAX, Accounts, Forbidden, Invalid, Principal, Refusal, TooSoon, Unauthorized
 
@@ -43,6 +47,61 @@ def address(request: Request) -> str:
 
 def _accounts(request: Request) -> Accounts:
     return request.app.state.accounts
+
+
+REQUEST_ID = "x-request-id"
+# A caller's own request id is kept when it looks like one.
+_ID_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.:")
+
+
+class RequestLog:
+    """Each request gets an id (X-Request-ID, the caller's or a new one),
+    answered back and kept in scope["state"] for the error handler. A
+    change (POST, PUT, PATCH, DELETE) and every answer of 400 or more are
+    logged with it, and who asked (a person's or a key's name); reads,
+    which callers and pages repeat all day, are not. Never the query string:
+    a feed reader's key may be in it.
+
+        app.add_middleware(RequestLog, name="subfeed")   # logs as subfeed.http
+    """
+
+    def __init__(self, app, name: str):
+        self._app = app
+        self._log = logging.getLogger(f"{name}.http")
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self._app(scope, receive, send)
+        given = dict(scope.get("headers") or []).get(REQUEST_ID.encode(), b"").decode("latin-1")
+        request_id = given if 0 < len(given) <= 64 and set(given) <= _ID_CHARS else secrets.token_hex(6)
+        scope.setdefault("state", {})["request_id"] = request_id
+        started, status = time.monotonic(), [500]
+
+        async def start(message):
+            if message["type"] == "http.response.start":
+                status[0] = message["status"]
+                MutableHeaders(scope=message)["X-Request-ID"] = request_id
+            await send(message)
+
+        try:
+            await self._app(scope, receive, start)
+        finally:
+            method, path = scope.get("method", ""), scope.get("path", "")
+            if method not in SAFE or status[0] >= 400:
+                client = (scope.get("client") or ("?",))[0]
+                who = scope["state"].get("principal")
+                level = logging.WARNING if status[0] >= 500 else logging.INFO
+                self._log.log(level, "%s %s %s %.0f ms from %s%s [%s]", method, path, status[0],
+                              (time.monotonic() - started) * 1000, client,
+                              f" by {who.name} ({who.kind})" if who else "", request_id)
+
+
+def without_key(url: str) -> str:
+    """url without its key=… (a feed reader's key), for an address a feed
+    writes into itself (its own, its next page)."""
+    parts = urllib.parse.urlsplit(url)
+    kept = [(k, v) for k, v in urllib.parse.parse_qsl(parts.query, keep_blank_values=True) if k != "key"]
+    return urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(kept)))
 
 
 class Problem(BaseModel):

@@ -7,8 +7,6 @@ any other. Errors answer {"detail": "<sentence>"}, whatever went wrong."""
 
 import logging
 import mimetypes
-import secrets
-import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -23,7 +21,7 @@ from .. import __version__, problems
 from ..config import load
 from ..domain import Conflict, Forbidden, Gone, Invalid, NotFound
 from ..services import Services, build
-from .auth import gate, principal
+from .auth import RequestLog, gate, principal
 from .routes import PUBLIC, ROUTERS
 
 log = logging.getLogger("videodrop")
@@ -103,49 +101,8 @@ class CompressSome:
         await (self._plain if plain or scope["type"] != "http" else self._gzip)(scope, receive, send)
 
 
-REQUEST_ID = "x-request-id"
-# A caller's own request id is kept when it looks like one.
-_ID_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.:")
-access = logging.getLogger("videodrop.http")
 # The page's manifest (its install and Share menu entry): browsers want its own type.
 mimetypes.add_type("application/manifest+json", ".webmanifest")
-
-
-class RequestLog:
-    """Each request gets an id (X-Request-ID, the caller's or a new one),
-    answered back and kept in scope["state"] for the error handler. A
-    change (POST, PUT, PATCH, DELETE) and every answer of 400 or more are
-    logged with it, and who asked (a person's or a key's name); reads,
-    which callers and pages repeat all day, are not."""
-
-    def __init__(self, app):
-        self._app = app
-
-    async def __call__(self, scope, receive, send):
-        if scope["type"] != "http":
-            return await self._app(scope, receive, send)
-        given = dict(scope.get("headers") or []).get(REQUEST_ID.encode(), b"").decode("latin-1")
-        request_id = given if 0 < len(given) <= 64 and set(given) <= _ID_CHARS else secrets.token_hex(6)
-        scope.setdefault("state", {})["request_id"] = request_id
-        started, status = time.monotonic(), [500]
-
-        async def start(message):
-            if message["type"] == "http.response.start":
-                status[0] = message["status"]
-                MutableHeaders(scope=message)["X-Request-ID"] = request_id
-            await send(message)
-
-        try:
-            await self._app(scope, receive, start)
-        finally:
-            method, path = scope.get("method", ""), scope.get("path", "")
-            if method not in ("GET", "HEAD", "OPTIONS") or status[0] >= 400:
-                client = (scope.get("client") or ("?",))[0]
-                who = scope["state"].get("principal")
-                level = logging.WARNING if status[0] >= 500 else logging.INFO
-                access.log(level, "%s %s %s %.0f ms from %s%s [%s]", method, path, status[0],
-                           (time.monotonic() - started) * 1000, client,
-                           f" by {who.name} ({who.kind})" if who else "", request_id)
 
 
 class Headers:
@@ -198,7 +155,7 @@ def create_app(services: Services) -> FastAPI:
     gate.install(app, services.accounts)
     app.add_middleware(CompressSome)
     app.add_middleware(Headers)
-    app.add_middleware(RequestLog)
+    app.add_middleware(RequestLog, name="videodrop")
 
     api = APIRouter(prefix="/api/v1")
     for router in PUBLIC:

@@ -2,7 +2,7 @@
 person by the page's session cookie, or an app by its API key
 (batlab_common/web.py). What they may do is checked by need()."""
 
-from batlab_common.web import Gate, address  # noqa: F401 (address: the routes' too)
+from batlab_common.web import Gate, RequestLog, address  # noqa: F401 (the app's and routes' too)
 
 from ..accounts import KEY_DEFAULT, PERMISSIONS
 

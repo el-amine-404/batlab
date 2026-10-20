@@ -67,11 +67,7 @@ class Services:
     async def start(self) -> None:
         self.broker.bind(asyncio.get_running_loop())
         self.seed()
-        code = self.accounts.setup_code()
-        if code:
-            log.warning("videodrop has no account yet: open its page and make the first one, an admin, with the "
-                        "setup code %s (12 letters and digits; the dashes are only for reading). Also given by: "
-                        "docker exec videodrop python -m videodrop.admin setup-code", code)
+        self.accounts.announce(log)
         self.scheduler.start()
         loop = asyncio.get_running_loop()
         self._tasks = [loop.create_task(self._keep_house(), name="housekeeping")]
