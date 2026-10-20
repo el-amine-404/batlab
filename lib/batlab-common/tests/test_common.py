@@ -1,3 +1,5 @@
+import email.parser
+import email.policy
 import http.server
 import json
 import os
@@ -76,7 +78,21 @@ class Apprise(http.server.BaseHTTPRequestHandler):
     received = []
 
     def do_POST(self):
-        self.received.append((self.path, json.loads(self.rfile.read(int(self.headers["Content-Length"])))))
+        data = self.rfile.read(int(self.headers["Content-Length"]))
+        if self.headers["Content-Type"].startswith("multipart/form-data"):
+            # A form: its fields, and its files as "files": [(filename, bytes)].
+            message = email.parser.BytesParser(policy=email.policy.HTTP).parsebytes(
+                f"Content-Type: {self.headers['Content-Type']}\r\n\r\n".encode() + data)
+            body = {"files": []}
+            for part in message.iter_parts():
+                if part.get_filename():
+                    body["files"].append((part.get_param("name", header="content-disposition"),
+                                          part.get_filename(), part.get_payload(decode=True)))
+                else:
+                    body[part.get_param("name", header="content-disposition")] = part.get_content()
+        else:
+            body = json.loads(data)
+        self.received.append((self.path, body))
         self.send_response(self.status)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
@@ -107,6 +123,18 @@ class Notify(unittest.TestCase):
         self.assertEqual(path, "/notify/batlab")
         self.assertEqual(body, {"title": "Ready to play", "body": "**Trop beau**", "type": "success",
                                 "format": "markdown", "tag": "downloads"})
+
+    def test_files_go_as_a_form(self):
+        # Django takes 2.5 MB of JSON at most: a clip in base64 was refused.
+        clip = os.urandom(3_000_000)
+        notify.send(self.endpoint, "", "***Ford spot · car left***", tag="cameras",
+                    attach=[("spot_2.jpg", b"\xff\xd8jpeg"), ("spot_2.mp4", clip)])
+        path, body = Apprise.received[0]
+        self.assertEqual({k: v for k, v in body.items() if k != "files"},
+                         {"title": "", "body": "***Ford spot · car left***", "type": "info",
+                          "format": "markdown", "tag": "cameras"})
+        self.assertEqual(body["files"], [("attachment", "spot_2.jpg", b"\xff\xd8jpeg"),
+                                         ("attachment", "spot_2.mp4", clip)])
 
     def test_failures_say_why(self):
         Apprise.status = 424

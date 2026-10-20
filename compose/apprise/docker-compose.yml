@@ -30,11 +30,6 @@ services:
       # A few messages an hour: one worker (the default, one per core, needs
       # far more memory).
       - APPRISE_WORKER_COUNT=1
-      # A message's JSON, its files in base64: carwatch's clips and pictures
-      # come to 9 MB (Discord's 10 MiB a message), 12 MB in base64. Apprise
-      # refuses more than 3 MB by default ("JSON Payload provided is too
-      # large"), and the message is lost.
-      - APPRISE_UPLOAD_MAX_MEMORY_SIZE=16
       # {host} in a sender's name (senders.json).
       - BATLAB_HOST=${HOST_PROFILE:-}
       - NOTIFY_DOWNLOADS=${NOTIFY_DOWNLOADS:-${DISCORD_WEBHOOK_DOWNLOADS:-}}

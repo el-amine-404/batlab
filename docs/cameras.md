@@ -148,11 +148,12 @@ everything; Frigate is the alarm and the index.
   records the street only around its detections, so its clips were often
   missing. A message's files must fit in 9 MB (Discord takes 10 MiB a
   message): a longer clip is encoded again at the bitrate that fits what
-  the pictures leave. Apprise takes 16 MB of JSON
-  (`APPRISE_UPLOAD_MAX_MEMORY_SIZE`); at its default 3 MB, every message
-  with a clip over about 1.5 MB was refused ("JSON Payload provided is too
-  large", 431) and lost: four of the six real ones on 2026-10-20. A message
-  without a clip says nothing of one. A dark camera
+  the pictures leave. The files go to Apprise as a form: in base64 inside
+  the JSON, every message with a clip over about 1.5 MB was refused (Django
+  takes 2.5 MB of JSON, and Apprise 2.0's `APPRISE_UPLOAD_MAX_MEMORY_SIZE`
+  does not change that: "JSON Payload provided is too large", 431) and
+  lost, four of the six real ones on 2026-10-20. A message without a clip
+  says nothing of one. A dark camera
   (Frigate's `camera_fps` 0) changes nothing. Its times follow
   `CARWATCH_TZ` in `compose/.env` (`Etc/GMT-1` on lab2: the zone data there
   puts Casablanca at UTC+0, the phones and the DVR at UTC+1).

@@ -16,7 +16,6 @@ run this file on its own.
 """
 
 import argparse
-import base64
 import datetime
 import json
 import os
@@ -54,10 +53,14 @@ def send(endpoint, title, body, tag=None, kind="info", timeout=15, attach=()):
     if tag:
         payload["tag"] = tag
     if attach:
-        payload["attachment"] = [{"filename": name, "base64": base64.b64encode(data).decode()}
-                                 for name, data in attach]
-    request = urllib.request.Request(endpoint, data=json.dumps(payload).encode(), method="POST",
-                                     headers={"Content-Type": "application/json", "Accept": "application/json",
+        # Files as a form, not base64 in JSON: Django caps a JSON body at
+        # 2.5 MB (Apprise 2.0's APPRISE_UPLOAD_MAX_MEMORY_SIZE does not reach
+        # it), and a clip is more ("JSON Payload provided is too large").
+        data, kind_of = form(payload, attach)
+    else:
+        data, kind_of = json.dumps(payload).encode(), "application/json"
+    request = urllib.request.Request(endpoint, data=data, method="POST",
+                                     headers={"Content-Type": kind_of, "Accept": "application/json",
                                               "User-Agent": "batlab"})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -83,6 +86,22 @@ def send(endpoint, title, body, tag=None, kind="info", timeout=15, attach=()):
         raise NotSent(f"Couldn't reach Apprise at {endpoint}: {reason}.", reached=False) from error
     if status == 204:
         raise NotSent(f"Apprise has no destination for the tag {tag!r}." if tag else "Apprise has no destination.")
+
+
+def form(fields, files):
+    """(body, content type) of a multipart/form-data request: fields as text,
+    files ((filename, bytes) pairs) each as an "attachment"."""
+    boundary = f"batlab-{os.urandom(12).hex()}"
+    parts = []
+    for name, value in fields.items():
+        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n'
+                     f"Content-Type: text/plain; charset=utf-8\r\n\r\n".encode()
+                     + str(value).encode() + b"\r\n")
+    for filename, data in files:
+        safe = filename.replace('"', "").replace("\r", "").replace("\n", "")
+        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="attachment"; filename="{safe}"\r\n'
+                     f"Content-Type: application/octet-stream\r\n\r\n".encode() + data + b"\r\n")
+    return b"".join(parts) + f"--{boundary}--\r\n".encode(), f"multipart/form-data; boundary={boundary}"
 
 
 def sender(key, host=None):

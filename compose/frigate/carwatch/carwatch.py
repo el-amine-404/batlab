@@ -149,9 +149,8 @@ LOITER = 30
 FFMPEG = os.environ.get("CARWATCH_FFMPEG", "/usr/lib/ffmpeg/8.0/bin/ffmpeg")
 NOTIFY_URL = os.environ.get("CARWATCH_NOTIFY_URL", "")
 NOTIFY_TAG = os.environ.get("CARWATCH_NOTIFY_TAG", "cameras")
-# Discord takes 10 MiB a message, all its files together; Apprise takes the
-# message as JSON, the files in base64 (APPRISE_UPLOAD_MAX_MEMORY_SIZE in
-# compose/apprise). A clip is made to fit what the pictures leave.
+# Discord takes 10 MiB a message, all its files together (notify.send posts
+# them to Apprise as a form). A clip is made to fit what the pictures leave.
 LARGEST = 9_000_000
 # What each spot holds and when it last changed, kept across restarts: at
 # night only a spot whose state is known can be told.
