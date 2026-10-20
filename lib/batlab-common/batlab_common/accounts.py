@@ -269,11 +269,9 @@ class Accounts:
     """app: its name, in sentences ("songdrop is set up already").
     permissions: {name: (label, description)}, in the order the page shows
     them, "admin" among them. key_prefix: the start of its keys ("sd_"), so
-    a key for another app is told apart at once. package: its Python
-    package, which `python -m <package>.admin` names (songdrop's is app)."""
+    a key for another app is told apart at once."""
 
-    def __init__(self, db, app: str, permissions: dict[str, tuple[str, str]], key_prefix: str,
-                 package: str | None = None):
+    def __init__(self, db, app: str, permissions: dict[str, tuple[str, str]], key_prefix: str):
         if "admin" not in permissions:
             raise ValueError("the permissions include admin")
         self._db = db
@@ -281,8 +279,8 @@ class Accounts:
         self.permissions = permissions
         self.names = tuple(permissions)
         self.key_prefix = key_prefix
-        # The shell command that gives the setup code (admin.py), as the log and the page say it.
-        self.setup_command = f"docker exec {app} python -m {package or app}.admin setup-code"
+        # The shell command that gives the setup code (admin.py; each image's `admin` runs it), as the log says it.
+        self.setup_command = f"docker exec {app} admin setup-code"
         self._lock = threading.Lock()
         self.throttle = Throttle()
         for statement in SCHEMA:

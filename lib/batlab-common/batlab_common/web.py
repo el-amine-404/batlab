@@ -110,12 +110,11 @@ class Problem(BaseModel):
 
 class Gate:
     def __init__(self, app: str, permissions: dict[str, tuple[str, str]], *, user_default: list[str],
-                 key_default: list[str], key_for: str = "clipseerr, Homepage, a script", package: str | None = None):
+                 key_default: list[str], key_for: str = "clipseerr, Homepage, a script"):
         """app: its name, as sentences and the cookie say it. permissions:
         the same as its Accounts'. user_default, key_default: what a new
-        person, a new key, may do unless told otherwise. package: its Python
-        package, when it isn't called as the app (songdrop's is app)."""
-        setup_command = f"docker exec {app} python -m {package or app}.admin setup-code"
+        person, a new key, may do unless told otherwise."""
+        setup_command = f"docker exec {app} admin setup-code"
         self.app = app
         self.permissions = permissions
         self.cookie = f"{app}_session"

@@ -21,4 +21,4 @@ KEY_DEFAULT = ["request"]
 
 def open_accounts(db) -> Accounts:
     """The accounts, in clipseerr's own database (db.py)."""
-    return Accounts(db, "clipseerr", PERMISSIONS, key_prefix="cs_", package="app")
+    return Accounts(db, "clipseerr", PERMISSIONS, key_prefix="cs_")

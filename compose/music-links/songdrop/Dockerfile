@@ -44,6 +44,10 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     SONGDROP_STATIC=/opt/songdrop/static \
     PYTHONPATH=/opt/batlab-common
+# `docker exec songdrop admin …`: its people and API keys from the shell (app/admin.py), the same
+# command in every app whatever its package is called.
+RUN printf '#!/bin/sh\nexec env PYTHONPATH=/opt/songdrop:/opt/batlab-common /opt/songdrop/.venv/bin/python -m app.admin "$@"\n' \
+      > /usr/local/bin/admin && chmod 755 /usr/local/bin/admin
 USER spotdl
 EXPOSE 8810
 ENTRYPOINT ["/opt/songdrop/.venv/bin/python", "-m", "app"]
@@ -63,6 +67,7 @@ RUN cd /opt/songdrop \
  && { { HOME=/tmp .venv/bin/python -m unittest discover -s tests \
         && HOME=/tmp .venv/bin/python -m unittest discover -s common-tests -p "test_[ae]*.py"; } \
       > /tmp/log 2>&1 || { tail -n 80 /tmp/log; exit 1; }; } \
+ && admin --help > /dev/null
  && grep -E "^(Ran|OK)" /tmp/log && touch /tmp/passed
 
 FROM app

@@ -1,11 +1,11 @@
 """songdrop's accounts from the server's shell (batlab_common/admin.py):
 
-    docker exec songdrop python -m app.admin setup-code
-    docker exec songdrop python -m app.admin users
-    docker exec -it songdrop python -m app.admin reset-password <user name>
-    docker exec songdrop python -m app.admin add-key <name> [--can download]
-    docker exec songdrop python -m app.admin keys
-    docker exec songdrop python -m app.admin remove-key <name>
+    docker exec songdrop admin setup-code
+    docker exec songdrop admin users
+    docker exec -it songdrop admin reset-password <user name>
+    docker exec songdrop admin add-key <name> [--can download]
+    docker exec songdrop admin keys
+    docker exec songdrop admin remove-key <name>
 """
 
 import sys

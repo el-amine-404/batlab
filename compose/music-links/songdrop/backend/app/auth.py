@@ -6,8 +6,7 @@ from batlab_common.web import Gate, RequestLog  # noqa: F401 (main.py's too)
 
 from .accounts import KEY_DEFAULT, PERMISSIONS
 
-gate = Gate("songdrop", PERMISSIONS, user_default=["download"], key_default=KEY_DEFAULT, key_for="clipseerr, a script",
-            package="app")
+gate = Gate("songdrop", PERMISSIONS, user_default=["download"], key_default=KEY_DEFAULT, key_for="clipseerr, a script")
 principal = gate.principal
 Who = gate.Who
 need = gate.need

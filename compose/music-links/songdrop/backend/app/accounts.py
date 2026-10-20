@@ -21,4 +21,4 @@ KEY_DEFAULT = ["download"]
 
 
 def open_accounts(state_dir: Path) -> Accounts:
-    return Accounts(Database(state_dir / "accounts.db"), "songdrop", PERMISSIONS, key_prefix="sd_", package="app")
+    return Accounts(Database(state_dir / "accounts.db"), "songdrop", PERMISSIONS, key_prefix="sd_")

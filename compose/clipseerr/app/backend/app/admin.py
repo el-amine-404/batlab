@@ -1,11 +1,11 @@
 """clipseerr's accounts from the server's shell (batlab_common/admin.py):
 
-    docker exec clipseerr python -m app.admin setup-code
-    docker exec clipseerr python -m app.admin users
-    docker exec -it clipseerr python -m app.admin reset-password <user name>
-    docker exec clipseerr python -m app.admin add-key <name> [--can request]
-    docker exec clipseerr python -m app.admin keys
-    docker exec clipseerr python -m app.admin remove-key <name>
+    docker exec clipseerr admin setup-code
+    docker exec clipseerr admin users
+    docker exec -it clipseerr admin reset-password <user name>
+    docker exec clipseerr admin add-key <name> [--can request]
+    docker exec clipseerr admin keys
+    docker exec clipseerr admin remove-key <name>
 """
 
 import sys

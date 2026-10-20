@@ -116,7 +116,7 @@ class Shell(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as folder:
             db = Database(Path(folder) / "accounts.db")
-            accounts = Accounts(db, "testapp", PERMISSIONS, key_prefix="ta_", package="app")
+            accounts = Accounts(db, "testapp", PERMISSIONS, key_prefix="ta_")
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 self.assertEqual(admin.run(accounts, ["download"], ["add-key", "reader", "--can", ""]), 0)
@@ -128,7 +128,7 @@ class Shell(unittest.TestCase):
             self.assertEqual(accounts.keys(), [])
             with contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(admin.run(accounts, ["download"], ["remove-key", "reader"]), 1)
-            self.assertEqual(accounts.setup_command, "docker exec testapp python -m app.admin setup-code")
+            self.assertEqual(accounts.setup_command, "docker exec testapp admin setup-code")
             db.close()
 
 

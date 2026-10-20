@@ -11,7 +11,7 @@ API's own description, so it is always exact. This page is the overview.
 | --- | --- |
 | Base URL | `http://songdrop.homelab.lan/api/v1` |
 | Format | JSON in and out, UTF-8. Times are Unix seconds (`1792008398.7`). |
-| Access | The home network only, and an API key: made in Settings → API keys (or `docker exec songdrop python -m app.admin add-key <name>`), sent as `X-Api-Key`. Each key sees its own downloads; only a key may ask for a `callback_url`. |
+| Access | The home network only, and an API key: made in Settings → API keys (or `docker exec songdrop admin add-key <name>`), sent as `X-Api-Key`. Each key sees its own downloads; only a key may ask for a `callback_url`. |
 | Description | `GET /api/v1/openapi.json` (OpenAPI 3). |
 | Versions | A change that breaks a caller goes to `/api/v2`; v1 keeps working. New fields may appear in any answer: ignore the ones you don't know. |
 

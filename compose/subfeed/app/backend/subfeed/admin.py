@@ -1,11 +1,11 @@
 """subfeed's accounts from the server's shell (batlab_common/admin.py):
 
-    docker exec subfeed python -m subfeed.admin setup-code
-    docker exec subfeed python -m subfeed.admin users
-    docker exec -it subfeed python -m subfeed.admin reset-password <user name>
-    docker exec subfeed python -m subfeed.admin add-key <name> [--can feeds]
-    docker exec subfeed python -m subfeed.admin keys
-    docker exec subfeed python -m subfeed.admin remove-key <name>
+    docker exec subfeed admin setup-code
+    docker exec subfeed admin users
+    docker exec -it subfeed admin reset-password <user name>
+    docker exec subfeed admin add-key <name> [--can feeds]
+    docker exec subfeed admin keys
+    docker exec subfeed admin remove-key <name>
 """
 
 import sys

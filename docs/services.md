@@ -147,7 +147,7 @@ service itself.
   without an account, as videodrop. People sign in on the page; apps send
   an API key (Settings → API keys, shown once, kept as a hash). Permissions:
   ask for downloads, see everyone's downloads (else only one's own), change settings, admin (people and keys). Downloads and the notifications name who asked ("Asked by …"); only a key may ask for a `callback_url`. Before anyone exists, the page makes the first admin with a
-  setup code from its log or `docker exec songdrop python -m app.admin
+  setup code from its log or `docker exec songdrop admin
   setup-code`; the same tool resets a password and makes or removes keys.
   clipseerr's key is `SONGDROP_CLIPSEERR_KEY`.
 - **Its way out**: yt-dlp's downloads go through the egress proxy
@@ -183,7 +183,7 @@ the service.
   without an account, as videodrop. People sign in on the page; apps send
   an API key (Settings → API keys, shown once, kept as a hash). Permissions:
   watching needs none; ask for songs and videos, see everyone's requests (else only one's own), change settings (services, notifications, libraries, Hot's picks), admin. Requests, their page and the notifications name who asked. The callbacks (`/hooks/…`) stay open: they only wake the engine, which asks the app itself. Before anyone exists, the page makes the first admin with a
-  setup code from its log or `docker exec clipseerr python -m app.admin
+  setup code from its log or `docker exec clipseerr admin
   setup-code`; the same tool resets a password and makes or removes keys.
   It calls songdrop and videodrop with their keys, and reads Hot's feed
   with subfeed's (`SUBFEED_CLIPSEERR_KEY`).
@@ -211,7 +211,7 @@ the service.
   without an account, as videodrop. People sign in on the page; apps send
   an API key (Settings → API keys, shown once, kept as a hash). Permissions:
   reading (feeds, posts, JSON Feed, Atom) needs none; manage feeds, change settings (and notifications), admin. A feed reader that can't send a header puts its key in the feed's address (`…/feed.json?key=…`); the addresses a feed writes into itself leave it out. Before anyone exists, the page makes the first admin with a
-  setup code from its log or `docker exec subfeed python -m subfeed.admin
+  setup code from its log or `docker exec subfeed admin
   setup-code`; the same tool resets a password and makes or removes keys.
   clipseerr's key is `SUBFEED_CLIPSEERR_KEY`, Homepage's
   `SUBFEED_HOMEPAGE_KEY`; both only read.
@@ -264,8 +264,8 @@ the service.
   only one's own), change settings, admin (people and keys). Downloads,
   their logs and the notifications name who asked. Only a key may ask for a
   callback. Before anyone exists, the page makes the first admin with a
-  setup code from videodrop's log or `docker exec videodrop python -m
-  videodrop.admin setup-code`; the same tool resets a password and makes
+  setup code from videodrop's log or `docker exec videodrop admin
+  setup-code`; the same tool resets a password and makes
   keys. clipseerr's key is `VIDEODROP_CLIPSEERR_KEY`, Homepage's (read only,
   everyone's counts) `VIDEODROP_HOMEPAGE_KEY`.
 - **Its way out** (`batlab_common/egress.py`): the downloads and link checks reach the

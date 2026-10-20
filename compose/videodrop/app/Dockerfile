@@ -43,6 +43,10 @@ RUN .venv/bin/python -m compileall -q videodrop /opt/batlab-common
 ENV VIDEODROP_STATIC=/opt/videodrop/static \
     PYTHONPATH=/opt/videodrop:/opt/batlab-common \
     PATH=/opt/videodrop/.venv/bin:$PATH
+# `docker exec videodrop admin …`: its people and API keys from the shell (videodrop/admin.py), the same
+# command in every app whatever its package is called.
+RUN printf '#!/bin/sh\nexec env PYTHONPATH=/opt/videodrop:/opt/batlab-common /opt/videodrop/.venv/bin/python -m videodrop.admin "$@"\n' \
+      > /usr/local/bin/admin && chmod 755 /usr/local/bin/admin
 USER 1000:1000
 EXPOSE 8840
 ENTRYPOINT ["/opt/videodrop/.venv/bin/python", "-m", "videodrop"]
@@ -56,6 +60,7 @@ COPY --from=common --chown=1000:1000 tests /tmp/videodrop-tests/common
 RUN cd /tmp/videodrop-tests \
  && { { HOME=/tmp python -m unittest discover -s tests && HOME=/tmp python -m unittest discover -s common -p "test_[ae]*.py"; } \
       > log 2>&1 || { tail -n 80 log; exit 1; }; } \
+ && admin --help > /dev/null
  && grep -E "^(Ran|OK)" log && touch passed
 
 FROM app

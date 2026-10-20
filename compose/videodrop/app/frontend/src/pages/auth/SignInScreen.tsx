@@ -188,7 +188,7 @@ function Setup() {
       <form onSubmit={submit} className="flex flex-col gap-4">
         <Field id="setup-code" label="Setup code"
                hint={<>12 letters and digits; the dashes are put in for you. It is in videodrop's log, or given by{" "}
-                       <code className="text-foreground">docker exec videodrop python -m videodrop.admin setup-code</code> on the server.</>}>
+                       <code className="text-foreground">docker exec videodrop admin setup-code</code> on the server.</>}>
           <div className="relative">
             <KeyRound className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input id="setup-code" className="pl-9 font-mono tracking-widest" placeholder="ABCD-EFGH-JKLM" autoComplete="off"

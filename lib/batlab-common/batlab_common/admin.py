@@ -1,13 +1,13 @@
 """An app's accounts (accounts.py) from the server's shell, for whoever runs
-it (the page does the rest). Each app's own `python -m <app>.admin` opens its
-accounts and calls run():
+it (the page does the rest). Each app's own admin module opens its accounts
+and calls run(); each image has an `admin` command that runs it:
 
-    docker exec <app> python -m <app>.admin setup-code
-    docker exec <app> python -m <app>.admin users
-    docker exec -it <app> python -m <app>.admin reset-password <user name>
-    docker exec <app> python -m <app>.admin add-key <name> [--can download]
-    docker exec <app> python -m <app>.admin keys
-    docker exec <app> python -m <app>.admin remove-key <name>
+    docker exec <app> admin setup-code
+    docker exec <app> admin users
+    docker exec -it <app> admin reset-password <user name>
+    docker exec <app> admin add-key <name> [--can download]
+    docker exec <app> admin keys
+    docker exec <app> admin remove-key <name>
 
 reset-password asks for the new password (or makes one with --generate and
 prints it); the person's sessions end. add-key prints the key, once.
@@ -28,8 +28,7 @@ def _when(at: float | None) -> str:
 
 def run(accounts: Accounts, key_default: list[str], argv: list[str] | None = None) -> int:
     app = accounts.app
-    prog = accounts.setup_command.removeprefix(f"docker exec {app} ").removesuffix(" setup-code")
-    parser = argparse.ArgumentParser(prog=prog, description=f"{app}'s people and API keys.")
+    parser = argparse.ArgumentParser(prog="admin", description=f"{app}'s people and API keys.")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("setup-code", help="the code that makes the first admin, while nobody exists")
     commands.add_parser("users", help="the people, what they may do, when they last signed in")

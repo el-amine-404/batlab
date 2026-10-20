@@ -28,6 +28,10 @@ RUN .venv/bin/python -m compileall -q subfeed /opt/batlab-common
 ENV SUBFEED_STATIC=/opt/subfeed/static \
     PYTHONPATH=/opt/subfeed:/opt/batlab-common \
     PATH=/opt/subfeed/.venv/bin:$PATH
+# `docker exec subfeed admin …`: its people and API keys from the shell (subfeed/admin.py), the same
+# command in every app whatever its package is called.
+RUN printf '#!/bin/sh\nexec env PYTHONPATH=/opt/subfeed:/opt/batlab-common /opt/subfeed/.venv/bin/python -m subfeed.admin "$@"\n' \
+      > /usr/local/bin/admin && chmod 755 /usr/local/bin/admin
 USER 1000:1000
 EXPOSE 8830
 ENTRYPOINT ["/opt/subfeed/.venv/bin/python", "-m", "subfeed"]
@@ -41,6 +45,7 @@ COPY --from=common --chown=1000:1000 tests /tmp/subfeed-tests/common
 RUN cd /tmp/subfeed-tests \
  && { { HOME=/tmp python -m unittest discover -s tests && HOME=/tmp python -m unittest discover -s common -p "test_[ae]*.py"; } \
       > log 2>&1 || { tail -n 80 log; exit 1; }; } \
+ && admin --help > /dev/null
  && grep -E "^(Ran|OK)" log && touch passed
 
 FROM app
