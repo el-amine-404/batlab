@@ -11,7 +11,7 @@ API's own description, so it is always exact. This page is the overview.
 | --- | --- |
 | Base URL | `http://songdrop.homelab.lan/api/v1` |
 | Format | JSON in and out, UTF-8. Times are Unix seconds (`1792008398.7`). |
-| Access | The home network only. No key or login. |
+| Access | The home network only, and an API key: made in Settings → API keys (or `docker exec songdrop python -m app.admin add-key <name>`), sent as `X-Api-Key`. Each key sees its own downloads; only a key may ask for a `callback_url`. |
 | Description | `GET /api/v1/openapi.json` (OpenAPI 3). |
 | Versions | A change that breaks a caller goes to `/api/v2`; v1 keeps working. New fields may appear in any answer: ignore the ones you don't know. |
 
@@ -37,16 +37,16 @@ Every error is a status code and a sentence a person can read:
 
 ```bash
 # 1. Start a job
-curl -s -X POST http://songdrop.homelab.lan/api/v1/jobs \
+curl -s -X POST http://songdrop.homelab.lan/api/v1/jobs -H "X-Api-Key: $KEY" \
   -H 'Content-Type: application/json' \
   -d '{"url": "https://open.spotify.com/track/3v3STGBmaci4IJQRlC2V1z"}'
 # → 201 {"id": "9b082a7de1bc42efb37b088312b869e3", "status": "queued", …}
 
 # 2. Ask until "status" is done, partial, failed or cancelled
-curl -s http://songdrop.homelab.lan/api/v1/jobs/9b082a7de1bc42efb37b088312b869e3
+curl -s -H "X-Api-Key: $KEY" http://songdrop.homelab.lan/api/v1/jobs/9b082a7de1bc42efb37b088312b869e3
 
 # 3. Download a song: each file has its own "url"
-curl -OJ http://songdrop.homelab.lan/api/v1/jobs/9b082a7de1bc42efb37b088312b869e3/files/4f1c2a9e0b7d
+curl -OJ -H "X-Api-Key: $KEY" http://songdrop.homelab.lan/api/v1/jobs/9b082a7de1bc42efb37b088312b869e3/files/4f1c2a9e0b7d
 ```
 
 `options` in step 1 changes how this one link is downloaded; what you leave out

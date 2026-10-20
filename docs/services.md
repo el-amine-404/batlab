@@ -31,7 +31,7 @@ Every service with an HTTP API:
 | Health | `GET /api/v1/health` → `200 {"ok": true}` when the service can do its job. |
 | Errors | A 4xx or 5xx status with `{"detail": "<sentence a person can read>"}`. |
 | Formats | JSON in and out, UTF-8. Times are Unix seconds (`1792008398.7`). |
-| Access | LAN only, through Caddy (`localSubnets`). No login inside the house network today; an API key per caller (`X-Api-Key`) comes before any service is reachable from outside it. |
+| Access | LAN only, through Caddy (`localSubnets`), and everyone known: a person signed in on the page (a session cookie), or an app with an API key of its own (`X-Api-Key`, or `Authorization: Bearer`). Only health, signing in and callbacks that just wake a service are open. Each person and key has permissions (`lib/batlab-common`: `accounts`, `web`). |
 | Long work | Returns at once with a job and its `id`. The caller polls `GET …/jobs/{id}` or passes a `callback_url`, which receives the job when it ends. |
 | Settings | `GET` and `PATCH /api/v1/settings` (only the fields to change). The environment gives the first values; changes made through the API are kept in the service's state folder and win over the environment. Secrets are write-only: the API says whether one is set, never what it is. |
 
@@ -116,8 +116,13 @@ Event names are `<thing>.<what happened>`:
 `lib/batlab-common` is the Python package every service of this repository
 may use: whether two titles name one song and which version (`titles`:
 remix, live…), audio fingerprints (`fingerprint`), Spotify's and Apple's
-previews (`previews`), and Apprise (`notify`). Standard library only, so it
-also runs in spotDL's environment. Images get it through compose's build
+previews (`previews`), Apprise (`notify`), each web app's people and API
+keys (`accounts`; `web`, the FastAPI side: who asks, the sign-in, people
+and key routes; `admin`, the shell commands), what an address is called
+on the network (`netnames`) and the egress proxy (`egress`). Standard
+library only, `web` aside (FastAPI, only the web servers import it), so it
+also runs in spotDL's environment. The web apps' image builds run its
+accounts and egress tests. Images get it through compose's build
 context `common` (`additional_contexts`) on `PYTHONPATH`; a mounted script
 (camwatch) mounts it; the host's scripts (updater, watchdog, vpnguard,
 dubkeeper, subtranslate, mediascan) load it from the checkout. Its tests: `python3 -m unittest discover -s
@@ -138,7 +143,20 @@ service itself.
 - **Plugs in through**: its API (a music browsing app calls
   `POST /api/v1/jobs`); its output folder (a hand-off folder; musicguard's
   inbox in this stack); its events.
-- **Owns**: `$VOLUMES_ROOT/songdrop/jobs` (jobs, settings, connections, cookies).
+- **Who may use it** (`app/accounts.py, app/auth.py`, the shared `accounts` and `web`): nobody
+  without an account, as videodrop. People sign in on the page; apps send
+  an API key (Settings → API keys, shown once, kept as a hash). Permissions:
+  ask for downloads, see everyone's downloads (else only one's own), change settings, admin (people and keys). Downloads and the notifications name who asked ("Asked by …"); only a key may ask for a `callback_url`. Before anyone exists, the page makes the first admin with a
+  setup code from its log or `docker exec songdrop python -m app.admin
+  setup-code`; the same tool resets a password and makes or removes keys.
+  clipseerr's key is `SONGDROP_CLIPSEERR_KEY`.
+- **Its way out**: yt-dlp's downloads go through the egress proxy
+  (`batlab_common/egress.py`, as videodrop's): the internet, never the home
+  network. spotDL's don't: it only ever gets Spotify's links, and reaches
+  Spotify, YouTube Music and the lyrics sites.
+- **Tests**: the image's build runs them; a failing one fails `make up`.
+- **Owns**: `$VOLUMES_ROOT/songdrop/jobs` (jobs, settings, connections, cookies, and
+  `accounts.db`, the people and keys).
 - **Not its job**: naming and tagging songs, lyrics, filing into a library
   (musicguard and Stanzarr).
 
@@ -161,6 +179,15 @@ the service.
   libraries (Navidrome, a folder: what is there already), Hot's feeds (any
   JSON Feed: subfeed's here), its API (`/api/v1`: requests, the catalog,
   settings).
+- **Who may use it** (`app/accounts.py, app/auth.py`, the shared `accounts` and `web`): nobody
+  without an account, as videodrop. People sign in on the page; apps send
+  an API key (Settings → API keys, shown once, kept as a hash). Permissions:
+  watching needs none; ask for songs and videos, see everyone's requests (else only one's own), change settings (services, notifications, libraries, Hot's picks), admin. Requests, their page and the notifications name who asked. The callbacks (`/hooks/…`) stay open: they only wake the engine, which asks the app itself. Before anyone exists, the page makes the first admin with a
+  setup code from its log or `docker exec clipseerr python -m app.admin
+  setup-code`; the same tool resets a password and makes or removes keys.
+  It calls songdrop and videodrop with their keys, and reads Hot's feed
+  with subfeed's (`SUBFEED_CLIPSEERR_KEY`).
+- **Tests**: the image's build runs them; a failing one fails `make up`.
 - **Owns**: `$VOLUMES_ROOT/clipseerr` (one SQLite database).
 - **Not its job**: downloading, checking or filing anything.
 
@@ -180,6 +207,15 @@ the service.
   unchanged feed with a bodyless 304), its API (`/api/v1`: feeds, posts,
   settings, notifications) and its events (Apprise, Discord, Webhook).
   clipseerr's Hot reads r/SexyMusicVideos' JSON Feed.
+- **Who may use it** (`subfeed/accounts.py, subfeed/api/auth.py`, the shared `accounts` and `web`): nobody
+  without an account, as videodrop. People sign in on the page; apps send
+  an API key (Settings → API keys, shown once, kept as a hash). Permissions:
+  reading (feeds, posts, JSON Feed, Atom) needs none; manage feeds, change settings (and notifications), admin. A feed reader that can't send a header puts its key in the feed's address (`…/feed.json?key=…`); the addresses a feed writes into itself leave it out. Before anyone exists, the page makes the first admin with a
+  setup code from its log or `docker exec subfeed python -m subfeed.admin
+  setup-code`; the same tool resets a password and makes or removes keys.
+  clipseerr's key is `SUBFEED_CLIPSEERR_KEY`, Homepage's
+  `SUBFEED_HOMEPAGE_KEY`; both only read.
+- **Tests**: the image's build runs them; a failing one fails `make up`.
 - **Owns**: `$VOLUMES_ROOT/subfeed` (one SQLite database, mode 600).
 - **Not its job**: deciding what a post is worth, or checking what it links
   to; downloading anything.
@@ -219,7 +255,7 @@ the service.
   callers name one, never a path) and its events (Apprise, Discord,
   Webhook). clipseerr sends "get the video" to the `music-videos`
   destination.
-- **Who may use it** (`accounts.py`, `api/auth.py`): nobody without an
+- **Who may use it** (`accounts.py`, `api/auth.py`; the shared `accounts` and `web`): nobody without an
   account. People sign in on the page (scrypt-hashed passwords, an HttpOnly
   SameSite session cookie that ends after 30 days unused; wrong passwords
   slow down after five); apps send an API key (`X-Api-Key`, made in
@@ -232,7 +268,7 @@ the service.
   videodrop.admin setup-code`; the same tool resets a password and makes
   keys. clipseerr's key is `VIDEODROP_CLIPSEERR_KEY`, Homepage's (read only,
   everyone's counts) `VIDEODROP_HOMEPAGE_KEY`.
-- **Its way out** (`egress.py`): the downloads and link checks reach the
+- **Its way out** (`batlab_common/egress.py`): the downloads and link checks reach the
   internet only, through a proxy on the loopback that resolves each host
   itself, refuses any that points inside (a private, loopback, link-local
   or CGNAT address, even once), and connects to the address it checked, so
