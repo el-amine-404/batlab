@@ -67,7 +67,7 @@ RUN cd /opt/songdrop \
  && { { HOME=/tmp .venv/bin/python -m unittest discover -s tests \
         && HOME=/tmp .venv/bin/python -m unittest discover -s common-tests -p "test_[ae]*.py"; } \
       > /tmp/log 2>&1 || { tail -n 80 /tmp/log; exit 1; }; } \
- && admin --help > /dev/null
+ && admin --help > /dev/null \
  && grep -E "^(Ran|OK)" /tmp/log && touch /tmp/passed
 
 FROM app

@@ -60,7 +60,7 @@ COPY --from=common --chown=1000:1000 tests /tmp/videodrop-tests/common
 RUN cd /tmp/videodrop-tests \
  && { { HOME=/tmp python -m unittest discover -s tests && HOME=/tmp python -m unittest discover -s common -p "test_[ae]*.py"; } \
       > log 2>&1 || { tail -n 80 log; exit 1; }; } \
- && admin --help > /dev/null
+ && admin --help > /dev/null \
  && grep -E "^(Ran|OK)" log && touch passed
 
 FROM app
