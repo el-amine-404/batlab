@@ -12,6 +12,7 @@ readonly NO_HEALTHCHECK_GRACE="${UPDATER_NO_HEALTHCHECK_GRACE:-60}"
 readonly BRANCH="${UPDATER_BRANCH:-main}"
 readonly DRY_RUN="${UPDATER_DRY_RUN:-0}"
 readonly NOTIFY="${UPDATER_NOTIFY:-1}"
+PULLED_FROM=""
 
 cd "$REPO_DIR"
 install -d -m 700 "$STATE_DIR"
@@ -77,11 +78,49 @@ sync_repository() {
     exit 1
   fi
   git fetch --quiet origin "$BRANCH"
+  PULLED_FROM="$(git rev-parse HEAD)"
   if ! git merge --ff-only --quiet "origin/$BRANCH"; then
     notify alerts "Updater skipped: cannot fast-forward" failure \
       "Fix" "cd ~/batlab && git status && git pull"
     exit 1
   fi
+}
+
+# A file bind-mounted from the checkout keeps the inode it had when its
+# container started, and git replaces a file it changes: the container goes on
+# reading the old copy until it is recreated. Netdata sent its old cards for
+# days that way (2026-10-20). Restarts each running container with a bind
+# mount from the checkout that the pull changed, file or directory.
+restart_changed_mounts() {
+  local from="$1" repo container source file
+  repo="$(readlink -f "$REPO_DIR")"
+  [[ -n "$from" && "$from" != "$(git rev-parse HEAD)" ]] || return 0
+  mapfile -t changed < <(git diff --name-only "$from" HEAD)
+  ((${#changed[@]})) || return 0
+
+  for container in $(docker ps --format '{{.Names}}'); do
+    local hits=()
+    while read -r source; do
+      [[ -n "$source" ]] || continue
+      source="$(readlink -f "$source" 2>/dev/null)" || continue
+      [[ "$source" == "$repo"/* ]] || continue
+      for file in "${changed[@]}"; do
+        [[ "$repo/$file" == "$source" || "$repo/$file" == "$source"/* ]] && hits+=("$file")
+      done
+    done < <(docker inspect -f '{{range .Mounts}}{{if eq .Type "bind"}}{{println .Source}}{{end}}{{end}}' "$container")
+    ((${#hits[@]})) || continue
+
+    echo "Restarting $container: ${hits[*]} changed"
+    [[ "$DRY_RUN" == "1" ]] && continue
+    if docker restart "$container" >/dev/null && wait_until_healthy "$container" >/dev/null; then
+      notify updates "Restarted $container for its changed configuration" success \
+        "Changed" "$(printf '%s\n' "${hits[@]}" | sort -u | head -5)"
+    else
+      notify alerts "Restart failed: $container" failure \
+        "Changed" "$(printf '%s\n' "${hits[@]}" | sort -u | head -5)" \
+        "Logs" "docker logs --tail 50 $container"
+    fi
+  done
 }
 
 wait_until_healthy() {
@@ -194,6 +233,7 @@ main() {
     echo "Dry run: not pulling, only comparing running images with the checkout."
   else
     sync_repository
+    restart_changed_mounts "$PULLED_FROM"
   fi
 
   mapfile -t allowed < <(grep -vE '^\s*(#|$)' "$SCRIPT_DIR/../conf/auto-services.txt")
