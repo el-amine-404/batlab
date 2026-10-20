@@ -128,7 +128,7 @@ class Notify(unittest.TestCase):
         # Django takes 2.5 MB of JSON at most: a clip in base64 was refused.
         clip = os.urandom(3_000_000)
         notify.send(self.endpoint, "", "***Ford spot · car left***", tag="cameras",
-                    attach=[("spot_2.jpg", b"\xff\xd8jpeg"), ("spot_2.mp4", clip)])
+                    attach=[("spot_2.jpg", b"\xff\xd8jpeg"), ("street.jpg", None), ("spot_2.mp4", clip)])
         path, body = Apprise.received[0]
         self.assertEqual({k: v for k, v in body.items() if k != "files"},
                          {"title": "", "body": "***Ford spot · car left***", "type": "info",

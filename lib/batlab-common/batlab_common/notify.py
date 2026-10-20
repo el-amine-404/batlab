@@ -52,6 +52,7 @@ def send(endpoint, title, body, tag=None, kind="info", timeout=15, attach=()):
     payload = {"title": title[:250], "body": body[:MAX_BODY], "type": kind, "format": "markdown"}
     if tag:
         payload["tag"] = tag
+    attach = [(name, data) for name, data in attach if data]  # a picture that couldn't be had
     if attach:
         # Files as a form, not base64 in JSON: Django caps a JSON body at
         # 2.5 MB (Apprise 2.0's APPRISE_UPLOAD_MAX_MEMORY_SIZE does not reach
