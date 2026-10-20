@@ -8,7 +8,8 @@ import ipaddress
 import re
 import urllib.parse
 
-from . import egress
+from batlab_common import egress
+
 from .domain import Invalid
 
 _YOUTUBE_ID = re.compile(r"^[\w-]{11}$")

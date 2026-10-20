@@ -14,7 +14,8 @@ _known: dict[str, tuple[float, str | None]] = {}
 _lock = threading.Lock()
 
 
-def name_of(address: str | None, resolve=socket.gethostbyaddr) -> str | None:
+def name_of(address: str | None, resolve=socket.gethostbyaddr, itself: str = "this app") -> str | None:
+    """itself: what the loopback is called (the app, "videodrop itself")."""
     if not address:
         return None
     try:
@@ -22,7 +23,7 @@ def name_of(address: str | None, resolve=socket.gethostbyaddr) -> str | None:
     except ValueError:
         return None
     if ip.is_loopback:
-        return "videodrop itself"
+        return itself
     with _lock:
         found = _known.get(address)
     if found and found[0] > time.time():

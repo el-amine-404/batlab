@@ -39,9 +39,5 @@ class Invalid(ValueError):
     """The message is shown as is."""
 
 
-class Unauthorized(PermissionError):
-    """Nobody known asks (401): sign in, or give an API key."""
-
-
 class Forbidden(PermissionError):
     """Someone known asks for what they may not do (403). The message says what."""

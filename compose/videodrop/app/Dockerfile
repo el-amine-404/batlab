@@ -47,13 +47,16 @@ USER 1000:1000
 EXPOSE 8840
 ENTRYPOINT ["/opt/videodrop/.venv/bin/python", "-m", "videodrop"]
 
-# The tests, against the image as built: a failing test fails the build, so
-# `make up` never deploys it. The image keeps none of them, only the mark.
+# The tests, against the image as built: videodrop's, and batlab-common's of
+# the accounts and the egress proxy it runs on. A failing test fails the
+# build, so `make up` never deploys it. The image keeps none of them, only the mark.
 FROM app AS tested
 COPY --chown=1000:1000 backend/tests /tmp/videodrop-tests/tests
+COPY --from=common --chown=1000:1000 tests /tmp/videodrop-tests/common
 RUN cd /tmp/videodrop-tests \
- && { HOME=/tmp python -m unittest discover -s tests > log 2>&1 || { tail -n 80 log; exit 1; }; } \
- && tail -n 3 log && touch passed
+ && { { HOME=/tmp python -m unittest discover -s tests && HOME=/tmp python -m unittest discover -s common -p "test_[ae]*.py"; } \
+      > log 2>&1 || { tail -n 80 log; exit 1; }; } \
+ && grep -E "^(Ran|OK)" log && touch passed
 
 FROM app
 COPY --from=tested /tmp/videodrop-tests/passed /opt/videodrop/.tests-passed

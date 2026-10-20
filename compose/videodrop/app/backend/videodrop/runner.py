@@ -129,11 +129,11 @@ def main() -> int:
     emit = Emitter(_stdout_for_events())
     config = json.loads(sys.stdin.readline())
     if config.get("proxy"):
-        from . import egress
+        from batlab_common import egress
 
         # The internet through the proxy, nothing else: for yt-dlp, ffmpeg, Deno and the lyrics alike.
         os.environ.update(egress.environment(config["proxy"]))
-        egress.lock(config["proxy"])
+        egress.lock(config["proxy"], "videodrop")
 
     import yt_dlp
     from yt_dlp.postprocessor.common import PostProcessor

@@ -52,9 +52,7 @@ export interface paths {
         put?: never;
         /**
          * Make the first account, an admin, with the setup code
-         * @description Only while nobody exists. The code is in videodrop's log, and given by
-         *     `docker exec videodrop python -m videodrop.admin setup-code`. Signs the
-         *     new admin in.
+         * @description Only while nobody exists. The code is in videodrop's log, and given by `docker exec videodrop python -m videodrop.admin setup-code`. Signs the new admin in.
          */
         post: operations["setup_api_v1_auth_setup_post"];
         delete?: never;
@@ -793,7 +791,7 @@ export interface paths {
             cookie?: never;
         };
         /** Who this is, and their sessions */
-        get: operations["me_api_v1_auth_me_get"];
+        get: operations["get_me_api_v1_auth_me_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -865,7 +863,7 @@ export interface paths {
         get: operations["get_user_api_v1_users__user_id__get"];
         put?: never;
         post?: never;
-        /** Remove someone; their downloads stay */
+        /** Remove someone; what they asked for stays */
         delete: operations["remove_user_api_v1_users__user_id__delete"];
         options?: never;
         head?: never;
@@ -967,7 +965,7 @@ export interface components {
         ApiKeyIn: {
             /**
              * Name
-             * @description The app it is for: clipseerr, homepage…
+             * @description The app it is for: clipseerr, Homepage, a script…
              */
             name: string;
             /** Permissions */
@@ -2582,7 +2580,7 @@ export interface components {
              * @description Every client that asked for a download.
              */
             clients: string[];
-            /** @description The downloads' way out (egress.py), since the start. */
+            /** @description The downloads' way out (batlab_common/egress.py), since the start. */
             egress: components["schemas"]["EgressStatus"];
         };
         /** TemplateFields */
@@ -4594,7 +4592,7 @@ export interface operations {
             };
         };
     };
-    me_api_v1_auth_me_get: {
+    get_me_api_v1_auth_me_get: {
         parameters: {
             query?: never;
             header?: never;

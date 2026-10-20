@@ -12,9 +12,10 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 
 import httpx
+from batlab_common.egress import Proxy
 
 from . import links, outbound, placement
-from .accounts import Accounts, Principal
+from .accounts import Accounts, Principal, open_accounts
 from .broker import Broker
 from .callbacks import Callbacks
 from .config import Config
@@ -26,7 +27,6 @@ from .jobs import JobIn, JobStore, section_text
 from .journal import Journal
 from .notifications import TYPES, NotificationStore, Notifier
 from .options import DEFAULT_TEMPLATE, OptionsPatch, Section, VideoOptions, resolve, to_output_template
-from .egress import Proxy
 from .previews import Previews
 from .prober import Prober
 from .scheduler import Scheduler
@@ -259,8 +259,8 @@ def build(config: Config, http: httpx.AsyncClient | None = None) -> Services:
     journal = Journal(db)
     jobs.hold_from(lambda: settings().hold_hours)
     callbacks = Callbacks(http, lambda job_id, last: _record_callback(jobs, journal, job_id, last))
-    # The downloads' and link checks' only way out (egress.py).
-    egress = Proxy()
+    # The downloads' and link checks' only way out (batlab_common/egress.py).
+    egress = Proxy(name="videodrop")
     proxy = egress.start()
     scheduler = Scheduler(config, jobs, settings, notifier.emit, callbacks, broker.publish, journal, proxy)
     jobs.live_from(scheduler.live)
@@ -277,7 +277,7 @@ def build(config: Config, http: httpx.AsyncClient | None = None) -> Services:
                     notifications=notifications, notifier=notifier, broker=broker, callbacks=callbacks,
                     scheduler=scheduler, prober=Prober(config.state_dir, config.deno, config.prober, proxy),
                     releases=releases, issues=issues, previews=previews, journal=journal,
-                    sites=Sites(config.state_dir, http), egress=egress, accounts=Accounts(db))
+                    sites=Sites(config.state_dir, http), egress=egress, accounts=open_accounts(db))
 
 
 def _record_callback(jobs: JobStore, journal: Journal, job_id: str, last: dict) -> None:

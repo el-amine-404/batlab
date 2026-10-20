@@ -32,7 +32,7 @@ from videodrop.scheduler import TRANSIENT, backoff  # noqa: E402
 from videodrop.services import build  # noqa: E402
 from videodrop.runner import StepWatch  # noqa: E402
 from videodrop.ytdlp import fingerprint, params  # noqa: E402
-from videodrop import egress  # noqa: E402
+from batlab_common import egress  # noqa: E402
 
 
 async def _resolve(host: str, port: int) -> list[str]:
@@ -490,26 +490,6 @@ class AuthTests(unittest.TestCase):
             p.read_bytes() for p in Path(self.services.config.database).parent.glob("*.db-wal"))
         for secret in (token, key, "a long password"):
             self.assertNotIn(secret.encode(), raw)
-
-
-class AddressNames(unittest.TestCase):
-    def test_an_address_is_named_by_the_network(self):
-        from videodrop import net
-
-        names = {"172.19.10.30": "homepage.home_server", "192.168.1.20": "pixel-7.lan", "8.8.8.8": "dns.google"}
-
-        def resolve(address):
-            if address not in names:
-                raise OSError("no name")
-            return names[address], [], [address]
-
-        self.assertEqual(net.name_of("172.19.10.30", resolve), "homepage")
-        self.assertEqual(net.name_of("192.168.1.20", resolve), "pixel-7")
-        self.assertEqual(net.name_of("8.8.8.8", resolve), "dns.google")
-        self.assertEqual(net.name_of("127.0.0.1", resolve), "videodrop itself")
-        self.assertIsNone(net.name_of("10.9.9.9", resolve))
-        self.assertIsNone(net.name_of("testclient", resolve))
-        self.assertIsNone(net.name_of(None, resolve))
 
 
 class Seed(unittest.TestCase):

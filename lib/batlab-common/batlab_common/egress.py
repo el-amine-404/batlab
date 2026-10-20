@@ -1,5 +1,5 @@
-"""The only way out for what a link makes videodrop fetch: an HTTP proxy on
-the loopback that connects to the internet and nowhere else.
+"""The only way out for what a link makes an app fetch (videodrop, songdrop):
+an HTTP proxy on the loopback that connects to the internet and nowhere else.
 
 A link's host is a name, and a name can point anywhere: at an address on this
 network, or at one address when it is checked and another when it is fetched
@@ -8,11 +8,11 @@ proxy resolves the name itself, refuses it when any of its addresses isn't a
 public one (a private range, the loopback, link-local, CGNAT, multicast…),
 and connects to the very address it checked.
 
-The download and link-check processes (runner.py, probe.py) are handed its
-address: yt-dlp sends every request through it (curl_cffi too), ffmpeg gets
-it and only web protocols, and lock() refuses any other connection the
-process's Python makes. HTTPS goes through as CONNECT tunnels (the proxy sees
-the host, never the content); plain HTTP as one request per connection.
+The processes that fetch links are handed its address: yt-dlp sends every
+request through it (curl_cffi too), ffmpeg gets it and only web protocols
+(FFMPEG_PROTOCOLS), and lock() refuses any other connection the process's
+Python makes. HTTPS goes through as CONNECT tunnels (the proxy sees the host,
+never the content); plain HTTP as one request per connection.
 """
 
 import asyncio
@@ -23,7 +23,7 @@ import threading
 import time
 import urllib.parse
 
-log = logging.getLogger("videodrop.egress")
+log = logging.getLogger("egress")
 
 HEAD_LIMIT = 32 * 1024
 HEAD_TIMEOUT = 30
@@ -106,8 +106,10 @@ class Proxy:
     """The proxy, on its own thread and event loop: the bytes of the
     downloads never wait on the API's loop, nor it on them."""
 
-    def __init__(self, resolver=resolve):
+    def __init__(self, resolver=resolve, name: str = "egress"):
+        """name: the app's, which its refusals start with ("songdrop: … not the internet")."""
         self._resolve = resolver
+        self.name = name
         self._loop: asyncio.AbstractEventLoop | None = None
         self._server: asyncio.Server | None = None
         self._ready = threading.Event()
@@ -210,14 +212,13 @@ class Proxy:
                 last = exc
         raise ConnectionError(f"couldn't connect: {last}")
 
-    @staticmethod
-    async def _answer(writer: asyncio.StreamWriter, status: int, reason: str) -> None:
+    async def _answer(self, writer: asyncio.StreamWriter, status: int, reason: str) -> None:
         text = reason.replace("\r", " ").replace("\n", " ")[:300]
         phrase = {400: "Bad Request", 403: "Forbidden", 502: "Bad Gateway", 503: "Service Unavailable"}[status]
-        body = f"videodrop: {text}\n".encode()
+        body = f"{self.name}: {text}\n".encode()
         try:
             writer.write(f"HTTP/1.1 {status} {phrase}\r\nContent-Type: text/plain\r\nContent-Length: {len(body)}\r\n"
-                         f"Connection: close\r\nX-Videodrop-Refused: {text}\r\n\r\n".encode("latin-1", "replace") + body)
+                         f"Connection: close\r\nX-Egress-Refused: {text}\r\n\r\n".encode("latin-1", "replace") + body)
             await writer.drain()
         except (ConnectionError, OSError):
             pass
@@ -237,7 +238,7 @@ def environment(proxy: str) -> dict[str, str]:
 FFMPEG_PROTOCOLS = "http,https,tls,tcp,httpproxy,crypto,data"
 
 
-def lock(proxy: str) -> None:
+def lock(proxy: str, name: str = "egress") -> None:
     """From now on, this process's sockets connect to the proxy only (and to
     local Unix sockets): a library that ignores the proxy fails instead of
     reaching out. DNS lookups stay (they only say a name)."""
@@ -250,7 +251,7 @@ def lock(proxy: str) -> None:
         if sock.family == getattr(socket, "AF_UNIX", None):
             return
         if not isinstance(address, tuple) or (address[0], address[1]) != allowed:
-            raise ConnectionRefusedError(f"videodrop: connections go through its proxy, not to {address!r}")
+            raise ConnectionRefusedError(f"{name}: connections go through its proxy, not to {address!r}")
 
     def connect(sock, address):
         check(sock, address)

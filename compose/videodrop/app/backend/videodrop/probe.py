@@ -96,10 +96,10 @@ def main() -> int:
     sys.stdout = sys.stderr
     config = json.load(sys.stdin)
     if config.get("proxy"):
-        from . import egress
+        from batlab_common import egress
 
         os.environ.update(egress.environment(config["proxy"]))
-        egress.lock(config["proxy"])
+        egress.lock(config["proxy"], "videodrop")
 
     import yt_dlp
     from yt_dlp.utils import DownloadError

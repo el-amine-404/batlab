@@ -5,7 +5,8 @@ import hashlib
 import json
 from pathlib import Path
 
-from .egress import FFMPEG_PROTOCOLS
+from batlab_common.egress import FFMPEG_PROTOCOLS
+
 from .options import VideoOptions
 
 _CODECS = {"h264": "vcodec:h264", "h265": "vcodec:h265", "vp9": "vcodec:vp9", "av1": "vcodec:av01"}
@@ -80,7 +81,7 @@ def params(options: VideoOptions, output: str, work_dir: Path, *, rate_limit: fl
     if deno:
         result["js_runtimes"] = {"deno": {"path": deno}}
     if proxy:
-        # Every request through videodrop's egress proxy (egress.py); ffmpeg, when it downloads, too, and
+        # Every request through videodrop's egress proxy (batlab_common/egress.py); ffmpeg, when it downloads, too, and
         # only over the web: no file, rtmp, rtsp or udp it would reach on its own.
         result["proxy"] = proxy
         result["external_downloader_args"] = {"ffmpeg_i": ["-protocol_whitelist", FFMPEG_PROTOCOLS]}

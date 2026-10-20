@@ -21,11 +21,10 @@ from starlette.datastructures import MutableHeaders
 
 from .. import __version__, problems
 from ..config import load
-from ..domain import Conflict, Forbidden, Gone, Invalid, NotFound, Unauthorized
+from ..domain import Conflict, Forbidden, Gone, Invalid, NotFound
 from ..services import Services, build
-from .auth import principal
+from .auth import gate, principal
 from .routes import PUBLIC, ROUTERS
-from .routes.auth import TooSoon
 
 log = logging.getLogger("videodrop")
 
@@ -195,6 +194,8 @@ def create_app(services: Services) -> FastAPI:
     app = FastAPI(title="videodrop", version=__version__, description=DESCRIPTION, docs_url=None, redoc_url=None,
                   openapi_url="/api/v1/openapi.json", openapi_tags=TAGS, lifespan=lifespan)
     app.state.services = services
+    # People and keys (api/auth.py): their refusals answered, the accounts the routes use.
+    gate.install(app, services.accounts)
     app.add_middleware(CompressSome)
     app.add_middleware(Headers)
     app.add_middleware(RequestLog)
@@ -210,18 +211,6 @@ def create_app(services: Services) -> FastAPI:
 
     for kind, status in ((NotFound, 404), (Conflict, 409), (Invalid, 422), (Forbidden, 403)):
         app.add_exception_handler(kind, lambda _request, exc, status=status: _error(status, str(exc)))
-
-    @app.exception_handler(TooSoon)
-    async def too_soon(_request: Request, exc: TooSoon):
-        response = _error(429, str(exc))
-        response.headers["Retry-After"] = str(exc.seconds)
-        return response
-
-    @app.exception_handler(Unauthorized)
-    async def unauthorized(_request: Request, exc: Unauthorized):
-        response = _error(401, str(exc))
-        response.headers["WWW-Authenticate"] = 'ApiKey header="X-Api-Key"'
-        return response
 
     @app.exception_handler(Gone)
     async def gone(_request: Request, exc: Gone):
