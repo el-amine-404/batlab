@@ -162,7 +162,7 @@ class Notify(unittest.TestCase):
         self.assertTrue(posted["username"].startswith("netdata on "))
         card = posted["embeds"][0]
         self.assertEqual((card["title"], card["description"], card["color"], card["url"]),
-                         ("Disk full", "**Value**\n98%", 15158332, "http://netdata.homelab.lan"))
+                         ("Disk full", "**Value**  98%", notify.COLOURS["failure"], "http://netdata.homelab.lan"))
 
     def test_no_fallback_when_apprise_answered(self):
         Apprise.status = 424

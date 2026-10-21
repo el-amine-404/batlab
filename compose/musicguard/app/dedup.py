@@ -63,7 +63,8 @@ def compare(a, b, alike):
         return None
     versions = titles.version(a.first("title")), titles.version(b.first("title"))
     if versions[0] != versions[1]:
-        named = " and ".join(" ".join(v) or "original" for v in versions)
+        # The original first, whichever of the two was found first.
+        named = " and ".join(sorted((" ".join(v) or "original" for v in versions), key=lambda n: (n != "original", n)))
         return f"two versions of one song ({named})"
     gap = abs(a.seconds - b.seconds)
     if gap <= SAME_LENGTH:
