@@ -6,6 +6,7 @@ import { type Counter, PAGES, SETTINGS, shown } from "@/app/navigation";
 import { Logo } from "@/components/Logo";
 import { api } from "@/lib/api";
 import { signOut, useCan, useMe } from "@/lib/auth";
+import { DOCS } from "@/lib/docs";
 import { JobsProvider, useJobs } from "@/lib/jobs";
 
 import { Loading } from "./States";
@@ -52,8 +53,8 @@ function Frame() {
           items={items}
           settings="/settings"
           links={[
-            { href: "/docs/", label: "Docs", icon: BookOpen },
-            { href: "/docs/api/", label: "API", icon: Braces },
+            { href: DOCS, label: "Docs", icon: BookOpen },
+            { href: "/docs", label: "API", icon: Braces },
           ]}
           user={{ name: me.name, role: me.permissions.includes("admin") ? "Admin" : "Member" }}
           onSignOut={() => void signOut()}

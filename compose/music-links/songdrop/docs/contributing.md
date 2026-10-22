@@ -28,7 +28,7 @@ compose/music-links/songdrop/
 │       ├── pages/              one component per screen
 │       ├── components/         what screens are made of (jobs/, settings/, connections/, layout/, ui/)
 │       └── lib/                the API client (api.ts), its generated types (schema.d.ts), hooks
-└── docs/               this site (VitePress); the API reference is Scalar on /api/v1/openapi.json
+└── docs/               this site (VitePress, on GitHub Pages); its API reference is Scalar on a copy of the API's description
 ```
 
 The page is a client of the API like any other app: nothing it does is out of
@@ -49,7 +49,11 @@ The page against a running songdrop:
 cd frontend && npm install && SONGDROP_API=http://songdrop.homelab.lan npm run dev
 ```
 
-The docs: `cd docs && npm install && npm run dev`.
+The docs: `cd docs && npm install && npm run dev`. They are published to
+https://el-amine-404.github.io/batlab/songdrop/ by `.github/workflows/docs.yml`
+when a change to them reaches `main`. After a change to the API, refresh the
+reference's copy of its description from a songdrop running it:
+`SONGDROP_OPENAPI=http://songdrop.homelab.lan/api/v1/openapi.json npm run openapi`.
 
 ## Common changes
 

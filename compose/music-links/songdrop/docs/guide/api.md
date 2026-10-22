@@ -2,8 +2,9 @@
 
 songdrop's page uses this API, and so can any other app: a music browser that
 sends a song to songdrop, a script, a phone shortcut. Every route, field and
-answer is in the [API reference](/api/){target="_self"}, made from the running
-API's own description, so it is always exact. This page is the overview.
+answer is in the [API reference](/api/){target="_self"}, made from the API's
+own description; your songdrop shows the one it runs at `/docs`. This page is
+the overview.
 
 ## Basics
 

@@ -1,4 +1,4 @@
-# songdrop (docs/music.md): the page and the docs site, built with Node, and
+# songdrop (docs/music.md): the page, built with Node, and
 # the server on spotDL's image, which brings spotDL, ffmpeg and Deno. Both spotDL's and
 # songdrop's yt-dlp are the one pinned in compose/versions.env, for the same
 # reason as compose/music-links/spotdl/Dockerfile.
@@ -13,14 +13,6 @@ COPY --from=ui . /batlab/lib/batlab-ui
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund --loglevel=error
 COPY frontend/ ./
-RUN npm run build
-
-# The docs (/docs): VitePress, and Scalar for the API reference.
-FROM ${NODE_IMAGE} AS docs
-WORKDIR /src
-COPY docs/package.json docs/package-lock.json ./
-RUN npm ci --no-audit --no-fund --loglevel=error
-COPY docs/ ./
 RUN npm run build
 
 FROM ${BASE_IMAGE} AS app
@@ -40,7 +32,6 @@ COPY backend/app ./app
 # runners/verify.py).
 COPY --from=common batlab_common /opt/batlab-common/batlab_common
 COPY --from=page /batlab/compose/music-links/songdrop/frontend/dist ./static
-COPY --from=docs /src/.vitepress/dist ./static/docs
 RUN .venv/bin/python -m compileall -q app /opt/batlab-common
 
 ENV PYTHONUNBUFFERED=1 \

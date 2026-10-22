@@ -382,9 +382,11 @@ still arrives as a pull request. When spotDL starts failing with 403, check
 ### songdrop
 
 songdrop's own docs, for using it, for its API (`/api/v1`) and for working on
-it, are on the service: http://songdrop.homelab.lan/docs (VitePress, sources in
-`compose/music-links/songdrop/docs/`), with an API reference made from the
-running API's OpenAPI description at `/docs/api/`. The sidebar, the same in
+it, are a site of their own: https://el-amine-404.github.io/batlab/songdrop/
+(VitePress, sources in `compose/music-links/songdrop/docs/`, published on
+GitHub Pages by `.github/workflows/docs.yml`). The service itself has the API
+reference, made from the running API's OpenAPI description, at
+http://songdrop.homelab.lan/docs. The sidebar, the same in
 batlab's four apps (`lib/batlab-ui`), has Add (the link box), Queue, History
 and Missing, then Settings, whose own list is on its page (Your account,
 General, Downloads, Retries, Connect, Spotify, Other sites, YouTube, People,

@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "vitepress dev",
     "build": "vitepress build && node scripts/copy-scalar.mjs",
-    "preview": "vitepress preview"
+    "preview": "vitepress preview",
+    "openapi": "node scripts/openapi.mjs"
   },
   "devDependencies": {
     "@scalar/api-reference": "1.72.3",

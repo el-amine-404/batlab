@@ -1,4 +1,4 @@
-"""songdrop's web server: the API (/api/v1, routes/), the docs (/docs) and
+"""songdrop's web server: the API (/api/v1, routes/), its reference (/docs) and
 the page (everything else).
 
 LAN-only behind Caddy. Everyone who uses it is known: a person signed in on
@@ -15,7 +15,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import MutableHeaders
 
@@ -36,7 +36,7 @@ downloads, unless allowed everyone's; only an app's key may ask for a
 `callback_url`.
 
 Errors answer a 4xx or 5xx status with `{"detail": "<sentence>"}`. Times are
-Unix seconds. The guide: [/docs](/docs/).
+Unix seconds. The guide: [songdrop's docs](https://el-amine-404.github.io/batlab/songdrop/guide/api).
 """
 
 
@@ -122,12 +122,7 @@ async def unexpected(request: Request, exc: Exception):
     return _error(500, f"Something went wrong on the server (reference {reference}: songdrop's log says what).")
 
 
-@app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
-def api_not_found(rest: str):
-    return _error(404, "Not found. The API is under /api/v1/ (see /docs/api/).")
-
-
-# ---- the docs and the page -----------------------------------------------------------
+# ---- the API reference and the page ------------------------------------------------
 
 static = base_settings.static_dir
 
@@ -135,7 +130,7 @@ static = base_settings.static_dir
 # The page's manifest (its install and Share menu entry): browsers want its own type.
 mimetypes.add_type("application/manifest+json", ".webmanifest")
 
-# The page loads only its own files. The docs (VitePress, and Scalar's reference) style and script as they like.
+# The page loads only its own files. The API reference (Scalar) styles and fetches as it likes.
 PAGE_POLICY = ("default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; "
                "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'")
 
@@ -159,7 +154,7 @@ class Headers:
                     headers["Cache-Control"] = "public, max-age=31536000, immutable"
                 elif not path.startswith("/api/"):
                     headers.setdefault("Cache-Control", "no-cache")
-                if not path.startswith(("/docs", "/api/")):
+                if path != "/docs" and not path.startswith("/api/"):
                     headers["Content-Security-Policy"] = PAGE_POLICY
                 headers["X-Content-Type-Options"] = "nosniff"
                 headers["Referrer-Policy"] = "no-referrer"
@@ -170,7 +165,7 @@ class Headers:
 
 
 class CompressSome:
-    """gzip for the API's JSON, the page and the docs; never a song or a zip
+    """gzip for the API's JSON and the page; never a song or a zip
     (audio doesn't compress, and a download wants its length)."""
 
     def __init__(self, app):
@@ -201,21 +196,30 @@ def _file_in(folder: Path, rel: str) -> Path | None:
     return None
 
 
+# The API reference: Scalar, from the page's own files (frontend/scripts/copy-scalar.mjs), on
+# the API's description as it runs. The guide is a site of its own (docs/, on GitHub Pages).
+API_DOCS = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>songdrop API</title><link rel="icon" href="/favicon.svg"></head>
+<body><script id="api-reference" data-url="/api/v1/openapi.json"
+data-configuration='{"theme":"purple","darkMode":true,"hideDownloadButton":false,"metaData":{"title":"songdrop API"}}'>
+</script><script src="/api-docs/scalar.js"></script></body></html>"""
+
+
 @app.get("/docs", include_in_schema=False)
-def docs_home():
-    return RedirectResponse("/docs/")
+def api_docs():
+    return HTMLResponse(API_DOCS)
 
 
-@app.get("/docs/{rest:path}", include_in_schema=False)
-def docs(rest: str):
-    """The docs site (docs/, built with VitePress) and its API reference (/docs/api/)."""
-    found = _file_in(static / "docs", rest)
-    if found:
-        return FileResponse(found)
-    missing = static / "docs" / "404.html"
-    if missing.is_file():
-        return FileResponse(missing, status_code=404, media_type="text/html")
-    return _error(404, "No such page in the docs.")
+@app.get("/api/docs", include_in_schema=False)
+@app.get("/api", include_in_schema=False)
+def api_home():
+    return RedirectResponse("/docs")
+
+
+@app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
+def api_not_found(rest: str):
+    return _error(404, "Not found. The API is under /api/v1/ (see /docs).")
 
 
 if (static / "assets").is_dir():

@@ -8,6 +8,7 @@ import { SettingsScreen } from "@/components/settings/SettingsScreen";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { api, type Connection, type ConnectionTypes } from "@/lib/api";
+import { DOCS } from "@/lib/docs";
 import { useLoad } from "@/lib/hooks";
 import { cn, timeAgo } from "@/lib/utils";
 
@@ -44,7 +45,7 @@ export function ConnectPage() {
           )}
           <p className="text-xs text-muted-foreground">
             Types today: {schema.data.types.map((type) => type.label).join(", ")}. A Webhook gets every event as JSON, so any app
-            can listen; the format is in the <a href="/docs/guide/connections" className="text-primary hover:underline">docs</a>.
+            can listen; the format is in the <a href={`${DOCS}guide/connections`} className="text-primary hover:underline">docs</a>.
           </p>
           <ConnectionDialog
             open={editing !== null}

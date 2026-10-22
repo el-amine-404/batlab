@@ -1,5 +1,5 @@
-// The API reference (/docs/api/, public/api/index.html) runs Scalar from the
-// docs' own files, not a CDN: the page works without internet.
+// The API reference (/api/, public/api/index.html) runs Scalar from the docs'
+// own files, not a CDN.
 import { copyFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";

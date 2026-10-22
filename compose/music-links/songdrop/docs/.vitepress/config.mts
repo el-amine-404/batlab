@@ -1,14 +1,16 @@
 import { defineConfig } from "vitepress";
 
-// The docs site, served by songdrop at /docs/. The API reference (/docs/api/)
-// is Scalar on the running API's OpenAPI description: public/api/index.html.
+// The docs site, published on GitHub Pages by .github/workflows/docs.yml:
+// https://el-amine-404.github.io/batlab/songdrop/. Its API reference (/api/) is
+// Scalar on a copy of the API's description, public/api/openapi.json (npm run
+// openapi); a running songdrop shows its own at /docs.
 export default defineConfig({
-  base: "/docs/",
+  base: "/batlab/songdrop/",
   title: "songdrop",
   description: "Paste a link, get the songs: Spotify, YouTube and more, checked and sent to your library.",
   cleanUrls: true,
   lastUpdated: false,
-  head: [["link", { rel: "icon", href: "/docs/favicon.svg" }]],
+  head: [["link", { rel: "icon", href: "/batlab/songdrop/favicon.svg" }]],
   themeConfig: {
     logo: "/favicon.svg",
     nav: [
@@ -16,8 +18,12 @@ export default defineConfig({
       { text: "API", link: "/guide/api", activeMatch: "/guide/api" },
       { text: "API reference", link: "/api/", target: "_self" },
       { text: "Contributing", link: "/contributing" },
-      { text: "Open songdrop", link: "/../", target: "_self" },
     ],
+    socialLinks: [{ icon: "github", link: "https://github.com/el-amine-404/batlab/tree/main/compose/music-links/songdrop" }],
+    editLink: {
+      pattern: "https://github.com/el-amine-404/batlab/edit/main/compose/music-links/songdrop/docs/:path",
+      text: "Change this page on GitHub",
+    },
     sidebar: [
       {
         text: "Using songdrop",

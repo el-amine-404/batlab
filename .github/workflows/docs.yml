@@ -1,0 +1,55 @@
+# The apps' docs sites on GitHub Pages, https://el-amine-404.github.io/batlab/:
+# songdrop's at /songdrop/ (compose/music-links/songdrop/docs, VitePress).
+# Built when a change to them reaches main; Pages' source must be "GitHub
+# Actions" (the repository's Settings, Pages).
+name: docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - compose/music-links/songdrop/docs/**
+      - .github/workflows/docs.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One publish at a time; a newer one waits rather than cutting the running one off.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: compose/music-links/songdrop/docs/package-lock.json
+      - name: songdrop
+        working-directory: compose/music-links/songdrop/docs
+        run: npm ci --no-audit --no-fund && npm run build
+      - name: The site
+        run: |
+          mkdir -p _site
+          cp -r compose/music-links/songdrop/docs/.vitepress/dist _site/songdrop
+          # The site's root has no docs of its own yet: it leads to songdrop's.
+          printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=songdrop/"><title>batlab docs</title><a href="songdrop/">songdrop</a>\n' > _site/index.html
+      - uses: actions/upload-pages-artifact@v3
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

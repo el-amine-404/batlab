@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>API reference · songdrop docs</title>
-<link rel="icon" href="/favicon.svg">
+<link rel="icon" href="../favicon.svg">
 <style>
   body { margin: 0; }
   .back { position: fixed; right: 16px; bottom: 16px; z-index: 1000; padding: 8px 14px; border-radius: 999px;
@@ -13,13 +13,13 @@
 </style>
 </head>
 <body>
-<!-- Made from songdrop's own OpenAPI description, so it is always the API as it runs. -->
+<!-- A copy of songdrop's OpenAPI description (npm run openapi); a running songdrop shows its own at /docs. -->
 <div id="app"></div>
-<a class="back" href="/docs/">← Docs</a>
-<script src="/docs/api/scalar.js"></script>
+<a class="back" href="../">← Docs</a>
+<script src="scalar.js"></script>
 <script>
   Scalar.createApiReference("#app", {
-    url: "/api/v1/openapi.json",
+    url: "openapi.json",
     theme: "purple",
     withDefaultFonts: false,
     hideDarkModeToggle: false,
