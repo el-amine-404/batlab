@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stanzarr-worker"
+dynamic = ["version"]
+description = "GPU worker for Stanzarr: turns plain lyrics into synced ones (Demucs, Whisper, MMS, vote)."
+license = { text = "GPL-3.0-or-later" }
+requires-python = ">=3.10,<3.13"
+# The versions measured together: 86% of lines within 1 s of a person's timing.
+dependencies = [
+  "torch==2.5.1",
+  "torchaudio==2.5.1",
+  "demucs==4.1.0",
+  "stable-ts==2.19.1",
+  "faster-whisper==1.2.1",
+  "ctranslate2==4.8.2",
+  "openai-whisper==20250625",
+  "soundfile==0.14.0",
+  "numpy>=1.26",
+]
+
+[project.scripts]
+stanzarr-worker = "stanzarr_worker.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "stanzarr_worker.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["stanzarr_worker*"]

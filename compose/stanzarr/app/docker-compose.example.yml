@@ -1,0 +1,29 @@
+# Stanzarr with Docker Compose. Copy, adjust the paths, then: docker compose up -d
+services:
+  stanzarr:
+    image: ghcr.io/el-amine-404/stanzarr:0.1.0
+    container_name: stanzarr
+    # The owner of your music files: lyrics are written beside the songs as this user.
+    user: "1000:1000"
+    environment:
+      - TZ=Etc/UTC
+      # Folders inside the container, separated by ":".
+      - STANZARR_LIBRARY=/music
+      # Optional: create the account at start instead of on the first visit.
+      # - STANZARR_USERNAME=admin
+      # - STANZARR_PASSWORD=change-me-please
+      # Behind a reverse proxy: its address, so the login limit counts real clients.
+      # - STANZARR_TRUSTED_PROXIES=172.18.0.2
+    volumes:
+      - ./config:/config
+      - /path/to/music:/music
+    ports:
+      - "6868:6868"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
