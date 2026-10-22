@@ -19,6 +19,9 @@ class SendFailed(Exception):
 
 
 def post_json(url: str, payload: dict) -> None:
+    # urllib opens file:// and ftp:// too: only the web, whatever let the address in.
+    if not url.startswith(("http://", "https://")):
+        raise SendFailed("Only http:// and https:// addresses are sent to.")
     body = json.dumps(payload, ensure_ascii=False, default=str).encode()
     request = urllib.request.Request(url, data=body, method="POST",
                                      headers={"Content-Type": "application/json", "User-Agent": USER_AGENT})
