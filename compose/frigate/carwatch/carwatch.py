@@ -5,7 +5,8 @@ Every CARWATCH_POLL seconds it looks at Frigate's latest frame of the street.
 Each spot (Frigate's zones, drawn around each parked car) is a patch of that
 frame. Once nothing has moved in it for CARWATCH_SETTLE seconds it is
 compared with how it looked when last settled. A change that keeps its
-texture (a shadow, headlights, the car beside it) is not a car. When it
+texture, block by block (a shadow, headlights, the car beside it), is not a
+car. When it
 stays different for
 CARWATCH_CONFIRM seconds (CARWATCH_QUICK by day, when Frigate and the model
 both saw the car do it), and a car drove in or out of it then, that is told:
@@ -20,9 +21,9 @@ as the spot's new look.
 
 In daylight the model Frigate uses (YOLO, on 9 squares of three sizes around
 the spots) also says whether a car covers CARWATCH_FILL of each spot. A look
-that finds fewer than CARWATCH_MIN_CARS cars around the spots, where a row of
-them is always parked, missed them and says nothing; at night, in the
-infrared, it finds none at all. When it sees, it overrules the patches: no
+that finds neither CARWATCH_MIN_CARS cars around the spots nor a car in one
+of them missed them and says nothing, as does one whose box covers every spot
+at once; at night, in the infrared, it finds none at all. When it sees, it overrules the patches: no
 "car left" while it sees the car there, and no "car arrived" while it sees
 the spot empty. It also tells what Frigate missed, a car gone or come while
 the camera was off or Frigate lost it: the spot then reads the other way on
@@ -126,17 +127,21 @@ NEAR, AWAY = 120, 130
 # makes it that much darker. A car against the paving there: likeness 0.02 at
 # most; headlights on a parked car change its light, not its shape (0.97). A
 # white car coming or going at night is told in the morning, by the model.
-STRUCTURE, CARSIZE, BAND, DARKER = 0.5, 0.4, 120, 0.05
+STRUCTURE, CARSIZE, BAND, DARKER = 0.6, 0.4, 120, 0.05
 # How long a change with no car seen driving waits for one: a car that pulls
 # out, then stops in the street for someone, is followed only when it goes.
 PENDING = int(os.environ.get("CARWATCH_PENDING", "300"))
-# Or until the model sees the spot the other way for WAIT seconds since.
-WAIT = int(os.environ.get("CARWATCH_WAIT", "60"))
+# Or until the model sees the spot the other way for WAIT seconds since: in
+# the sun around 15:00 it read the parked Ford empty for 60 s at a time on
+# 2026-10-20 and 21, never for 120.
+WAIT = int(os.environ.get("CARWATCH_WAIT", "120"))
 DRIFT = int(os.environ.get("CARWATCH_DRIFT", "300"))
 # OpenVINO's device for the model: the iGPU, else the CPU.
 DEVICE = os.environ.get("CARWATCH_DEVICE", "GPU")
 FILL = float(os.environ.get("CARWATCH_FILL", "0.4"))
-# Fewer cars than that in a look: the model missed them, the spots are unknown.
+# A look sees when it finds MIN_CARS cars around the spots, or a car in one of
+# them: with the Ford gone it found 1 to 3, and read both spots right. Fewer,
+# and none in a spot (the sun on the lens), it missed them.
 MIN_CARS = int(os.environ.get("CARWATCH_MIN_CARS", "4"))
 # sub_label=name pairs of the cars followed wherever they park.
 FOLLOW = dict(pair.split("=", 1) for pair in
@@ -397,12 +402,36 @@ def colourless(frame):
     return float(numpy.abs(f[..., 0] - f[..., 1]).mean() + numpy.abs(f[..., 1] - f[..., 2]).mean()) < 2
 
 
-def likeness(a, b):
-    """How alike two looks are in shape, the light aside: 1 the same, 0 unrelated."""
+def likeness(a, b, mask=None, side=8):
+    """How alike two looks at a spot are in shape, the light aside: 1 the
+    same, 0 unrelated. With the spot's mask, the median over its side x side
+    blocks, each with its own light: a shadow's edge or the sun across half the
+    spot changes a few blocks, not the median (the whole spot at once read a car
+    gone as 0.68 alike on 2026-10-21)."""
     import numpy
 
-    a, b = a - a.mean(), b - b.mean()
-    return float((a * b).sum() / (numpy.sqrt((a * a).sum() * (b * b).sum()) + 1e-6))
+    def whole(a, b):
+        a, b = a - a.mean(), b - b.mean()
+        return float((a * b).sum() / (numpy.sqrt((a * a).sum() * (b * b).sum()) + 1e-6))
+
+    if mask is None:
+        return whole(a, b)
+    h, w = mask.shape[0] // side * side, mask.shape[1] // side * side
+
+    def blocks(values):
+        full = numpy.zeros(mask.shape, numpy.float32)
+        full[mask] = values
+        return full[:h, :w].reshape(h // side, side, w // side, side).swapaxes(1, 2).reshape(-1, side * side)
+
+    inside = blocks(numpy.ones(int(mask.sum()), numpy.float32)).min(1) > 0
+    x, y = blocks(a)[inside], blocks(b)[inside]
+    x, y = x - x.mean(1, keepdims=True), y - y.mean(1, keepdims=True)
+    vx, vy = (x * x).mean(1), (y * y).mean(1)
+    # A block flat in either look (the noise of bare paving at night) says nothing.
+    keep = (vx > 1) & (vy > 1)
+    if keep.sum() < 4:
+        return whole(a, b)
+    return float(numpy.median((x * y).mean(1)[keep] / numpy.sqrt(vx[keep] * vy[keep])))
 
 
 def changed(a, b):
@@ -515,22 +544,23 @@ class Detector:
         """spot zone -> whether a car covers FILL of it; None when the model
         missed the cars."""
         boxes = self.cars(frame, spots)
-        blind = len(boxes) < MIN_CARS
+        fills = {}
+        for spot in spots:
+            x1, y1, _, _ = spot.box
+            fills[spot.zone] = [spot.mask[max(int(box[1]) - y1, 0):max(int(box[3]) - y1, 0),
+                                          max(int(box[0]) - x1, 0):max(int(box[2]) - x1, 0)].sum() / spot.area
+                                for box in boxes]
+        best = {zone: max(found, default=0.0) for zone, found in fills.items()}
+        # One box over every spot is the model merging the row, not a car.
+        merged = len(spots) > 1 and any(all(fills[spot.zone][i] >= 0.9 for spot in spots) for i in range(len(boxes)))
+        blind = merged or (len(boxes) < MIN_CARS and max(best.values(), default=0.0) < FILL)
         if blind != self.blind:
-            log(f"the model {'misses the cars' if blind else 'sees the cars again'} ({len(boxes)} found)")
+            log(f"the model {'misses the cars' if blind else 'sees the cars again'} ({len(boxes)} found"
+                f"{', one box over every spot' if merged else ''})")
             self.blind = blind
         if blind:
             return None
-        seen = {}
-        for spot in spots:
-            x1, y1, _, _ = spot.box
-            best = 0.0
-            for box in boxes:
-                part = spot.mask[max(int(box[1]) - y1, 0):max(int(box[3]) - y1, 0),
-                                 max(int(box[0]) - x1, 0):max(int(box[2]) - x1, 0)]
-                best = max(best, part.sum() / spot.mask.sum())
-            seen[spot.zone] = best >= FILL
-        return seen
+        return {zone: fill >= FILL for zone, fill in best.items()}
 
 
 class Watch:
@@ -666,14 +696,15 @@ class Watch:
         start, before, stir, settled = spot.calm or spot.since, spot.ref, spot.stir, spot.since
         # Its new look, whatever made it.
         spot.ref, spot.scene, spot.calm, spot.since, spot.stir = pixels, whole, now, None, 0
-        change, like = difference(pixels, before), likeness(pixels, before)
+        change, like = difference(pixels, before), likeness(pixels, before, spot.mask)
         if change < CHANGE:
             return
         log(f"{spot.name}: changed by {change:.0f}, likeness {like:.2f}")
         if like > STRUCTURE:
-            # A car gone or come replaces the spot's texture (0.15 at most on
-            # 2026-10-20); a shadow, headlights, or the car beside it
-            # overhanging shift its light (0.87 when the Ford spot's car left).
+            # A car gone or come replaces the spot's texture (0.33 at most on
+            # 2026-10-20 and 21); a shadow, headlights, or the car beside it
+            # overhanging shift its light (0.98). Should it mislead, drift()
+            # tells the car gone or come.
             log(f"{spot.name}: looks different; not told, its texture is the same (a shadow, the car beside it)")
             return
         if night:

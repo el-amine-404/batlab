@@ -90,9 +90,13 @@ everything; Frigate is the alarm and the index.
   there for 6 s (`CARWATCH_SETTLE`) it is compared with its last settled
   look. A car coming or going changes it by 19 to 81 grey levels (a person,
   a door or a shadow, under 10; `CARWATCH_CHANGE` 18) and replaces its
-  texture: likeness to the old look 0.37 at most on 2026-10-20, against 0.87
-  when the car beside the Clio left and its shadow and overhang moved off
-  the Clio's spot (more than 0.5 is not a car, day or night). When it stays
+  texture. Likeness is measured in 8×8-pixel blocks, each with its own
+  light, and the median taken: 0.33 at most for a car on 2026-10-20 and 21,
+  against 0.98 when the car beside the Clio left and its shadow and overhang
+  moved off the Clio's spot, and 0.93 to 0.98 for headlights at night (more
+  than 0.6 is not a car). The whole spot at once was fooled by the sun's
+  edge across it: the Ford leaving read 0.68 and 0.56 alike on 2026-10-21,
+  and both departures were told late, by the model, 4 and 22 min after. When it stays
   changed for 20 s (`CARWATCH_CONFIRM`), it is told only with proof that a
   car did it:
   - by day, the path of a car Frigate followed from the spot to 130 px away
@@ -103,12 +107,16 @@ everything; Frigate is the alarm and the index.
     out" of a spot every few minutes (the cause of 460 false messages on
     2026-10-19). A change with no path waits 5 min (`CARWATCH_PENDING`) for
     one, or for the model to read the spot the other way on 90% of its
-    looks for 60 s (`CARWATCH_WAIT`): a car that pulls out and waits in the
+    looks for 120 s (`CARWATCH_WAIT`; in the sun around 15:00 it read the
+    parked Ford as empty for 60 s at a time): a car that pulls out and waits in the
     street is followed only when it goes.
   - by day also, Frigate's YOLO model on 9 squares around the spots (a car
-    covering 40% of a spot, `CARWATCH_FILL`). A look finding fewer than 4
-    cars (`CARWATCH_MIN_CARS`; a row of them is always parked there) missed
-    them and is ignored. The model overrules the rest (no "left" while it
+    covering 40% of a spot, `CARWATCH_FILL`). A look that finds neither 4
+    cars (`CARWATCH_MIN_CARS`) nor a car in one of the spots missed them and
+    is ignored, as is one with a single box over both spots (the model
+    merging the row in the sun). With the Ford gone it often found only 1 to
+    3 cars and read both spots right; ignoring those cost 22 min on
+    2026-10-21. The model overrules the rest (no "left" while it
     sees the car; two looks since the spot settled are enough, in the sun
     it misses most), stands in for a path Frigate missed, and tells a change
     nobody saw (the camera off, a white car at night) once it reads the

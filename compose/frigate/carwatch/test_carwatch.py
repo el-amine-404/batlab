@@ -108,14 +108,71 @@ class Veto(Base):
 
 
 class Texture(Base):
-    def test_a_shifted_light_is_not_a_car(self):
-        # The same texture, darker by 21 grey levels: a shadow.
+    def textures(self):
+        """The spot's paving and a car in it, both under the sun's edge
+        across the spot: its left half in the shade."""
         rng = numpy.random.default_rng(1)
-        before = rng.uniform(60, 200, 5000).astype(numpy.float32)
-        self.assertGreater(c.likeness(before - 21, before), c.STRUCTURE)
-        # Another texture: a car where the paving was.
-        after = rng.uniform(60, 200, 5000).astype(numpy.float32)
-        self.assertLess(c.likeness(after, before), c.STRUCTURE)
+        shape = self.spot.mask.shape
+        light = numpy.where(numpy.arange(shape[1]) < shape[1] // 2, 60.0, 180.0)[None, :]
+        paving = (light + rng.normal(0, 8, shape)).astype(numpy.float32)
+        car = (light * 0.6 + rng.normal(0, 8, shape)).astype(numpy.float32)
+        return paving, car
+
+    def test_a_shadow_keeps_the_texture(self):
+        paving, _ = self.textures()
+        mask = self.spot.mask
+        shaded = paving.copy()
+        shaded[: shaded.shape[0] // 2] *= 0.5  # the car beside's shadow over half of it
+        self.assertGreater(c.likeness(shaded[mask], paving[mask], mask), c.STRUCTURE)
+
+    def test_a_car_gone_under_the_suns_edge_is_not_a_shadow(self):
+        # 2026-10-21 09:37 and 16:45: the Ford left, the sun's edge across the
+        # spot stayed; the whole spot read 0.64 and 0.56 alike, a shadow, and
+        # the departures came 4 and 22 min late.
+        paving, car = self.textures()
+        mask = self.spot.mask
+        self.assertGreater(c.likeness(paving[mask], car[mask]), c.STRUCTURE)
+        self.assertLess(c.likeness(paving[mask], car[mask], mask), c.STRUCTURE)
+
+    def test_no_path_counts_for_a_shadow(self):
+        # 2026-10-20 15:21: the car beside the Clio drove off near its spot.
+        paving, _ = self.textures()
+        mask = self.spot.mask
+        shaded = paving.copy()
+        shaded[: shaded.shape[0] // 2] *= 0.5
+        whole = numpy.zeros((58, 96), numpy.float32)
+        self.spot.held, self.spot.changed = True, 0.0
+        for when in range(1000, 1020, 2):
+            self.watch.spot(self.spot, when, paving[mask], whole)
+        self.watch.trails["x"] = [(1025.0, *self.spot.middle), (1030.0, 200.0, 100.0)]
+        for when in range(1030, 1060, 2):
+            self.watch.spot(self.spot, when, shaded[mask], whole)
+        self.assertEqual(self.told, [])
+        self.assertTrue(any("its texture is the same" in m for m in self.logged))
+
+
+class Model(Base):
+    def look(self, boxes):
+        self.watch.detector.cars = lambda frame, spots: boxes
+        return self.watch.detector.look(None, [self.clio, self.spot])
+
+    def setUp(self):
+        super().setUp()
+        self.clio = c.Spot("spot_1", "Clio 4 spot", numpy.array([[420, 360], [520, 360], [520, 560], [420, 560]], float))
+
+    def test_sees_with_few_cars_when_one_is_in_a_spot(self):
+        # 2026-10-21 16:45: the Ford gone, it found 1 to 3 cars, the Clio
+        # among them, and the Ford spot empty; 4 were needed, and the
+        # departure was told 22 min late.
+        self.assertEqual(self.look([(420, 360, 520, 560), (0, 0, 50, 50)]), {"spot_1": True, "spot_2": False})
+
+    def test_blind_with_few_cars_and_none_in_a_spot(self):
+        self.assertIsNone(self.look([(0, 0, 50, 50)]))
+
+    def test_one_box_over_both_spots_is_not_a_car(self):
+        # 2026-10-21 16:45:13, in the sun: one box over the row read the
+        # Ford's empty spot taken.
+        self.assertIsNone(self.look([(400, 340, 660, 580), (420, 360, 520, 560)] + [(0, 0, 50, 50)] * 3))
 
 
 class State(Base):
