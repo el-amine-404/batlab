@@ -431,15 +431,32 @@ the service.
   through APIs, for no gain while one machine runs them. A part becomes a
   service when something else needs it alone.
 
-### Stanzarr: lyrics
+### stanzarr: lyrics
 
-`compose/stanzarr`, `stanzarr.homelab.lan`; its own private project.
+`compose/stanzarr/app`, `stanzarr.homelab.lan`. Docs: `/docs` on the service
+itself, and [its README](../compose/stanzarr/app/README.md).
 
-- **Job**: every song's lyrics: tracks them, fetches them from LRCLIB, syncs
-  plain lyrics by AI on a GPU worker, and hosts the lyrics editor.
+- **Job**: every song's lyrics: tracks them, asks its sources for what is
+  missing, syncs plain lyrics by AI on a GPU worker, and hosts the lyrics
+  editor. The one owner of lyrics: the other apps ask it.
 - **Alone**: point it at any music folder.
 - **Plugs in through**: the library folders (it writes `.lrc` and `.txt` beside
-  songs), its worker API.
+  songs); `GET /api/v1/lyrics?artist=&title=&duration=`, any song's lyrics,
+  the library's when the song is there, else the sources'; its events
+  (`ai.synced`, `ai.failed`, `lyrics.found`); the workers' protocol
+  (`/api/v1/worker/…`, the workers' key).
+- **Sources are add-ons** (`backend/stanzarr/sources/`): one `LyricsSource`
+  module each, chosen, ordered and tested in Settings, Sources. LRCLIB is the
+  first; its address is a setting, so a mirror works the same.
+- **Who may use it**: accounts and API keys as the other apps. Reading needs
+  only to be someone; editing lyrics (`edit`), queuing AI syncs (`ai`) and
+  changing settings need the permission. Homepage's key only reads
+  (`STANZARR_HOMEPAGE_KEY`).
+- **Owns**: `$VOLUMES_ROOT/stanzarr` (the database, the voices the workers
+  separated, the backups of replaced lyrics); the `.lrc` and `.txt` files
+  beside the songs.
+- **Not its job**: whether a file may enter the library, its tags and place
+  (musicguard).
 
 ### camwatch: camera health
 

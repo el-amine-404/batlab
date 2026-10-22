@@ -12,7 +12,7 @@ const HEAR = [
 ]
 const SHOW = [
   { value: "mix", label: "Song", dot: "bg-zinc-500" },
-  { value: "voice", label: "Voice", dot: "bg-blue-400" },
+  { value: "voice", label: "Voice", dot: "bg-teal-400" },
 ]
 
 /** What you hear and what the waveform draws, kept out of the way. */

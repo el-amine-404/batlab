@@ -57,11 +57,32 @@
         href: http://feishin.homelab.lan
         description: Player for Navidrome
         siteMonitor: http://feishin:9180
-    - Stanzarr:
+    - stanzarr:
         icon: mdi-script-text
         href: http://stanzarr.homelab.lan
-        description: Lyrics for the library
-        siteMonitor: http://stanzarr:6868/health
+        description: Lyrics for the library, synced
+        siteMonitor: http://stanzarr:6868/api/v1/health
+        # No stanzarr widget in Homepage; its /system/status counts the
+        # library's lyrics, read with a key that only reads (STANZARR_HOMEPAGE_KEY).
+        widget:
+          type: customapi
+          url: http://stanzarr:6868/api/v1/system/status
+          refreshInterval: 60000
+          headers:
+            X-Api-Key: "{{HOMEPAGE_VAR_STANZARR_KEY}}"
+          mappings:
+            - field:
+                by_status: synced
+              label: Synced
+            - field:
+                to_check: songs
+              label: To check
+            - field:
+                by_status: plain
+              label: Plain only
+            - field:
+                by_status: missing
+              label: Missing
 
 - Get music:
     - Aurral:

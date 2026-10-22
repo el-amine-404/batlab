@@ -1,19 +1,23 @@
-"""python -m stanzarr: serve the app."""
+"""python -m stanzarr: the server and its background work, in one process."""
 
 import logging
 
 import uvicorn
 
-from .app import create_app
 from .config import Config
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
-def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    cfg = Config()
-    uvicorn.run(create_app(cfg), host=cfg.host, port=cfg.port, proxy_headers=True, forwarded_allow_ips=cfg.trusted_proxies,
-                log_level="warning")
-
-
-if __name__ == "__main__":
-    main()
+uvicorn.run(
+    "stanzarr.api.app:create_default",
+    factory=True,
+    host="0.0.0.0",
+    port=Config().port,
+    workers=1,
+    proxy_headers=True,
+    forwarded_allow_ips="*",
+    server_header=False,
+    # The page polls the queue; the access log would be only that.
+    access_log=False,
+)

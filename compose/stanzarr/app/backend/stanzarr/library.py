@@ -74,7 +74,7 @@ def scan(db: Database, roots: list[str]) -> dict:
                         song_id = row["id"]
                         updated += 1
                     else:
-                        song_id = db.run(
+                        song_id = db.insert(
                             "INSERT INTO songs(path, root, rel, size, mtime, artist, album, title, duration, added_at)"
                             " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                             (path, root, rel, stat.st_size, int(stat.st_mtime), artist, album, title, duration,
@@ -91,8 +91,10 @@ def scan(db: Database, roots: list[str]) -> dict:
     return {"added": added, "updated": updated, "removed": removed, "seconds": round(time.time() - started, 1)}
 
 
-def sync_lyrics(db: Database, song_id: int, audio_path: str, names: set[str] | None = None) -> None:
-    """Record the lyrics files of one song; a file is only read when it changed."""
+def sync_lyrics(db: Database, song_id: int, audio_path: str, names: set[str] | None = None, force: bool = False) -> None:
+    """Record the lyrics files of one song; a file is only read when it changed,
+    or always with force (after Stanzarr wrote one itself: two writes within one
+    tick of the file system's clock have the same time)."""
     directory = os.path.dirname(audio_path)
     stem = os.path.splitext(os.path.basename(audio_path))[0]
     if names is None:
@@ -112,7 +114,7 @@ def sync_lyrics(db: Database, song_id: int, audio_path: str, names: set[str] | N
             continue
         present.add(path)
         row = existing.get(path)
-        if row and row["mtime"] == int(stat.st_mtime_ns // 1000):
+        if row and not force and row["mtime"] == int(stat.st_mtime_ns // 1000):
             continue
         try:
             lyrics = lyricsfiles.read_sidecar(path, fmt)

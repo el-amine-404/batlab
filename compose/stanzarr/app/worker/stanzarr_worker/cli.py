@@ -51,7 +51,7 @@ class Server:
 def heartbeat(server: Server, name: str, vram: int, stop: threading.Event) -> None:
     while not stop.is_set():
         try:
-            server.call("POST", "/api/worker/heartbeat", {"gpu": name, "vram": vram, "version": __version__})
+            server.call("POST", "/api/v1/worker/heartbeat", {"gpu": name, "vram": vram, "version": __version__})
         except Exception as error:
             log.warning("server unreachable: %s", error)
         stop.wait(20)
@@ -61,22 +61,22 @@ def work(server: Server, job: dict, device: str) -> None:
     job_id = job["job"]
     song = job["song"]
     log.info("job %s: %s – %s (%d lines)", job_id, song["artist"], song["title"], len(job["lines"]))
-    stage = lambda text: _quiet(lambda: server.call("POST", f"/api/worker/jobs/{job_id}/stage", {"stage": text}))
+    stage = lambda text: _quiet(lambda: server.call("POST", f"/api/v1/worker/jobs/{job_id}/stage", {"stage": text}))
     with tempfile.TemporaryDirectory(prefix="stanzarr-worker-") as workdir:
         try:
             stage("downloading the song")
             ext = job.get("audio_name", "song.flac").rsplit(".", 1)[-1][:5]
             audio = f"{workdir}/song.{ext}"
-            server.download(f"/api/worker/jobs/{job_id}/audio", audio)
+            server.download(f"/api/v1/worker/jobs/{job_id}/audio", audio)
             lines, voice = pipeline.run(audio, job["lines"], workdir, stage, device)
             stage("uploading")
             with open(voice, "rb") as handle:
-                server.call("PUT", f"/api/worker/jobs/{job_id}/voice", raw=handle.read(), timeout=600)
-            result = server.call("POST", f"/api/worker/jobs/{job_id}/result", {"lines": lines, "method": pipeline.NAME})
+                server.call("PUT", f"/api/v1/worker/jobs/{job_id}/voice", raw=handle.read(), timeout=600)
+            result = server.call("POST", f"/api/v1/worker/jobs/{job_id}/result", {"lines": lines, "method": pipeline.NAME})
             log.info("job %s done: %s", job_id, (result or {}).get("result"))
         except Exception as error:
             log.exception("job %s failed", job_id)
-            _quiet(lambda: server.call("POST", f"/api/worker/jobs/{job_id}/fail", {"error": str(error)[:500]}))
+            _quiet(lambda: server.call("POST", f"/api/v1/worker/jobs/{job_id}/fail", {"error": str(error)[:500]}))
 
 
 def _quiet(action) -> None:
@@ -89,7 +89,7 @@ def _quiet(action) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--server", required=True, help="the Stanzarr address, e.g. http://stanzarr.homelab.lan")
-    parser.add_argument("--key", required=True, help="the worker key (Stanzarr > Workers)")
+    parser.add_argument("--key", required=True, help="the workers' key (stanzarr, Settings, Workers)")
     parser.add_argument("--name", default=socket.gethostname(), help="how this worker shows in Stanzarr")
     parser.add_argument("--cpu", action="store_true", help="take jobs without a GPU (slow)")
     parser.add_argument("--once", action="store_true", help="do one job, if there is one, then stop")
@@ -103,7 +103,7 @@ def main() -> None:
         log.warning("no NVIDIA GPU found%s", ": taking jobs on the CPU (slow)" if args.cpu else ": checking in, taking no jobs")
     server = Server(args.server, args.key, args.name)
     try:
-        server.call("POST", "/api/worker/heartbeat", {"gpu": name, "vram": vram, "version": __version__})
+        server.call("POST", "/api/v1/worker/heartbeat", {"gpu": name, "vram": vram, "version": __version__})
     except urllib.error.HTTPError as error:
         raise SystemExit(f"the server refused this worker ({error.code}): check the key") from error
     except urllib.error.URLError as error:
@@ -116,7 +116,7 @@ def main() -> None:
             job = None
             if name or args.cpu:
                 try:
-                    job = server.call("POST", "/api/worker/next")
+                    job = server.call("POST", "/api/v1/worker/next")
                 except Exception as error:
                     log.warning("could not ask for work: %s", error)
             if job:

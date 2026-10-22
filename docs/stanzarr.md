@@ -1,4 +1,10 @@
-# Stanzarr: where it stands, and the plan
+# Stanzarr: where it stood, and the plan
+
+**Done in 1.0 (2026-10-22)**: steps 1 to 3 and 5 of the plan below. Its source
+is in batlab (`compose/stanzarr/app`), it runs on batlab-common and batlab-ui
+with the new look, sources are add-ons, `GET /api/v1/lyrics` answers other
+apps, and Homepage has its card. Left: step 4 (clipseerr and videodrop asking
+it), its docs site, appcheck covering it.
 
 Stanzarr (stanzarr.homelab.lan) gives every song in the libraries its lyrics:
 it finds what each song has, fetches what is missing from LRCLIB, turns plain

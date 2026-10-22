@@ -295,15 +295,16 @@ is unmounted.
 
 ## Stanzarr (lyrics)
 
-Since 2026-10-12 lyrics are managed by **Stanzarr** (`stanzarr.homelab.lan`,
-`compose/stanzarr`, its own project, kept private for now: built from the source copy in `STANZARR_SOURCE`, `~/stanzarr` on lab2). It
-tracks every song's lyrics files (format, language, origin), fetches missing
-ones from LRCLIB (synced first, again every 30 days for songs without lyrics
-synced by a person), writes `.lrc` / `.txt` beside the songs, and hosts the
-lyrics editor. AI sync runs on a GPU worker: the laptop, with
+Since 2026-10-12 lyrics are managed by **stanzarr** (`stanzarr.homelab.lan`,
+`compose/stanzarr/app`; part of batlab since 1.0, built like its other apps:
+[services.md](services.md#stanzarr-lyrics)). It tracks every song's lyrics
+files (format, language, origin), asks its sources for missing ones (add-ons,
+Settings, Sources: LRCLIB first; synced first, again every 30 days for songs
+without lyrics synced by a person), writes `.lrc` / `.txt` beside the songs,
+and hosts the lyrics editor. AI sync runs on a GPU worker: the laptop, with
 `~/ai-lyrics/dvenv/bin/stanzarr-worker --server http://stanzarr.homelab.lan
 --key <STANZARR_WORKER_KEY>`; without a worker online, AI sync is disabled in
-the interface. The account and the worker key are in `compose/.env`
+the page. Its first admin and the worker key are in `compose/.env`
 (`STANZARR_USERNAME`, `STANZARR_PASSWORD`, `STANZARR_WORKER_KEY`).
 
 musicguard no longer fetches lyrics (`MUSICGUARD_LYRICS=0`). It still checks

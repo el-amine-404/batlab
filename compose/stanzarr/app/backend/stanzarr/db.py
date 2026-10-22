@@ -1,5 +1,14 @@
-"""SQLite storage. One connection shared by the app's threads, writes under a lock."""
+"""SQLite storage (state_dir/stanzarr.db, mode 600: notifications' addresses
+and the people's passwords are in it). One connection shared by the app's
+threads, behind a lock.
 
+The schema grows by steps (SCHEMA), each run once; PRAGMA user_version says
+how many ran. Step 2 makes way for batlab's accounts (batlab_common/accounts.py),
+which keep their own users and sessions tables: Stanzarr's one account is made
+again from the environment (STANZARR_USERNAME, STANZARR_PASSWORD) at start."""
+
+import json
+import os
 import sqlite3
 import threading
 import time
@@ -85,11 +94,51 @@ SCHEMA = [
         value TEXT NOT NULL
     );
     """,
+    # version 2: batlab's accounts, the lyrics sources, the notifications
+    """
+    DROP TABLE sessions;
+    DROP TABLE users;
+    CREATE TABLE sources (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        enabled INTEGER NOT NULL,
+        position INTEGER NOT NULL,
+        config TEXT NOT NULL DEFAULT '{}',
+        created_at REAL NOT NULL
+    );
+    CREATE TABLE notifications (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        enabled INTEGER NOT NULL,
+        position INTEGER NOT NULL,
+        events TEXT NOT NULL DEFAULT '[]',
+        config TEXT NOT NULL DEFAULT '{}',
+        created_at REAL NOT NULL
+    );
+    ALTER TABLE attempts ADD COLUMN source TEXT NOT NULL DEFAULT 'lrclib';
+    -- The download contract's word (docs/services.md), as songdrop's and videodrop's jobs.
+    UPDATE jobs SET status='finished' WHERE status='done';
+    -- GET /api/v1/lyrics for a song outside the library: the sources' answer, kept a while.
+    CREATE TABLE lookups (
+        key TEXT PRIMARY KEY,
+        at REAL NOT NULL,
+        kind TEXT NOT NULL,
+        text TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT '',
+        reference TEXT
+    );
+    """,
 ]
 
 
 class Database:
     def __init__(self, path: str):
+        if not os.path.exists(path):
+            # Made 600 before SQLite writes anything into it.
+            os.close(os.open(path, os.O_WRONLY | os.O_CREAT, 0o600))
+        self.path = path
         self.conn = sqlite3.connect(path, check_same_thread=False, isolation_level=None, timeout=30)
         self.conn.row_factory = sqlite3.Row
         self.lock = threading.RLock()
@@ -97,6 +146,7 @@ class Database:
             self.conn.execute("PRAGMA journal_mode=WAL")
             self.conn.execute("PRAGMA foreign_keys=ON")
             self.conn.execute("PRAGMA synchronous=NORMAL")
+            self.conn.execute("PRAGMA busy_timeout=5000")
             self._migrate()
 
     def _migrate(self) -> None:
@@ -125,8 +175,35 @@ class Database:
             return dict(row) if row else None
 
     def run(self, sql: str, args=()) -> int:
+        """The rows it changed (as batlab_common's accounts expect)."""
+        with self.lock:
+            return self.conn.execute(sql, args).rowcount
+
+    def insert(self, sql: str, args=()) -> int:
+        """The new row's id."""
         with self.lock:
             return self.conn.execute(sql, args).lastrowid or 0
+
+    def get(self, key: str, default=None):
+        """A setting kept as JSON (settings.py)."""
+        row = self.one("SELECT value FROM settings WHERE key=?", (key,))
+        if not row:
+            return default
+        try:
+            return json.loads(row["value"])
+        except ValueError:
+            return row["value"]
+
+    def put(self, key: str, value) -> None:
+        self.set_setting(key, json.dumps(value))
+
+    def size(self) -> int:
+        """Bytes on disk, the write-ahead log included."""
+        return sum(os.path.getsize(p) for p in (self.path, self.path + "-wal") if os.path.exists(p))
+
+    def close(self) -> None:
+        with self.lock:
+            self.conn.close()
 
     def setting(self, key: str, default: str = "") -> str:
         row = self.one("SELECT value FROM settings WHERE key=?", (key,))

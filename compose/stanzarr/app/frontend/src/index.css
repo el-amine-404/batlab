@@ -1,18 +1,35 @@
 @import "tailwindcss";
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
 @import "@fontsource-variable/inter";
-@import "@fontsource-variable/jetbrains-mono";
+/* The frame shared by batlab's apps uses this theme's classes too. */
+@source "../../../../../lib/batlab-ui/src";
 
-@custom-variant dark (&:is(.dark *));
+/* shadcn/ui tokens, dark only, like the other apps; stanzarr's accent is emerald to teal. */
+:root {
+  --radius: 0.875rem;
+  --background: oklch(0.14 0.008 165);
+  --foreground: oklch(0.97 0.004 165);
+  --card: oklch(0.19 0.01 165 / 0.62);
+  --card-foreground: var(--foreground);
+  --popover: oklch(0.2 0.012 165);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.76 0.15 162);
+  --primary-foreground: oklch(0.2 0.045 170);
+  --secondary: oklch(0.255 0.012 165);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(0.245 0.01 165);
+  --muted-foreground: oklch(0.72 0.015 165);
+  --accent: oklch(0.275 0.016 165);
+  --accent-foreground: var(--foreground);
+  --destructive: oklch(0.66 0.2 22);
+  --success: oklch(0.74 0.16 155);
+  --warning: oklch(0.8 0.15 80);
+  --border: oklch(1 0 0 / 0.09);
+  --input: oklch(1 0 0 / 0.12);
+  --ring: oklch(0.76 0.15 162 / 0.6);
+}
 
 @theme inline {
-  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -28,101 +45,161 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
-}
-
-:root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-}
-
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --radius-sm: calc(var(--radius) - 6px);
+  --radius-md: calc(var(--radius) - 3px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    @apply border-border outline-ring/50;
+  }
+  /* Dark from the body down, not on the page itself: a password manager's frame (Bitwarden's "Save
+     login") is light, and Firefox paints a frame white where it is see-through when the page or the
+     frame's element says dark and its document doesn't. The frames here are only such extensions'. The
+     page's own scrollbar, which would follow the page's scheme, has its colours said instead. */
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    background: var(--background);
+    scrollbar-color: oklch(1 0 0 / 0.2) var(--background);
   }
   body {
-    @apply bg-background text-foreground font-sans antialiased;
-    font-feature-settings: "cv11", "tnum";
-    @apply bg-background text-foreground;
+    color-scheme: dark;
+    /* No background of its own: html has it, and one here would cover the glows (.backdrop, .aurora) behind. */
+    @apply min-h-dvh font-sans text-foreground antialiased;
+  }
+  iframe {
+    color-scheme: normal;
+  }
+}
+
+/* Two soft glows; nothing moves. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(60rem 40rem at 10% -10%, oklch(0.6 0.14 160 / 0.2), transparent 60%),
+    radial-gradient(50rem 36rem at 100% 0%, oklch(0.72 0.12 190 / 0.1), transparent 60%),
+    var(--background);
+}
+
+/* The sign-in screen's sky: three glows in the logo's colours drifting and changing shape, about a
+   minute a turn, under a fine grain. Still for whoever asks for less motion (the rule at the end). */
+.aurora {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--background);
+}
+.aurora > span {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.55;
+  will-change: transform;
+}
+.aurora > span:nth-child(1) {
+  width: 55vmax;
+  height: 45vmax;
+  left: -15vmax;
+  top: -20vmax;
+  background: oklch(0.6 0.14 160);
+  opacity: 0.42;
+  animation: aurora-a 46s ease-in-out infinite alternate;
+}
+.aurora > span:nth-child(2) {
+  width: 45vmax;
+  height: 40vmax;
+  right: -12vmax;
+  top: 10vmax;
+  background: oklch(0.72 0.12 190);
+  opacity: 0.35;
+  animation: aurora-b 58s ease-in-out infinite alternate;
+}
+.aurora > span:nth-child(3) {
+  width: 50vmax;
+  height: 30vmax;
+  left: 20vmax;
+  bottom: -22vmax;
+  background: oklch(0.5 0.12 140);
+  opacity: 0.4;
+  animation: aurora-c 64s ease-in-out infinite alternate;
+}
+.aurora::after {
+  /* The grain: a noise drawn once, kept faint, so the glows don't band. */
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.07;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+@keyframes aurora-a {
+  to {
+    transform: translate(18vmax, 12vmax) scale(1.25, 0.85) rotate(25deg);
+  }
+}
+@keyframes aurora-b {
+  to {
+    transform: translate(-16vmax, 14vmax) scale(0.8, 1.2) rotate(-30deg);
+  }
+}
+@keyframes aurora-c {
+  to {
+    transform: translate(-12vmax, -16vmax) scale(1.3, 1.1) rotate(15deg);
+  }
+}
+
+/* A wrong password: the form shakes once. */
+.shake {
+  animation: shake 0.42s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+@keyframes shake {
+  20%,
+  60% {
+    transform: translateX(-7px);
+  }
+  40%,
+  80% {
+    transform: translateX(7px);
+  }
+}
+
+/* Placeholder shimmer while a list loads. */
+.skeleton {
+  background: linear-gradient(90deg, oklch(1 0 0 / 0.04), oklch(1 0 0 / 0.09), oklch(1 0 0 / 0.04));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    /* Once: an endless animation 0.01 ms long would flicker. */
+    animation-iteration-count: 1 !important;
+  }
+  .aurora > span {
+    animation: none !important;
   }
 }

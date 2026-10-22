@@ -1,0 +1,8 @@
+# The server. Regenerate requirements.txt after a change (docs/music.md, Stanzarr).
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
+httpx==0.28.1
+# Tags and embedded lyrics.
+mutagen==1.48.1
+# The editor's waveforms.
+numpy==2.2.5

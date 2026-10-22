@@ -12,10 +12,11 @@ import shutil
 import time
 from datetime import date
 
-from . import lrclib, lyricsfiles
+from . import lyricsfiles
 from .config import Config
 from .db import Database
 from .library import sync_lyrics
+from .sources import NOTHING, SongQuery
 
 
 class ReadOnly(Exception):
@@ -48,46 +49,78 @@ def needs_search(db: Database, cfg: Config, song_id: int, now: float | None = No
     return not attempt or now - attempt["at"] >= cfg.retry_days * 86400
 
 
-def search_lrclib(db: Database, cfg: Config, song_id: int) -> str:
-    """Ask LRCLIB for one song and write what it has, by the rules above.
-    Returns what happened, in words."""
+def search(db: Database, cfg: Config, song_id: int, sources: list, note=None, found=None) -> str:
+    """Ask the sources (Settings, Sources: [(item, LyricsSource)], first to
+    last) for one song, and write the best answer by the rules above: synced
+    lyrics from any source end the search; plain text, or "instrumental", is
+    kept unless a later source has them synced. note(item_id, ok, message)
+    records each answer; found(song, how) is told when lyrics are written.
+    Returns what happened, in words. Raises when every source failed to
+    answer (the next pass tries again)."""
     song = song_or_none(db, song_id)
     if not song:
         return "unknown song"
     artist, title = song["artist"], song["title"]
     if not artist or not title:
-        db.run("INSERT OR REPLACE INTO attempts(song_id, at, result) VALUES(?, ?, ?)", (song_id, int(time.time()), "untagged"))
+        db.run("INSERT OR REPLACE INTO attempts(song_id, at, result, source) VALUES(?, ?, ?, '')",
+               (song_id, int(time.time()), "untagged"))
         return "no artist or title to search with"
-    kind, text, entry = lrclib.lookup(artist, title, song["album"], song["duration"])
-    db.run("INSERT OR REPLACE INTO attempts(song_id, at, result) VALUES(?, ?, ?)", (song_id, int(time.time()), kind))
+    if not sources:
+        return "no source is on (Settings, Sources)"
+    query = SongQuery(artist, title, song["album"], song["duration"])
+    best, best_from, failed = NOTHING, None, None
+    for item, kind in sources:
+        try:
+            answer = kind.search(query, item["config"])
+        except Exception as error:
+            failed = error
+            if note:
+                note(item["id"], False, f"{artist} – {title}: {error}")
+            continue
+        if note:
+            note(item["id"], True, f"{artist} – {title}: {answer.kind}")
+        if answer.kind == "synced":
+            best, best_from = answer, (item, kind)
+            break
+        if answer.kind != "none" and best.kind == "none":
+            best, best_from = answer, (item, kind)
+    if best.kind == "none" and failed is not None:
+        raise failed
+    label = best_from[1].label if best_from else ""
+    db.run("INSERT OR REPLACE INTO attempts(song_id, at, result, source) VALUES(?, ?, ?, ?)",
+           (song_id, int(time.time()), best.kind, best_from[1].key if best_from else ""))
     lrc, txt = sidecar(song, ".lrc"), sidecar(song, ".txt")
-    if kind == "synced":
+    if best.kind == "synced":
         if os.path.exists(lrc) and not lyricsfiles.is_ai(lrc):
-            return "LRCLIB has synced lyrics, but a person-synced .lrc is already there"
+            return f"{label} has synced lyrics, but a person-synced .lrc is already there"
         if cfg.read_only:
-            return "LRCLIB has synced lyrics (read-only: not written)"
+            return f"{label} has synced lyrics (read-only: not written)"
         replaced = os.path.exists(lrc)
         if replaced:
             _backup(cfg, song, lrc)
-        lyrics = lyricsfiles.parse_lrc(text)
-        tags = ["[re:LRCLIB via Stanzarr]"] + ([f"[#:lrclib id: {entry}]"] if entry else [])
+        lyrics = lyricsfiles.parse_lrc(best.text)
+        tags = [f"[re:{label} via Stanzarr]"] + ([f"[#:{best.reference}]"] if best.reference else [])
         lyricsfiles.write_atomic(lrc, lyricsfiles.render_lrc(lyrics.lines, tags))
-        sync_lyrics(db, song_id, song["path"])
-        message = "synced lyrics from LRCLIB" + (" replaced the AI-synced ones (kept in backups)" if replaced else "")
+        sync_lyrics(db, song_id, song["path"], force=True)
+        message = f"synced lyrics from {label}" + (" replaced the AI-synced ones (kept in backups)" if replaced else "")
         db.event("lyrics", f"{artist} – {title}: {message}", song_id)
+        if found:
+            found(song, message)
         return message
-    if kind == "plain":
+    if best.kind == "plain":
         if os.path.exists(txt) or os.path.exists(lrc):
-            return "LRCLIB has plain lyrics only; lyrics are already there"
+            return f"{label} has plain lyrics only; lyrics are already there"
         if cfg.read_only:
-            return "LRCLIB has plain lyrics (read-only: not written)"
-        lyricsfiles.write_atomic(txt, text)
-        sync_lyrics(db, song_id, song["path"])
-        db.event("lyrics", f"{artist} – {title}: plain lyrics from LRCLIB", song_id)
-        return "plain lyrics from LRCLIB"
-    if kind == "instrumental":
-        return "LRCLIB says it is instrumental"
-    return "LRCLIB has nothing for it yet"
+            return f"{label} has plain lyrics (read-only: not written)"
+        lyricsfiles.write_atomic(txt, best.text)
+        sync_lyrics(db, song_id, song["path"], force=True)
+        db.event("lyrics", f"{artist} – {title}: plain lyrics from {label}", song_id)
+        if found:
+            found(song, f"plain lyrics from {label}")
+        return f"plain lyrics from {label}"
+    if best.kind == "instrumental":
+        return f"{label} says it is instrumental"
+    return "no source has lyrics for it yet"
 
 
 def best_text(db: Database, song_id: int) -> lyricsfiles.Lyrics | None:
@@ -146,7 +179,7 @@ def save_from_editor(db: Database, cfg: Config, song_id: int, lines: list[dict])
     stays flagged AI-generated (so a person-synced one may still replace it);
     otherwise it is marked as edited by a person."""
     if cfg.read_only:
-        raise ReadOnly()
+        raise ReadOnly("Stanzarr is read-only (STANZARR_READ_ONLY): nothing is written.")
     song = song_or_none(db, song_id)
     if not song:
         raise KeyError(song_id)
@@ -174,7 +207,7 @@ def save_from_editor(db: Database, cfg: Config, song_id: int, lines: list[dict])
     else:
         tags = ["[by:a person]", f"[re:Stanzarr editor {date.today()}]"]
     lyricsfiles.write_atomic(lrc, lyricsfiles.render_lrc([lyricsfiles.Line(t, s) for t, s, _, _ in clean], tags))
-    sync_lyrics(db, song_id, song["path"])
+    sync_lyrics(db, song_id, song["path"], force=True)
     db.event("lyrics", f"{song['artist']} – {song['title']}: edited ({len(clean)} lines)", song_id)
     return len(clean)
 
@@ -197,6 +230,6 @@ def save_ai_result(db: Database, cfg: Config, song_id: int, lines: list[dict], m
             "[#:uncertain lines (the methods disagree): " + (", ".join(unsure) or "none") + "]"]
     body = [lyricsfiles.Line(float(l["t"]), lyricsfiles.clean(str(l["s"])).strip()) for l in lines]
     lyricsfiles.write_atomic(lrc, lyricsfiles.render_lrc(body, tags))
-    sync_lyrics(db, song_id, song["path"])
+    sync_lyrics(db, song_id, song["path"], force=True)
     db.event("ai", f"{song['artist']} – {song['title']}: synced by AI ({len(unsure)} unsure lines)", song_id)
     return f"written, {len(unsure)} lines to check"

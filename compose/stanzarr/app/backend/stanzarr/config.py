@@ -1,4 +1,6 @@
-"""Settings from the environment. Everything has a default except the library."""
+"""Settings from the environment. Everything has a default except the library.
+What the page or the API changes (settings.py) is kept in the database and
+wins over these."""
 
 import os
 from dataclasses import dataclass, field
@@ -19,26 +21,24 @@ class Config:
     library: list[str] = field(default_factory=lambda: [p for p in _env("STANZARR_LIBRARY", "/music").split(":") if p])
     # Database, cache, backups and AI results.
     config_dir: str = field(default_factory=lambda: _env("STANZARR_CONFIG_DIR", "/config"))
-    host: str = field(default_factory=lambda: _env("STANZARR_HOST", "0.0.0.0"))
     port: int = field(default_factory=lambda: int(_env("STANZARR_PORT", "6868")))
-    # Create (or reset the password of) this account at start, instead of the setup page.
+    # The first admin, made at start while nobody exists (instead of the setup code).
     username: str = field(default_factory=lambda: _env("STANZARR_USERNAME"))
     password: str = field(default_factory=lambda: _env("STANZARR_PASSWORD"))
     # Never write into the library: everything else works.
     read_only: bool = field(default_factory=lambda: _flag("STANZARR_READ_ONLY", False))
-    # Ask LRCLIB for missing lyrics, and again every retry_days for songs
-    # without lyrics synced by a person.
+    # LRCLIB as the first source, on the first start (Settings, Sources after that).
     lrclib: bool = field(default_factory=lambda: _flag("STANZARR_LRCLIB", True))
+    # First values of the settings (Settings, General).
     retry_days: int = field(default_factory=lambda: int(_env("STANZARR_RETRY_DAYS", "30")))
-    scan_interval: int = field(default_factory=lambda: int(_env("STANZARR_SCAN_INTERVAL", "600")))
+    scan_minutes: int = field(default_factory=lambda: max(1, int(_env("STANZARR_SCAN_INTERVAL", "600")) // 60))
+    public_url: str = field(default_factory=lambda: _env("STANZARR_PUBLIC_URL").rstrip("/"))
     # Workers authenticate with this key; generated and kept in the database when empty.
     worker_key: str = field(default_factory=lambda: _env("STANZARR_WORKER_KEY"))
-    # Session cookies only over HTTPS. Off by default: most homelabs serve plain HTTP on the LAN.
-    cookie_secure: bool = field(default_factory=lambda: _flag("STANZARR_COOKIE_SECURE", False))
-    # Reverse proxies whose X-Forwarded-For is believed (comma-separated
-    # addresses, or * for any): the login rate limit counts per real client.
-    trusted_proxies: str = field(default_factory=lambda: _env("STANZARR_TRUSTED_PROXIES", "127.0.0.1"))
-    # Built frontend; served at /.
+    # The first notification, made on the first start (Settings, Notifications after that).
+    apprise_url: str = field(default_factory=lambda: _env("STANZARR_APPRISE_URL"))
+    apprise_tag: str = field(default_factory=lambda: _env("STANZARR_APPRISE_TAG"))
+    # Built page; served at /.
     static_dir: str = field(default_factory=lambda: _env(
         "STANZARR_STATIC", os.path.join(os.path.dirname(__file__), "static")))
 

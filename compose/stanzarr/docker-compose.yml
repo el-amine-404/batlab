@@ -1,19 +1,23 @@
 name: ${STANZARR_PROJECT_NAME}
-# Stanzarr: lyrics for the music libraries (docs/music.md). It tracks every
-# song's lyrics, fetches them from LRCLIB, writes synced .lrc files beside the
-# songs, and takes AI-sync jobs to a GPU worker (the laptop). musicguard no
-# longer fetches lyrics; it still checks every file and starts Navidrome's
-# scans, now also when Stanzarr writes lyrics.
-#
-# Built from a private copy of the source on the server (STANZARR_SOURCE in
-# compose/.env): the project is not public for now.
+# Stanzarr: lyrics for the music libraries (docs/services.md). It tracks every
+# song's lyrics, asks its sources (add-ons: LRCLIB first) for what is missing,
+# writes synced .lrc files beside the songs, and takes AI-sync jobs to a GPU
+# worker (the laptop). Other apps ask it for any song's lyrics (GET
+# /api/v1/lyrics). musicguard no longer fetches lyrics; it still checks every
+# file and starts Navidrome's scans, now also when Stanzarr writes lyrics.
 services:
   stanzarr:
-    image: local/stanzarr:${TAG_STANZARR}
+    image: local/batlab-stanzarr
     build:
-      context: ${STANZARR_SOURCE:?set STANZARR_SOURCE in compose/.env to the Stanzarr source folder}
+      context: ./app
+      additional_contexts:
+        common: ../../lib/batlab-common
+        ui: ../../lib/batlab-ui
       # Same reason as musicguard: the builder's DNS on lab2 needs the host network.
       network: host
+      args:
+        BASE_IMAGE: ${IMAGE_STANZARR_BASE}:${TAG_STANZARR_BASE}
+        NODE_IMAGE: ${IMAGE_STANZARR_NODE}:${TAG_STANZARR_NODE}
     pull_policy: build
     container_name: stanzarr
     # The owner of the music files: lyrics are written beside the songs as them.
@@ -22,11 +26,11 @@ services:
       - TZ=${TZ}
       # The same paths as musicguard, Lidarr and Aurral see.
       - STANZARR_LIBRARY=/data/media/music:/data/media/music-aurral:/data/media/music-extras
+      # The first admin, made while nobody exists (then: Settings, People).
       - STANZARR_USERNAME=${STANZARR_USERNAME:-admin}
-      - STANZARR_PASSWORD=${STANZARR_PASSWORD:?set STANZARR_PASSWORD in compose/.env}
+      - STANZARR_PASSWORD=${STANZARR_PASSWORD:-}
       - STANZARR_WORKER_KEY=${STANZARR_WORKER_KEY:?set STANZARR_WORKER_KEY in compose/.env}
-      # Reached only through Caddy on home_server: any address there may forward.
-      - STANZARR_TRUSTED_PROXIES=*
+      - STANZARR_PUBLIC_URL=http://stanzarr.homelab.lan
     volumes:
       - ${VOLUMES_ROOT}/stanzarr:/config
       - ${DATA_ROOT}/media/music:/data/media/music
@@ -42,7 +46,14 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    healthcheck:
+      test: ["CMD", "/opt/stanzarr/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:6868/api/v1/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     mem_limit: 512m
+    pids_limit: 128
     logging:
       driver: "json-file"
       options:

@@ -45,11 +45,11 @@ those lines are marked for checking.
 
 ```sh
 python3.12 -m venv ~/.stanzarr-worker
-~/.stanzarr-worker/bin/pip install "stanzarr-worker @ git+https://github.com/el-amine-404/stanzarr.git#subdirectory=worker"
-~/.stanzarr-worker/bin/stanzarr-worker --server http://your-stanzarr:6868 --key <key>
+~/.stanzarr-worker/bin/pip install "stanzarr-worker @ git+https://github.com/el-amine-404/batlab.git#subdirectory=compose/stanzarr/app/worker"
+~/.stanzarr-worker/bin/stanzarr-worker --server http://stanzarr.homelab.lan --key <key>
 ```
 
-The key is in Stanzarr under **Workers**. It lets a worker download songs, so
+The key is in stanzarr under **Settings, Workers**. It lets a worker download songs, so
 keep it private; **New key** in the same page revokes the old one.
 
 | Option | |
