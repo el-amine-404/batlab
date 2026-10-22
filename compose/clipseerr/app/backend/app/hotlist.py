@@ -12,6 +12,8 @@ PICKS = "hot_picks"
 ARTISTS = "hot_artists"
 CHANGES = "hot_changes"
 MAX_PICKS = 1000
+# The artists Hot has shown: the ones it showed longest ago go first.
+MAX_ARTISTS = 2000
 
 
 def _names(video: dict) -> list[tuple[str, str | None]]:
@@ -96,6 +98,9 @@ class HotList:
                 old = known.get(key) or {"first_seen": now, "thumbnail": None, "id": None}
                 known[key] = {**old, "name": old.get("name") or seen["name"], "id": seen["id"] or old.get("id"),
                               "videos": max(seen["videos"], old.get("videos", 0)), "last_seen": now}
+            if len(known) > MAX_ARTISTS:
+                kept = sorted(known.items(), key=lambda item: -item[1]["last_seen"])[:MAX_ARTISTS]
+                known = dict(kept)
             self._db.put(ARTISTS, known)
 
     def unresolved(self, limit: int) -> list[str]:

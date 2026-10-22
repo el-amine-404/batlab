@@ -652,6 +652,20 @@ class HotListTests(unittest.TestCase):
             self.assertEqual(hot.pick_ids(), ["yt:a", "yt:b"])
             db.close()
 
+    def test_artists_are_bounded_the_oldest_going_first(self):
+        from unittest import mock
+
+        from app import hotlist
+
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(hotlist, "MAX_ARTISTS", 3):
+            db = Database(Path(folder) / "t.db")
+            hot = hotlist.HotList(db)
+            for n, name in enumerate(["A", "B", "C", "D"]):
+                with mock.patch.object(hotlist.time, "time", return_value=1000.0 + n):
+                    hot.saw([{"artists": [{"name": name}]}])
+            self.assertEqual(sorted(a["name"] for a in hot.artists()), ["B", "C", "D"])
+            db.close()
+
 
 class HotChecks(unittest.TestCase):
     def test_hot_counts_its_changes(self):

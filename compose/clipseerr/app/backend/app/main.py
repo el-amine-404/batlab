@@ -10,9 +10,12 @@ open: they only wake the engine, which then asks the app itself.
 import asyncio
 import logging
 import time
+import urllib.parse
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
+import httpx
+import requests
 from batlab_common.web import BodyLimit
 from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -137,6 +140,20 @@ async def problem(_request: Request, exc: problems.Problem):
 
 for _kind, _status in _STATUS.items():
     app.add_exception_handler(_kind, lambda _request, exc, status=_status: _error(status, str(exc)))
+
+
+def _unreachable(request: Request, exc: Exception) -> JSONResponse:
+    """A source (YouTube Music, Apple, a service) that couldn't be reached by a
+    call no route wrapped: a 502 saying so, not a 500."""
+    url = getattr(getattr(exc, "request", None), "url", None)
+    host = getattr(url, "host", None) or urllib.parse.urlsplit(str(url or "")).hostname or "A source"
+    log.warning("%s %s: %s didn't answer: %r", request.method, request.url.path, host, exc)
+    return _error(502, f"{host} didn't answer. Try again in a moment.")
+
+
+# httpx's (Apple, the services) and requests' (ytmusicapi's YouTube Music).
+for _kind in (httpx.TransportError, requests.RequestException):
+    app.add_exception_handler(_kind, _unreachable)
 
 
 @app.exception_handler(RequestValidationError)

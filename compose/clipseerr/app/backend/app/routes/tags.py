@@ -1,4 +1,6 @@
 import re
+import threading
+import time
 from collections import Counter
 from typing import Literal
 
@@ -12,16 +14,32 @@ from ..problems import Problem
 router = APIRouter(tags=["Tags"])
 
 
-def _tagged():
+# Working them out reads every known video and asks the libraries about each:
+# a few hundred ms of Python that held every other request up, for a list
+# that changes slowly. Kept a minute, and per hide_explicit, so the setting
+# applies at once.
+_KEEP_SECONDS = 60
+_kept: dict[bool, tuple[float, list]] = {}
+_lock = threading.Lock()
+
+
+def _tagged() -> list:
     """(video, tags) of every video known, the libraries' "in-library" added,
     explicit ones left out when the settings hide them."""
     hide = settings()["hide_explicit"]
-    for video, found in known.tagged():
-        if hide and video.explicit:
-            continue
-        if library.held(video.youtube_id, video.title, video.artist):
-            found.add("in-library")
-        yield video, found
+    with _lock:
+        at, found = _kept.get(hide, (0.0, []))
+        if time.monotonic() - at < _KEEP_SECONDS:
+            return found
+        found = []
+        for video, tagged in known.tagged():
+            if hide and video.explicit:
+                continue
+            if library.held(video.youtube_id, video.title, video.artist):
+                tagged.add("in-library")
+            found.append((video, frozenset(tagged)))
+        _kept[hide] = (time.monotonic(), found)
+        return found
 
 
 def _count(views: str | None) -> float:

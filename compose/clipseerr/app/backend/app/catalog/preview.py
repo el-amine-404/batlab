@@ -236,7 +236,8 @@ class Clips:
         self._failed: dict[str, float] = {}
         self._started: list[float] = []
         self._paused_until = 0.0
-        self._gate: asyncio.Semaphore | None = None
+        # Bound to the loop when first waited on (Python 3.10+), not here.
+        self._gate = asyncio.Semaphore(self.AT_ONCE)
 
     def path(self, youtube_id: str) -> Path:
         return self.folder / f"{youtube_id}.mp4"
@@ -271,8 +272,6 @@ class Clips:
         return await asyncio.shield(task)
 
     async def _cut(self, youtube_id: str, out: Path) -> Path:
-        if self._gate is None:
-            self._gate = asyncio.Semaphore(self.AT_ONCE)
         async with self._gate:
             if time.monotonic() < self._paused_until:
                 raise Busy(int(self._paused_until - time.monotonic()))
