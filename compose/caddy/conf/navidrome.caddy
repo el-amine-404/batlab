@@ -4,7 +4,10 @@
 # admin's rescan button or Aurral (which needs an admin account for its
 # playlists) would index songs musicguard had not checked yet.
 (navidromeNoScan) {
-	@startScan path /rest/startScan /rest/startScan.view
+	@startScan {
+		path /rest/startScan /rest/startScan.view
+		remote_ip private_ranges
+	}
 	handle @startScan {
 		header Content-Type application/json
 		respond `{"subsonic-response":{"status":"ok","version":"1.16.1","type":"navidrome","openSubsonic":true,"scanStatus":{"scanning":false,"count":0}}}` 200

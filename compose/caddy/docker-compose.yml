@@ -5,9 +5,8 @@ services:
     container_name: caddy
     restart: unless-stopped
     ports:
+      # Every site is plain http:// on the LAN; nothing serves 443.
       - ${CADDY_HTTP_PORT}:80
-      - ${CADDY_HTTPS_PORT}:443
-      - ${CADDY_HTTP3_PORT}:443/udp
     volumes:
       - ${CONFIGS_ROOT}/caddy/conf:/etc/caddy:ro
       - ${SITES_ROOT}/caddy/site:/srv:ro

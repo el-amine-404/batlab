@@ -3,18 +3,12 @@
 	skip_install_trust
 }
 
-(localTLS) {
-	tls internal {
-		on_demand
-	}
-}
-
-(localHostOnly) {
-	@localHostOnly remote_ip 127.0.0.1
-}
-
+# Only the home network: anyone else has the connection closed. Without the
+# abort, a request the reverse_proxy matcher skipped got an empty 200.
 (localSubnets) {
 	@localSubnets remote_ip private_ranges
+	@outside not remote_ip private_ranges
+	abort @outside
 }
 
 import *.caddy
@@ -24,4 +18,9 @@ import *.caddy
 # Caddy tries exact names before a wildcard, so the sites above are unaffected.
 http://*.homelab.lan {
 	respond "No service at this address." 404
+}
+
+# Any other name (a bare IP, a made-up Host header) used to get an empty 200.
+http:// {
+	abort
 }
