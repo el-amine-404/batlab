@@ -35,6 +35,57 @@ Every service with an HTTP API:
 | Long work | Returns at once with a job and its `id`. The caller polls `GET …/jobs/{id}` or passes a `callback_url`, which receives the job when it ends. |
 | Settings | `GET` and `PATCH /api/v1/settings` (only the fields to change). The environment gives the first values; changes made through the API are kept in the service's state folder and win over the environment. Secrets are write-only: the API says whether one is set, never what it is. |
 
+## Who does what
+
+```
+ subfeed ──feeds──▶ clipseerr ──requests──▶ Aurral / songdrop ──files──▶ musicguard ──▶ Navidrome
+ (sources as         (discover,              videodrop ─────────────────────────────▶ Jellyfin
+  feeds)              ask, track)            (download only)            (check, tag, file)
+```
+
+| Service | Owns | Never |
+| --- | --- | --- |
+| subfeed | Turning a source (Reddit) into feeds any program reads | Downloads, or decides what is wanted |
+| clipseerr | Discovery, requests, and following them across the services that download | Writes media files; it asks a service that downloads |
+| songdrop | Getting audio from a link, and that it is the recording asked for | Names, tags or files songs into a library |
+| videodrop | Getting video from a link | Library decisions |
+| musicguard | The only way into the music library: the file is sound, tagged, with lyrics, filed | Downloads |
+
+Where two could overlap, the line is drawn here:
+
+- **"Is it the right song?" is asked twice, differently.** songdrop checks the
+  download is the recording that was asked for (Spotify's preview, the
+  title); musicguard checks the file is fit for the library (decodes, its
+  tags, who it is by Shazam). Neither repeats the other's check.
+- **clipseerr's previews.** The play-on-hover clips are cut by ffmpeg in
+  clipseerr: read-only, a few at once (`catalog/preview.py`), never kept as
+  media. Anything heavier is a download, and goes to videodrop.
+- **Downloading services share one contract** (below), so clipseerr's
+  adapters stay thin and a new one plugs in the same way.
+
+## The download contract
+
+songdrop and videodrop, and any service that turns a link into files:
+
+| | |
+| --- | --- |
+| Ask | `POST /api/v1/jobs` with `url`, `options` (the service's own), `callback_url`. Answers `201` with the job at once. |
+| Follow | `GET /api/v1/jobs/{id}`; `GET /api/v1/jobs` lists them, newest first. |
+| The job | `id`, `url`, `site`, `status`, `title`, `progress`, `files`, `asked_by`, `created_at`, `started_at`, `finished_at`. |
+| Status | `queued`, `running`, then one of `done`, `failed`, `cancelled` (final). |
+| Act | `POST …/jobs/{id}/cancel`; `DELETE …/jobs/{id}` removes a finished job and its files. |
+| Files | `GET …/jobs/{id}/files/{file}`, while the service keeps them. |
+| Told | `callback_url` gets the job (POST, JSON) when it ends, signed with `callback_secret` when one is given (HMAC-SHA256 of `<timestamp>.<body>`). |
+
+Where they differ today, to be brought in line one at a time:
+
+| | songdrop | videodrop |
+| --- | --- | --- |
+| A job that ended well | `done`, or `partial` (some songs missing) | `finished` |
+| `progress` | 0 to 1 | an object (bytes, speed, stage) |
+| Signed callbacks | not yet | `X-Videodrop-Signature` |
+| Live changes | polling | `GET /api/v1/jobs/events` (SSE) |
+
 ## Hand-off folders
 
 When one service's output is another's input, the hand-off is a folder: the
