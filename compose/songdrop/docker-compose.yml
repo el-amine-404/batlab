@@ -1,4 +1,4 @@
-name: ${MUSIC_LINKS_PROJECT_NAME}
+name: ${SONGDROP_PROJECT_NAME:-songdrop}
 # Paste a link, get the song (docs/music.md). songdrop takes Spotify links
 # (through spotDL, which finds the same song on YouTube Music) and any site
 # yt-dlp knows. It only writes into the inbox: musicguard checks each file,
@@ -9,7 +9,7 @@ name: ${MUSIC_LINKS_PROJECT_NAME}
 # It connects directly, not through the VPN: YouTube answers VPN addresses with
 # "sign in to confirm you're not a bot".
 services:
-  # Paste a link, get the song (compose/music-links/songdrop, docs/music.md):
+  # Paste a link, get the song (compose/songdrop/app, docs/music.md):
   # Spotify links through spotDL, any other site yt-dlp knows through yt-dlp,
   # into the inbox, and downloadable for a day. It replaced spotDL's own page
   # on 2026-10-14, and MeTube on 2026-10-18.
@@ -18,7 +18,7 @@ services:
     # image, which the nightly updater rebuilds.
     image: local/batlab-songdrop:${TAG_SPOTDL}-yt-dlp-${VERSION_YTDLP}
     build:
-      context: ./songdrop
+      context: ./app
       additional_contexts:
         common: ../../lib/batlab-common
         ui: ../../lib/batlab-ui

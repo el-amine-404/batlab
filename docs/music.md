@@ -349,7 +349,7 @@ Symfonium or Tempo (Android), Amperfy or play:Sub (iPhone).
 ## Pasted links
 
 - **songdrop** (`songdrop.homelab.lan`): one page for every link, built here
-  (`compose/music-links/songdrop`) to replace the two below. A Spotify track,
+  (`compose/songdrop/app`) to replace the two below. A Spotify track,
   album, playlist or artist link goes through spotDL; any other link yt-dlp
   supports (YouTube, YouTube Music, SoundCloud, Bandcamp…) through yt-dlp, as
   audio. Each finished song is copied into `inbox/music/songdrop`, where
@@ -383,7 +383,7 @@ still arrives as a pull request. When spotDL starts failing with 403, check
 
 songdrop's own docs, for using it, for its API (`/api/v1`) and for working on
 it, are a site of their own: https://el-amine-404.github.io/batlab/songdrop/
-(VitePress, sources in `compose/music-links/songdrop/docs/`, published on
+(VitePress, sources in `compose/songdrop/app/docs/`, published on
 GitHub Pages by `.github/workflows/docs.yml`). The service itself has the API
 reference, made from the running API's OpenAPI description, at
 http://songdrop.homelab.lan/docs. The sidebar, the same in
@@ -457,10 +457,10 @@ its download copies are removed, never the library's.
 ```bash
 # tests, in the image
 docker run --rm --network none --entrypoint /opt/songdrop/.venv/bin/python \
-  -v "$PWD/compose/music-links/songdrop/backend:/w" -w /w \
+  -v "$PWD/compose/songdrop/app/backend:/w" -w /w \
   local/batlab-songdrop:<tag> -m unittest discover -s tests
 # after changing requirements.in
-docker run --rm -v "$PWD/compose/music-links/songdrop/backend:/w" -w /w \
+docker run --rm -v "$PWD/compose/songdrop/app/backend:/w" -w /w \
   ghcr.io/astral-sh/uv:0.13.0-python3.14-trixie-slim \
   uv pip compile requirements.in --generate-hashes --python-version 3.14 --no-header -o requirements.txt
 ```

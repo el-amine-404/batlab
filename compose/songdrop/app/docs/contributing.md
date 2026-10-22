@@ -7,7 +7,7 @@ recipients) are in `docs/services.md` in the repository.
 ## The parts
 
 ```
-compose/music-links/songdrop/
+compose/songdrop/app/
 ├── backend/            Python 3, FastAPI: the API, jobs, runners
 │   ├── app/
 │   │   ├── main.py         the web server: routers, error handling, the page and the docs

@@ -40,7 +40,7 @@ pip install -e .                          # if you want it importable elsewhere
 - Every function says in its docstring what it returns when it can't tell
   (`None`, never a guess).
 - A change here is a change to every service: run their tests too
-  (`compose/musicguard/tests`, `compose/music-links/songdrop/backend/tests`,
+  (`compose/musicguard/tests`, `compose/songdrop/app/backend/tests`,
   and those of videodrop, clipseerr and subfeed). Each web app's image build
   runs `tests/test_accounts.py` and `tests/test_egress.py` against its own
   FastAPI: a failure stops its deploy.

@@ -19,7 +19,7 @@ homepage
 immich
 isponsorblocktv
 jellyfin
-music-links
+songdrop
 musicguard
 navidrome
 netalertx

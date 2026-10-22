@@ -1,7 +1,7 @@
 name: ${CLIPSEERR_PROJECT_NAME:-clipseerr}
 # Browse the newest music videos and ask for the song or the video, like Seerr
 # for music videos (docs/music.md). It only asks and follows: Aurral and
-# songdrop (music-links) download the songs, videodrop the videos, musicguard
+# songdrop download the songs, videodrop the videos, musicguard
 # checks, Navidrome and Jellyfin play. Each request is announced on Discord's #requests through Apprise.
 #
 # The catalog is YouTube Music and Apple Music, without an account or a key.

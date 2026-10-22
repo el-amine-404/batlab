@@ -1,14 +1,13 @@
 # songdrop (docs/music.md): the page, built with Node, and
 # the server on spotDL's image, which brings spotDL, ffmpeg and Deno. Both spotDL's and
-# songdrop's yt-dlp are the one pinned in compose/versions.env, for the same
-# reason as compose/music-links/spotdl/Dockerfile.
+# songdrop's yt-dlp are the one pinned in compose/versions.env.
 ARG BASE_IMAGE
 ARG NODE_IMAGE
 
 FROM ${NODE_IMAGE} AS page
 # Where the page is in the repo, beside lib/batlab-ui (the context "ui"), so
 # its relative path to the shared frame holds here too.
-WORKDIR /batlab/compose/music-links/songdrop/frontend
+WORKDIR /batlab/compose/songdrop/app/frontend
 COPY --from=ui . /batlab/lib/batlab-ui
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund --loglevel=error
@@ -31,7 +30,7 @@ COPY backend/app ./app
 # context "common"; on PYTHONPATH for both interpreters (spotDL's runs
 # runners/verify.py).
 COPY --from=common batlab_common /opt/batlab-common/batlab_common
-COPY --from=page /batlab/compose/music-links/songdrop/frontend/dist ./static
+COPY --from=page /batlab/compose/songdrop/app/frontend/dist ./static
 RUN .venv/bin/python -m compileall -q app /opt/batlab-common
 
 ENV PYTHONUNBUFFERED=1 \

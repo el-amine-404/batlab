@@ -1,4 +1,4 @@
-"""songdrop (compose/music-links/songdrop): the song's own audio from YouTube
+"""songdrop (compose/songdrop/app): the song's own audio from YouTube
 Music (lossy, about 130-160 kbps Opus), checked against its preview, into the
 inbox musicguard files. A good fallback: it always finds the upload."""
 

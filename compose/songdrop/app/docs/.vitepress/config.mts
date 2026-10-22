@@ -19,9 +19,9 @@ export default defineConfig({
       { text: "API reference", link: "/api/", target: "_self" },
       { text: "Contributing", link: "/contributing" },
     ],
-    socialLinks: [{ icon: "github", link: "https://github.com/el-amine-404/batlab/tree/main/compose/music-links/songdrop" }],
+    socialLinks: [{ icon: "github", link: "https://github.com/el-amine-404/batlab/tree/main/compose/songdrop/app" }],
     editLink: {
-      pattern: "https://github.com/el-amine-404/batlab/edit/main/compose/music-links/songdrop/docs/:path",
+      pattern: "https://github.com/el-amine-404/batlab/edit/main/compose/songdrop/app/docs/:path",
       text: "Change this page on GitHub",
     },
     sidebar: [

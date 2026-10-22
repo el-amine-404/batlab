@@ -138,7 +138,7 @@ through the build context `ui`; an app takes only the pieces it uses
 
 ### songdrop: link → audio files
 
-`compose/music-links/songdrop`, `songdrop.homelab.lan`. Docs: `/docs` on the
+`compose/songdrop/app`, `songdrop.homelab.lan`. Docs: `/docs` on the
 service itself.
 
 - **Job**: takes a link (Spotify through spotDL, any site yt-dlp knows through

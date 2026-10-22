@@ -1,4 +1,4 @@
-"""Settings: the environment gives the first values (compose/music-links/
+"""Settings: the environment gives the first values (compose/songdrop/
 docker-compose.yml); what the Settings page or API changes is kept in
 state_dir/settings.json and wins over them (preferences.py)."""
 
