@@ -1,4 +1,4 @@
-import { SettingsLayout, Shell, Sidebar } from "@batlab/ui";
+import { SettingsLayout, Shell, Sidebar, useConnection } from "@batlab/ui";
 import { Braces } from "lucide-react";
 
 import { BROWSE, SETTINGS, shown } from "@/app/navigation";
@@ -15,6 +15,7 @@ import { Loading } from "./States";
  * long list where it was left (its pages are cached).
  */
 export function Layout() {
+  const live = useConnection();
   const { data: active } = useActiveCount();
   const { data: status } = useStatus();
   const me = useMe();
@@ -46,6 +47,7 @@ export function Layout() {
           version={status?.version}
           versionTitle="Status, and the versions it runs"
           status="/settings/status"
+          live={live}
           onClose={close}
         />
       )}

@@ -14,7 +14,7 @@ export type Badge = { count: number; tone?: "active" | "error" | "warning"; titl
 /** A page outside the app (the docs, the API reference): a plain link, at the bottom. */
 export type ExternalLink = { href: string; label: string; icon: LucideIcon };
 
-/** Whether the page gets the app's changes as they happen (videodrop's job stream). */
+/** Whether the page reaches the app: its live stream (videodrop), else useConnection(). */
 export type Live = "connecting" | "live" | "offline";
 
 export type SidebarProps = {
@@ -47,7 +47,7 @@ const TONES = {
 } as const;
 
 const LIVE = {
-  live: { dot: "bg-success", label: "Live" },
+  live: { dot: "bg-success", label: "Connected" },
   connecting: { dot: "bg-warning animate-pulse", label: "Connecting" },
   offline: { dot: "bg-destructive", label: "Offline" },
 } as const;
@@ -135,7 +135,7 @@ export function Sidebar(props: SidebarProps) {
           <span>{props.name} {props.version && `v${props.version}`}</span>
         )}
         {live && (
-          <span className="flex items-center gap-1.5" title="Whether this page gets the changes as they happen">
+          <span className="flex items-center gap-1.5" title={`Whether this page reaches ${props.name}`}>
             <span className={cn("size-1.5 rounded-full", live.dot)} /> {live.label}
           </span>
         )}

@@ -24,7 +24,6 @@ export function SettingsLayout({ entries, loading }: { entries: SettingsEntry[];
     <div className="lg:grid lg:grid-cols-[11rem_minmax(0,1fr)] lg:gap-10">
       <nav ref={list} aria-label="Settings"
            className="-mx-4 mb-6 flex gap-1 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:-mx-6 sm:px-6 lg:mx-0 lg:mb-0 lg:flex-col lg:self-start lg:overflow-visible lg:p-0">
-        <p className="mb-1.5 hidden px-3 text-[11px] font-medium tracking-wider text-muted-foreground/70 uppercase lg:block">Settings</p>
         {entries.map(({ to, label, icon: Icon }) => (
           <NavLink key={to} to={to}
                    className={({ isActive }) => cn(

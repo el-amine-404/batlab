@@ -1,4 +1,4 @@
-import { type Badge, SettingsLayout, Shell, Sidebar } from "@batlab/ui";
+import { type Badge, SettingsLayout, Shell, Sidebar, useConnection } from "@batlab/ui";
 import { BookOpen, Braces } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -21,6 +21,7 @@ export function Layout() {
 }
 
 function Frame() {
+  const live = useConnection();
   const { queue, missing } = useJobs();
   const me = useMe();
   const can = useCan();
@@ -60,6 +61,7 @@ function Frame() {
           onSignOut={() => void signOut()}
           version={version}
           status="/settings/status"
+          live={live}
           onClose={close}
         />
       )}

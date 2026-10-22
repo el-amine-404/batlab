@@ -1,4 +1,4 @@
-import { SettingsLayout, Shell, Sidebar } from "@batlab/ui";
+import { SettingsLayout, Shell, Sidebar, useConnection } from "@batlab/ui";
 import { Braces } from "lucide-react";
 
 import { BROWSE, SETTINGS, shown } from "@/app/navigation";
@@ -10,6 +10,7 @@ import { Loading } from "./States";
 
 /** The frame of every screen (lib/batlab-ui): subfeed's pages, and the failing feeds beside Feeds. */
 export function Layout() {
+  const live = useConnection();
   const { data: status } = useStatus();
   const { data: feeds } = useFeeds();
   const failing = feeds?.feeds.filter((feed) => feed.enabled && feed.failures > 0).length ?? 0;
@@ -39,6 +40,7 @@ export function Layout() {
           onSignOut={() => void signOut()}
           version={status?.version}
           status="/settings/status"
+          live={live}
           onClose={close}
         />
       )}

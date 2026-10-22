@@ -8,8 +8,9 @@ screens, and the settings' own list. The page side of
 | Export | What it is |
 | --- | --- |
 | `Shell` | The frame: the sidebar (a drawer on a phone), the phone's bar or an app's own bar (`header`), the screen, toasts, scroll restoration. |
-| `Sidebar` | The app's pages with their counts, one Settings entry, the docs and API links, who is signed in, the version (and videodrop's Live dot). |
+| `Sidebar` | The app's pages with their counts, one Settings entry, the docs and API links, who is signed in, the version, and whether the page reaches the app. |
 | `SettingsLayout` | The settings' list beside their page: a column on a computer, tabs that scroll on a phone. A route element with the settings as its children. |
+| `useConnection` | Whether the page reaches its server (`/api/v1/health` every 30 s), for the sidebar's dot. |
 | `cn` | Tailwind classes joined, the later winning. |
 
 ## Only what an app uses
@@ -18,9 +19,9 @@ Everything here is a piece an app picks, not a framework it must fill in:
 
 - An app imports only the exports it needs; the build leaves the rest out.
 - What differs is a prop, and left out it is simply not there: no `settings`,
-  no Settings entry; no `links`, no docs block; no `live`, no dot; no
-  `header`, only the phone's bar. An app with no settings at all doesn't use
-  `SettingsLayout`.
+  no Settings entry; no `links`, no docs block; no `live`, no dot (videodrop
+  passes its stream's state, the others `useConnection()`); no `header`, only
+  the phone's bar. An app with no settings at all doesn't use `SettingsLayout`.
 - The content is the app's: its pages, counts and permissions are worked out
   in the app and handed in (`items`, `entries`), never read from here.
 - A piece goes here once two apps use it the same way. What one app does on
