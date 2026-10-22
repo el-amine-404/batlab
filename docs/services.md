@@ -128,6 +128,12 @@ context `common` (`additional_contexts`) on `PYTHONPATH`; a mounted script
 dubkeeper, subtranslate, mediascan) load it from the checkout. Its tests: `python3 -m unittest discover -s
 lib/batlab-common/tests`.
 
+`lib/batlab-ui` is the same for the web apps' pages (subfeed, videodrop,
+songdrop, clipseerr): the frame, the sidebar and the settings' own list, so
+the four look and work alike. TypeScript source built with each app's page,
+through the build context `ui`; an app takes only the pieces it uses
+([its README](../lib/batlab-ui/README.md)).
+
 ## The services
 
 ### songdrop: link → audio files

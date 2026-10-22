@@ -9,7 +9,10 @@ ARG DENO_IMAGE
 FROM ${DENO_IMAGE} AS deno
 
 FROM ${NODE_IMAGE} AS page
-WORKDIR /src
+# Where the page is in the repo, beside lib/batlab-ui (the context "ui"), so
+# its relative path to the shared frame holds here too.
+WORKDIR /batlab/compose/clipseerr/app/frontend
+COPY --from=ui . /batlab/lib/batlab-ui
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund --loglevel=error
 COPY frontend/ ./
@@ -39,7 +42,7 @@ COPY backend/app ./app
 # batlab's shared code (lib/batlab-common), handed in by compose as the build
 # context "common".
 COPY --from=common batlab_common /opt/batlab-common/batlab_common
-COPY --from=page /src/dist ./static
+COPY --from=page /batlab/compose/clipseerr/app/frontend/dist ./static
 RUN .venv/bin/python -m compileall -q app /opt/batlab-common
 
 ENV CLIPSEERR_STATIC=/opt/clipseerr/static \

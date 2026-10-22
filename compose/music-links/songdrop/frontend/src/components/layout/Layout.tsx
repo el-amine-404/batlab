@@ -1,62 +1,74 @@
-import { Menu } from "lucide-react";
-import { Suspense, useEffect, useState } from "react";
-import { Link, Outlet, useLocation } from "react-router";
-import { Toaster } from "sonner";
+import { type Badge, SettingsLayout, Shell, Sidebar } from "@batlab/ui";
+import { BookOpen, Braces } from "lucide-react";
+import { useEffect, useState } from "react";
 
+import { type Counter, PAGES, SETTINGS, shown } from "@/app/navigation";
 import { Logo } from "@/components/Logo";
-import { JobsProvider } from "@/lib/jobs";
-import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
+import { signOut, useCan, useMe } from "@/lib/auth";
+import { JobsProvider, useJobs } from "@/lib/jobs";
 
-import { Sidebar } from "./Sidebar";
 import { Loading } from "./States";
 
-/** The frame of every screen: the sidebar (a drawer on a phone) and the screen. */
+/** The frame of every screen (lib/batlab-ui), inside the job list that gives the sidebar its counts. */
 export function Layout() {
-  const [open, setOpen] = useState(false);
-  const { pathname } = useLocation();
-
-  useEffect(() => {
-    setOpen(false);
-    window.scrollTo(0, 0);
-  }, [pathname]);
-
   return (
     <JobsProvider>
-      <div className="backdrop" aria-hidden />
-
-      <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-border bg-background/80 px-3 pt-[env(safe-area-inset-top)] backdrop-blur-xl lg:hidden">
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          aria-label="Open the menu"
-          className="flex size-10 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <Menu className="size-5" />
-        </button>
-        <Link to="/" className="flex items-center gap-2 font-semibold tracking-tight">
-          <Logo className="size-7" /> songdrop
-        </Link>
-      </header>
-
-      {open && <div className="fixed inset-0 z-40 bg-black/60 lg:hidden" onClick={() => setOpen(false)} aria-hidden />}
-      <aside
-        className={cn(
-          "fixed inset-y-0 left-0 z-50 w-64 -translate-x-full border-r border-border bg-background/95 backdrop-blur-xl transition-transform lg:translate-x-0 lg:bg-background/60",
-          open && "translate-x-0",
-        )}
-      >
-        <Sidebar onClose={() => setOpen(false)} />
-      </aside>
-
-      <main className="px-4 pt-6 pb-[max(4rem,env(safe-area-inset-bottom))] sm:px-6 lg:ml-64 lg:px-10 lg:pt-10">
-        <div className="mx-auto w-full max-w-4xl">
-          {/* Settings and System load their code when opened (app/navigation.tsx). */}
-          <Suspense fallback={<Loading />}>
-            <Outlet />
-          </Suspense>
-        </div>
-      </main>
-      <Toaster theme="dark" position="bottom-right" richColors closeButton />
+      <Frame />
     </JobsProvider>
   );
+}
+
+function Frame() {
+  const { queue, missing } = useJobs();
+  const me = useMe();
+  const can = useCan();
+  const [version, setVersion] = useState<string>();
+  useEffect(() => {
+    api.health().then((health) => setVersion(health.version), () => setVersion(undefined));
+  }, []);
+
+  const badges: Record<Counter, Badge> = {
+    queue: { count: queue.length, title: `${queue.length} queued or downloading` },
+    missing: { count: missing.length, tone: "warning", title: `${missing.length} songs not found` },
+  };
+  const items = PAGES.filter(shown(can)).map((screen) => ({
+    to: screen.path,
+    label: screen.label,
+    icon: screen.icon,
+    badge: screen.counter && badges[screen.counter],
+  }));
+
+  return (
+    <Shell
+      name="songdrop"
+      logo={<Logo className="size-7" />}
+      width={(pathname) => (pathname.startsWith("/settings") ? "max-w-5xl" : "max-w-4xl")}
+      loading={<Loading />}
+      sidebar={(close) => (
+        <Sidebar
+          name="songdrop"
+          logo={<Logo className="size-8" />}
+          items={items}
+          settings="/settings"
+          links={[
+            { href: "/docs/", label: "Docs", icon: BookOpen },
+            { href: "/docs/api/", label: "API", icon: Braces },
+          ]}
+          user={{ name: me.name, role: me.permissions.includes("admin") ? "Admin" : "Member" }}
+          onSignOut={() => void signOut()}
+          version={version}
+          status="/settings/status"
+          onClose={close}
+        />
+      )}
+    />
+  );
+}
+
+/** The settings' list beside the open one: those this person may open. */
+export function SettingsFrame() {
+  const can = useCan();
+  const entries = SETTINGS.filter(shown(can)).map((screen) => ({ to: screen.path, label: screen.label, icon: screen.icon }));
+  return <SettingsLayout entries={entries} loading={<Loading />} />;
 }

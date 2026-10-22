@@ -1,7 +1,7 @@
 import { lazy } from "react";
 import { createBrowserRouter, Navigate } from "react-router";
 
-import { Layout } from "@/components/layout/Layout";
+import { Layout, SettingsFrame } from "@/components/layout/Layout";
 import { RouteError } from "@/components/layout/RouteError";
 import { FeedPage } from "@/pages/FeedPage";
 import { FeedsPage } from "@/pages/FeedsPage";
@@ -29,13 +29,19 @@ export const router = createBrowserRouter([
           { path: "/", element: <FeedsPage /> },
           { path: "/feeds/:slug", element: <FeedPage /> },
           { path: "/posts", element: <PostsPage /> },
-          { path: "/settings", element: <Navigate to="/settings/account" replace /> },
-          { path: "/settings/account", element: <AccountPage /> },
-          { path: "/settings/people", element: <PeoplePage /> },
-          { path: "/settings/keys", element: <KeysPage /> },
-          { path: "/settings/notifications", element: <NotificationsPage /> },
-          { path: "/settings/general", element: <GeneralPage /> },
-          { path: "/settings/status", element: <StatusPage /> },
+          {
+            path: "/settings",
+            element: <SettingsFrame />,
+            children: [
+              { index: true, element: <Navigate to="/settings/account" replace /> },
+              { path: "account", element: <AccountPage /> },
+              { path: "people", element: <PeoplePage /> },
+              { path: "keys", element: <KeysPage /> },
+              { path: "notifications", element: <NotificationsPage /> },
+              { path: "general", element: <GeneralPage /> },
+              { path: "status", element: <StatusPage /> },
+            ],
+          },
           { path: "*", element: <NotFoundPage /> },
         ],
       },

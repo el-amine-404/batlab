@@ -6,7 +6,10 @@ ARG BASE_IMAGE
 ARG NODE_IMAGE
 
 FROM ${NODE_IMAGE} AS page
-WORKDIR /src
+# Where the page is in the repo, beside lib/batlab-ui (the context "ui"), so
+# its relative path to the shared frame holds here too.
+WORKDIR /batlab/compose/music-links/songdrop/frontend
+COPY --from=ui . /batlab/lib/batlab-ui
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund --loglevel=error
 COPY frontend/ ./
@@ -36,7 +39,7 @@ COPY backend/app ./app
 # context "common"; on PYTHONPATH for both interpreters (spotDL's runs
 # runners/verify.py).
 COPY --from=common batlab_common /opt/batlab-common/batlab_common
-COPY --from=page /src/dist ./static
+COPY --from=page /batlab/compose/music-links/songdrop/frontend/dist ./static
 COPY --from=docs /src/.vitepress/dist ./static/docs
 RUN .venv/bin/python -m compileall -q app /opt/batlab-common
 

@@ -384,10 +384,11 @@ still arrives as a pull request. When spotDL starts failing with 403, check
 songdrop's own docs, for using it, for its API (`/api/v1`) and for working on
 it, are on the service: http://songdrop.homelab.lan/docs (VitePress, sources in
 `compose/music-links/songdrop/docs/`), with an API reference made from the
-running API's OpenAPI description at `/docs/api/`. The page has a sidebar like
-the *arr apps: Add (the link box), Activity (Queue, History, Missing),
-Settings (General, Downloads, Retries, Connect, Spotify, Other sites, YouTube)
-and System (Status). Settings are kept in
+running API's OpenAPI description at `/docs/api/`. The sidebar, the same in
+batlab's four apps (`lib/batlab-ui`), has Add (the link box), Queue, History
+and Missing, then Settings, whose own list is on its page (Your account,
+General, Downloads, Retries, Connect, Spotify, Other sites, YouTube, People,
+API keys, Status). Settings are kept in
 `$VOLUMES_ROOT/songdrop/jobs/settings.json` over the environment's values,
 connections (where events go) in `connections.json` beside it, both mode 600.
 What it does and does not do is in [services.md](services.md).

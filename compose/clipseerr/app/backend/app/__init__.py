@@ -1,4 +1,4 @@
 """clipseerr."""
 
 # The release, shown at the foot of the sidebar: bumped with each change to clipseerr.
-__version__ = "1.16.1"
+__version__ = "1.17.0"

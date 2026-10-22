@@ -1,7 +1,7 @@
 # Queue, History, Missing
 
-The **Activity** screens show what songdrop is doing and has done. The sidebar
-counts what is in the Queue and how many songs are missing.
+**Queue**, **History** and **Missing** show what songdrop is doing and has
+done. The sidebar counts what is in the Queue and how many songs are missing.
 
 ## Queue
 

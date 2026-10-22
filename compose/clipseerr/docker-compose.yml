@@ -17,6 +17,7 @@ services:
       context: ./app
       additional_contexts:
         common: ../../lib/batlab-common
+        ui: ../../lib/batlab-ui
       network: host
       args:
         BASE_IMAGE: ${IMAGE_CLIPSEERR_BASE}:${TAG_CLIPSEERR_BASE}

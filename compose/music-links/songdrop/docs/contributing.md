@@ -24,7 +24,7 @@ compose/music-links/songdrop/
 │   └── tests/
 ├── frontend/           React, TypeScript, Tailwind, shadcn/ui-style components
 │   └── src/
-│       ├── app/navigation.tsx  every screen, in sidebar order; the router and sidebar are made from it
+│       ├── app/navigation.tsx  every screen: the sidebar's, then the settings'; the router is made from it
 │       ├── pages/              one component per screen
 │       ├── components/         what screens are made of (jobs/, settings/, connections/, layout/, ui/)
 │       └── lib/                the API client (api.ts), its generated types (schema.d.ts), hooks
@@ -68,7 +68,9 @@ The docs: `cd docs && npm install && npm run dev`.
 ### A new screen
 
 A component in `frontend/src/pages/`, and one entry in
-`frontend/src/app/navigation.tsx`. The route and the sidebar link follow.
+`frontend/src/app/navigation.tsx`. The route and the sidebar link follow (or
+the settings' list, for a setting). The sidebar and the frame themselves are
+batlab's, shared with its other apps: `lib/batlab-ui`.
 
 ### A new connection type
 

@@ -1,7 +1,7 @@
 import { lazy } from "react";
 import { createBrowserRouter, Navigate } from "react-router";
 
-import { Layout } from "@/components/layout/Layout";
+import { Layout, SettingsFrame } from "@/components/layout/Layout";
 import { RouteError } from "@/components/layout/RouteError";
 import { DownloadsPage } from "@/pages/DownloadsPage";
 import { JobPage } from "@/pages/JobPage";
@@ -42,18 +42,24 @@ export const router = createBrowserRouter([
           { path: "/issues", element: <IssuesPage /> },
           { path: "/sites", element: <SitesPage /> },
           { path: "/share", element: <SharePage /> },
-          { path: "/settings", element: <Navigate to="/settings/account" replace /> },
-          { path: "/settings/account", element: <AccountPage /> },
-          { path: "/settings/people", element: <PeoplePage /> },
-          { path: "/settings/keys", element: <KeysPage /> },
-          { path: "/settings/general", element: <GeneralPage /> },
-          { path: "/settings/downloads", element: <DownloadSettingsPage /> },
-          { path: "/settings/options", element: <DefaultOptionsPage /> },
-          { path: "/settings/storage", element: <StoragePage /> },
-          { path: "/settings/cookies", element: <CookiesPage /> },
-          { path: "/settings/notifications", element: <NotificationsPage /> },
-          { path: "/settings/status", element: <StatusPage /> },
-          { path: "/settings/log", element: <LogPage /> },
+          {
+            path: "/settings",
+            element: <SettingsFrame />,
+            children: [
+              { index: true, element: <Navigate to="/settings/account" replace /> },
+              { path: "account", element: <AccountPage /> },
+              { path: "people", element: <PeoplePage /> },
+              { path: "keys", element: <KeysPage /> },
+              { path: "general", element: <GeneralPage /> },
+              { path: "downloads", element: <DownloadSettingsPage /> },
+              { path: "options", element: <DefaultOptionsPage /> },
+              { path: "storage", element: <StoragePage /> },
+              { path: "cookies", element: <CookiesPage /> },
+              { path: "notifications", element: <NotificationsPage /> },
+              { path: "status", element: <StatusPage /> },
+              { path: "log", element: <LogPage /> },
+            ],
+          },
           { path: "*", element: <NotFoundPage /> },
         ],
       },

@@ -21,6 +21,7 @@ services:
       context: ./songdrop
       additional_contexts:
         common: ../../lib/batlab-common
+        ui: ../../lib/batlab-ui
       network: host
       args:
         BASE_IMAGE: ${IMAGE_SPOTDL}:${TAG_SPOTDL}

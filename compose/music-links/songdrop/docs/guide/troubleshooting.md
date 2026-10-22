@@ -10,5 +10,5 @@
 | Downloaded, but it couldn't be copied to the output folder | Download it from History; check the output folder in [Settings, General](settings#general). |
 | A connection's card says its last message failed | Open it and press **Test**: the message says what the other side answered. |
 
-**System, Status** shows the versions of yt-dlp, spotDL and ffmpeg, and the
+**Settings, Status** shows the versions of yt-dlp, spotDL and ffmpeg, and the
 space left in the output folder.

@@ -1,12 +1,11 @@
 /**
- * Every screen of songdrop, in the order of the sidebar. The router
- * (app/router.tsx) and the sidebar (components/layout/Sidebar.tsx) are both
- * made from this list: a new screen is one page component and one entry here.
- * need: the permission it is shown for (the server refuses the rest anyway).
- * Settings and System load their code when opened.
+ * Every screen of songdrop: the sidebar's pages, then the settings' list. The
+ * router (app/router.tsx), the sidebar and the settings' list
+ * (components/layout/Layout.tsx) are all made from these: a new screen is one
+ * page component and one entry here. need: the permission it is shown for
+ * (the server refuses the rest anyway). Settings load their code when opened.
  */
 import {
-  Activity,
   Cable,
   CircleGauge,
   Cookie,
@@ -21,8 +20,6 @@ import {
   Plus,
   RotateCw,
   SearchX,
-  Server,
-  Settings,
   UserRound,
   Users,
 } from "lucide-react";
@@ -57,48 +54,26 @@ export type Screen = {
   need?: Permission;
 };
 
-export type Section = {
-  label: string;
-  icon: LucideIcon;
-  /** Where the section starts: its first screen. */
-  path: string;
-  screens: Screen[];
-};
-
-export const HOME: Screen = { path: "/", label: "Add", icon: Plus, element: <AddPage />, need: "download" };
-
-export const SECTIONS: Section[] = [
-  {
-    label: "Activity",
-    icon: Activity,
-    path: "/activity",
-    screens: [
-      { path: "/activity/queue", label: "Queue", icon: Download, element: <QueuePage />, counter: "queue" },
-      { path: "/activity/history", label: "History", icon: History, element: <HistoryPage /> },
-      { path: "/activity/missing", label: "Missing", icon: SearchX, element: <MissingPage />, counter: "missing" },
-    ],
-  },
-  {
-    label: "Settings",
-    icon: Settings,
-    path: "/settings",
-    screens: [
-      { path: "/settings/account", label: "Your account", icon: UserRound, element: <AccountPage /> },
-      { path: "/settings/general", label: "General", icon: FolderCog, element: <GeneralPage />, need: "settings" },
-      { path: "/settings/downloads", label: "Downloads", icon: Gauge, element: <DownloadsPage />, need: "settings" },
-      { path: "/settings/retries", label: "Retries", icon: RotateCw, element: <RetriesPage />, need: "settings" },
-      { path: "/settings/connect", label: "Connect", icon: Cable, element: <ConnectPage />, need: "settings" },
-      { path: "/settings/spotify", label: "Spotify", icon: Music2, element: <DefaultsPage engine="spotdl" />, need: "settings" },
-      { path: "/settings/other-sites", label: "Other sites", icon: ListMusic, element: <DefaultsPage engine="ytdlp" />, need: "settings" },
-      { path: "/settings/youtube", label: "YouTube", icon: Cookie, element: <YouTubePage />, need: "settings" },
-      { path: "/settings/people", label: "People", icon: Users, element: <PeoplePage />, need: "admin" },
-      { path: "/settings/keys", label: "API keys", icon: KeyRound, element: <KeysPage />, need: "admin" },
-    ],
-  },
-  {
-    label: "System",
-    icon: Server,
-    path: "/system",
-    screens: [{ path: "/system/status", label: "Status", icon: CircleGauge, element: <StatusPage /> }],
-  },
+export const PAGES: Screen[] = [
+  { path: "/", label: "Add", icon: Plus, element: <AddPage />, need: "download" },
+  { path: "/activity/queue", label: "Queue", icon: Download, element: <QueuePage />, counter: "queue" },
+  { path: "/activity/history", label: "History", icon: History, element: <HistoryPage /> },
+  { path: "/activity/missing", label: "Missing", icon: SearchX, element: <MissingPage />, counter: "missing" },
 ];
+
+export const SETTINGS: Screen[] = [
+  { path: "/settings/account", label: "Your account", icon: UserRound, element: <AccountPage /> },
+  { path: "/settings/general", label: "General", icon: FolderCog, element: <GeneralPage />, need: "settings" },
+  { path: "/settings/downloads", label: "Downloads", icon: Gauge, element: <DownloadsPage />, need: "settings" },
+  { path: "/settings/retries", label: "Retries", icon: RotateCw, element: <RetriesPage />, need: "settings" },
+  { path: "/settings/connect", label: "Connect", icon: Cable, element: <ConnectPage />, need: "settings" },
+  { path: "/settings/spotify", label: "Spotify", icon: Music2, element: <DefaultsPage engine="spotdl" />, need: "settings" },
+  { path: "/settings/other-sites", label: "Other sites", icon: ListMusic, element: <DefaultsPage engine="ytdlp" />, need: "settings" },
+  { path: "/settings/youtube", label: "YouTube", icon: Cookie, element: <YouTubePage />, need: "settings" },
+  { path: "/settings/people", label: "People", icon: Users, element: <PeoplePage />, need: "admin" },
+  { path: "/settings/keys", label: "API keys", icon: KeyRound, element: <KeysPage />, need: "admin" },
+  { path: "/settings/status", label: "Status", icon: CircleGauge, element: <StatusPage /> },
+];
+
+/** Whether this person sees a screen. */
+export const shown = (can: (permission: Permission) => boolean) => (screen: Screen) => !screen.need || can(screen.need);

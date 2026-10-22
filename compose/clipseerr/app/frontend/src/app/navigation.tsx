@@ -1,5 +1,5 @@
 /**
- * The sidebar's entries. The router (app/router.tsx) has the screens; a new
+ * The sidebar's pages and the settings' list. The router (app/router.tsx) has the screens; a new
  * screen is one page component, one route, and one entry here. need: the
  * permission it is shown for (the server refuses the rest anyway).
  */
@@ -29,3 +29,6 @@ export const SETTINGS: Entry[] = [
   { path: "/settings/keys", label: "API keys", icon: KeyRound, need: "admin" },
   { path: "/settings/status", label: "Status", icon: CircleGauge },
 ];
+
+/** Whether this person sees an entry. */
+export const shown = (can: (permission: Permission) => boolean) => (entry: Entry) => !entry.need || can(entry.need);
