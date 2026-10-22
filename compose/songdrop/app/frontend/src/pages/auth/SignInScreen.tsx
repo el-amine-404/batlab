@@ -3,6 +3,7 @@ import { AudioLines, ClipboardPaste, Library, Eye, EyeOff, KeyRound, Loader2, Lo
 import { type ComponentProps, type FormEvent, type KeyboardEvent, type ReactNode, useState } from "react";
 
 import { Drift } from "@/components/auth/Drift";
+import { CopyButton } from "@/components/common/CopyButton";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -187,8 +188,12 @@ function Setup() {
     <Frame title="Set up songdrop" text="Make the first account: the admin, who then adds the others and decides what each may do." shake={shake}>
       <form onSubmit={submit} className="flex flex-col gap-4">
         <Field id="setup-code" label="Setup code"
-               hint={<>12 letters and digits; the dashes are put in for you. It is in songdrop's log, or given by{" "}
-                       <code className="text-foreground">docker exec songdrop admin setup-code</code> on the server.</>}>
+               hint={<>12 letters and digits; the dashes are put in for you. It is in songdrop's log, or given by
+                       this command on the server:
+                       <span className="mt-1.5 flex items-center gap-1 rounded-md border border-border bg-background/60 py-0.5 pr-0.5 pl-2.5">
+                         <code className="min-w-0 flex-1 truncate text-foreground">docker exec songdrop admin setup-code</code>
+                         <CopyButton text="docker exec songdrop admin setup-code" label="command" />
+                       </span></>}>
           <div className="relative">
             <KeyRound className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input id="setup-code" className="pl-9 font-mono tracking-widest" placeholder="ABCD-EFGH-JKLM" autoComplete="off"
