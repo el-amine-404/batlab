@@ -236,7 +236,7 @@ def _video(ctx, who, job_id: str, index: int):
 
 
 @router.get("/{job_id}/files/{index}/details", summary="A video file's details and pictures",
-            response_model=schemas.FileDetails, responses=_PROBLEMS)
+            response_model=schemas.FileDetails, responses={**_PROBLEMS, **_GONE})
 def file_details(job_id: str, index: FileIndex, ctx: Ctx, base: Base, who: Who):
     """As ffprobe reads it: its codecs, bitrates, tracks and chapters; and
     the addresses of its pictures (a gallery, a storyboard for a seek bar)
@@ -261,7 +261,7 @@ def file_details(job_id: str, index: FileIndex, ctx: Ctx, base: Base, who: Who):
     }
 
 
-_PICTURE = {200: {"content": {"image/jpeg": {}}}, 404: {"model": schemas.Problem}}
+_PICTURE = {200: {"content": {"image/jpeg": {}}}, 404: {"model": schemas.Problem}, **_GONE}
 
 
 @router.get("/{job_id}/files/{index}/frames/{n}.jpg", summary="One of a video's gallery pictures",

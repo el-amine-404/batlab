@@ -19,15 +19,30 @@ from .base import NotificationType
 MAX_ITEMS = 20
 
 
+def _types_enum(schema: dict) -> None:
+    """The types, written into the description when it is made (the package's
+    registry imports this module, so not before)."""
+    from . import TYPES
+
+    schema["enum"] = sorted(TYPES)
+
+
+def _events_enum(schema: dict) -> None:
+    for shape in schema.get("anyOf", [schema]):
+        if shape.get("type") == "array":
+            shape["items"]["enum"] = list(events.NAMES)
+
+
 class NotificationIn(BaseModel):
     """A notification as the page or an app sends it."""
 
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=60)
-    type: str = Field(description="One of GET /api/v1/notifications/types.")
+    type: str = Field(description="One of GET /api/v1/notifications/types.", json_schema_extra=_types_enum)
     enabled: bool = True
-    events: list[str] | None = Field(None, description="The events it gets; left out: the usual ones.")
+    events: list[str] | None = Field(None, description="The events it gets; left out: the usual ones.",
+                                     json_schema_extra=_events_enum)
     config: dict[str, str | None] = Field(default_factory=dict, description="Its type's fields. A secret left "
                                                                             "empty keeps the saved one.")
 

@@ -20,17 +20,20 @@ on another homelab.lan name, can't act as whoever is signed in here.
 """
 
 import logging
+import os
 import secrets
 import time
 import urllib.parse
 from typing import Annotated, Literal
 
+import anyio.to_thread
 from fastapi import APIRouter, Depends, FastAPI, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyCookie, APIKeyHeader, APIKeyQuery
 from pydantic import BaseModel, Field
 from starlette.datastructures import MutableHeaders
+from starlette.routing import compile_path
 
 from .accounts import SESSION_MAX, Accounts, Forbidden, Invalid, Principal, Refusal, TooSoon, Unauthorized
 
@@ -96,6 +99,26 @@ class RequestLog:
                               f" by {who.name} ({who.kind})" if who else "", request_id)
 
 
+# Plain-def routes running at once. FastAPI's default is 40; on one core 40
+# threads fight over the GIL, and answers fell as clients grew. Measured with
+# appcheck (docs/appcheck.md), 8 kept the most answers a second at 100 clients
+# in all four apps (subfeed 136 → 216, videodrop 120 → 177, songdrop 196 → 241)
+# and changed nothing at 10. A route that waits on the network is async, so
+# none holds a thread for long.
+THREADS = 8
+
+
+def set_threads(app: str) -> int:
+    """How many plain-def routes run at once (anyio's thread limiter, which
+    FastAPI uses): <APP>_THREADS, else THREADS. Called from the app's lifespan,
+    where the loop runs. Returns the number set."""
+    raw = os.environ.get(f"{app.upper()}_THREADS", "").strip()
+    count = int(raw) if raw.isdigit() and 1 <= int(raw) <= 200 else THREADS
+    anyio.to_thread.current_default_thread_limiter().total_tokens = count
+    return count
+
+
+_METHODS = {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
 MAX_BODY = 2 * 1024 * 1024
 
 
@@ -164,10 +187,47 @@ class Problem(BaseModel):
     detail: str = Field(description="What went wrong, as a sentence a person can read.")
 
 
+def api_not_found(app: FastAPI, docs: str = "/docs") -> None:
+    """The last route under /api/: a path the API doesn't have is a 404, and
+    a path it has, asked with a method it doesn't take, a 405 with Allow
+    (it was a 404 too). Registered after every API route."""
+
+    # The API's paths and their methods, from its own description: the routes
+    # themselves sit in included routers FastAPI doesn't flatten any more.
+    table: list[tuple] = []
+
+    def allowed(path: str) -> set[str]:
+        """The methods of the path as the description has it: a literal path
+        (/notifications/test) is that one, not also /notifications/{id}."""
+        if not table:
+            for template, operations in app.openapi().get("paths", {}).items():
+                methods = {name.upper() for name in operations if name.upper() in _METHODS}
+                table.append((template, compile_path(template)[0], methods))
+        literal = [methods for template, _pattern, methods in table if template == path]
+        if literal:
+            return literal[0]
+        found: set[str] = set()
+        for _template, pattern, methods in table:
+            if pattern.match(path):
+                found |= methods
+        return found
+
+    @app.api_route("/api/{rest:path}", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+                   include_in_schema=False)
+    def not_here(request: Request, rest: str):
+        methods = allowed(request.url.path)
+        if methods:
+            return JSONResponse({"detail": f"{request.method} isn't how this is asked: {', '.join(sorted(methods))}."},
+                                status_code=405, headers={"Allow": ", ".join(sorted(methods))})
+        return JSONResponse({"detail": f"Not found. The API is under /api/v1/ (see {docs})."}, status_code=404)
+
+
 def plain_errors(app: FastAPI) -> None:
-    """The app's OpenAPI says what its 422s really are: {"detail": "<sentence>"}
-    (Problem), as every app answers them, not FastAPI's list of errors that
-    no answer carries. Gate.install calls it."""
+    """The app's OpenAPI says what its errors really are: every 422 is
+    {"detail": "<sentence>"} (Problem), as every app answers them, not
+    FastAPI's list of errors; and the answers every app gives besides what a
+    route declares (400, 401, 403, 404, 413, 429) are written down. Gate.install
+    calls it."""
     made = app.openapi
 
     def openapi() -> dict:
@@ -176,11 +236,28 @@ def plain_errors(app: FastAPI) -> None:
         schema = made()
         shapes = schema.setdefault("components", {}).setdefault("schemas", {})
         shapes.setdefault("Problem", Problem.model_json_schema())
-        for operations in schema.get("paths", {}).values():
+        problem = {"application/json": {"schema": {"$ref": "#/components/schemas/Problem"}}}
+        for path, operations in schema.get("paths", {}).items():
             for operation in operations.values():
-                answer = operation.get("responses", {}).get("422") if isinstance(operation, dict) else None
-                if answer:
-                    answer["content"] = {"application/json": {"schema": {"$ref": "#/components/schemas/Problem"}}}
+                if not isinstance(operation, dict):
+                    continue
+                answers = operation.setdefault("responses", {})
+                if "422" in answers:
+                    answers["422"]["content"] = problem
+                # What every app answers besides what a route says: written down, so a
+                # client made from the description expects it.
+                standard = []
+                if "requestBody" in operation:
+                    standard += [("400", "The body isn't JSON."), ("413", "The body is over 2 MB.")]
+                if operation.get("security"):
+                    standard += [("401", "Nobody signed in, or an unknown key."),
+                                 ("403", "Signed in, but not allowed this.")]
+                if any(param.get("in") == "path" for param in operation.get("parameters", [])):
+                    standard.append(("404", "No such thing, or not one this caller may see."))
+                if path.endswith(("/auth/login", "/auth/setup")):
+                    standard.append(("429", "Too many tries: wait (Retry-After)."))
+                for status, text in standard:
+                    answers.setdefault(status, {"description": text, "content": problem})
         text = str(schema["paths"])
         for unused in ("HTTPValidationError", "ValidationError"):
             if f"/{unused}'" not in text:

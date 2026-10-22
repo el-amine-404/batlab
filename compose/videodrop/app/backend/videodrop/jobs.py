@@ -41,7 +41,7 @@ class JobIn(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    url: str = Field(min_length=8, max_length=2000, description="The video (or playlist) on its site.",
+    url: str = Field(min_length=8, max_length=2000, pattern=r"^\s*https?://", description="The video (or playlist) on its site.",
                      examples=["https://www.youtube.com/watch?v=DPEodkHzH-s"])
     destination: str | None = Field(None, max_length=40,
                                     description="Where its files go (GET /api/v1/destinations). Left out: the "

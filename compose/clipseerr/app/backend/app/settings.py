@@ -65,7 +65,7 @@ class SettingsPatch(BaseModel):
     poll_seconds: int | None = Field(None, ge=5, le=600)
     attempt_timeout_hours: int | None = Field(None, ge=1, le=168)
     hide_explicit: bool | None = None
-    hot_queries: list[str] | None = Field(None, max_length=12)
+    hot_queries: list[str] | None = Field(None, min_length=1, max_length=12)
     hot_feeds: list[str] | None = Field(None, max_length=8)
 
     @field_validator("hot_feeds")

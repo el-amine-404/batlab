@@ -775,6 +775,8 @@ class Api(unittest.TestCase):
         self.assertEqual(self.client.delete("/api/v1/destinations/clips").status_code, 204)
         self.assertEqual(self.client.get("/api/v1/settings").json()["default_destination"], "")
         self.assertEqual(self.client.get("/api/v1/folders?path=videos").json()["folders"][0]["path"], "videos/clips")
+        # A name past the disk's limit is refused, not a 500.
+        self.assertEqual(self.client.get("/api/v1/folders?path=" + "a" * 256).status_code, 422)
 
     def test_restart_requeues_running_jobs(self):
         job = self.ask("slowslowslo")

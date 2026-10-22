@@ -16,7 +16,7 @@ from pathlib import Path
 
 import httpx
 import requests
-from batlab_common.web import BodyLimit
+from batlab_common.web import BodyLimit, api_not_found, set_threads
 from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.gzip import GZipMiddleware
@@ -66,6 +66,7 @@ async def _housekeeping() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    set_threads("clipseerr")
     seed.run(db, conf, service_store, notification_store, library_store)
     accounts.announce(log)
     engine.start()
@@ -190,9 +191,7 @@ def api_home():
     return RedirectResponse("/api/docs")
 
 
-@app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
-def api_not_found(rest: str):
-    return _error(404, "Not found. The API is under /api/v1/ (see /api/docs).")
+api_not_found(app, docs="/api/docs")
 
 
 # The page's own files; the videos' pictures from wherever their sites keep them; YouTube's player in a frame.

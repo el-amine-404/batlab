@@ -1,7 +1,10 @@
 """Services (Settings, Services) and notifications (Settings, Notifications):
 the same routes for both, under /services and /notifications."""
 
+from typing import Literal
+
 from fastapi import APIRouter, Response
+from pydantic import Field, create_model
 
 from .. import events, outbound, schemas
 from ..auth import need
@@ -32,6 +35,13 @@ async def _test_library(raw: dict, item_id: str | None = None) -> dict:
 def _routes(prefix: str, tag: str, store, test, event_list, changed=engine.wake, noun: str | None = None) -> APIRouter:
     # Settings' own: services, notifications and libraries hold addresses and secrets.
     router = APIRouter(prefix=prefix, tags=[tag], dependencies=[need("settings")])
+    # This kind's own body: its types (and, for notifications, its events)
+    # are in the description, not only known to the code.
+    fields = {"type": (Literal[tuple(store.types)], Field(description=f"One of GET {prefix}/types."))}
+    if event_list:
+        fields["events"] = (list[Literal[tuple(event["name"] for event in event_list)]] | None,
+                            Field(None, description="The events it gets. Left out: all."))
+    Body = create_model(f"{tag.replace(' ', '')}In", __base__=IntegrationIn, **fields)  # noqa: N806
     noun = noun or tag.lower().rstrip("s")
 
     @router.get("/types", summary=f"The {noun} types and their fields", response_model=schemas.IntegrationTypes)
@@ -44,14 +54,14 @@ def _routes(prefix: str, tag: str, store, test, event_list, changed=engine.wake,
 
     @router.post("", status_code=201, summary=f"Add a {noun}", response_model=schemas.Integration,
                  responses=_PROBLEMS)
-    def create(body: IntegrationIn):
+    def create(body: Body):
         item = store.create(body.model_dump())
         changed()
         return item
 
     @router.post("/test", summary=f"Try a {noun} not saved yet", response_model=schemas.TestResult,
                  responses=_PROBLEMS)
-    async def test_new(body: IntegrationIn):
+    async def test_new(body: Body):
         return await test(body.model_dump())
 
     @router.put("/order", summary=f"Put the {noun}s in order", response_model=schemas.IntegrationList,
@@ -65,14 +75,14 @@ def _routes(prefix: str, tag: str, store, test, event_list, changed=engine.wake,
 
     @router.put("/{item_id}", summary=f"Change a {noun}; a secret left empty keeps its value",
                 response_model=schemas.Integration, responses=_PROBLEMS)
-    def update(item_id: str, body: IntegrationIn):
+    def update(item_id: str, body: Body):
         item = store.update(item_id, body.model_dump())
         changed()
         return item
 
     @router.post("/{item_id}/test", summary=f"Try a saved {noun}, changed as the body says",
                  response_model=schemas.TestResult, responses=_PROBLEMS)
-    async def test_saved(item_id: str, body: IntegrationIn):
+    async def test_saved(item_id: str, body: Body):
         return await test(body.model_dump(), item_id)
 
     @router.delete("/{item_id}", status_code=204, summary=f"Remove a {noun}", responses=_PROBLEMS)

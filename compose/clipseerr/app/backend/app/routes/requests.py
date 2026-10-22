@@ -45,7 +45,8 @@ def list_requests(who: Who, status: Literal["all", "active", "completed", "faile
 @router.post("/requests", status_code=201, summary="Ask for a song (audio) or a video",
              description="Answers the request already made for this video and kind when there is one "
                          "(200, not 201), rather than asking twice.",
-             response_model=schemas.Request, responses={**_PROBLEMS, 200: {"model": schemas.Request}})
+             response_model=schemas.Request, responses={**_PROBLEMS, 200: {"model": schemas.Request},
+                                                         502: {"model": schemas.Problem}})
 async def create_request(body: schemas.RequestIn, response: Response, who=need("request")):
     video = await catalog.video(body.video_id)
     existing = requests.open_for(video.id, body.kind)

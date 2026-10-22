@@ -26,7 +26,7 @@ try:
     from fastapi import APIRouter, Depends, FastAPI, Request
     from fastapi.testclient import TestClient
 
-    from batlab_common.web import BodyLimit, Gate
+    from batlab_common.web import BodyLimit, Gate, api_not_found
 except ImportError:  # outside the apps' images
     FastAPI = None
 
@@ -293,6 +293,44 @@ class BodyLimits(unittest.TestCase):
     def test_a_streamed_body_over_it_is_cut_off(self):
         response = self.client.put("/raw", content=iter([b"x" * 600, b"x" * 600]))
         self.assertEqual(response.status_code, 413)
+
+
+@unittest.skipIf(FastAPI is None, "needs FastAPI and httpx (the apps' images)")
+class ApiCatchAll(unittest.TestCase):
+    """A path the API has, asked the wrong way, is a 405 with Allow; one it hasn't, a 404."""
+
+    def setUp(self):
+        # As the apps do it: routes in a router, included under /api/v1.
+        app, things = FastAPI(), APIRouter()
+
+        @things.get("/things/{thing}")
+        def read(thing: str):
+            return {"thing": thing}
+
+        @things.delete("/things/{thing}")
+        def remove(thing: str):
+            return {}
+
+        @things.post("/things/check")
+        def check():
+            return {}
+
+        app.include_router(things, prefix="/api/v1")
+        api_not_found(app)
+        self.client = TestClient(app)
+
+    def test_the_wrong_method_is_a_405_saying_the_right_ones(self):
+        response = self.client.put("/api/v1/things/a")
+        self.assertEqual(response.status_code, 405)
+        self.assertEqual(response.headers["allow"], "DELETE, GET")
+
+    def test_a_literal_path_says_only_its_own_methods(self):
+        response = self.client.put("/api/v1/things/check")
+        self.assertEqual((response.status_code, response.headers["allow"]), (405, "POST"))
+
+    def test_an_unknown_path_is_a_404(self):
+        self.assertEqual(self.client.get("/api/v1/nothing").status_code, 404)
+        self.assertEqual(self.client.get("/api/v1/things/a").status_code, 200)
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,18 +13,19 @@ the fixes below, on lab2, each app on its own:
 
 | Clients at once | subfeed | videodrop | clipseerr | songdrop |
 | --- | --- | --- | --- | --- |
-| 1 | 233 /s, 9 ms | 161 /s, 28 ms | 170 /s, 18 ms | 270 /s, 5 ms |
-| 5 | 312 /s, 28 ms | 258 /s, 48 ms | 233 /s, 43 ms | 433 /s, 19 ms |
-| 10 | 304 /s, 67 ms | 257 /s, 89 ms | 241 /s, 78 ms | 340 /s, 99 ms |
-| 25 | 191 /s, 393 ms | 173 /s, 435 ms | 187 /s, 375 ms | 284 /s, 261 ms |
-| 100 | 184 /s, 1.6 s | 148 /s, 2.0 s | 115 /s, 2.8 s | 246 /s, 1.1 s |
+| 1 | 227 /s, 9 ms | 163 /s, 28 ms | 160 /s, 18 ms | 234 /s, 7 ms |
+| 5 | 327 /s, 28 ms | 272 /s, 46 ms | 226 /s, 46 ms | 354 /s, 25 ms |
+| 10 | 316 /s, 66 ms | 259 /s, 87 ms | 225 /s, 90 ms | 273 /s, 124 ms |
+| 25 | 226 /s, 333 ms | 188 /s, 386 ms | 186 /s, 381 ms | 250 /s, 300 ms |
+| 100 | 232 /s, 1.2 s | 155 /s, 1.9 s | 173 /s, 1.7 s | 176 /s, 1.7 s |
 
 What that means for people:
 
 - **Each app is one Python process on one core**, and that core is the limit
   (memory stayed far under the containers' limits: subfeed used 50 MB of 256).
   The best is reached at 5 to 10 requests in flight; past that each one waits
-  longer and fewer are answered a second.
+  longer. With 8 threads instead of FastAPI's 40 (below), the rate holds
+  instead of falling: 40 threads fought over the one core.
 - **An open page asks ~0.1 to 0.3 times a second** (its lists, counts, status).
   Around 250 requests a second, every app answers in under 100 ms: **several
   hundred pages open at once**, far beyond a household. Opening a page is a
@@ -50,6 +51,10 @@ What that means for people:
 | Speed | clipseerr | Tags worked out every known video's tags on each call (~440 ms) and held every other request up: 45 answers a second, however many asked. | Kept a minute: 240 a second. |
 | Speed | videodrop | /sites validated and encoded ~1800 sites on each call. | Made once a yt-dlp version, with an ETag. |
 | Memory | clipseerr | Hot's artists had no bound. | The 2000 shown most recently. |
+| Speed | all four | 40 threads for plain-def routes fought over one core: past 10 clients, answers a second fell (subfeed 324 → 136 at 100). | 8 (`batlab_common.web.THREADS`, `<APP>_THREADS`): measured at 4, 8, 16 and 40, 8 best in all four (subfeed 136 → 216, videodrop 120 → 177, songdrop 196 → 241 at 100). |
+| Robustness | videodrop | A folder name past the disk's 255 characters: a 500. | Refused (422). |
+| Contract | all four | The description left out answers every app gives (400, 401, 403, 404, 413, 429), a wrong method was a 404, the types and events a notification takes were "a string". | Written down; a wrong method is a 405 with Allow; types and events listed; empty lists and links refused by the description. |
+| Contract | songdrop | Its callbacks weren't signed, and a job that ended well was "done" where videodrop says "finished". | Signed as videodrop's (`callback_secret`, `X-Songdrop-Signature`, `batlab_common.callbacks`); "finished", as the contract now says. |
 
 ## Checked and fine
 
@@ -67,14 +72,15 @@ What that means for people:
 
 ## Still open
 
-- **The API descriptions are looser than the APIs**: statuses answered but
-  not described (400 for broken JSON, 403, 404), input the description allows
-  but the app refuses (a rule only the code knows), 404 instead of 405 for a
-  method a path doesn't have. Not a risk; it matters to whoever builds a
-  client from the description.
-- **The download contract** ([services.md](services.md#the-download-contract)):
-  songdrop's callbacks aren't signed yet, and the two apps name a good end
-  differently (`done` / `finished`).
-- **Past ~10 requests in flight answers fall**, from threads competing for the
-  one core. A smaller thread pool would hold the best rate longer; worth
-  measuring before changing.
+What fuzzing still reports is input the description allows and the app
+refuses for a reason only the state knows: a subreddit or a destination that
+must exist, a notification type's own required field ("Apprise address is
+needed"), "an API key has no password", a cookies file's first line. Each is
+a 422 saying why, which is right; the description can't say it. clipseerr's
+remaining 5xx are its 502s (the sources can't be reached from the sealed
+network). videodrop takes 0 and 1 for true and false in its download
+options.
+
+The download contract's two differences left are each service's own:
+songdrop's progress is a number, videodrop's an object; videodrop streams its
+changes (SSE), songdrop is asked.

@@ -12,7 +12,7 @@ import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from batlab_common.web import BodyLimit
+from batlab_common.web import BodyLimit, api_not_found, set_threads
 from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.gzip import GZipMiddleware
@@ -43,6 +43,7 @@ Unix seconds. The guide: [songdrop's docs](https://el-amine-404.github.io/batlab
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    set_threads("songdrop")
     # The yt-dlp downloads connect through it (batlab_common/egress.py): the internet, not the home network.
     manager.proxy = egress.start()
     accounts.announce(log)
@@ -219,9 +220,7 @@ def api_home():
     return RedirectResponse("/docs")
 
 
-@app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
-def api_not_found(rest: str):
-    return _error(404, "Not found. The API is under /api/v1/ (see /docs).")
+api_not_found(app, docs="/docs")
 
 
 if (static / "assets").is_dir():

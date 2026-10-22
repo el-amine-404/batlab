@@ -215,7 +215,7 @@ class IntegrationTypes(BaseModel):
 class Order(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    ids: list[str] = Field(description="Every service's id once, first to be asked first.")
+    ids: list[str] = Field(min_length=1, description="Every service's id once, first to be asked first.")
 
 
 class TestResult(BaseModel):

@@ -7,6 +7,7 @@
 #   appcheck/run.sh [subfeed videodrop clipseerr songdrop]   (default: all four)
 #   appcheck/run.sh static                                    bandit, pip-audit, npm audit
 #   APPCHECK_IMAGE_SUBFEED=<image> appcheck/run.sh subfeed    another image than the live one
+#   APPCHECK_ENV="-e SUBFEED_THREADS=8" APPCHECK_ONLY=load …   another setting, the load only
 #
 # Results: appcheck/out/<date>/<app>/ (load.json, schemathesis.txt, stats.txt, app.log).
 set -euo pipefail
@@ -16,7 +17,7 @@ REPO=$(dirname "$HERE")
 VOLUMES=${VOLUMES_ROOT:-/mnt/docker-volumes}
 NET=appcheck-net
 TOOLS=local/batlab-appcheck
-OUT="$HERE/out/$(date +%F)"
+OUT=${APPCHECK_OUT:-$HERE/out/$(date +%F)}
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
@@ -62,6 +63,8 @@ check() {
   mkdir -p "$dir" "$WORK/$app/state" "$WORK/$app/media/music-videos"
   cp -a "$VOLUMES/${STATE[$app]}/." "$WORK/$app/state/"
   local extra=${EXTRA[$app]//MEDIA/$WORK/$app/media}
+  # More flags for the copy, to compare settings (APPCHECK_ENV="-e SUBFEED_THREADS=8").
+  extra="$extra ${APPCHECK_ENV:-}"
 
   docker rm -f "$name" > /dev/null 2>&1 || true
   # shellcheck disable=SC2086 # extra is a list of flags
@@ -84,11 +87,11 @@ check() {
 
   echo "== $app ($image)"
   docker run --rm --network "$NET" -v "$dir:/out" "$TOOLS" python load.py --base "http://$name:$port" --key "$key" \
-    ${SSE[$app]:+--sse ${SSE[$app]}} --out /out/load.json | tee "$dir/load.txt"
-  docker run --rm --network "$NET" "$TOOLS" schemathesis run "http://$name:$port/api/v1/openapi.json" \
+    ${SSE[$app]:+--sse ${SSE[$app]}} ${APPCHECK_LOAD_ARGS:-} --out /out/load.json | tee "$dir/load.txt"
+  [ "${APPCHECK_ONLY:-}" = load ] || docker run --rm --network "$NET" "$TOOLS" schemathesis run "http://$name:$port/api/v1/openapi.json" \
     --url "http://$name:$port" -H "X-Api-Key: $key" --checks all --max-examples 30 --workers 4 --request-timeout 30 \
     > "$dir/schemathesis.txt" 2>&1 || true
-  tail -n 25 "$dir/schemathesis.txt"
+  [ "${APPCHECK_ONLY:-}" = load ] || tail -n 25 "$dir/schemathesis.txt"
 
   docker logs "$name" > "$dir/app.log" 2>&1
   docker inspect -f 'oom_killed={{.State.OOMKilled}} restarts={{.RestartCount}} status={{.State.Status}}' "$name" > "$dir/end.txt"

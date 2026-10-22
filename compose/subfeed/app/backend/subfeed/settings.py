@@ -25,7 +25,8 @@ class Settings(BaseModel):
 class SettingsPatch(BaseModel):
     """Only the fields to change; the others keep their value."""
 
-    model_config = ConfigDict(extra="forbid")
+    # strict: a number is a number (false isn't 0).
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     default_poll_minutes: int | None = Field(None, ge=POLL_MINUTES[0], le=POLL_MINUTES[1])
     keep_days: int | None = Field(None, ge=0, le=3650)

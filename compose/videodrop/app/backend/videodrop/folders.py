@@ -21,6 +21,9 @@ def normalise(rel: str) -> str:
     rel = (rel or "").strip().strip("/")
     if rel and (not _PATH.match(rel) or any(part in (".", "..") for part in rel.split("/"))):
         raise Invalid("Use a folder inside the media folder, with letters, digits, spaces, _ . and - only.")
+    if any(len(part.encode()) > 255 for part in rel.split("/")):
+        # The disk's limit for one name: past it, the system refuses (it was a 500).
+        raise Invalid("A folder's name is 255 characters at most.")
     if rel.split("/")[0] == OWN_FOLDER:
         raise Invalid(f"{OWN_FOLDER} is videodrop's own folder.")
     return rel

@@ -10,7 +10,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from batlab_common.web import BodyLimit
+from batlab_common.web import BodyLimit, api_not_found, set_threads
 from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.gzip import GZipMiddleware
@@ -86,6 +86,7 @@ def _file_in(folder: Path, rel: str) -> Path | None:
 def create_app(services: Services) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        set_threads("subfeed")
         await services.start()
         yield
         await services.stop()
@@ -155,9 +156,7 @@ def create_app(services: Services) -> FastAPI:
     def api_home():
         return RedirectResponse("/docs")
 
-    @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
-    def api_not_found(rest: str):
-        return _error(404, "Not found. The API is under /api/v1/ (see /docs).")
+    api_not_found(app, docs="/docs")
 
     if (static / "assets").is_dir():
         app.mount("/assets", StaticFiles(directory=static / "assets"), name="assets")

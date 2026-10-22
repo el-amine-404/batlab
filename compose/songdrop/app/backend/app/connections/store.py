@@ -33,15 +33,29 @@ class Seed:
     config: dict
 
 
+def _types_enum(schema: dict) -> None:
+    """The types, written into the description when it is made (the package's
+    registry imports this module, so not before)."""
+    from . import TYPES
+
+    schema["enum"] = sorted(TYPES)
+
+
+def _events_enum(schema: dict) -> None:
+    for shape in schema.get("anyOf", [schema]):
+        if shape.get("type") == "array":
+            shape["items"]["enum"] = list(events.NAMES)
+
+
 class ConnectionIn(BaseModel):
     """A connection as the page or an app sends it."""
 
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=60)
-    type: str
+    type: str = Field(description="One of GET /api/v1/connections/types.", json_schema_extra=_types_enum)
     enabled: bool = True
-    events: list[str] = Field(default_factory=lambda: list(events.DEFAULTS))
+    events: list[str] = Field(default_factory=lambda: list(events.DEFAULTS), json_schema_extra=_events_enum)
     config: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("name")

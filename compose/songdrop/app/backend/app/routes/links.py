@@ -11,7 +11,7 @@ router = APIRouter()
 
 
 class LinkIn(BaseModel):
-    url: str = Field(max_length=detect.MAX_URL_LENGTH, description="The link to download.")
+    url: str = Field(min_length=1, max_length=detect.MAX_URL_LENGTH, description="The link to download.")
 
 
 @public.get("/health", tags=["Service"], summary="Whether songdrop is up", response_model=schemas.Health)
