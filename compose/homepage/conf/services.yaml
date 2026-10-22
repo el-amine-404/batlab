@@ -74,11 +74,54 @@
         href: http://clipseerr.homelab.lan
         description: New music videos; ask for the song or the video
         siteMonitor: http://clipseerr:8820/api/v1/health
+        # No clipseerr widget in Homepage; its /system/status counts the
+        # requests, read with a key that only reads (CLIPSEERR_HOMEPAGE_KEY).
+        widget:
+          type: customapi
+          url: http://clipseerr:8820/api/v1/system/status
+          refreshInterval: 30000
+          headers:
+            X-Api-Key: "{{HOMEPAGE_VAR_CLIPSEERR_KEY}}"
+          mappings:
+            - field:
+                requests: active
+              label: Under way
+            - field:
+                requests: completed
+              label: Done
+            - field:
+                requests: failed
+              label: Failed
     - songdrop:
         icon: mdi-link-variant
         href: http://songdrop.homelab.lan
         description: Paste a Spotify or YouTube link, get the song
         siteMonitor: http://songdrop:8810/api/v1/health
+        # No songdrop widget in Homepage; its /system/status counts the
+        # downloads it keeps (a day), read with a key that only reads
+        # (SONGDROP_HOMEPAGE_KEY). Songs waiting: missing ones to try again.
+        widget:
+          type: customapi
+          url: http://songdrop:8810/api/v1/system/status
+          refreshInterval: 30000
+          headers:
+            X-Api-Key: "{{HOMEPAGE_VAR_SONGDROP_KEY}}"
+          mappings:
+            - field:
+                jobs:
+                  by_status: running
+              label: Downloading
+            - field:
+                jobs:
+                  by_status: queued
+              label: Queued
+            - field:
+                jobs: songs_waiting
+              label: Songs waiting
+            - field:
+                jobs:
+                  by_status: failed
+              label: Failed
 - Feeds:
     - subfeed:
         icon: mdi-rss

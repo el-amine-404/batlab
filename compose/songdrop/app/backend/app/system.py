@@ -7,8 +7,10 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from typing import get_args
 
 from .config import Settings
+from .schemas import JobStatus
 
 STARTED_AT = time.time()
 _versions: list[dict] | None = None
@@ -59,7 +61,8 @@ def _disk(label: str, path: Path) -> dict:
 
 
 def status(settings: Settings, jobs: list[dict]) -> dict:
-    counts: dict[str, int] = {}
+    # Every status, 0 included: a reader (Homepage's card) finds each one.
+    counts: dict[str, int] = dict.fromkeys(get_args(JobStatus), 0)
     for job in jobs:
         counts[job["status"]] = counts.get(job["status"], 0) + 1
     waiting = sum(1 for job in jobs for error in job["errors"] if error["state"] in ("waiting", "queued", "retrying"))

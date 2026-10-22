@@ -532,6 +532,16 @@ class JobsTest(unittest.TestCase):
         self.manager.cancel(first["id"])
 
 
+class StatusTest(unittest.TestCase):
+    def test_every_job_status_is_counted_even_at_zero(self):
+        from app import system
+
+        with mock.patch.object(system, "versions", return_value=[]):
+            counts = system.status(mock.Mock(output_root=Path("/"), state_dir=Path("/")),
+                                   [{"status": "done", "errors": []}])["jobs"]["by_status"]
+        self.assertEqual(counts, {"queued": 0, "running": 0, "done": 1, "partial": 0, "failed": 0, "cancelled": 0})
+
+
 class PreferencesTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
