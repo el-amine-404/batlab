@@ -9,7 +9,7 @@ from ...domain import Invalid
 from ...settings import Settings, SettingsPatch
 from .. import schemas
 from ..auth import Who, need
-from ..deps import Ctx
+from ..deps import MAX_NUMBER, Ctx
 
 public = APIRouter()
 router = APIRouter()
@@ -47,7 +47,7 @@ def status(ctx: Ctx, who: Who):
 
 @router.get("/log", tags=["System"], summary="videodrop's own log, its newest lines", response_model=schemas.ServerLog,
             dependencies=[need("settings")])
-def server_log(after: int = Query(0, ge=0, description="Only the lines after this one (its seq): to follow it."),
+def server_log(after: int = Query(0, ge=0, le=MAX_NUMBER, description="Only the lines after this one (its seq): to follow it."),
                level: Literal["debug", "info", "warning", "error"] = Query("info", description="This one and worse."),
                limit: int = Query(500, ge=1, le=2000)):
     """Kept in memory since the start, the newest 2000; the container's log

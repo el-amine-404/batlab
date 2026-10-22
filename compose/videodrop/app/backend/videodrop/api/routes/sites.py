@@ -1,6 +1,6 @@
 from importlib import metadata
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request, Response
 from fastapi.responses import FileResponse
 
 from ...domain import NotFound
@@ -9,19 +9,31 @@ from .. import schemas
 from ..deps import Ctx
 
 router = APIRouter(prefix="/sites", tags=["Links"])
+# The sites list, as answered: {"version", "body", "etag"} for the yt-dlp running.
+_encoded: dict = {}
 
 
 @router.get("", summary="The sites videodrop downloads from", response_model=schemas.SiteList)
-def list_sites(ctx: Ctx):
+def list_sites(ctx: Ctx, request: Request):
     """yt-dlp's sites, one entry a site, in categories; known sites first
     in each. Read once for each yt-dlp version (a few seconds the first
-    time). Other links are refused (POST /api/v1/links/check says so)."""
-    sites = ctx.sites.list()
-    counts = {key: 0 for key in CATEGORIES}
-    for site in sites:
-        counts[site["category"]] += 1
-    return {"yt_dlp": metadata.version("yt-dlp"), "sites": sites,
-            "categories": [{"id": key, "label": label, "count": counts[key]} for key, label in CATEGORIES.items()]}
+    time). Other links are refused (POST /api/v1/links/check says so).
+    The answer is the same until yt-dlp changes: made once a version, with an
+    ETag, so a page that has it gets a 304."""
+    version = metadata.version("yt-dlp")
+    if _encoded.get("version") != version:
+        sites = ctx.sites.list()
+        counts = {key: 0 for key in CATEGORIES}
+        for site in sites:
+            counts[site["category"]] += 1
+        answer = schemas.SiteList.model_validate({
+            "yt_dlp": version, "sites": sites,
+            "categories": [{"id": key, "label": label, "count": counts[key]} for key, label in CATEGORIES.items()]})
+        _encoded.update(version=version, body=answer.model_dump_json().encode(), etag=f'"sites-{version}"')
+    headers = {"ETag": _encoded["etag"], "Cache-Control": "private, no-cache"}
+    if request.headers.get("if-none-match") == _encoded["etag"]:
+        return Response(status_code=304, headers=headers)
+    return Response(_encoded["body"], media_type="application/json", headers=headers)
 
 
 @router.get("/{domain}/icon", summary="A site's icon", response_class=FileResponse,

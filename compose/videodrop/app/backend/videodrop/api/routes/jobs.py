@@ -14,7 +14,7 @@ from ...jobs import MAX_PAGE, JobIn, JobQuery
 from ...journal import PAGE
 from .. import schemas
 from ..auth import Who, need
-from ..deps import Base, Ctx
+from ..deps import MAX_NUMBER, Base, Ctx, FileIndex
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
 _PROBLEMS = {404: {"model": schemas.Problem}, 409: {"model": schemas.Problem}, 422: {"model": schemas.Problem}}
@@ -74,7 +74,7 @@ def list_jobs(ctx: Ctx, base: Base, who: Who,
               client: str | None = Query(None, max_length=40),
               q: str | None = Query(None, max_length=200, description="In the title, the link and the uploader."),
               limit: int = Query(50, ge=1, le=MAX_PAGE),
-              offset: int = Query(0, ge=0)):
+              offset: int = Query(0, ge=0, le=MAX_NUMBER)):
     """One's own; everyone's with that permission."""
     rows, total = ctx.jobs.query(JobQuery(tuple(status), destination, client, (q or "").strip() or None, limit,
                                           offset, None if who.can("everyone") else who.owner))
@@ -194,7 +194,7 @@ def delete_job(job_id: str, ctx: Ctx, who: Who):
 @router.get("/{job_id}/log", summary="What happened to it, line by line", response_model=schemas.JobLog,
             responses=_PROBLEMS)
 def job_log(job_id: str, ctx: Ctx, who: Who,
-            after: int = Query(0, ge=0, description="Only the lines after this one (its seq): to follow it."),
+            after: int = Query(0, ge=0, le=MAX_NUMBER, description="Only the lines after this one (its seq): to follow it."),
             limit: int = Query(PAGE, ge=1, le=PAGE)):
     """Who asked, each try, what yt-dlp said, the fingerprint, each step
     and how long it took, where the files went, each callback, the held
@@ -215,7 +215,7 @@ def job_log_text(job_id: str, ctx: Ctx, who: Who):
 
 @router.get("/{job_id}/files/{index}", summary="Download one of its files", response_class=FileResponse,
             responses={200: {"content": {"application/octet-stream": {}}}, 404: {"model": schemas.Problem}, **_GONE})
-def get_file(job_id: str, index: int, ctx: Ctx, base: Base, who: Who,
+def get_file(job_id: str, index: FileIndex, ctx: Ctx, base: Base, who: Who,
              inline: bool = Query(False, description="To play in the browser rather than save.")):
     """The file itself. Range requests work (resume a download, seek in a
     player); the ETag and Last-Modified let a client skip what it has. A
@@ -237,7 +237,7 @@ def _video(ctx, who, job_id: str, index: int):
 
 @router.get("/{job_id}/files/{index}/details", summary="A video file's details and pictures",
             response_model=schemas.FileDetails, responses=_PROBLEMS)
-def file_details(job_id: str, index: int, ctx: Ctx, base: Base, who: Who):
+def file_details(job_id: str, index: FileIndex, ctx: Ctx, base: Base, who: Who):
     """As ffprobe reads it: its codecs, bitrates, tracks and chapters; and
     the addresses of its pictures (a gallery, a storyboard for a seek bar)
     and of its subtitle tracks as WebVTT. The pictures are made the first
@@ -266,7 +266,7 @@ _PICTURE = {200: {"content": {"image/jpeg": {}}}, 404: {"model": schemas.Problem
 
 @router.get("/{job_id}/files/{index}/frames/{n}.jpg", summary="One of a video's gallery pictures",
             response_class=FileResponse, responses=_PICTURE)
-def file_frame(job_id: str, index: int, n: int, ctx: Ctx, who: Who):
+def file_frame(job_id: str, index: FileIndex, n: FileIndex, ctx: Ctx, who: Who):
     _, path = _video(ctx, who, job_id, index)
     found = ctx.previews.frame(path, n)
     if not found:
@@ -276,7 +276,7 @@ def file_frame(job_id: str, index: int, n: int, ctx: Ctx, who: Who):
 
 @router.get("/{job_id}/files/{index}/storyboard.jpg", summary="A video's storyboard",
             response_class=FileResponse, responses=_PICTURE)
-def file_storyboard(job_id: str, index: int, ctx: Ctx, who: Who):
+def file_storyboard(job_id: str, index: FileIndex, ctx: Ctx, who: Who):
     """Small pictures of the whole video in one image (details.storyboard says how to read it)."""
     _, path = _video(ctx, who, job_id, index)
     found = ctx.previews.storyboard(path)
@@ -287,7 +287,7 @@ def file_storyboard(job_id: str, index: int, ctx: Ctx, who: Who):
 
 @router.get("/{job_id}/files/{index}/subtitles/{n}.vtt", summary="A video's subtitle track, as WebVTT",
             response_class=FileResponse, responses={200: {"content": {"text/vtt": {}}}, 404: {"model": schemas.Problem}})
-def file_subtitles(job_id: str, index: int, n: int, ctx: Ctx, who: Who):
+def file_subtitles(job_id: str, index: FileIndex, n: FileIndex, ctx: Ctx, who: Who):
     _, path = _video(ctx, who, job_id, index)
     found = ctx.previews.subtitles(path, n)
     if not found:
