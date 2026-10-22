@@ -43,7 +43,7 @@ curl -s -X POST http://songdrop.homelab.lan/api/v1/jobs -H "X-Api-Key: $KEY" \
   -d '{"url": "https://open.spotify.com/track/3v3STGBmaci4IJQRlC2V1z"}'
 # → 201 {"id": "9b082a7de1bc42efb37b088312b869e3", "status": "queued", …}
 
-# 2. Ask until "status" is done, partial, failed or cancelled
+# 2. Ask until "status" is finished, partial (some songs missing), failed or cancelled
 curl -s -H "X-Api-Key: $KEY" http://songdrop.homelab.lan/api/v1/jobs/9b082a7de1bc42efb37b088312b869e3
 
 # 3. Download a song: each file has its own "url"
@@ -59,17 +59,26 @@ takes the saved defaults. `GET /api/v1/options` lists them.
 
 ## Be called back
 
-Instead of asking in step 2, pass a `callback_url` with the job. songdrop posts
-the job there when it ends, and again each time a later try of one of its songs
-ends:
+Instead of asking in step 2, pass a `callback_url` with the job, and a
+`callback_secret` (16 characters or more) to know the calls are songdrop's.
+songdrop posts the job there when it ends, and again each time a later try of
+one of its songs ends:
 
 ```http
 POST /songdrop-done HTTP/1.1
 Content-Type: application/json
 User-Agent: songdrop
+X-Songdrop-Event: job.updated
+X-Songdrop-Timestamp: 1792008398
+X-Songdrop-Signature: sha256=5d1c…
 
 {"event": "job.updated", "job": {…the job, as GET /jobs/{id} gives it…}}
 ```
+
+The signature is the HMAC-SHA256 of `<X-Songdrop-Timestamp>.<body>` with your
+secret as the key, the same as videodrop's. Refuse a call whose signature
+doesn't match, or whose timestamp is more than 5 minutes off. Without a
+secret, there is no signature.
 
 Answer with any `2xx`. songdrop doesn't send a failed callback again; ask
 `GET /jobs/{id}` when in doubt.

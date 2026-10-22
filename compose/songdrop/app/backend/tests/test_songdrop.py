@@ -359,7 +359,7 @@ class JobsTest(unittest.TestCase):
 
     def test_done_files_delivered_and_tidy(self):
         job = self._wait(self._submit("ok")["id"])
-        self.assertEqual(job["status"], "done")
+        self.assertEqual(job["status"], "finished")
         self.assertEqual((job["title"], job["total"], job["completed"], job["progress"]), ("Album", 3, 3, 1.0))
         self.assertEqual(sorted(os.listdir(self.settings.output_dir)),
                          ["Artist - Song 0.opus", "Artist - Song 1.opus", "Artist - Song 2.opus"])
@@ -373,7 +373,7 @@ class JobsTest(unittest.TestCase):
 
         # The same songs again land beside the first copies, never over them.
         second = self._wait(self._submit("ok")["id"])
-        self.assertEqual(second["status"], "done")
+        self.assertEqual(second["status"], "finished")
         self.assertIn("Artist - Song 0 (2).opus", os.listdir(self.settings.output_dir))
 
         archive, archive_name = self.manager.archive(job["id"])
@@ -475,7 +475,7 @@ class JobsTest(unittest.TestCase):
     def test_a_later_try_offers_the_song(self):
         job = self._wait(self._spotify("flaky")["id"])
         job = self._try_again(job["id"])
-        self.assertEqual((job["status"], job["errors"], job["completed"]), ("done", [], 2))
+        self.assertEqual((job["status"], job["errors"], job["completed"]), ("finished", [], 2))
         self.assertIn("Artist - Song 1.opus", os.listdir(self.settings.output_dir))
         path, _ = self.manager.file(job["id"], next(f["id"] for f in job["files"] if f["title"] == "Song 1"))
         self.assertTrue(path.is_file())
@@ -514,13 +514,13 @@ class JobsTest(unittest.TestCase):
 
     def test_the_caller_is_told_when_its_job_ends(self):
         calls = []
-        with mock.patch.object(outbound, "post_json", side_effect=lambda url, payload: calls.append((url, payload))):
+        with mock.patch.object(outbound, "post_json", side_effect=lambda url, payload, secret=None: calls.append((url, payload))):
             found = detect.Detection("ytdlp", "YouTube", "playlist", "https://youtube.com/ok")
             job = self.manager.submit(found, options.parse("ytdlp", {}), "http://browser.lan/hook")
             self._wait(job["id"])
             time.sleep(0.2)
         [(url, payload)] = calls
-        self.assertEqual((url, payload["event"], payload["job"]["status"]), ("http://browser.lan/hook", "job.updated", "done"))
+        self.assertEqual((url, payload["event"], payload["job"]["status"]), ("http://browser.lan/hook", "job.updated", "finished"))
 
     def test_only_the_set_number_of_jobs_runs_at_once(self):
         first = self._submit("slow")
@@ -538,8 +538,41 @@ class StatusTest(unittest.TestCase):
 
         with mock.patch.object(system, "versions", return_value=[]):
             counts = system.status(mock.Mock(output_root=Path("/"), state_dir=Path("/")),
-                                   [{"status": "done", "errors": []}])["jobs"]["by_status"]
-        self.assertEqual(counts, {"queued": 0, "running": 0, "done": 1, "partial": 0, "failed": 0, "cancelled": 0})
+                                   [{"status": "finished", "errors": []}])["jobs"]["by_status"]
+        self.assertEqual(counts, {"queued": 0, "running": 0, "finished": 1, "partial": 0, "failed": 0, "cancelled": 0})
+
+
+class SignedCallbackTest(unittest.TestCase):
+    def test_a_callback_with_a_secret_is_signed(self):
+        from batlab_common import callbacks
+
+        from app import outbound
+
+        sent = {}
+
+        def fake_urlopen(request, timeout):
+            sent["headers"], sent["body"] = dict(request.header_items()), request.data
+            return mock.MagicMock()
+
+        with mock.patch.object(outbound.urllib.request, "urlopen", fake_urlopen):
+            outbound.post_json("http://caller/hook", {"event": "job.updated", "job": {"id": "x"}}, "a secret of sixteen")
+        headers = {k.lower(): v for k, v in sent["headers"].items()}
+        self.assertEqual(headers["x-songdrop-event"], "job.updated")
+        self.assertTrue(callbacks.verify("a secret of sixteen", headers["x-songdrop-timestamp"], sent["body"],
+                                         headers["x-songdrop-signature"]))
+
+    def test_without_a_secret_there_is_no_signature(self):
+        from app import outbound
+
+        sent = {}
+
+        def fake_urlopen(request, timeout):
+            sent["headers"] = {k.lower() for k, _ in request.header_items()}
+            return mock.MagicMock()
+
+        with mock.patch.object(outbound.urllib.request, "urlopen", fake_urlopen):
+            outbound.post_json("http://caller/hook", {"event": "job.updated"})
+        self.assertNotIn("x-songdrop-signature", sent["headers"])
 
 
 class PreferencesTest(unittest.TestCase):

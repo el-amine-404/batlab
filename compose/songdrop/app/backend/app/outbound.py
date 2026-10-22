@@ -8,6 +8,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from batlab_common import callbacks
+
 log = logging.getLogger("songdrop.outbound")
 
 TIMEOUT_SECONDS = 15
@@ -18,13 +20,16 @@ class SendFailed(Exception):
     """The message is shown to the user as is."""
 
 
-def post_json(url: str, payload: dict) -> None:
+def post_json(url: str, payload: dict, secret: str | None = None) -> None:
+    """POSTs payload as JSON; signed with secret when there is one (a job's
+    callback_secret, batlab_common.callbacks)."""
     # urllib opens file:// and ftp:// too: only the web, whatever let the address in.
     if not url.startswith(("http://", "https://")):
         raise SendFailed("Only http:// and https:// addresses are sent to.")
     body = json.dumps(payload, ensure_ascii=False, default=str).encode()
-    request = urllib.request.Request(url, data=body, method="POST",
-                                     headers={"Content-Type": "application/json", "User-Agent": USER_AGENT})
+    headers = {"Content-Type": "application/json", "User-Agent": USER_AGENT,
+               **callbacks.headers("songdrop", secret, body, payload.get("event", "message"))}
+    request = urllib.request.Request(url, data=body, method="POST", headers=headers)
     host = urllib.parse.urlsplit(url).hostname or url
     try:
         urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS).close()

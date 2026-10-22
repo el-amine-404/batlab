@@ -12,7 +12,7 @@ import { formatBytes } from "@/lib/utils";
 const STATUS_LABELS: Record<string, string> = {
   queued: "Waiting",
   running: "Downloading",
-  done: "Complete",
+  finished: "Complete",
   partial: "Songs missing",
   failed: "Failed",
   cancelled: "Cancelled",

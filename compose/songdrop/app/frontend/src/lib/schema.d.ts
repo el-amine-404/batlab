@@ -950,7 +950,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "queued" | "running" | "done" | "partial" | "failed" | "cancelled";
+            status: "queued" | "running" | "finished" | "partial" | "failed" | "cancelled";
             /** Title */
             title: string | null;
             /** Message */

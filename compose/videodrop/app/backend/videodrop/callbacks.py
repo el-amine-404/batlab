@@ -10,8 +10,6 @@ callback.last says how the last one went. Calls are not kept across a
 restart: a caller that must not miss the end also reads the job."""
 
 import asyncio
-import hashlib
-import hmac
 import json
 import logging
 import time
@@ -19,6 +17,7 @@ import uuid
 from collections.abc import Callable
 
 import httpx
+from batlab_common.callbacks import sign
 
 from . import outbound
 
@@ -26,10 +25,6 @@ log = logging.getLogger("videodrop.callbacks")
 
 DELAYS = (5, 30, 120, 600)
 AT_ONCE = 8
-
-
-def sign(secret: str, timestamp: str, body: bytes) -> str:
-    return "sha256=" + hmac.new(secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
 
 
 class Callbacks:

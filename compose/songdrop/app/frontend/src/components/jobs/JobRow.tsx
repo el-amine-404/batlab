@@ -32,7 +32,7 @@ import { engineVariant, kindLabel } from "./labels";
 const STATUS = {
   queued: { label: "Queued", variant: "muted", icon: Clock },
   running: { label: "Downloading", variant: "site", icon: Loader2 },
-  done: { label: "Done", variant: "success", icon: Check },
+  finished: { label: "Done", variant: "success", icon: Check },
   partial: { label: "Songs missing", variant: "warning", icon: AlertTriangle },
   failed: { label: "Failed", variant: "destructive", icon: AlertTriangle },
   cancelled: { label: "Cancelled", variant: "muted", icon: Ban },

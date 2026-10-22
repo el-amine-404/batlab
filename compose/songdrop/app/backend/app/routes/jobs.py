@@ -21,6 +21,10 @@ class JobIn(LinkIn):
                                                    "Left out: the saved defaults.")
     callback_url: str | None = Field(None, max_length=2048,
                                      description="Gets the job (POST, JSON) when it ends and when a later try ends.")
+    callback_secret: str | None = Field(None, min_length=16, max_length=200,
+                                        description="Signs each callback: X-Songdrop-Signature is sha256=<hex "
+                                                    "HMAC-SHA256 of \"<X-Songdrop-Timestamp>.<body>\">, this as "
+                                                    "key. Never answered back.")
 
     @field_validator("callback_url")
     @classmethod
@@ -82,7 +86,8 @@ def create_job(body: JobIn, who=need("download")):
         text = problems.explain(exc.errors())
         message = next((m for clue, m in _OPTION_MESSAGES if clue in text), "One of the options isn't valid.")
         raise JobError(422, message) from exc
-    job = manager.submit(detection, chosen, body.callback_url, owner=who.owner, owner_name=who.name)
+    job = manager.submit(detection, chosen, body.callback_url, owner=who.owner, owner_name=who.name,
+                         callback_secret=body.callback_secret)
     log.info("%s asked for %s (job %s)", who.name, detection.url, job["id"])
     return job
 

@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 
 const FILTERS: { key: string; label: string; test: (job: Job) => boolean }[] = [
   { key: "all", label: "All", test: () => true },
-  { key: "done", label: "Complete", test: (job) => job.status === "done" },
+  { key: "finished", label: "Complete", test: (job) => job.status === "finished" },
   { key: "partial", label: "Songs missing", test: (job) => job.errors.length > 0 },
   { key: "failed", label: "Failed", test: (job) => job.status === "failed" },
   { key: "cancelled", label: "Cancelled", test: (job) => job.status === "cancelled" },
@@ -24,7 +24,7 @@ export function HistoryPage() {
   const [clearing, setClearing] = useState(false);
 
   const visible = useMemo(() => history.filter(FILTERS.find((f) => f.key === filter)!.test), [history, filter]);
-  const clearable = history.filter((job) => job.status === "done" || job.status === "cancelled");
+  const clearable = history.filter((job) => job.status === "finished" || job.status === "cancelled");
 
   const clear = async () => {
     const count = `${clearable.length} download${clearable.length === 1 ? "" : "s"}`;

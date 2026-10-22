@@ -55,7 +55,8 @@ class Songdrop(ServiceType):
         if status == "running":
             return Update("downloading", "Downloading.", progress=job.get("progress"))
         files = job.get("files") or []
-        if status in ("done", "partial") and files:
+        # "done": songdrop before 1.8 (the download contract says "finished" now).
+        if status in ("finished", "done", "partial") and files:
             ext = re.search(r"\.(\w+)$", files[0].get("name") or "")
             return Update("completed", "Downloaded by songdrop; musicguard files it.",
                           quality=ext.group(1).upper() if ext else None)

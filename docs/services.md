@@ -72,18 +72,16 @@ songdrop and videodrop, and any service that turns a link into files:
 | Ask | `POST /api/v1/jobs` with `url`, `options` (the service's own), `callback_url`. Answers `201` with the job at once. |
 | Follow | `GET /api/v1/jobs/{id}`; `GET /api/v1/jobs` lists them, newest first. |
 | The job | `id`, `url`, `site`, `status`, `title`, `progress`, `files`, `asked_by`, `created_at`, `started_at`, `finished_at`. |
-| Status | `queued`, `running`, then one of `done`, `failed`, `cancelled` (final). |
+| Status | `queued`, `running`, then one of `finished`, `failed`, `cancelled` (final). A service may have a final status of its own besides, said in its API (songdrop's `partial`: some songs missing). |
 | Act | `POST …/jobs/{id}/cancel`; `DELETE …/jobs/{id}` removes a finished job and its files. |
 | Files | `GET …/jobs/{id}/files/{file}`, while the service keeps them. |
-| Told | `callback_url` gets the job (POST, JSON) when it ends, signed with `callback_secret` when one is given (HMAC-SHA256 of `<timestamp>.<body>`). |
+| Told | `callback_url` gets the job (POST, JSON) when it ends, signed with `callback_secret` when one is given: `X-<App>-Signature` is `sha256=` and the HMAC-SHA256 of `<X-<App>-Timestamp>.<body>` (`batlab_common.callbacks`). A caller that only wakes up on a call and then asks the service itself (clipseerr) needn't check it: a forged call changes nothing. |
 
-Where they differ today, to be brought in line one at a time:
+Where they still differ, each the service's own and within the contract:
 
 | | songdrop | videodrop |
 | --- | --- | --- |
-| A job that ended well | `done`, or `partial` (some songs missing) | `finished` |
 | `progress` | 0 to 1 | an object (bytes, speed, stage) |
-| Signed callbacks | not yet | `X-Videodrop-Signature` |
 | Live changes | polling | `GET /api/v1/jobs/events` (SSE) |
 
 ## Hand-off folders

@@ -13,7 +13,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from batlab_common import fingerprint, http as fetch, notify, titles  # noqa: E402
+from batlab_common import callbacks, fingerprint, http as fetch, notify, titles  # noqa: E402
 
 
 def ffmpeg(*args):
@@ -190,6 +190,26 @@ class Spacing(unittest.TestCase):
             server.shutdown()
             server.server_close()
 
+
+
+class SignedCallbacks(unittest.TestCase):
+    def test_a_signed_call_verifies_and_a_changed_one_does_not(self):
+        body = b'{"event":"job.updated"}'
+        sent = callbacks.headers("songdrop", "s3cret", body, "job.updated")
+        self.assertEqual(sent["X-Songdrop-Event"], "job.updated")
+        stamp, signature = sent["X-Songdrop-Timestamp"], sent["X-Songdrop-Signature"]
+        self.assertTrue(callbacks.verify("s3cret", stamp, body, signature))
+        self.assertFalse(callbacks.verify("s3cret", stamp, body + b" ", signature))
+        self.assertFalse(callbacks.verify("other", stamp, body, signature))
+
+    def test_an_old_call_is_refused(self):
+        body = b"{}"
+        signature = callbacks.sign("s", "1000", body)
+        self.assertTrue(callbacks.verify("s", "1000", body, signature, now=1000 + callbacks.MAX_AGE))
+        self.assertFalse(callbacks.verify("s", "1000", body, signature, now=1001 + callbacks.MAX_AGE))
+
+    def test_no_secret_no_signature(self):
+        self.assertNotIn("X-Videodrop-Signature", callbacks.headers("videodrop", None, b"{}", "job.finished"))
 
 if __name__ == "__main__":
     unittest.main()

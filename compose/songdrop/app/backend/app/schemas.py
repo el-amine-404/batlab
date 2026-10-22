@@ -10,7 +10,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 Engine = Literal["spotdl", "ytdlp"]
-JobStatus = Literal["queued", "running", "done", "partial", "failed", "cancelled"]
+# "finished" as the download contract says (docs/services.md); "done" before 1.8.
+JobStatus = Literal["queued", "running", "finished", "partial", "failed", "cancelled"]
 RetryState = Literal["waiting", "queued", "retrying", "gave_up", "failed"]
 
 

@@ -67,7 +67,7 @@ class Job:
     kind: str
     options: dict
     created_at: float
-    status: str = "queued"  # queued, running, done, partial, failed, cancelled
+    status: str = "queued"  # queued, running, finished, partial, failed, cancelled
     title: str | None = None
     total: int = 0
     started_at: float | None = None
@@ -80,6 +80,8 @@ class Job:
     # Told the job (as GET /api/v1/jobs/{id} gives it) when it ends, and when
     # a later try ends.
     callback_url: str | None = None
+    # Signs each callback when the caller gave one (batlab_common.callbacks); never answered back.
+    callback_secret: str | None = None
     # Who asked: "user:<id>" or "key:<id>" (batlab_common/accounts.py), and their name then. None for
     # the jobs from before songdrop had accounts.
     owner: str | None = None
@@ -152,6 +154,8 @@ class JobManager:
             except Exception:
                 log.exception("ignoring unreadable %s", path)
                 continue
+            if job.status == "done":  # saved before 1.8, when it was called that
+                job.status = "finished"
             if job.status == "running":
                 job.status = "failed" if not job.files else "partial"
                 job.message = "Interrupted: songdrop restarted while this was downloading."
@@ -176,7 +180,7 @@ class JobManager:
         return 1 + len(self.settings.retry_minutes)
 
     def submit(self, detection: Detection, options, callback_url: str | None = None, owner: str | None = None,
-               owner_name: str | None = None) -> dict:
+               owner_name: str | None = None, callback_secret: str | None = None) -> dict:
         job = Job(
             id=uuid.uuid4().hex,
             url=detection.url,
@@ -186,6 +190,7 @@ class JobManager:
             options=options.model_dump(),
             created_at=time.time(),
             callback_url=callback_url,
+            callback_secret=callback_secret,
             owner=owner,
             owner_name=owner_name,
         )
@@ -548,8 +553,8 @@ class JobManager:
             if got:
                 shutil.rmtree(job_dir / ARCHIVE_DIR, ignore_errors=True)  # "Download all" is rebuilt with it
                 job.errors.remove(entry)
-                job.status = "partial" if job.errors else "done"
-                job.message = None if job.status == "done" else job.message
+                job.status = "partial" if job.errors else "finished"
+                job.message = None if job.status == "finished" else job.message
                 job.finished_at = time.time()  # its link lasts from now
                 self._save(job)
                 self._announce_retry(job, entry, got=True)
@@ -618,7 +623,7 @@ class JobManager:
         """The caller that asked to be told (callback_url) gets the job."""
         if job.callback_url:
             outbound.in_background("callback", outbound.post_json, job.callback_url,
-                                   {"event": "job.updated", "job": self._public(job)})
+                                   {"event": "job.updated", "job": self._public(job)}, job.callback_secret)
 
     def _drain(self, job_id: str, process: subprocess.Popen, output: deque) -> None:
         for raw in process.stdout:
@@ -723,7 +728,7 @@ class JobManager:
         elif job.files and job.errors:
             status = "partial"
         elif job.files:
-            status = "done"
+            status = "finished"
         else:
             status = "failed"
             message = message or ("Nothing could be downloaded." if job.errors else "Nothing was downloaded.")
