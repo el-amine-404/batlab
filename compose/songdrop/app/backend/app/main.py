@@ -12,6 +12,7 @@ import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from batlab_common.web import BodyLimit
 from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.gzip import GZipMiddleware
@@ -180,6 +181,7 @@ class CompressSome:
 
 app.add_middleware(CompressSome)
 app.add_middleware(Headers)
+app.add_middleware(BodyLimit)
 app.add_middleware(RequestLog, name="songdrop")
 
 

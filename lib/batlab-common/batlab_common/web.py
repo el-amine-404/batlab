@@ -96,6 +96,62 @@ class RequestLog:
                               f" by {who.name} ({who.kind})" if who else "", request_id)
 
 
+MAX_BODY = 2 * 1024 * 1024
+
+
+class _TooLarge(Exception):
+    pass
+
+
+class BodyLimit:
+    """No request body over limit (2 MB): the largest any app takes is a
+    cookies.txt, 1 MB. One that says it is larger (Content-Length) is answered
+    413 before a byte of it is read; one that doesn't is cut off once it is,
+    so no body ever fills the app's memory (a 64 MB one to the open sign-in
+    was read whole before).
+
+        app.add_middleware(BodyLimit)
+    """
+
+    def __init__(self, app, limit: int = MAX_BODY):
+        self._app = app
+        self._limit = limit
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self._app(scope, receive, send)
+        length = dict(scope.get("headers") or []).get(b"content-length", b"")
+        if length.isdigit() and int(length) > self._limit:
+            return await self._refuse(send)
+        seen, started = [0], [False]
+
+        async def counted():
+            message = await receive()
+            if message["type"] == "http.request":
+                seen[0] += len(message.get("body", b""))
+                if seen[0] > self._limit:
+                    raise _TooLarge
+            return message
+
+        async def tracked(message):
+            if message["type"] == "http.response.start":
+                started[0] = True
+            await send(message)
+
+        try:
+            await self._app(scope, counted, tracked)
+        except _TooLarge:
+            if not started[0]:
+                await self._refuse(send)
+
+    async def _refuse(self, send):
+        body = b'{"detail":"That request is too large."}'
+        await send({"type": "http.response.start", "status": 413,
+                    "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode()),
+                                (b"connection", b"close")]})
+        await send({"type": "http.response.body", "body": body})
+
+
 def without_key(url: str) -> str:
     """url without its key=… (a feed reader's key), for an address a feed
     writes into itself (its own, its next page)."""
@@ -106,6 +162,33 @@ def without_key(url: str) -> str:
 
 class Problem(BaseModel):
     detail: str = Field(description="What went wrong, as a sentence a person can read.")
+
+
+def plain_errors(app: FastAPI) -> None:
+    """The app's OpenAPI says what its 422s really are: {"detail": "<sentence>"}
+    (Problem), as every app answers them, not FastAPI's list of errors that
+    no answer carries. Gate.install calls it."""
+    made = app.openapi
+
+    def openapi() -> dict:
+        if app.openapi_schema:
+            return app.openapi_schema
+        schema = made()
+        shapes = schema.setdefault("components", {}).setdefault("schemas", {})
+        shapes.setdefault("Problem", Problem.model_json_schema())
+        for operations in schema.get("paths", {}).values():
+            for operation in operations.values():
+                answer = operation.get("responses", {}).get("422") if isinstance(operation, dict) else None
+                if answer:
+                    answer["content"] = {"application/json": {"schema": {"$ref": "#/components/schemas/Problem"}}}
+        text = str(schema["paths"])
+        for unused in ("HTTPValidationError", "ValidationError"):
+            if f"/{unused}'" not in text:
+                shapes.pop(unused, None)
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = openapi
 
 
 class Gate:
@@ -496,3 +579,4 @@ class Gate:
             return response
 
         app.add_exception_handler(Refusal, refused)
+        plain_errors(app)

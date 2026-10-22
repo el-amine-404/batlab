@@ -10,6 +10,7 @@ import mimetypes
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from batlab_common.web import BodyLimit
 from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.gzip import GZipMiddleware
@@ -155,6 +156,7 @@ def create_app(services: Services) -> FastAPI:
     gate.install(app, services.accounts)
     app.add_middleware(CompressSome)
     app.add_middleware(Headers)
+    app.add_middleware(BodyLimit)
     app.add_middleware(RequestLog, name="videodrop")
 
     api = APIRouter(prefix="/api/v1")

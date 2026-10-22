@@ -13,6 +13,7 @@ import time
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
+from batlab_common.web import BodyLimit
 from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.gzip import GZipMiddleware
@@ -103,6 +104,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.add_middleware(GZipMiddleware, minimum_size=1024)
+app.add_middleware(BodyLimit)
 app.add_middleware(RequestLog, name="clipseerr")
 # People and keys (auth.py): their refusals answered, the accounts the routes use.
 gate.install(app, accounts)

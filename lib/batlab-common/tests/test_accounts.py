@@ -23,10 +23,10 @@ PERMISSIONS = {
 }
 
 try:
-    from fastapi import APIRouter, Depends, FastAPI
+    from fastapi import APIRouter, Depends, FastAPI, Request
     from fastapi.testclient import TestClient
 
-    from batlab_common.web import Gate
+    from batlab_common.web import BodyLimit, Gate
 except ImportError:  # outside the apps' images
     FastAPI = None
 
@@ -255,6 +255,44 @@ class Web(unittest.TestCase):
         self.assertLess(time.time() - started, 5)
         self.assertEqual(self.client.get("/api/auth/me").json()["username"], "amine")
 
+    def test_the_description_says_what_a_422_is(self):
+        schema = self.client.app.openapi()
+        answers = [op["responses"]["422"] for ops in schema["paths"].values() for op in ops.values()
+                   if "422" in op.get("responses", {})]
+        self.assertTrue(answers)
+        for answer in answers:
+            self.assertEqual(answer["content"]["application/json"]["schema"], {"$ref": "#/components/schemas/Problem"})
+        self.assertNotIn("HTTPValidationError", schema["components"]["schemas"])
+
+
+@unittest.skipIf(FastAPI is None, "needs FastAPI and httpx (the apps' images)")
+class BodyLimits(unittest.TestCase):
+    """No body over the limit reaches a route, said or streamed."""
+
+    def setUp(self):
+        app = FastAPI()
+        app.add_middleware(BodyLimit, limit=1000)
+
+        @app.post("/echo")
+        async def echo(body: dict):
+            return {"keys": len(body)}
+
+        @app.put("/raw")
+        async def raw(request: Request):
+            return {"bytes": len(await request.body())}
+
+        self.client = TestClient(app)
+
+    def test_within_the_limit_passes(self):
+        self.assertEqual(self.client.post("/echo", json={"a": 1}).json(), {"keys": 1})
+
+    def test_a_said_length_over_it_is_refused_unread(self):
+        response = self.client.post("/echo", content=b"{" + b" " * 2000 + b"}", headers={"Content-Type": "application/json"})
+        self.assertEqual(response.status_code, 413)
+
+    def test_a_streamed_body_over_it_is_cut_off(self):
+        response = self.client.put("/raw", content=iter([b"x" * 600, b"x" * 600]))
+        self.assertEqual(response.status_code, 413)
 
 if __name__ == "__main__":
     unittest.main()

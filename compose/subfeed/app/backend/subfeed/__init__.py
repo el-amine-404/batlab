@@ -3,4 +3,4 @@ read: JSON Feed, Atom and an API (/api/v1), with a page to manage them. It
 knows communities and their posts, nothing about what the posts are about
 (docs/services.md)."""
 
-__version__ = "1.5.0"
+__version__ = "1.5.1"
