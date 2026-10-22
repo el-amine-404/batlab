@@ -26,9 +26,6 @@ services:
       - TZ=${TZ}
       # The same paths as musicguard, Lidarr and Aurral see.
       - STANZARR_LIBRARY=/data/media/music:/data/media/music-aurral:/data/media/music-extras
-      # The first admin, made while nobody exists (then: Settings, People).
-      - STANZARR_USERNAME=${STANZARR_USERNAME:-admin}
-      - STANZARR_PASSWORD=${STANZARR_PASSWORD:-}
       - STANZARR_WORKER_KEY=${STANZARR_WORKER_KEY:?set STANZARR_WORKER_KEY in compose/.env}
       - STANZARR_PUBLIC_URL=http://stanzarr.homelab.lan
     volumes:

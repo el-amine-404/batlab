@@ -304,8 +304,8 @@ without lyrics synced by a person), writes `.lrc` / `.txt` beside the songs,
 and hosts the lyrics editor. AI sync runs on a GPU worker: the laptop, with
 `~/ai-lyrics/dvenv/bin/stanzarr-worker --server http://stanzarr.homelab.lan
 --key <STANZARR_WORKER_KEY>`; without a worker online, AI sync is disabled in
-the page. Its first admin and the worker key are in `compose/.env`
-(`STANZARR_USERNAME`, `STANZARR_PASSWORD`, `STANZARR_WORKER_KEY`).
+the page. The worker key is in `compose/.env` (`STANZARR_WORKER_KEY`); the
+people are stanzarr's own, as the other apps' (Settings, People).
 
 musicguard no longer fetches lyrics (`MUSICGUARD_LYRICS=0`). It still checks
 lyrics files (size, orphans), and a new or changed one makes it start

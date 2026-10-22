@@ -43,10 +43,9 @@ Two things keep that from happening again:
 
 ## Frigate
 
-- **Login**: Frigate's own users; `admin`'s password is kept in
-  `compose/.env` as `FRIGATE_ADMIN_PASS` (Frigate does not read it). Change
-  it under Settings > Users. Lost it: set `auth.reset_admin_password: true`
-  and restart, the log prints a new one.
+- **Login**: Frigate's own users, kept in a password manager (not in
+  `compose/.env`). Change a password under Settings > Users. Lost the admin's:
+  set `auth.reset_admin_password: true` and restart, the log prints a new one.
 - **Config**: the live file is `$VOLUMES_ROOT/frigate/config/config.yml`,
   edited from Frigate's Settings UI, which also migrates it on upgrades.
   `compose/frigate/config.yml` is only the seed `compose/frigate/setup.sh`
