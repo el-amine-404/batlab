@@ -777,9 +777,9 @@ class Catalog:
 
         # lyrics3: stanzarr's first (lyrics2: with the language they are in).
         key = f"lyrics3:{titles.simple(first)}:{titles.simple(title)}:{seconds or 0}"
-        kept = self._cache.peek(key)
+        at = self._cache.fetched_at(key)
         # Asked again: on demand ("Look again"), or when it found nothing an hour ago (sources learn new songs).
-        if kept and (fresh or (not _has_words(kept[1]) and time.time() - kept[0] > HOUR)):
+        if at and (fresh or (not _has_words(self._cache.peek(key)) and time.time() - at > HOUR)):
             self._cache.forget(key)
         found = Lyrics.model_validate(await self._cache.get(key, fetch, fresh=7 * DAY, stale=90 * DAY))
         if found.language and self.known:

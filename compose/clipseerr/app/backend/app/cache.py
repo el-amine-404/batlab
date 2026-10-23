@@ -150,9 +150,10 @@ class Cache:
         self._background.add(task)
         task.add_done_callback(self._background.discard)
 
-    def peek(self, key: str) -> tuple[float, Any] | None:
-        """(when it was fetched, the value) of key, without fetching; None when not kept."""
-        return self._read(key)
+    def fetched_at(self, key: str) -> float | None:
+        """When key's value was fetched; None when nothing is kept."""
+        found = self._read(key)
+        return found[0] if found else None
 
     def forget(self, prefix: str = "") -> int:
         """Drops every entry whose key starts with prefix (all with "")."""
