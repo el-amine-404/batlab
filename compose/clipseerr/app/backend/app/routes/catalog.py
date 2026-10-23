@@ -4,13 +4,14 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Query, Response
 from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel, Field
 
 from .. import schemas
 from ..catalog.models import (AlbumPage, ArtistPage, ArtistSummary, CategoryGroup, Credits, Lyrics, SearchResults, Shelf, Video,
                               VideoDetail, Versions)
 from ..cache import tracking
 from ..catalog.preview import Busy
-from ..context import catalog, clips, known, library, requests, settings
+from ..context import catalog, clips, frames, known, library, requests, settings
 from ..problems import Problem
 
 router = APIRouter(tags=["Catalog"])
@@ -186,6 +187,47 @@ async def video_files(video_id: str):
                       for f in files]}
 
 
+class Frame(BaseModel):
+    t: float = Field(description="Seconds into the video.")
+    sheet: int = Field(description="The storyboard sheet it is on: /frames/{sheet}.jpg.")
+    col: int
+    row: int
+
+
+class Tile(BaseModel):
+    width: int
+    height: int
+    columns: int
+    rows: int
+
+
+class Moments(BaseModel):
+    frames: list[Frame]
+    tile: Tile | None = Field(description="A frame's size on its sheet, and how many a sheet has across and down.")
+
+
+@router.get("/videos/{video_id}/frames", summary="A few frames along the video (YouTube's storyboard), to cut from "
+            "their sheets", response_model=Moments, responses=_404)
+async def video_frames(video_id: str):
+    found = await catalog.video(video_id)
+    if not found.youtube_id or not _YOUTUBE_ID.fullmatch(found.youtube_id):
+        return {"frames": [], "tile": None}
+    try:
+        return await frames.get(found.youtube_id)
+    except Exception as exc:
+        raise Problem(502, "YouTube didn't give this video's frames. Try again in a moment.") from exc
+
+
+@router.get("/videos/{video_id}/frames/{sheet}.jpg", summary="One storyboard sheet", response_class=FileResponse,
+            responses=_404)
+async def video_frame_sheet(video_id: str, sheet: int):
+    youtube_id = video_id.removeprefix("yt:")
+    path = frames.sheet(youtube_id, sheet) if _YOUTUBE_ID.fullmatch(youtube_id) and 0 <= sheet < 1000 else None
+    if not path or not path.exists():
+        raise Problem(404, "No such frames.")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=2592000, immutable"})
+
+
 async def _clip(youtube_id: str):
     if not _YOUTUBE_ID.fullmatch(youtube_id):
         raise Problem(404, "No such video.")
@@ -234,11 +276,11 @@ async def library_file(token: str):
 
 @router.get("/videos/{video_id}/credits", summary="Who made the song: performed, written, produced by…",
             response_model=Credits, responses=_404)
-async def credits(video_id: str):
-    return await catalog.credits(video_id)
+async def credits(video_id: str, fresh: bool = Query(False, description="Ask again now, not the kept answer.")):
+    return await catalog.credits(video_id, fresh)
 
 
-@router.get("/videos/{video_id}/lyrics", summary="The song's words: timed lines (LRCLIB, else YouTube Music) "
+@router.get("/videos/{video_id}/lyrics", summary="The song's words: timed lines (stanzarr, else LRCLIB, else YouTube Music) "
             "or plain text", response_model=Lyrics, responses=_404)
 async def lyrics(video_id: str, fresh: bool = Query(False, description="Ask the sources again now, not the kept answer.")):
     return await catalog.lyrics(video_id, fresh)

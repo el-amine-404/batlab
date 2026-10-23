@@ -16,7 +16,7 @@ from batlab_common import titles
 
 from ..cache import Cache, tracking
 from ..problems import Problem
-from . import language, lrclib, match, youtube
+from . import language, lrclib, match, musicbrainz, youtube
 from .apple import GENRES, Apple
 from .models import (AlbumPage, ArtistPage, ArtistRef, AudioMatch, Category, CategoryGroup, Checks, Credits, Lyrics, SearchResults, Shelf,
                      SourceCheck,
@@ -714,23 +714,37 @@ class Catalog:
 
     # ---- who made the song, and its words ---------------------------------------------------------
 
-    async def credits(self, video_id: str) -> Credits:
-        """The song's credits (its official audio's, else the video's)."""
+    async def credits(self, video_id: str, fresh: bool = False) -> Credits:
+        """The song's credits: YouTube Music's (its official audio's, else the
+        video's), else MusicBrainz's. None found is asked again a day later,
+        or now (fresh, "Look again")."""
         detail = await self.video(video_id)
         region = self.region
         ids = [i for i in ((detail.audio.youtube_id if detail.audio else None), detail.youtube_id) if i]
+        song = detail.audio
+        title, artist = (song.title, song.artist) if song else (detail.title, detail.artist)
+        seconds = (song.duration if song else None) or detail.duration
+        first = (_credit_names(artist) or [artist])[0]
 
         async def fetch():
             for youtube_id in ids:
                 found = await youtube.credits(region, youtube_id)
                 if found["credits"]:
                     return found
-            return {"credits": [], "provider": None}
+            try:
+                return await musicbrainz.credits(self._http, first, _bare(title), seconds)
+            except Exception as exc:
+                log.info("MusicBrainz credits failed for %s - %s: %r", first, title, exc)
+                return {"credits": [], "provider": None}
 
         if not ids:
             return Credits(credits=[])
-        found = Credits.model_validate(await self._get("youtube", f"yt:credits:{ids[0]}", fetch, fresh=30 * DAY,
-                                                       stale=90 * DAY))
+        # credits2: MusicBrainz's when YouTube Music has none.
+        key = f"yt:credits2:{ids[0]}"
+        at = self._cache.fetched_at(key)
+        if at and (fresh or (not (self._cache.peek(key) or {}).get("credits") and time.time() - at > DAY)):
+            self._cache.forget(key)
+        found = Credits.model_validate(await self._get("youtube", key, fetch, fresh=30 * DAY, stale=90 * DAY))
         # Each name to its YouTube Music page when it has one (a writer or a
         # producer often hasn't): the page links them.
         names = list(dict.fromkeys(n for credit in found.credits for n in credit.names))
@@ -771,15 +785,19 @@ class Catalog:
                 found = from_youtube or found
             words = Lyrics.model_validate(found or {})
             text = words.plain or "\n".join(line.text for line in words.synced)
-            words.language = language.detect(text)
+            # The lyrics say it; without them, the title's writing may (Hebrew, Greek, Korean…).
+            words.language = language.detect(text) or language.by_script(f"{title} {artist}")
             words.language_name = language.name(words.language)
             return words.model_dump()
 
         # lyrics3: stanzarr's first (lyrics2: with the language they are in).
         key = f"lyrics3:{titles.simple(first)}:{titles.simple(title)}:{seconds or 0}"
         at = self._cache.fetched_at(key)
-        # Asked again: on demand ("Look again"), or when it found nothing an hour ago (sources learn new songs).
-        if at and (fresh or (not _has_words(self._cache.peek(key)) and time.time() - at > HOUR)):
+        # Asked again: on demand, when it found nothing an hour ago, or words without timings a day ago:
+        # sources learn songs, and timings come later than words.
+        kept = self._cache.peek(key) if at else None
+        if at and (fresh or (not _has_words(kept) and time.time() - at > HOUR)
+                   or (not (kept or {}).get("synced") and not (kept or {}).get("instrumental") and time.time() - at > DAY)):
             self._cache.forget(key)
         found = Lyrics.model_validate(await self._cache.get(key, fetch, fresh=7 * DAY, stale=90 * DAY))
         if found.language and self.known:

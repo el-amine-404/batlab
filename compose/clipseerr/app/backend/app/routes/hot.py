@@ -15,6 +15,8 @@ _404 = {404: {"model": schemas.Problem}, 502: {"model": schemas.Problem}}
 
 class Picks(BaseModel):
     ids: list[str] = Field(description="The videos added by hand (catalog ids), newest first.")
+    shown: list[str] = Field(default_factory=list, description="Every video Hot shows now: the picks, and its feeds' "
+                                                               "and searches' (yt: ids).")
 
 
 class HotArtists(BaseModel):
@@ -23,7 +25,7 @@ class HotArtists(BaseModel):
 
 @router.get("/picks", summary="The videos added to Hot by hand", response_model=Picks)
 def picks():
-    return {"ids": hotlist.pick_ids()}
+    return {"ids": hotlist.pick_ids(), "shown": hotlist.shown_ids()}
 
 
 @router.put("/picks/{video_id}", summary="Add a video to Hot", response_model=Picks, responses=_404,
@@ -36,7 +38,7 @@ async def add_pick(video_id: str):
         video["id"] = f"yt:{detail.youtube_id}"
         video["source"] = "youtube"
     hotlist.pick(video)
-    return {"ids": hotlist.pick_ids()}
+    return {"ids": hotlist.pick_ids(), "shown": hotlist.shown_ids()}
 
 
 @router.delete("/picks/{video_id}", summary="Take a video out of Hot's picks (its yt: id)", status_code=204,

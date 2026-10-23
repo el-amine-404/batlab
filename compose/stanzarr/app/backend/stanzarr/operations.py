@@ -135,6 +135,8 @@ def search(db: Database, cfg: Config, song_id: int, sources: list, note=None, fo
         if cfg.read_only:
             return f"{label} has plain lyrics (read-only: not written)"
         lyricsfiles.write_atomic(txt, best.text)
+        # A .txt can't say who made it: stanzarr keeps it.
+        db.run("INSERT OR REPLACE INTO written(path, source, at) VALUES(?, ?, ?)", (txt, best_from[1].key, time.time()))
         sync_lyrics(db, song_id, song["path"], force=True)
         db.event("lyrics", f"{artist} – {title}: plain lyrics from {label}", song_id, actor)
         if found:

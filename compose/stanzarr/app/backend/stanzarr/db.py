@@ -154,6 +154,17 @@ SCHEMA = [
         counts TEXT NOT NULL
     );
     """,
+    # version 4: who made the files stanzarr writes, which plain text has nowhere to say
+    """
+    CREATE TABLE written (
+        path TEXT PRIMARY KEY,
+        source TEXT NOT NULL,
+        at REAL NOT NULL
+    );
+    -- Every lyrics file read again once: who made those that don't say, from the searches.
+    UPDATE lyrics SET mtime = 0;
+    UPDATE songs SET mtime = 0;
+    """,
 ]
 
 

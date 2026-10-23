@@ -25,6 +25,10 @@ export const playback = {
   attach(iframe: HTMLIFrameElement | null) {
     frame = iframe;
   },
+  /** Play the video from there: the player starts there, or jumps there when it plays already. */
+  jump(seconds: number) {
+    window.dispatchEvent(new CustomEvent("clipseerr:jump", { detail: seconds }));
+  },
   seek(seconds: number) {
     frame?.contentWindow?.postMessage(JSON.stringify({ event: "command", func: "seekTo", args: [seconds, true] }), "*");
     frame?.contentWindow?.postMessage(JSON.stringify({ event: "command", func: "playVideo", args: [] }), "*");

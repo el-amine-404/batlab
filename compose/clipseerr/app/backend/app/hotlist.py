@@ -71,6 +71,10 @@ class HotList:
                 self._db.put(CHANGES, old)
         return {key: old[key] for key in ("changed_at", "added", "removed")}
 
+    def shown_ids(self) -> list[str]:
+        """The videos Hot showed last: its feeds' and searches' as well as the picks."""
+        return (self._db.get(CHANGES) or {}).get("ids") or []
+
     def last_changes(self) -> dict:
         """The last changes() found, without counting: a list made with a source failing proves nothing."""
         found = self._db.get(CHANGES) or {"changed_at": None, "added": 0, "removed": 0}

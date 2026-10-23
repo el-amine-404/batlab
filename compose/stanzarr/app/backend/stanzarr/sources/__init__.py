@@ -49,13 +49,17 @@ class SourceIn(BaseModel):
         return value
 
 
+# The key the last answers are kept under (Database.get/put).
+LAST = "source_last"
+
+
 class SourceStore:
     def __init__(self, db: Database, types: dict[str, LyricsSource] = TYPES):
         self._db = db
         self.types = types
         self._lock = threading.Lock()
-        # The last question to each one since start: {"at", "ok", "message"}.
-        self._last: dict[str, dict] = {}
+        # The last question to each one: {"at", "ok", "message"}, kept across restarts.
+        self._last: dict[str, dict] = db.get(LAST, {}) or {}
 
     # ---- reading --------------------------------------------------------------------
 
@@ -90,6 +94,11 @@ class SourceStore:
             "config": {k: v for k, v in item["config"].items() if k not in secret},
             "secrets_set": sorted(k for k in item["config"] if k in secret and item["config"][k]),
             "last": self._last.get(item["id"]),
+            # What it brought: the songs with a file it made, and when it last found some.
+            "found_songs": self._db.one("SELECT COUNT(DISTINCT song_id) AS n FROM lyrics WHERE source=?",
+                                        (item["type"],))["n"],
+            "last_found": self._db.one("SELECT MAX(at) AS at FROM attempts WHERE source=? AND result IN ('synced','plain')",
+                                       (item["type"],))["at"],
         }
 
     def list(self) -> list[dict]:
@@ -155,7 +164,9 @@ class SourceStore:
         return self.list()
 
     def note(self, item_id: str, ok: bool, message: str) -> None:
-        self._last[item_id] = {"at": time.time(), "ok": ok, "message": message[:500]}
+        with self._lock:
+            self._last[item_id] = {"at": time.time(), "ok": ok, "message": message[:500]}
+            self._db.put(LAST, self._last)
 
 
 __all__ = ["NOTHING", "TYPES", "Found", "LyricsSource", "SongQuery", "SourceIn", "SourceStore"]

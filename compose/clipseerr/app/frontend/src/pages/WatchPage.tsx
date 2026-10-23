@@ -9,6 +9,7 @@ import { RequestPanel } from "@/components/video/RequestPanel";
 import { ShelfRow } from "@/components/video/ShelfRow";
 import { Thumb } from "@/components/video/Thumb";
 import type { Shelf, Version, Video, VideoDetail } from "@/lib/api";
+import { Moments } from "@/components/video/Moments";
 import { CreditsPanel, LyricsPanel } from "@/components/video/SongInfo";
 import { TagBadge } from "@/components/video/TagBadge";
 import { prefetchArtist, prefetchVideo, queryClient, useAlbum, useArtist, useCredits, useHotPick, useHotPicks, useLyrics, useVersions,
@@ -133,6 +134,14 @@ function HotButton({ video }: { video: VideoDetail }) {
   if (!video.youtube_id) return null;
   const id = `yt:${video.youtube_id}`;
   const picked = data?.ids.includes(id) ?? false;
+  // In Hot already through its feeds or searches: nothing to add, nothing a click takes out.
+  if (!picked && data?.shown?.includes(id)) {
+    return (
+      <span title="Hot's feeds or searches have it" className="flex h-7 items-center gap-1.5 rounded-full border border-orange-400/40 bg-orange-400/15 px-2.5 text-xs font-medium text-orange-200">
+        <Flame className="size-3.5" /> In Hot
+      </span>
+    );
+  }
   return (
     <button type="button" disabled={!data || pick.isPending} onClick={() => pick.mutate({ id: picked ? id : video.id, add: !picked })}
             title={picked ? "Take it out of Hot" : "Add it to the Hot category"}
@@ -297,6 +306,7 @@ export function WatchPage() {
           )}
         </aside>
       </div>
+      {playable?.youtube_id && <Moments video={playable} />}
       {playable && (playable.youtube_id || playable.audio) && (
         <div className="grid gap-4 md:grid-cols-2">
           <LyricsPanel video={playable} />

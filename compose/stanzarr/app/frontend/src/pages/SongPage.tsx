@@ -1,12 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, AudioLines, Cable, Disc3, Download, Info, Loader2, Pencil } from "lucide-react";
+import { ArrowLeft, AudioLines, Barcode, Cable, Clock, Database, Disc3, Download, ExternalLink, FolderOpen, Info, Loader2,
+         Pencil } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
 
+import { CopyButton } from "@/components/common/CopyButton";
 import { StatusBadge } from "@/components/library/StatusBadge";
 import { Failed, Loading } from "@/components/layout/States";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -121,10 +122,24 @@ function Compare({ songId, files }: { songId: number; files: LyricsFile[] }) {
       </div>
       {!pairs ? <Loading /> : left === right ? <p className="text-sm text-muted-foreground">Pick two different versions.</p> : (
         <>
+          {/* The answer first, in words; the lines below show where. */}
+          <ul className="grid gap-2 rounded-lg border border-border bg-background/40 p-3 text-sm sm:grid-cols-2">
+            <li>
+              <p className="text-xs text-muted-foreground">Words</p>
+              <p>{pairs.length === both.length ? `The same ${both.length} lines` : `${both.length} lines alike, ${pairs.length - both.length} in only one`}</p>
+            </li>
+            <li>
+              <p className="text-xs text-muted-foreground">Timings</p>
+              <p>{!one.data!.synced && !two.data!.synced ? "Neither has timings"
+                : !timed ? `Only the ${one.data!.synced ? "first" : "second"} has timings`
+                : moved ? `${moved} lines apart by 0.3 s or more (up to ${Math.max(...gaps).toFixed(1)} s)` : "The same, within 0.3 s"}</p>
+            </li>
+          </ul>
           <p className="text-xs text-muted-foreground">
-            {both.length} lines in both{!timed ? " (one has no timings)" : moved ? `, ${moved} timed differently (0.3 s or more)` : ", timed the same"}
-            {pairs.length - both.length ? `; ${pairs.length - both.length} in only one` : ""}.
-            {gaps.length > 0 && ` Largest gap ${Math.max(...gaps).toFixed(2)} s.`}
+            Each line once.{" "}
+            <span className="rounded bg-sky-400/15 px-1 text-sky-200">Blue</span>: only in the first.{" "}
+            <span className="rounded bg-amber-400/15 px-1 text-amber-200">Amber</span>: only in the second.
+            {timed && " A time on the right: how much later (+) or sooner (−) the second has it."}
           </p>
           <ol className="text-sm leading-6">
             {pairs.map((p, n) => {
@@ -146,6 +161,16 @@ function Compare({ songId, files }: { songId: number; files: LyricsFile[] }) {
           </ol>
         </>
       )}
+    </div>
+  );
+}
+
+function Detail({ icon, label, children }: { icon: ReactNode; label: string; children: ReactNode }) {
+  return (
+    <div className="flex min-w-0 items-start gap-2.5">
+      <span className="mt-0.5 text-muted-foreground [&_svg]:size-4" aria-hidden>{icon}</span>
+      <dt className="w-24 shrink-0 text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 flex-1">{children}</dd>
     </div>
   );
 }
@@ -287,7 +312,7 @@ export function SongPage() {
                           <span title={timing.hint}>Timings: {timing.label.toLowerCase()}</span>
                           <span aria-hidden>·</span>
                           <Link to={`/library?by=${file.source}`} className="hover:text-foreground hover:underline" title="Every song with a file made so">
-                            {file.source === "unknown" ? "Maker not recorded" : `By ${SOURCE[file.source] ?? file.source}`}
+                            {file.source === "unknown" ? <span title="stanzarr didn't make this file, and the file doesn't say who did: it was beside the song already, or another app put it there.">Was already there</span> : `From ${SOURCE[file.source] ?? file.source}`}
                           </Link>
                           <span aria-hidden>·</span>
                           {file.language ? <Link to={`/library?lang=${file.language}`} className="hover:text-foreground hover:underline">{file.language_name}</Link>
@@ -341,11 +366,26 @@ export function SongPage() {
             </Section>
           )}
 
-          <div className="flex flex-wrap gap-1.5 px-1">
-            {song.isrc && <Badge variant="muted" title="The recording's code, from its tags">ISRC {song.isrc}</Badge>}
-            {song.mbid && <Badge variant="muted" title="MusicBrainz's recording, from its tags">MusicBrainz</Badge>}
-          </div>
-          <p className="truncate px-1 text-xs text-muted-foreground" title={song.path}>{song.rel}</p>
+          <Section title="Details">
+            <dl className="flex flex-col gap-2.5 text-sm">
+              <Detail icon={<FolderOpen />} label="File">
+                <span className="flex min-w-0 items-center gap-1">
+                  <span className="truncate" title={song.path}>{song.rel}</span>
+                  <CopyButton text={song.path} label="the file's path" />
+                </span>
+              </Detail>
+              <Detail icon={<Clock />} label="Added">{new Date(song.added_at * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}</Detail>
+              {song.isrc && <Detail icon={<Barcode />} label="ISRC"><span title="The recording's code, from its tags">{song.isrc}</span></Detail>}
+              {song.mbid && (
+                <Detail icon={<Database />} label="MusicBrainz">
+                  <a href={`https://musicbrainz.org/recording/${song.mbid}`} target="_blank" rel="noreferrer"
+                     className="inline-flex items-center gap-1 text-primary hover:underline">
+                    The recording <ExternalLink className="size-3" />
+                  </a>
+                </Detail>
+              )}
+            </dl>
+          </Section>
         </div>
       </div>
     </>

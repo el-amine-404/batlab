@@ -237,7 +237,9 @@ class Source(BaseModel):
     enabled: bool
     config: dict[str, str | None] = Field(description="Without secrets.")
     secrets_set: list[str]
-    last: LastSend | None = Field(description="Its last answer since Stanzarr started.")
+    last: LastSend | None = Field(description="Its last answer: to a search or a test.")
+    found_songs: int = Field(0, description="Songs with a lyrics file it made.")
+    last_found: float | None = Field(None, description="When it last found lyrics for a song.")
 
 
 class SourceList(BaseModel):

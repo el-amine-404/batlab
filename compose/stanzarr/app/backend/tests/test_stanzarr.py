@@ -300,6 +300,19 @@ class LibraryAndRules(unittest.TestCase):
         library.sync_lyrics(self.db, song_id, path, force=True)
         self.assertEqual(rank(), 4)
 
+    def test_who_made_a_plain_file_is_kept(self):
+        path, song_id = self.song()
+        self.search(song_id, Found("plain", "some words\n"))
+        row = self.db.one("SELECT source FROM lyrics WHERE path LIKE '%.txt'")
+        self.assertEqual(row["source"], "fake")
+        # One written before stanzarr noted it: the search at the file's time says.
+        self.db.run("DELETE FROM written")
+        library.sync_lyrics(self.db, song_id, path, force=True)
+        self.assertEqual(self.db.one("SELECT source FROM lyrics WHERE path LIKE '%.txt'")["source"], "fake")
+        self.db.run("UPDATE attempts SET at = at - 86400")
+        library.sync_lyrics(self.db, song_id, path, force=True)
+        self.assertEqual(self.db.one("SELECT source FROM lyrics WHERE path LIKE '%.txt'")["source"], "unknown")
+
     def test_a_failing_source_doesnt_stop_the_next(self):
         path, song_id = self.song()
 

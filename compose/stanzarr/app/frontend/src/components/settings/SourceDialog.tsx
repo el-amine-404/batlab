@@ -18,15 +18,17 @@ function initial(fields: FormField[], saved?: Source): Values {
   return values;
 }
 
-/** Adds or changes one source; its form is its type's fields (GET /sources/types). */
-export function SourceDialog({ types, saved, open, onOpenChange, onSaved }: {
+/** Adds a source of the kind chosen on the page, or changes one; its form is its kind's fields (GET /sources/types). */
+export function SourceDialog({ types, saved, adding, open, onOpenChange, onSaved }: {
   types: SourceTypes;
   saved?: Source;
+  /** The kind being added. */
+  adding?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
 }) {
-  const [type, setType] = useState(saved?.type ?? "");
+  const [type, setType] = useState(saved?.type ?? adding ?? "");
   const kind = types.types.find((t) => t.type === type);
   const [name, setName] = useState(saved?.name ?? "");
   const [enabled, setEnabled] = useState(saved?.enabled ?? true);
@@ -36,13 +38,14 @@ export function SourceDialog({ types, saved, open, onOpenChange, onSaved }: {
 
   useEffect(() => {
     if (!open) return;
-    setType(saved?.type ?? "");
-    setName(saved?.name ?? "");
+    const chosenType = saved?.type ?? adding ?? "";
+    setType(chosenType);
+    const chosen = types.types.find((t) => t.type === chosenType);
+    setName(saved?.name ?? chosen?.label ?? "");
     setEnabled(saved?.enabled ?? true);
-    const chosen = types.types.find((t) => t.type === saved?.type);
     setValues(chosen ? initial(chosen.fields, saved) : {});
     setResult(null);
-  }, [open, saved, types]);
+  }, [open, saved, adding, types]);
 
   const pick = (next: string) => {
     const chosen = types.types.find((t) => t.type === next);
@@ -85,11 +88,11 @@ export function SourceDialog({ types, saved, open, onOpenChange, onSaved }: {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>{saved ? `Change ${saved.name}` : "Add a source"}</DialogTitle>
-          <DialogDescription>Where stanzarr asks for the lyrics a song lacks. Each is asked in its turn; synced lyrics end the search.</DialogDescription>
+          <DialogTitle>{saved ? `Change ${saved.name}` : `Add ${kind?.label ?? "a source"}`}</DialogTitle>
+          <DialogDescription>{kind?.description ?? "Where stanzarr asks for the lyrics a song lacks."}</DialogDescription>
         </DialogHeader>
         <DialogBody className="flex flex-col gap-5">
-          {!saved && (
+          {!saved && !adding && (
             <div className="grid gap-2 sm:grid-cols-3">
               {types.types.map((item) => (
                 <button key={item.type} type="button" onClick={() => pick(item.type)}
@@ -140,7 +143,7 @@ export function SourceDialog({ types, saved, open, onOpenChange, onSaved }: {
         </DialogBody>
         <DialogFooter className="justify-end">
           <Button variant="secondary" onClick={() => void test()} disabled={!kind || !!busy}>
-            {busy === "test" && <Loader2 className="animate-spin" />} Ask for a test song
+            {busy === "test" && <Loader2 className="animate-spin" />} Test it
           </Button>
           <Button onClick={() => void save()} disabled={!kind || !!busy}>
             {busy === "save" && <Loader2 className="animate-spin" />} {saved ? "Save" : "Add"}

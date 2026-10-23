@@ -11,10 +11,11 @@ import { Thumb } from "./Thumb";
 
 type Mode = "video" | "audio" | "preview";
 
-function embed(id: string) {
+function embed(id: string, start = 0) {
   // enablejsapi: the player tells its time (lib/playback.ts), for the lyrics to follow.
   const params = new URLSearchParams({ autoplay: "1", rel: "0", playsinline: "1", modestbranding: "1", iv_load_policy: "3",
                                        enablejsapi: "1", origin: window.location.origin });
+  if (start > 0) params.set("start", String(Math.floor(start)));
   return `https://www.youtube-nocookie.com/embed/${id}?${params}`;
 }
 
@@ -43,10 +44,27 @@ export function Player({ video }: { video: VideoDetail }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modes.join()]);
 
+  const [start, setStart] = useState(0);
   const choose = (next: Mode) => {
     setMode(next);
     setPlaying(true);
   };
+
+  // A moment clicked (Moments): the video from there.
+  useEffect(() => {
+    const jump = (event: Event) => {
+      const seconds = (event as CustomEvent<number>).detail;
+      if (!modes.includes("video")) return;
+      if (playing && mode === "video") playback.seek(seconds);
+      else {
+        setStart(seconds);
+        choose("video");
+      }
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    };
+    window.addEventListener("clipseerr:jump", jump);
+    return () => window.removeEventListener("clipseerr:jump", jump);
+  });
 
   const source = mode === "audio" ? video.audio?.youtube_id : video.youtube_id;
 
@@ -64,8 +82,8 @@ export function Player({ video }: { video: VideoDetail }) {
         ) : playing && mode && source ? (
           <iframe
             onLoad={(event) => listen(event.currentTarget, mode, source)}
-            key={`${mode}-${source}`}
-            src={embed(source)}
+            key={`${mode}-${source}-${start}`}
+            src={embed(source, mode === "video" ? start : 0)}
             title={`${video.artist} – ${video.title}`}
             className="aspect-video w-full"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"

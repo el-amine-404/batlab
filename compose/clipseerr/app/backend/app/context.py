@@ -8,6 +8,7 @@ from batlab_common.lyrics import Stanzarr
 from . import config, events, libraries, notifications, outbound, services
 from .accounts import open_accounts
 from .cache import Cache
+from .catalog.frames import Frames
 from .catalog.preview import Clips
 from .catalog.service import Catalog
 from .catalog.verdicts import Verdicts
@@ -33,6 +34,8 @@ catalog.stanzarr = Stanzarr(conf.stanzarr_url, conf.stanzarr_api_key, "clipseerr
 # Newly judged videos join Hot: its cached lists are dropped, read again when asked.
 catalog.verdicts = Verdicts(cache, on_judged=lambda: cache.forget("hot:"))
 clips = Clips(conf.state_dir / "previews")
+# A video's moments: frames from YouTube's storyboard (catalog/frames.py).
+frames = Frames(conf.state_dir / "frames")
 hotlist = HotList(db)
 catalog.hotlist = hotlist
 known = Known(db)

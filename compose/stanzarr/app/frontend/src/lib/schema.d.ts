@@ -460,6 +460,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/find/songs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Which songs a name may be: the library's, then Deezer's catalogue */
+        get: operations["find_songs_api_v1_find_songs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/find": {
         parameters: {
             query?: never;
@@ -469,7 +486,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Find lyrics for a song's name or a link: your library, then every source on */
+        /** Lyrics for one song (or a link to it): your library, then every source that is on */
         post: operations["find_api_v1_find_post"];
         delete?: never;
         options?: never;
@@ -1218,13 +1235,37 @@ export interface components {
              */
             kind: "info" | "success" | "warning" | "failure";
         };
-        /** FindIn */
+        /**
+         * FindIn
+         * @description A link to the song, or the song itself (as Which song? chose it).
+         */
         FindIn: {
             /**
              * Query
-             * @description A song's name (Artist - Title, or a title), or a link to it: YouTube, Spotify, Apple Music, Deezer…
+             * @description A link: YouTube, Spotify, Deezer, Apple Music, SoundCloud, Bandcamp, Tidal, Amazon Music.
+             * @default
              */
             query: string;
+            /**
+             * Artist
+             * @default
+             */
+            artist: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /**
+             * Album
+             * @default
+             */
+            album: string;
+            /**
+             * Duration
+             * @default 0
+             */
+            duration: number;
         };
         /** FormField */
         FormField: {
@@ -1681,8 +1722,19 @@ export interface components {
             };
             /** Secrets Set */
             secrets_set: string[];
-            /** @description Its last answer since Stanzarr started. */
+            /** @description Its last answer: to a search or a test. */
             last: components["schemas"]["LastSend"] | null;
+            /**
+             * Found Songs
+             * @description Songs with a lyrics file it made.
+             * @default 0
+             */
+            found_songs: number;
+            /**
+             * Last Found
+             * @description When it last found lyrics for a song.
+             */
+            last_found?: number | null;
         };
         /**
          * SourceIn
@@ -1696,7 +1748,7 @@ export interface components {
              * @description One of GET /api/v1/sources/types.
              * @enum {string}
              */
-            type: "genius" | "lrclib" | "musixmatch" | "netease";
+            type: "genius" | "lrclib" | "lyricsovh" | "musixmatch" | "netease";
             /**
              * Enabled
              * @default true
@@ -3247,6 +3299,8 @@ export interface operations {
                 album?: string;
                 /** @description Seconds; helps tell versions apart. */
                 duration?: number;
+                /** @description Ask the sources now, not the answer kept from before. */
+                refresh?: boolean;
             };
             header?: never;
             path?: never;
@@ -3261,6 +3315,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LyricsAnswer"];
+                };
+            };
+            /** @description Nobody signed in, or an unknown key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Signed in, but not allowed this. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    find_songs_api_v1_find_songs_get: {
+        parameters: {
+            query: {
+                q: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Nobody signed in, or an unknown key. */

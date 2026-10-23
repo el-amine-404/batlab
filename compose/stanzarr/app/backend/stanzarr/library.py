@@ -149,8 +149,25 @@ def sync_lyrics(db: Database, song_id: int, audio_path: str, names: set[str] | N
             db.run("DELETE FROM lyrics WHERE path=?", (path,))
 
 
+def _made_by(db: Database, song_id: int, path: str, synced: bool, mtime: int) -> str:
+    # mtime: microseconds, as the lyrics rows keep it.
+    """Who made a file that doesn't say: what stanzarr noted when it wrote it,
+    else the search that found that kind of lyrics within minutes of the
+    file's date (a .txt stanzarr wrote before it noted them), else unknown."""
+    noted = db.one("SELECT source FROM written WHERE path=?", (path,))
+    if noted:
+        return noted["source"]
+    attempt = db.one("SELECT result, source, at FROM attempts WHERE song_id=?", (song_id,))
+    if attempt and attempt["source"] and attempt["result"] == ("synced" if synced else "plain") \
+            and abs(mtime / 1_000_000 - attempt["at"]) < 600:
+        return attempt["source"]
+    return "unknown"
+
+
 def _store(db: Database, song_id: int, path: str, fmt: str, lyrics: lyricsfiles.Lyrics, mtime: int) -> None:
     origin = lyricsfiles.origin(lyrics)
+    if origin.source == "unknown" and not path.startswith("embedded:"):
+        origin = lyricsfiles.Origin(_made_by(db, song_id, path, lyrics.synced, mtime), None, 0, 0)
     db.run(
         "INSERT INTO lyrics(song_id, path, format, synced, language, source, ai_state, lines, unsure, checked, mtime)"
         " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"

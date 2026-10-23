@@ -165,17 +165,17 @@ class SearchResults(BaseModel):
 
 
 class Credit(BaseModel):
-    role: str = Field(description='"Performed by", "Written by", "Produced by"…, as YouTube Music says.')
+    role: str = Field(description='"Performed by", "Written by", "Produced by"…')
     names: list[str]
     people: list[ArtistRef] = Field(default_factory=list,
                                     description="The same names, each with its YouTube Music page when it has one.")
 
 
 class Credits(BaseModel):
-    """Who made the song, from YouTube Music's credits page."""
+    """Who made the song: YouTube Music's credits page, else MusicBrainz."""
 
     credits: list[Credit]
-    provider: str | None = Field(None, description="Who gave YouTube Music the credits (the label).")
+    provider: str | None = Field(None, description="Who gave the credits: the label (YouTube Music's), or \"MusicBrainz\".")
 
 
 class LyricLine(BaseModel):

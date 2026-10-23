@@ -25,8 +25,8 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__, integrations, problems, seed
 from .auth import RequestLog, gate, principal
-from .context import (accounts, cache, catalog, conf, db, engine, http, library, library_store, notification_store,
-                      notifier, service_store)
+from .context import (accounts, cache, catalog, conf, db, engine, frames, http, library, library_store,
+                      notification_store, notifier, service_store)
 from .routes import PUBLIC, ROUTERS
 from .tracker import store as request_store
 
@@ -59,6 +59,7 @@ async def _housekeeping() -> None:
     while True:
         await catalog.warm()
         cache.prune(CACHE_KEEP)
+        await asyncio.to_thread(frames.prune)
         db.tidy()
         catalog.next_warm_at = time.time() + WARM_EVERY
         await asyncio.sleep(WARM_EVERY)

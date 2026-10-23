@@ -23,6 +23,37 @@ function Panel({ title, icon, actions, children }: { title: string; icon: React.
   );
 }
 
+/**
+ * Asks the sources again, past what clipseerr (and stanzarr) kept: a song new
+ * to them may be there by now, or better (timed lines where there were words).
+ */
+function useLookAgain(kind: "lyrics" | "credits", videoId: string) {
+  const client = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    setBusy(true);
+    try {
+      const fresh = kind === "lyrics" ? await api.lyrics(videoId, undefined, true) : await api.credits(videoId, undefined, true);
+      client.setQueryData([kind, videoId], fresh);
+    } catch {
+      // the panel keeps what it showed
+    } finally {
+      setBusy(false);
+    }
+  };
+  return { busy, run };
+}
+
+/** The small "ask again" button in a panel's header. */
+function AgainIcon({ busy, run, label }: { busy: boolean; run: () => void; label: string }) {
+  return (
+    <button type="button" onClick={run} disabled={busy} title={label} aria-label={label}
+            className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50">
+      {busy ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCw className="size-3.5" />}
+    </button>
+  );
+}
+
 function FileLink({ href, label }: { href: string; label: string }) {
   return (
     <a href={href} download className="flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground">
@@ -42,19 +73,7 @@ export function LyricsPanel({ video }: { video: VideoDetail }) {
   const box = useRef<HTMLDivElement>(null);
   const following = now.mode === "audio" && now.videoId === video.audio?.youtube_id;
   const lines = data?.synced ?? [];
-  const client = useQueryClient();
-  const [again, setAgain] = useState(false);
-  // The sources asked now, past the kept answer: a song new to them may be there by now.
-  const lookAgain = async () => {
-    setAgain(true);
-    try {
-      client.setQueryData(["lyrics", video.id], await api.lyrics(video.id, undefined, true));
-    } catch {
-      // the panel keeps saying none
-    } finally {
-      setAgain(false);
-    }
-  };
+  const { busy: again, run: lookAgain } = useLookAgain("lyrics", video.id);
 
   const current = useMemo(() => {
     if (!following || !lines.length) return -1;
@@ -72,6 +91,7 @@ export function LyricsPanel({ video }: { video: VideoDetail }) {
 
   const actions = data && (lines.length || data.plain) ? (
     <div className="flex gap-0.5">
+      <AgainIcon busy={again} run={() => void lookAgain()} label="Look for better lyrics (timed, or another version)" />
       {lines.length > 0 && <FileLink href={api.lyricsFile(video.id, "lrc")} label="LRC" />}
       {data.plain && <FileLink href={api.lyricsFile(video.id, "txt")} label="TXT" />}
     </div>
@@ -141,8 +161,10 @@ function RoleIcon({ role }: { role: string }) {
 /** Who made the song, as YouTube Music credits it. */
 export function CreditsPanel({ video }: { video: VideoDetail }) {
   const { data, isPending } = useCredits(video.id, !!(video.youtube_id || video.audio));
+  const { busy, run } = useLookAgain("credits", video.id);
   return (
-    <Panel title="Credits" icon={<FileText />}>
+    <Panel title="Credits" icon={<FileText />}
+           actions={data?.credits.length ? <AgainIcon busy={busy} run={() => void run()} label="Look for the credits again" /> : null}>
       <div className="flex flex-col gap-3 px-4 py-3">
         {isPending ? (
           Array.from({ length: 3 }, (_, i) => (
@@ -152,7 +174,12 @@ export function CreditsPanel({ video }: { video: VideoDetail }) {
             </div>
           ))
         ) : !data?.credits.length ? (
-          <p className="text-sm text-muted-foreground">No credits for this song.</p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-muted-foreground">No credits found yet.</p>
+            <Button variant="secondary" size="sm" disabled={busy} onClick={() => void run()}>
+              {busy ? <Loader2 className="animate-spin" /> : <RotateCw />} Look again
+            </Button>
+          </div>
         ) : (
           <>
             <dl className="flex flex-col gap-3">
@@ -174,7 +201,11 @@ export function CreditsPanel({ video }: { video: VideoDetail }) {
                 </div>
               ))}
             </dl>
-            {data.provider && <p className="text-[11px] text-muted-foreground">Credits from {data.provider}, through YouTube Music.</p>}
+            {data.provider && (
+              <p className="text-[11px] text-muted-foreground">
+                {data.provider === "MusicBrainz" ? "Credits from MusicBrainz." : `Credits from ${data.provider}, through YouTube Music.`}
+              </p>
+            )}
           </>
         )}
       </div>

@@ -990,5 +990,45 @@ class VideodropService(unittest.TestCase):
             db.close()
 
 
+
+class Moments(unittest.TestCase):
+    def test_frames_spread_along_the_video_and_only_the_sheets_needed(self):
+        from app.catalog import frames
+        board = {"columns": 3, "rows": 3, "fps": 0.51, "fragments": [{"url": f"u{i}"} for i in range(9)]}
+        planned, sheets = frames.plan(147, board)
+        self.assertEqual(len(planned), frames.count(147))
+        self.assertEqual(planned[0]["t"], round(147 / 10 / 2, 1))
+        self.assertTrue(all(0 <= f["col"] < 3 and 0 <= f["row"] < 3 for f in planned))
+        self.assertLessEqual(len(sheets), 9)
+        self.assertEqual((frames.count(30), frames.count(3600)), (frames.MIN, frames.MAX))
+
+
+class TitleLanguages(unittest.TestCase):
+    def test_a_script_one_language_is_written_in(self):
+        from app.catalog import language
+        self.assertEqual(language.by_script("דורין פסטרנק - און אנד אוף"), "he")
+        self.assertEqual(language.by_script("Καλημέρα"), "el")
+        self.assertIsNone(language.by_script("Thin Ice"))
+        self.assertIsNone(language.by_script("ليلة"), "Arabic letters write several languages")
+
+
+class MusicBrainzCredits(unittest.TestCase):
+    def test_relations_become_credits(self):
+        from app.catalog import musicbrainz
+        recording = {"artist-credit": [{"name": "Megan Thee Stallion", "artist": {"name": "Megan Thee Stallion"}}],
+                     "relations": [
+                         {"target-type": "artist", "type": "producer", "artist": {"name": "J. White Did It"}},
+                         {"target-type": "artist", "type": "recording", "artist": {"name": "Eddie Hernández"}},
+                         {"target-type": "work", "type": "performance", "work": {"relations": [
+                             {"type": "writer", "artist": {"name": "J. White Did It"}},
+                             {"type": "writer", "artist": {"name": "Megan Thee Stallion"}}]}}]}
+        self.assertEqual(musicbrainz._credits(recording), [
+            {"role": "Performed by", "names": ["Megan Thee Stallion"]},
+            {"role": "Written by", "names": ["J. White Did It", "Megan Thee Stallion"]},
+            {"role": "Produced by", "names": ["J. White Did It"]},
+            {"role": "Engineered by", "names": ["Eddie Hernández"]}])
+        self.assertEqual(musicbrainz._credits({"relations": []}), [])
+
+
 if __name__ == "__main__":
     unittest.main()

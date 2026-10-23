@@ -15,6 +15,11 @@ export type Version = Schemas["Version"];
 export type Versions = Schemas["Versions"];
 export type Credits = Schemas["Credits"];
 export type Lyrics = Schemas["Lyrics"];
+/** A video's moments (GET /videos/{id}/frames): frames to cut from storyboard sheets. */
+export type Moments = {
+  frames: { t: number; sheet: number; col: number; row: number }[];
+  tile: { width: number; height: number; columns: number; rows: number } | null;
+};
 export type HotArtist = Schemas["HotArtist"];
 export type CategoryGroup = Schemas["CategoryGroup"];
 export type ArtistPage = Schemas["ArtistPage"];
@@ -140,12 +145,15 @@ export const api = {
     request<Shelf>(`/tags/videos?${new URLSearchParams([...tags.map((t) => ["tag", t]), ["sort", sort],
                                                         ["limit", String(page.limit ?? PAGE)], ["offset", String(page.offset ?? 0)]])}`,
                    { signal }),
-  credits: (id: string, signal?: AbortSignal) => request<Credits>(`/videos/${encodeURIComponent(id)}/credits`, { signal }),
   lyrics: (id: string, signal?: AbortSignal, fresh = false) =>
     request<Lyrics>(`/videos/${encodeURIComponent(id)}/lyrics${fresh ? "?fresh=true" : ""}`, { signal }),
+  frames: (id: string, signal?: AbortSignal) => request<Moments>(`/videos/${encodeURIComponent(id)}/frames`, { signal }),
+  frameSheet: (youtubeId: string, sheet: number) => `/api/v1/videos/yt:${encodeURIComponent(youtubeId)}/frames/${sheet}.jpg`,
+  credits: (id: string, signal?: AbortSignal, fresh = false) =>
+    request<Credits>(`/videos/${encodeURIComponent(id)}/credits${fresh ? "?fresh=true" : ""}`, { signal }),
   /** Where the lyrics download as a file. */
   lyricsFile: (id: string, format: "lrc" | "txt") => `/api/v1/videos/${encodeURIComponent(id)}/lyrics.${format}`,
-  hotPicks: (signal?: AbortSignal) => request<{ ids: string[] }>("/hot/picks", { signal }),
+  hotPicks: (signal?: AbortSignal) => request<{ ids: string[]; shown: string[] }>("/hot/picks", { signal }),
   addHotPick: (id: string) => request<{ ids: string[] }>(`/hot/picks/${encodeURIComponent(id)}`, { method: "PUT" }),
   removeHotPick: (id: string) => request<void>(`/hot/picks/${encodeURIComponent(id)}`, { method: "DELETE" }),
   hotArtists: (signal?: AbortSignal) => request<{ artists: HotArtist[] }>("/hot/artists", { signal }),

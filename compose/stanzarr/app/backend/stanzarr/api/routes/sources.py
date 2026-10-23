@@ -16,9 +16,13 @@ _PROBLEMS = {403: {"model": schemas.Problem}, 404: {"model": schemas.Problem}, 4
 async def _test(ctx, raw: dict, item_id: str | None = None) -> dict:
     _body, kind, config = ctx.sources.parse(raw, item_id)
     try:
-        return {"ok": True, "message": await asyncio.to_thread(kind.test, config)}
+        result = {"ok": True, "message": await asyncio.to_thread(kind.test, config)}
     except Exception as exc:
-        return {"ok": False, "message": f"{kind.label} didn't answer: {exc}"}
+        result = {"ok": False, "message": f"{kind.label} didn't answer: {exc}"}
+    if item_id:
+        # A saved one's health is what it answered last, a test as much as a search.
+        ctx.sources.note(item_id, result["ok"], f"Test: {result['message']}")
+    return result
 
 
 @router.get("/types", summary="The kinds of source there are, and their fields", response_model=schemas.SourceTypes)
