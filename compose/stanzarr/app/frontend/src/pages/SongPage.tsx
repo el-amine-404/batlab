@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, AudioLines, Barcode, Cable, Clock, Database, Disc3, Download, ExternalLink, FolderOpen, Info, Loader2,
          Pencil } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
 
@@ -165,13 +165,39 @@ function Compare({ songId, files }: { songId: number; files: LyricsFile[] }) {
   );
 }
 
+/** One fact of the song: icon, name and value on one line, the same columns for each. */
 function Detail({ icon, label, children }: { icon: ReactNode; label: string; children: ReactNode }) {
   return (
-    <div className="flex min-w-0 items-start gap-2.5">
-      <span className="mt-0.5 text-muted-foreground [&_svg]:size-4" aria-hidden>{icon}</span>
-      <dt className="w-24 shrink-0 text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 flex-1">{children}</dd>
+    <div className="grid min-h-8 grid-cols-[1rem_6.5rem_minmax(0,1fr)] items-center gap-x-2.5">
+      <span className="flex text-muted-foreground [&_svg]:size-4" aria-hidden>{icon}</span>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="flex min-w-0 items-center gap-1">{children}</dd>
     </div>
+  );
+}
+
+/**
+ * A long line (a path) in one line that scrolls sideways: it starts at its
+ * end (the file's name), and fades at a side where there is more.
+ */
+function ScrollLine({ text }: { text: string }) {
+  const box = useRef<HTMLSpanElement>(null);
+  const [more, setMore] = useState({ before: false, after: false });
+  const measure = () => {
+    const el = box.current;
+    if (el) setMore({ before: el.scrollLeft > 1, after: el.scrollLeft + el.clientWidth < el.scrollWidth - 1 });
+  };
+  useEffect(() => {
+    if (box.current) box.current.scrollLeft = box.current.scrollWidth;
+    measure();
+  }, [text]);
+  const fade = `linear-gradient(to right, ${more.before ? "transparent, black 1.5rem" : "black"}, ${more.after ? "black calc(100% - 1.5rem), transparent" : "black"})`;
+  return (
+    <span ref={box} onScroll={measure} title={text}
+          className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          style={{ maskImage: fade, WebkitMaskImage: fade }}>
+      {text}
+    </span>
   );
 }
 
@@ -367,12 +393,10 @@ export function SongPage() {
           )}
 
           <Section title="Details">
-            <dl className="flex flex-col gap-2.5 text-sm">
+            <dl className="flex flex-col gap-1 text-sm">
               <Detail icon={<FolderOpen />} label="File">
-                <span className="flex min-w-0 items-center gap-1">
-                  <span className="truncate" title={song.path}>{song.rel}</span>
-                  <CopyButton text={song.path} label="the file's path" />
-                </span>
+                <ScrollLine text={song.rel} />
+                <CopyButton text={song.path} label="the file's path" />
               </Detail>
               <Detail icon={<Clock />} label="Added">{new Date(song.added_at * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}</Detail>
               {song.isrc && <Detail icon={<Barcode />} label="ISRC"><span title="The recording's code, from its tags">{song.isrc}</span></Detail>}

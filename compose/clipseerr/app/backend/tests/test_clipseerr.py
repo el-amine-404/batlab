@@ -1030,5 +1030,20 @@ class MusicBrainzCredits(unittest.TestCase):
         self.assertEqual(musicbrainz._credits({"relations": []}), [])
 
 
+class GeniusCredits(unittest.TestCase):
+    def test_a_songs_credits(self):
+        from app.catalog import genius
+        song = {"primary_artist": {"name": "Megan Thee Stallion"}, "featured_artists": [],
+                "writer_artists": [{"name": "Megan Thee Stallion"}], "producer_artists": [{"name": "Buddah Bless"}],
+                "custom_performances": [{"label": "Mixing Engineer", "artists": [{"name": "Shawn \"Source\" Jarrett"}]}]}
+        self.assertEqual(genius.credits_of(song), [
+            {"role": "Performed by", "names": ["Megan Thee Stallion"]},
+            {"role": "Written by", "names": ["Megan Thee Stallion"]},
+            {"role": "Produced by", "names": ["Buddah Bless"]},
+            {"role": "Mixing Engineer", "names": ['Shawn "Source" Jarrett']}])
+        self.assertEqual(genius.credits_of({"primary_artist": {"name": "X"}}), [], "performers alone are no credits")
+
+
+
 if __name__ == "__main__":
     unittest.main()

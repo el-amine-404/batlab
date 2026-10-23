@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Check, FlaskConical, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { SourceDialog } from "@/components/settings/SourceDialog";
@@ -13,8 +13,11 @@ import { keys, useSources, useSourceTypes } from "@/lib/queries";
 import { cn, timeAgo } from "@/lib/utils";
 
 /** How a source is doing: green, it answered last time; red, it failed; grey, never asked. Hover: what it said. */
-function Health({ item }: { item: Source }) {
+function Health({ item, checking }: { item: Source; checking: boolean }) {
   const last = item.last;
+  if (checking && !last) {
+    return <span aria-label="Checking" title="Checking it now" className="flex size-3 shrink-0 animate-pulse rounded-full bg-muted-foreground/60" />;
+  }
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -24,7 +27,7 @@ function Health({ item }: { item: Source }) {
         </span>
       </TooltipTrigger>
       <TooltipContent side="right" className="max-w-72">
-        {!last ? "Not asked yet: Test it." : (
+        {!last ? "Not asked yet." : (
           <div className="flex flex-col gap-0.5">
             <span className="font-medium">{last.ok ? "Answering" : "Failing"} · {timeAgo(last.at)}</span>
             <span className="text-muted-foreground">{last.message}</span>
@@ -48,6 +51,27 @@ export default function SourcesPage() {
   const [adding, setAdding] = useState<string | undefined>();
   const [open, setOpen] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
+  // A source never asked has no health to show: each is asked once, as the page opens.
+  const [checking, setChecking] = useState<Set<string>>(new Set());
+  const checked = useRef(new Set<string>());
+  useEffect(() => {
+    const unknown = (data?.items ?? []).filter((item) => item.enabled && !item.last && !checked.current.has(item.id));
+    if (!unknown.length) return;
+    unknown.forEach((item) => checked.current.add(item.id));
+    setChecking(new Set(unknown.map((item) => item.id)));
+    void (async () => {
+      for (const item of unknown) {
+        try {
+          await api.testSource(body(item), item.id);
+        } catch {
+          // its dot says what it answered, whatever that was
+        }
+      }
+      setChecking(new Set());
+      reload();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
 
   const reload = () => {
     void client.invalidateQueries({ queryKey: keys.sources });
@@ -117,7 +141,7 @@ export default function SourcesPage() {
                 <Button variant="ghost" size="icon-sm" disabled={index === 0} aria-label={`Ask ${item.name} sooner`} onClick={() => move(index, -1)}><ArrowUp /></Button>
                 <Button variant="ghost" size="icon-sm" disabled={index === data.items.length - 1} aria-label={`Ask ${item.name} later`} onClick={() => move(index, 1)}><ArrowDown /></Button>
               </div>
-              <Health item={item} />
+              <Health item={item} checking={checking.has(item.id)} />
               <div className="min-w-0 flex-1">
                 <p className="font-medium">{item.name}</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">

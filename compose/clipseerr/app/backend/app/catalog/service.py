@@ -16,7 +16,7 @@ from batlab_common import titles
 
 from ..cache import Cache, tracking
 from ..problems import Problem
-from . import language, lrclib, match, musicbrainz, youtube
+from . import genius, language, lrclib, match, musicbrainz, youtube
 from .apple import GENRES, Apple
 from .models import (AlbumPage, ArtistPage, ArtistRef, AudioMatch, Category, CategoryGroup, Checks, Credits, Lyrics, SearchResults, Shelf,
                      SourceCheck,
@@ -727,20 +727,28 @@ class Catalog:
         first = (_credit_names(artist) or [artist])[0]
 
         async def fetch():
+            # Each asked in turn, the first with credits wins; what was asked is said either way.
+            tried = ["YouTube Music"]
             for youtube_id in ids:
                 found = await youtube.credits(region, youtube_id)
                 if found["credits"]:
-                    return found
-            try:
-                return await musicbrainz.credits(self._http, first, _bare(title), seconds)
-            except Exception as exc:
-                log.info("MusicBrainz credits failed for %s - %s: %r", first, title, exc)
-                return {"credits": [], "provider": None}
+                    return found | {"tried": tried}
+            for name, ask in (("Genius", lambda: genius.credits(self._http, first, _bare(title))),
+                              ("MusicBrainz", lambda: musicbrainz.credits(self._http, first, _bare(title), seconds))):
+                tried.append(name)
+                try:
+                    found = await ask()
+                except Exception as exc:
+                    log.info("%s credits failed for %s - %s: %r", name, first, title, exc)
+                    continue
+                if found["credits"]:
+                    return found | {"tried": tried}
+            return {"credits": [], "provider": None, "tried": tried}
 
         if not ids:
             return Credits(credits=[])
-        # credits2: MusicBrainz's when YouTube Music has none.
-        key = f"yt:credits2:{ids[0]}"
+        # credits3: Genius's, then MusicBrainz's, when YouTube Music has none.
+        key = f"yt:credits3:{ids[0]}"
         at = self._cache.fetched_at(key)
         if at and (fresh or (not (self._cache.peek(key) or {}).get("credits") and time.time() - at > DAY)):
             self._cache.forget(key)

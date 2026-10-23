@@ -172,10 +172,12 @@ class Credit(BaseModel):
 
 
 class Credits(BaseModel):
-    """Who made the song: YouTube Music's credits page, else MusicBrainz."""
+    """Who made the song: YouTube Music's credits page, else Genius, else MusicBrainz."""
 
     credits: list[Credit]
-    provider: str | None = Field(None, description="Who gave the credits: the label (YouTube Music's), or \"MusicBrainz\".")
+    provider: str | None = Field(None, description="Who gave the credits: the label (YouTube Music's), \"Genius\" or "
+                                                   "\"MusicBrainz\".")
+    tried: list[str] = Field(default_factory=list, description="Where they were looked for, in order.")
 
 
 class LyricLine(BaseModel):

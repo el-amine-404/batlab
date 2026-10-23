@@ -1531,9 +1531,14 @@ export interface components {
             credits: components["schemas"]["Credit"][];
             /**
              * Provider
-             * @description Who gave YouTube Music the credits (the label).
+             * @description Who gave the credits: the label (YouTube Music's), "Genius" or "MusicBrainz".
              */
             provider?: string | null;
+            /**
+             * Tried
+             * @description Where they were looked for, in order.
+             */
+            tried?: string[];
         };
         /** EventDescription */
         EventDescription: {

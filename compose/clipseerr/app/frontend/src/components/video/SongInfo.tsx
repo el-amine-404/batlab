@@ -44,6 +44,11 @@ function useLookAgain(kind: "lyrics" | "credits", videoId: string) {
   return { busy, run };
 }
 
+/** "A, B and C". */
+function listed(names: string[]): string {
+  return names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
 /** The small "ask again" button in a panel's header. */
 function AgainIcon({ busy, run, label }: { busy: boolean; run: () => void; label: string }) {
   return (
@@ -175,7 +180,9 @@ export function CreditsPanel({ video }: { video: VideoDetail }) {
           ))
         ) : !data?.credits.length ? (
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm text-muted-foreground">No credits found yet.</p>
+            <p className="text-sm text-muted-foreground">
+              No credits found yet{data?.tried?.length ? `: looked at ${listed(data.tried)}` : ""}.
+            </p>
             <Button variant="secondary" size="sm" disabled={busy} onClick={() => void run()}>
               {busy ? <Loader2 className="animate-spin" /> : <RotateCw />} Look again
             </Button>
@@ -203,7 +210,8 @@ export function CreditsPanel({ video }: { video: VideoDetail }) {
             </dl>
             {data.provider && (
               <p className="text-[11px] text-muted-foreground">
-                {data.provider === "MusicBrainz" ? "Credits from MusicBrainz." : `Credits from ${data.provider}, through YouTube Music.`}
+                {data.provider === "MusicBrainz" || data.provider === "Genius" ? `Credits from ${data.provider}` : `Credits from ${data.provider}, through YouTube Music`}
+                {(data.tried?.length ?? 0) > 1 && ` (${listed(data.tried!.slice(0, -1))} had none)`}.
               </p>
             )}
           </>
