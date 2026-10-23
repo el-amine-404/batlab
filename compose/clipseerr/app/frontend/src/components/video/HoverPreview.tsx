@@ -1,7 +1,7 @@
 import { Volume2, VolumeX } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { PAGE_HEADERS, type Video } from "@/lib/api";
+import { api, PAGE_HEADERS, type Video } from "@/lib/api";
 
 /** How long the pointer rests on a card, or a finger holds it, before its preview plays. */
 const HOVER_MS = 700;
@@ -205,7 +205,7 @@ export function useHoverPreview(video: Video) {
   const preview = playing ? (
     <span className="absolute inset-0 overflow-hidden">
       {clip && <PreviewVideo
-        src={video.youtube_id ? `/api/v1/previews/${video.youtube_id}` : video.preview_url!}
+        src={video.youtube_id ? `/api/v1/previews/${video.youtube_id}` : api.applePreview(video.id)}
         sound={sound}
         onShown={() => setShown(true)}
         onProgress={setProgress}

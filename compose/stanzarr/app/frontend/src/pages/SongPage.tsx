@@ -177,26 +177,30 @@ function Detail({ icon, label, children }: { icon: ReactNode; label: string; chi
 }
 
 /**
- * A long line (a path) in one line that scrolls sideways: it starts at its
- * end (the file's name), and fades at a side where there is more.
+ * A long line (a path) in one line: when it doesn't fit, it slides to its end
+ * and back, pausing at each (stopped under the pointer, still when the system
+ * asks for less motion), faded at the sides where more is.
  */
 function ScrollLine({ text }: { text: string }) {
   const box = useRef<HTMLSpanElement>(null);
-  const [more, setMore] = useState({ before: false, after: false });
-  const measure = () => {
-    const el = box.current;
-    if (el) setMore({ before: el.scrollLeft > 1, after: el.scrollLeft + el.clientWidth < el.scrollWidth - 1 });
-  };
+  const inner = useRef<HTMLSpanElement>(null);
+  const [shift, setShift] = useState(0);
   useEffect(() => {
-    if (box.current) box.current.scrollLeft = box.current.scrollWidth;
+    const measure = () => setShift(Math.max(0, (inner.current?.scrollWidth ?? 0) - (box.current?.clientWidth ?? 0)));
     measure();
+    const watch = new ResizeObserver(measure);
+    if (box.current) watch.observe(box.current);
+    return () => watch.disconnect();
   }, [text]);
-  const fade = `linear-gradient(to right, ${more.before ? "transparent, black 1.5rem" : "black"}, ${more.after ? "black calc(100% - 1.5rem), transparent" : "black"})`;
+  const fade = shift ? "linear-gradient(to right, transparent, black 1rem, black calc(100% - 1rem), transparent)" : undefined;
   return (
-    <span ref={box} onScroll={measure} title={text}
-          className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+    <span ref={box} title={text} className="group min-w-0 flex-1 overflow-hidden whitespace-nowrap"
           style={{ maskImage: fade, WebkitMaskImage: fade }}>
-      {text}
+      <span ref={inner}
+            className={cn("inline-block px-1", shift > 0 && "animate-[marquee_var(--marquee-time)_ease-in-out_infinite] group-hover:[animation-play-state:paused] motion-reduce:animate-none")}
+            style={{ "--marquee-shift": `-${shift}px`, "--marquee-time": `${Math.max(6, shift / 25 + 4)}s` } as React.CSSProperties}>
+        {text}
+      </span>
     </span>
   );
 }

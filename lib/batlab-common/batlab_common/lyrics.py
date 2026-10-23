@@ -7,8 +7,8 @@ A song it hasn't seen is asked of its sources one after the other: that
 takes seconds, so TIMEOUT is generous, and a slow answer only means this
 song's lyrics come from the caller's own source. Down means it can't be
 reached or answers an error: then it is left alone for PAUSE seconds (a
-breaker), so a stopped stanzarr costs one question, not one per song. Standard library only: callers in async
-code run it in a thread."""
+breaker), so a stopped stanzarr costs one question, not one per song.
+Standard library only: callers in async code run it in a thread."""
 
 import json
 import logging

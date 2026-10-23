@@ -120,7 +120,7 @@ export type Page = {
 };
 
 /** Services and notifications have the same routes. */
-export type Family = "services" | "notifications" | "libraries";
+export type Family = "services" | "notifications" | "libraries" | "credits";
 
 export const api = {
   home: (signal?: AbortSignal) => request<{ shelves: Shelf[] }>("/home", { signal }),
@@ -147,6 +147,8 @@ export const api = {
                    { signal }),
   lyrics: (id: string, signal?: AbortSignal, fresh = false) =>
     request<Lyrics>(`/videos/${encodeURIComponent(id)}/lyrics${fresh ? "?fresh=true" : ""}`, { signal }),
+  /** Apple's preview, through clipseerr (the page plays media from it only). */
+  applePreview: (id: string) => `/api/v1/videos/${encodeURIComponent(id)}/preview`,
   frames: (id: string, signal?: AbortSignal) => request<Moments>(`/videos/${encodeURIComponent(id)}/frames`, { signal }),
   frameSheet: (youtubeId: string, sheet: number) => `/api/v1/videos/yt:${encodeURIComponent(youtubeId)}/frames/${sheet}.jpg`,
   credits: (id: string, signal?: AbortSignal, fresh = false) =>

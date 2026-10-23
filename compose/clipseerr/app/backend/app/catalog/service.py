@@ -16,7 +16,7 @@ from batlab_common import titles
 
 from ..cache import Cache, tracking
 from ..problems import Problem
-from . import genius, language, lrclib, match, musicbrainz, youtube
+from . import language, lrclib, match, youtube
 from .apple import GENRES, Apple
 from .models import (AlbumPage, ArtistPage, ArtistRef, AudioMatch, Category, CategoryGroup, Checks, Credits, Lyrics, SearchResults, Shelf,
                      SourceCheck,
@@ -82,6 +82,8 @@ class Catalog:
         self.verdicts = None
         # Lyrics from stanzarr first, when there is one (batlab_common.lyrics).
         self.stanzarr = None
+        # Where credits are looked for (Settings, Credits), when there is a store.
+        self.credit_store = None
         # The last answer or failure of each source, for the status screen.
         self.health: dict[str, dict] = {}
         # When the housekeeping loop warms the lists next, and how often (main.py): Hot's next check.
@@ -727,28 +729,30 @@ class Catalog:
         first = (_credit_names(artist) or [artist])[0]
 
         async def fetch():
-            # Each asked in turn, the first with credits wins; what was asked is said either way.
-            tried = ["YouTube Music"]
-            for youtube_id in ids:
-                found = await youtube.credits(region, youtube_id)
-                if found["credits"]:
-                    return found | {"tried": tried}
-            for name, ask in (("Genius", lambda: genius.credits(self._http, first, _bare(title))),
-                              ("MusicBrainz", lambda: musicbrainz.credits(self._http, first, _bare(title), seconds))):
-                tried.append(name)
-                try:
-                    found = await ask()
-                except Exception as exc:
-                    log.info("%s credits failed for %s - %s: %r", name, first, title, exc)
+            # The sources of Settings, Credits, in their order: the first with credits wins; what was
+            # asked is said either way, and each one's answer is its health on that page.
+            song = {"artist": first, "title": _bare(title), "seconds": seconds, "youtube_ids": ids, "region": region}
+            store, tried = self.credit_store, []
+            for item in store.items(enabled_only=True) if store else []:
+                kind = store.types.get(item["type"])
+                if not kind:
                     continue
-                if found["credits"]:
-                    return found | {"tried": tried}
+                tried.append(item["name"])
+                try:
+                    found = await kind.find(self._http, song, item["config"])
+                except Exception as exc:
+                    log.info("%s credits failed for %s - %s: %r", item["name"], first, title, exc)
+                    store.note(item["id"], False, f"{first} – {title}: {exc}")
+                    continue
+                store.note(item["id"], True, f"{first} – {title}: {'credits' if found else 'none'}")
+                if found:
+                    return {"credits": found, "provider": item["name"], "tried": tried}
             return {"credits": [], "provider": None, "tried": tried}
 
         if not ids:
             return Credits(credits=[])
-        # credits3: Genius's, then MusicBrainz's, when YouTube Music has none.
-        key = f"yt:credits3:{ids[0]}"
+        # credits4: from the sources of Settings, Credits.
+        key = f"yt:credits4:{ids[0]}"
         at = self._cache.fetched_at(key)
         if at and (fresh or (not (self._cache.peek(key) or {}).get("credits") and time.time() - at > DAY)):
             self._cache.forget(key)

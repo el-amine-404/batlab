@@ -1,7 +1,7 @@
 import { ExternalLink, Film, Music2, Play, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import type { VideoDetail } from "@/lib/api";
+import { api, type VideoDetail } from "@/lib/api";
 import { listen, playback } from "@/lib/playback";
 import { cn } from "@/lib/utils";
 
@@ -78,7 +78,7 @@ export function Player({ video }: { video: VideoDetail }) {
     <div className="flex flex-col gap-3">
       <div className="relative overflow-hidden rounded-2xl bg-black shadow-2xl shadow-black/50 ring-1 ring-white/10">
         {playing && mode === "preview" && video.preview_url ? (
-          <video src={video.preview_url} poster={video.thumbnail ?? undefined} controls autoPlay playsInline className="aspect-video w-full bg-black" />
+          <video src={api.applePreview(video.id)} poster={video.thumbnail ?? undefined} controls autoPlay playsInline className="aspect-video w-full bg-black" />
         ) : playing && mode && source ? (
           <iframe
             onLoad={(event) => listen(event.currentTarget, mode, source)}

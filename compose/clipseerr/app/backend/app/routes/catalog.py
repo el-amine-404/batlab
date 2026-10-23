@@ -2,16 +2,17 @@ import re
 from typing import Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 
 from .. import schemas
 from ..catalog.models import (AlbumPage, ArtistPage, ArtistSummary, CategoryGroup, Credits, Lyrics, SearchResults, Shelf, Video,
                               VideoDetail, Versions)
 from ..cache import tracking
 from ..catalog.preview import Busy
-from ..context import catalog, clips, frames, known, library, requests, settings
+from ..context import catalog, clips, frames, http, known, library, requests, settings
 from ..problems import Problem
 
 router = APIRouter(tags=["Catalog"])
@@ -238,6 +239,30 @@ async def _clip(youtube_id: str):
                       "to stay in YouTube's good books.") from None
     except LookupError:
         raise Problem(404, "No preview for this video.") from None
+
+
+# Apple's previews, relayed: the page plays media from clipseerr only, and Apple
+# names its files video/x-m4v, which Firefox won't play (the same MP4 inside).
+APPLE_MEDIA = re.compile(r"https://[\w.-]+\.(?:apple|mzstatic)\.com/")
+RELAYED = ("content-length", "content-range", "accept-ranges", "last-modified", "etag")
+
+
+@router.get("/videos/{video_id}/preview", summary="Apple's 30 s preview of a video YouTube lacks, relayed (ranges "
+            "pass through)", response_class=StreamingResponse, responses=_404)
+async def apple_preview(video_id: str, request: Request):
+    found = await catalog.video(video_id)
+    if not found.preview_url or not APPLE_MEDIA.match(found.preview_url):
+        raise Problem(404, "This video has no preview.")
+    headers = {"Range": request.headers["range"]} if "range" in request.headers else {}
+    upstream = await http.send(http.build_request("GET", found.preview_url, headers=headers), stream=True)
+    if upstream.status_code >= 400:
+        await upstream.aclose()
+        raise Problem(502, "Apple didn't give the preview. Try again in a moment.")
+    kind = "audio/mp4" if found.preview_url.endswith((".m4a", ".aac")) else "video/mp4"
+    return StreamingResponse(upstream.aiter_bytes(), status_code=upstream.status_code, media_type=kind,
+                             headers={k: v for k, v in upstream.headers.items() if k.lower() in RELAYED}
+                             | {"Cache-Control": "private, max-age=3600"},
+                             background=BackgroundTask(upstream.aclose))
 
 
 @router.get("/previews/{youtube_id}", summary="A video's preview for its card: a 15 s clip with its sound, "

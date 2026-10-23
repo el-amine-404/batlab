@@ -5,7 +5,7 @@ import time
 
 from batlab_common.lyrics import Stanzarr
 
-from . import config, events, libraries, notifications, outbound, services
+from . import config, credits, events, libraries, notifications, outbound, services
 from .accounts import open_accounts
 from .cache import Cache
 from .catalog.frames import Frames
@@ -44,6 +44,9 @@ service_store = Integrations(db, "service", services.TYPES, describe_extra=servi
 notification_store = Integrations(db, "notification", notifications.TYPES, events=events.NAMES)
 notifier = notifications.Notifier(notification_store, http)
 library_store = Integrations(db, "library", libraries.TYPES)
+# Where credits are looked for, in order (Settings, Credits).
+credit_store = Integrations(db, "credits", credits.TYPES)
+catalog.credit_store = credit_store
 library = libraries.LibraryIndex(library_store, http)
 requests = Requests(db)
 engine = Engine(requests, service_store, notifier.emit, settings, http, f"{conf.internal_url}/api/v1",

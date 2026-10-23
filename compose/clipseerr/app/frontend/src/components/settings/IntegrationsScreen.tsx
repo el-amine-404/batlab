@@ -24,6 +24,11 @@ const COPY: Record<Family, { title: string; description: string; empty: string }
     description: "Where songs and music videos already are. clipseerr reads them every 10 minutes: what they hold gets a green check, everywhere.",
     empty: "No library yet: only what clipseerr asked for is marked.",
   },
+  credits: {
+    title: "Credits",
+    description: "Where a song's credits are looked for, top to bottom: the first with credits wins, and the song's panel says which were asked.",
+    empty: "No source yet: songs show no credits.",
+  },
   notifications: {
     title: "Notifications",
     description: "Where clipseerr tells about requests: made, done, failed.",
@@ -78,7 +83,7 @@ export function IntegrationsScreen({ family }: { family: Family }) {
         <ol className="flex flex-col gap-2">
           {data.items.map((item, index) => (
             <li key={item.id} className={cn("flex items-center gap-3 rounded-xl border border-border bg-card p-3 sm:p-4", !item.enabled && "opacity-60")}>
-              {family === "services" && (
+              {(family === "services" || family === "credits") && (
                 <div className="flex flex-col">
                   <Button variant="ghost" size="icon-sm" disabled={index === 0} onClick={() => move(index, -1)} aria-label="Ask it earlier">
                     <ArrowUp />
@@ -90,7 +95,7 @@ export function IntegrationsScreen({ family }: { family: Family }) {
               )}
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  {family === "services" && <span className="text-xs font-semibold text-muted-foreground tabular-nums">{index + 1}</span>}
+                  {(family === "services" || family === "credits") && <span className="text-xs font-semibold text-muted-foreground tabular-nums">{index + 1}</span>}
                   <p className="font-medium">{item.name}</p>
                   <Badge variant="muted">{item.type_label}</Badge>
                   {item.kinds?.map((kind) => (

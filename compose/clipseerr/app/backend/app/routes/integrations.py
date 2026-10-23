@@ -8,7 +8,7 @@ from pydantic import Field, create_model
 
 from .. import events, outbound, schemas
 from ..auth import need
-from ..context import engine, http, library, library_store, notification_store, notifier, service_store
+from ..context import cache, credit_store, engine, http, library, library_store, notification_store, notifier, service_store
 from ..integrations import IntegrationIn
 from ..services import Context
 
@@ -30,6 +30,17 @@ async def _test_library(raw: dict, item_id: str | None = None) -> dict:
         return {"ok": True, "message": await kind.test(http, config)}
     except Exception as exc:
         return {"ok": False, "message": f"Couldn't read it: {exc}"[:300]}
+
+
+async def _test_credits(raw: dict, item_id: str | None = None) -> dict:
+    _body, kind, config = credit_store.parse(raw, item_id)
+    try:
+        result = {"ok": True, "message": await kind.test(http, config)}
+    except Exception as exc:
+        result = {"ok": False, "message": f"{kind.label} didn't answer: {exc}"[:300]}
+    if item_id:
+        credit_store.note(item_id, result["ok"], f"Test: {result['message']}")
+    return result
 
 
 def _routes(prefix: str, tag: str, store, test, event_list, changed=engine.wake, noun: str | None = None) -> APIRouter:
@@ -99,3 +110,6 @@ libraries_router = _routes("/libraries", "Libraries", library_store, _test_libra
                            noun="library")
 notifications_router = _routes("/notifications", "Notifications", notification_store, notifier.test,
                                [vars(item) for item in events.CATALOG])
+# Other sources, other answers: the kept credits are asked again.
+credits_router = _routes("/credits", "Credits", credit_store, _test_credits, [],
+                         changed=lambda: cache.forget("yt:credits"), noun="credits source")

@@ -203,3 +203,10 @@
     animation: none !important;
   }
 }
+
+/* A line too long for its place (a path): to its end and back, resting at each (SongPage's ScrollLine). */
+@keyframes marquee {
+  0%, 20% { transform: translateX(0); }
+  45%, 65% { transform: translateX(var(--marquee-shift)); }
+  90%, 100% { transform: translateX(0); }
+}

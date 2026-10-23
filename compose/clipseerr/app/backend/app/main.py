@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__, integrations, problems, seed
 from .auth import RequestLog, gate, principal
-from .context import (accounts, cache, catalog, conf, db, engine, frames, http, library, library_store,
+from .context import (accounts, cache, catalog, conf, credit_store, db, engine, frames, http, library, library_store,
                       notification_store, notifier, service_store)
 from .routes import PUBLIC, ROUTERS
 from .tracker import store as request_store
@@ -68,7 +68,7 @@ async def _housekeeping() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     set_threads("clipseerr")
-    seed.run(db, conf, service_store, notification_store, library_store)
+    seed.run(db, conf, service_store, notification_store, library_store, credit_store)
     accounts.announce(log)
     engine.start()
     library.start()

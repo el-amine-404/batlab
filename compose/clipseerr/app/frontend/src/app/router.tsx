@@ -20,6 +20,7 @@ import { WatchPage } from "@/pages/WatchPage";
 const ServicesPage = lazy(() => import("@/pages/settings/ServicesPage"));
 const NotificationsPage = lazy(() => import("@/pages/settings/NotificationsPage"));
 const LibrariesPage = lazy(() => import("@/pages/settings/LibrariesPage"));
+const CreditsPage = lazy(() => import("@/pages/settings/CreditsPage"));
 const GeneralPage = lazy(() => import("@/pages/settings/GeneralPage"));
 const StatusPage = lazy(() => import("@/pages/settings/StatusPage"));
 const AccountPage = lazy(() => import("@/pages/settings/AccountPage"));
@@ -61,6 +62,7 @@ export const router = createBrowserRouter([
           { path: "services", element: <ServicesPage /> },
           { path: "notifications", element: <NotificationsPage /> },
           { path: "libraries", element: <LibrariesPage /> },
+          { path: "credits", element: <CreditsPage /> },
           { path: "general", element: <GeneralPage /> },
           { path: "status", element: <StatusPage /> },
         ],

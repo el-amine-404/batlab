@@ -4,12 +4,14 @@ Settings screens' to change; the environment is not read again."""
 
 import logging
 
+from . import credits
 from .config import Config
 from .db import Database
 from .integrations import Integrations, Invalid
 
 log = logging.getLogger("clipseerr.seed")
 KEY = "seeded"
+CREDITS_KEY = "seeded_credit_sources"
 # Libraries came later: their own first start.
 LIBRARIES_KEY = "seeded_libraries"
 # videodrop replaced MeTube (2026-10-18): once, MeTube services become it.
@@ -17,11 +19,23 @@ VIDEODROP_KEY = "seeded_videodrop"
 
 
 def run(db: Database, conf: Config, services: Integrations, notifications: Integrations,
-        libraries: Integrations) -> None:
+        libraries: Integrations, credit_sources: Integrations | None = None) -> None:
     _libraries(db, conf, libraries)
+    if credit_sources is not None:
+        _credits(db, credit_sources)
     _first_start(db, conf, services, notifications)
     _videodrop(db, conf, services)
     _api_keys(conf, services)
+
+
+def _credits(db: Database, store: Integrations) -> None:
+    """The credits sources needing nothing set up, once (1.24); Discogs waits for its token."""
+    if db.get(CREDITS_KEY) or store.items():
+        db.put(CREDITS_KEY, True)
+        return
+    for key in credits.FIRST:
+        store.seed(credits.TYPES[key].label, key, {})
+    db.put(CREDITS_KEY, True)
 
 
 def _first_start(db: Database, conf: Config, services: Integrations, notifications: Integrations) -> None:

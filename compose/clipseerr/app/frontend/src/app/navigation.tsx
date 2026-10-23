@@ -3,7 +3,7 @@
  * screen is one page component, one route, and one entry here. need: the
  * permission it is shown for (the server refuses the rest anyway).
  */
-import { Bell, Cable, CalendarClock, CircleGauge, Compass, Disc3, Inbox, KeyRound, Library, type LucideIcon, Search,
+import { Bell, Cable, CalendarClock, CircleGauge, Compass, Disc3, FileText, Inbox, KeyRound, Library, type LucideIcon, Search,
          SlidersHorizontal, Tags, UserRound, Users } from "lucide-react";
 
 import type { Permission } from "@/lib/api";
@@ -24,6 +24,7 @@ export const SETTINGS: Entry[] = [
   { path: "/settings/services", label: "Services", icon: Cable, need: "settings" },
   { path: "/settings/notifications", label: "Notifications", icon: Bell, need: "settings" },
   { path: "/settings/libraries", label: "Libraries", icon: Library, need: "settings" },
+  { path: "/settings/credits", label: "Credits", icon: FileText, need: "settings" },
   { path: "/settings/general", label: "General", icon: SlidersHorizontal, need: "settings" },
   { path: "/settings/people", label: "People", icon: Users, need: "admin" },
   { path: "/settings/keys", label: "API keys", icon: KeyRound, need: "admin" },
