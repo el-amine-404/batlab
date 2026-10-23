@@ -251,10 +251,16 @@ class StanzarrLyrics(unittest.TestCase):
         self.assertEqual(found["lrc"], "[00:01.00] hi")
         self.assertEqual(Lyrics.asked, [("/api/v1/lyrics?artist=Band&title=Song&duration=200", "k")])
 
-    def test_off_without_an_address_and_paused_once_down(self):
+    def test_off_without_an_address_slow_once_and_paused_when_down(self):
         self.assertIsNone(lyrics.Stanzarr("", "", "test").lyrics("Band", "Song"))
         Lyrics.slow = True
         client = lyrics.Stanzarr(self.url, "k", "test", timeout=0.1, pause=60)
         self.assertIsNone(client.lyrics("Band", "Song"))
         self.assertIsNone(client.lyrics("Band", "Other"))
-        self.assertEqual(len(Lyrics.asked), 1, "down: not asked again during the pause")
+        self.assertEqual(len(Lyrics.asked), 2, "slow is not down: asked again")
+        port = self.server.server_address[1]
+        self.tearDown()
+        gone = lyrics.Stanzarr(f"http://127.0.0.1:{port}", "k", "test", pause=60)
+        self.assertIsNone(gone.lyrics("Band", "Song"))
+        self.assertFalse(gone.available(), "unreachable: paused")
+        self.setUp()

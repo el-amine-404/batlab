@@ -450,7 +450,8 @@ itself, and [its README](../compose/stanzarr/app/README.md).
 - **Others don't depend on it**: clipseerr and videodrop ask it first when
   given its address and a key (`STANZARR_CLIPSEERR_KEY`,
   `STANZARR_VIDEODROP_KEY`), and ask LRCLIB themselves when it doesn't answer
-  in 6 s; after a failure they leave it alone 5 minutes
+  in 20 s (a song new to it is asked of its sources first); when it can't
+  be reached they leave it alone 5 minutes
   (`batlab_common/lyrics.py`). videodrop asks it before the download starts:
   the download's process reaches only the VPN proxy.
 - **Sources are add-ons** (`backend/stanzarr/sources/`): one `LyricsSource`

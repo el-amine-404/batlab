@@ -3,9 +3,11 @@ embed them (clipseerr, videodrop). Optional: an app without STANZARR_URL
 never asks, and one whose stanzarr is down falls back to its own LRCLIB
 question at once.
 
-Down means: no answer within TIMEOUT, or an error. After one, stanzarr is
-left alone for PAUSE seconds (a breaker), so a stopped stanzarr costs one
-slow question, not one per song. Standard library only: callers in async
+A song it hasn't seen is asked of its sources one after the other: that
+takes seconds, so TIMEOUT is generous, and a slow answer only means this
+song's lyrics come from the caller's own source. Down means it can't be
+reached or answers an error: then it is left alone for PAUSE seconds (a
+breaker), so a stopped stanzarr costs one question, not one per song. Standard library only: callers in async
 code run it in a thread."""
 
 import json
@@ -18,7 +20,7 @@ import urllib.request
 
 log = logging.getLogger(__name__)
 
-TIMEOUT = 6.0
+TIMEOUT = 20.0
 PAUSE = 300.0
 
 
@@ -63,6 +65,14 @@ class Stanzarr:
         try:
             with opener.open(request, timeout=self.timeout) as response:
                 answer = json.loads(response.read(2 * 1024 * 1024))
+        except TimeoutError:
+            log.info("stanzarr slow for %s - %s: own lyrics this time", artist, title)
+            return None
+        except urllib.error.URLError as error:
+            if isinstance(error.reason, TimeoutError):
+                return None
+            self._down(error)
+            return None
         except (OSError, ValueError) as error:
             self._down(error)
             return None
