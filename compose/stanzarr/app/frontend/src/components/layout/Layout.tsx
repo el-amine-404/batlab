@@ -31,6 +31,7 @@ export function Layout() {
                                                             badge: badges[entry.path] }));
 
   return (
+    <TooltipProvider delayDuration={150}>
     <Shell
       name="stanzarr"
       logo={<Logo className="size-7" />}
@@ -51,6 +52,7 @@ export function Layout() {
         />
       )}
     />
+    </TooltipProvider>
   );
 }
 

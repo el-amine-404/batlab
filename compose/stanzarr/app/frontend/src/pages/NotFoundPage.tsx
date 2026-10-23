@@ -6,7 +6,7 @@ import { Empty } from "@/components/layout/States";
 export function NotFoundPage() {
   return (
     <Empty icon={<Rss />} title="There's no such page">
-      <Link to="/" className="text-emerald-300 hover:underline">Back to the library</Link>
+      <Link to="/library" className="text-emerald-300 hover:underline">Back to the library</Link>
     </Empty>
   );
 }

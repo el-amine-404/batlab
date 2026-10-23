@@ -1,4 +1,5 @@
 from ..auth import gate
+from .activity import router as activity
 from .lyrics import router as lyrics
 from .notifications import router as notifications
 from .songs import router as songs
@@ -14,4 +15,4 @@ PUBLIC = (system_public, gate.public)
 WORKERS = (worker_protocol,)
 # Who asks must be known (api/auth.py); each route says what more it needs. gate.router: one's own
 # account, and the admins' people and keys.
-ROUTERS = (songs, lyrics, queue, sources, notifications, system, gate.router)
+ROUTERS = (songs, lyrics, activity, queue, sources, notifications, system, gate.router)

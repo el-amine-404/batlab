@@ -437,17 +437,32 @@ the service.
 itself, and [its README](../compose/stanzarr/app/README.md).
 
 - **Job**: every song's lyrics: tracks them, asks its sources for what is
-  missing, syncs plain lyrics by AI on a GPU worker, and hosts the lyrics
-  editor. The one owner of lyrics: the other apps ask it.
+  missing until they reach the quality cutoff (Settings, General), syncs
+  plain lyrics by AI on a GPU worker, and hosts the lyrics editor. Its home
+  page finds lyrics for any song by its name or a link (YouTube, Spotify,
+  Deezer, Apple Music, SoundCloud, Bandcamp, Tidal, Amazon Music).
 - **Alone**: point it at any music folder.
 - **Plugs in through**: the library folders (it writes `.lrc` and `.txt` beside
   songs); `GET /api/v1/lyrics?artist=&title=&duration=`, any song's lyrics,
   the library's when the song is there, else the sources'; its events
   (`ai.synced`, `ai.failed`, `lyrics.found`); the workers' protocol
-  (`/api/v1/worker/…`, the workers' key).
+  (`/api/v1/worker/…`, a key per worker, Settings, Workers).
+- **Others don't depend on it**: clipseerr and videodrop ask it first when
+  given its address and a key (`STANZARR_CLIPSEERR_KEY`,
+  `STANZARR_VIDEODROP_KEY`), and ask LRCLIB themselves when it doesn't answer
+  in 6 s; after a failure they leave it alone 5 minutes
+  (`batlab_common/lyrics.py`). videodrop asks it before the download starts:
+  the download's process reaches only the VPN proxy.
 - **Sources are add-ons** (`backend/stanzarr/sources/`): one `LyricsSource`
-  module each, chosen, ordered and tested in Settings, Sources. LRCLIB is the
-  first; its address is a setting, so a mirror works the same.
+  module each, chosen, ordered and tested in Settings, Sources: LRCLIB,
+  NetEase Cloud Music (no account), Musixmatch (one's own user token; its
+  terms don't allow this use), Genius (words only, a free token). Every
+  answer goes through a filter first (hidden and direction-turning
+  characters, HTML, site credits and links, times past the song's end);
+  what it refuses is kept aside in `quarantine/` with why, and said in
+  Activity.
+- **Who did what**: Activity says what runs now and logs every search, write,
+  AI job and refusal with who asked (a person, an app's key, a worker).
 - **Who may use it**: accounts and API keys as the other apps. Reading needs
   only to be someone; editing lyrics (`edit`), queuing AI syncs (`ai`) and
   changing settings need the permission. Homepage's key only reads

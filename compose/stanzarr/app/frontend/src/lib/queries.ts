@@ -2,9 +2,9 @@
  * Every read of the API, through TanStack Query: answers are kept and shared
  * between screens; the queue and the status refresh themselves while shown.
  */
-import { keepPreviousData, QueryClient, useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api, PAGE, type SongFilters, type SongList } from "./api";
+import { type ActivityFilters, api, type SongFilters } from "./api";
 
 const SECOND = 1000;
 
@@ -32,18 +32,28 @@ export const keys = {
   status: ["status"] as const,
   stats: ["stats"] as const,
   events: ["events"] as const,
+  facets: ["songs", "facets"] as const,
+  history: ["songs", "history"] as const,
+  activity: (filters: ActivityFilters, page: number) => ["activity", filters, page] as const,
+  activityNow: ["activity", "now"] as const,
 };
 
-/** The library, a page at a time; the next page loads when asked for. */
-export function useSongs(filters: SongFilters) {
-  return useInfiniteQuery({
-    queryKey: keys.songs(filters),
-    queryFn: ({ pageParam, signal }) => api.songs(filters, pageParam, signal),
+/** The library, one page of it; the one shown stays while the next loads. */
+export const useSongs = (filters: SongFilters, page: number, size: number) =>
+  useQuery({
+    queryKey: [...keys.songs(filters), page, size],
+    queryFn: ({ signal }) => api.songs(filters, page, size, signal),
     placeholderData: keepPreviousData,
-    initialPageParam: 1,
-    getNextPageParam: (last: SongList, pages: SongList[]) => (pages.length * PAGE < last.total ? pages.length + 1 : undefined),
   });
-}
+export const useFacets = () => useQuery({ queryKey: keys.facets, queryFn: api.facets, staleTime: 5 * 60 * SECOND });
+export const useHistory = () => useQuery({ queryKey: keys.history, queryFn: () => api.history(90), staleTime: 5 * 60 * SECOND });
+export const useActivity = (filters: ActivityFilters, page: number) =>
+  useQuery({ queryKey: keys.activity(filters, page), queryFn: () => api.activity(filters, page), placeholderData: keepPreviousData,
+             refetchInterval: 15 * SECOND });
+/** What runs now: every 3 s while something does, else every 15 s. */
+export const useActivityNow = () =>
+  useQuery({ queryKey: keys.activityNow, queryFn: api.activityNow,
+             refetchInterval: (q) => (q.state.data?.busy || q.state.data?.jobs.some((j) => j.status === "running") ? 3 * SECOND : 15 * SECOND) });
 
 export const useSong = (id: number) => useQuery({ queryKey: keys.song(id), queryFn: () => api.song(id) });
 export const useEditor = (id: number) =>
@@ -77,5 +87,6 @@ export function useLyricsChanged() {
     void client.invalidateQueries({ queryKey: ["songs"] });
     void client.invalidateQueries({ queryKey: keys.status });
     void client.invalidateQueries({ queryKey: keys.jobs });
+    void client.invalidateQueries({ queryKey: ["activity"] });
   };
 }

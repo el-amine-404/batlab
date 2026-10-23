@@ -16,13 +16,18 @@ log = logging.getLogger("stanzarr.library")
 STATUSES = ("synced", "ai_corrected", "ai_checked", "ai_unchecked", "plain", "instrumental", "missing")
 
 
-def _tags(path: str) -> tuple[str, str, str, float]:
+class Tags(dict):
+    """artist, album, title, duration, and what identifies the recording:
+    albumartist, isrc, mbid (MusicBrainz's recording, as musicguard writes it)."""
+
+
+def _tags(path: str) -> Tags:
     try:
         audio = mutagen.File(path, easy=True)
     except Exception:
         audio = None
     if audio is None:
-        return "", "", "", 0.0
+        return Tags(artist="", album="", title="", duration=0.0, albumartist="", isrc="", mbid="")
     tags = audio.tags or {}
 
     def first(key: str) -> str:
@@ -33,11 +38,14 @@ def _tags(path: str) -> tuple[str, str, str, float]:
         return str(value[0]).strip() if value else ""
 
     length = float(getattr(getattr(audio, "info", None), "length", 0) or 0)
-    return first("artist") or first("albumartist"), first("album"), first("title"), length
+    return Tags(artist=first("artist") or first("albumartist"), album=first("album"), title=first("title"),
+                duration=length, albumartist=first("albumartist"), isrc=first("isrc").upper()[:15],
+                mbid=first("musicbrainz_trackid")[:36])
 
 
-def scan(db: Database, roots: list[str]) -> dict:
-    """One pass over the library. Returns counts of what changed."""
+def scan(db: Database, roots: list[str], progress=None) -> dict:
+    """One pass over the library. Returns counts of what changed.
+    progress(seen, folder) is told as it goes, for the Activity page."""
     started = time.time()
     known = {r["path"]: r for r in db.all("SELECT id, path, size, mtime FROM songs")}
     seen: set[str] = set()
@@ -61,24 +69,28 @@ def scan(db: Database, roots: list[str]) -> dict:
                 except OSError:
                     continue
                 seen.add(path)
+                if progress and len(seen) % 25 == 0:
+                    progress(len(seen), directory)
                 row = known.get(path)
                 if row and row["size"] == stat.st_size and row["mtime"] == int(stat.st_mtime):
                     song_id = row["id"]
                 else:
-                    artist, album, title, duration = _tags(path)
+                    tags = _tags(path)
                     rel = os.path.relpath(path, root)
-                    title = title or stem
+                    artist, album, title, duration = tags["artist"], tags["album"], tags["title"] or stem, tags["duration"]
+                    ids = (tags["albumartist"], tags["isrc"], tags["mbid"])
                     if row:
-                        db.run("UPDATE songs SET size=?, mtime=?, artist=?, album=?, title=?, duration=? WHERE id=?",
-                               (stat.st_size, int(stat.st_mtime), artist, album, title, duration, row["id"]))
+                        db.run("UPDATE songs SET size=?, mtime=?, artist=?, album=?, title=?, duration=?, albumartist=?,"
+                               " isrc=?, mbid=? WHERE id=?",
+                               (stat.st_size, int(stat.st_mtime), artist, album, title, duration, *ids, row["id"]))
                         song_id = row["id"]
                         updated += 1
                     else:
                         song_id = db.insert(
-                            "INSERT INTO songs(path, root, rel, size, mtime, artist, album, title, duration, added_at)"
-                            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            "INSERT INTO songs(path, root, rel, size, mtime, artist, album, title, duration, added_at,"
+                            " albumartist, isrc, mbid) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                             (path, root, rel, stat.st_size, int(stat.st_mtime), artist, album, title, duration,
-                             int(time.time())))
+                             int(time.time()), *ids))
                         added += 1
                 sync_lyrics(db, song_id, path, names)
     removed = 0
@@ -158,5 +170,23 @@ CASE
   WHEN EXISTS(SELECT 1 FROM lyrics l WHERE l.song_id=s.id) THEN 'plain'
   WHEN (SELECT result FROM attempts a WHERE a.song_id=s.id)='instrumental' THEN 'instrumental'
   ELSE 'missing'
+END
+"""
+
+
+# The quality ladder (Settings, Quality), best last: what a song's best lyrics
+# are worth. A song is asked about again until it reaches the cutoff;
+# instrumental songs have nothing to reach.
+LEVELS = {"none": 0, "plain": 1, "ai": 2, "ai_checked": 3, "synced": 4, "words": 5}
+RANK_SQL = """
+CASE
+  WHEN NOT EXISTS(SELECT 1 FROM lyrics l WHERE l.song_id=s.id)
+       AND (SELECT result FROM attempts a WHERE a.song_id=s.id)='instrumental' THEN 9
+  WHEN EXISTS(SELECT 1 FROM lyrics l WHERE l.song_id=s.id AND l.synced=1 AND l.source!='ai' AND l.format='elrc') THEN 5
+  WHEN EXISTS(SELECT 1 FROM lyrics l WHERE l.song_id=s.id AND l.synced=1 AND l.source!='ai') THEN 4
+  WHEN EXISTS(SELECT 1 FROM lyrics l WHERE l.song_id=s.id AND l.synced=1 AND l.ai_state IN ('checked','corrected')) THEN 3
+  WHEN EXISTS(SELECT 1 FROM lyrics l WHERE l.song_id=s.id AND l.synced=1) THEN 2
+  WHEN EXISTS(SELECT 1 FROM lyrics l WHERE l.song_id=s.id) THEN 1
+  ELSE 0
 END
 """

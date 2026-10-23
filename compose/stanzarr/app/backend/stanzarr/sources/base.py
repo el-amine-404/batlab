@@ -18,8 +18,10 @@ class SongQuery:
     artist: str
     title: str
     album: str = ""
-    # Seconds; 0 when unknown.
+    # Seconds; 0 when unknown (a song asked for by its name).
     duration: float = 0.0
+    # The recording's code, from the tags: some sources match it exactly.
+    isrc: str = ""
 
 
 @dataclass(frozen=True)

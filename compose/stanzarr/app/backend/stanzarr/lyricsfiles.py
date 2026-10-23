@@ -39,6 +39,76 @@ NUMBERS = re.compile(r"\d+")
 LOOKALIKES = str.maketrans("аеорсухіјѕАВЕКМНОРСТХІЈЅοΑΒΕΗΙΚΜΝΟΡΤΧΥΖ", "aeopcyxijsABEKMHOPCTXIJSoABEHIKMNOPTXYZ")
 WORD = re.compile(r"\w+")
 
+# Word stamps inside a line (<01:02.34>): enhanced LRC, words in time.
+WORD_STAMP = re.compile(r"<\d{1,3}:\d{2}[.:]\d{1,3}>")
+
+# What no lyric needs, and what some use to hide or turn text around:
+# control characters, the bidirectional overrides and isolates, zero widths,
+# the byte order mark.
+HIDDEN = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]")
+HTML = re.compile(r"<\s*/?\s*(script|style|iframe|object|embed|a|div|span|p|br|img|svg|meta|link)\b[^>]*>", re.IGNORECASE)
+# The lines lyrics sites add that aren't lyrics: credits to the site, links, ads.
+ADS = re.compile(r"(?i)(lyrics (provided|powered|licensed) by|paroles de la chanson|\bwww\.|https?://|"
+                 r"you might also like|\d*embed$|get tickets|see .{1,40} live)")
+MAX_LINE = 300
+MAX_LINES = 1500
+
+
+@dataclass
+class Checked:
+    """What sanitize() made of a text: the text to write, what it took out,
+    and why it refused the whole of it (None: it didn't)."""
+    text: str
+    removed: list[str] = field(default_factory=list)
+    refused: str | None = None
+
+
+def sanitize(text: str, duration: float = 0.0) -> Checked:
+    """Lyrics from a source, made safe to write beside a song and to show:
+    no binary, no hidden or direction-turning characters, no HTML, no site
+    credits or links, no line a player would choke on, no time past the song's
+    end. Refused whole when it can't be lyrics."""
+    if "\x00" in text:
+        return Checked("", refused="it holds binary data")
+    if len(text.encode("utf-8", "replace")) > MAX_BYTES:
+        return Checked("", refused=f"it is over {MAX_BYTES // 1024} KB")
+    removed: list[str] = []
+    hidden = len(HIDDEN.findall(text))
+    if hidden:
+        text = HIDDEN.sub("", text)
+        removed.append(f"{hidden} hidden or control characters")
+    if HTML.search(text):
+        text = HTML.sub("", text)
+        removed.append("HTML tags")
+    kept = []
+    for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        words = WORD_STAMP.sub("", STAMP.sub("", line)).strip()
+        if words and len(words) < 200 and ADS.search(words):
+            removed.append(f"not lyrics: {words[:80]}")
+            continue
+        if len(words) > MAX_LINE:
+            removed.append(f"a line of {len(words)} characters")
+            continue
+        stamp = STAMP.match(line.strip())
+        if duration and stamp:
+            minutes, seconds = stamp.groups()
+            at = int(minutes) * 60 + float(seconds.replace(":", "."))
+            if at > duration + 10:
+                removed.append(f"a line timed after the song's end ({stamp.group(0)})")
+                continue
+        kept.append(line)
+    if sum(1 for line in kept if line.strip()) > MAX_LINES:
+        return Checked("", removed, refused=f"over {MAX_LINES} lines")
+    out = "\n".join(kept).strip("\n")
+    if not out.strip():
+        return Checked("", removed, refused="nothing left once cleaned")
+    return Checked(out + "\n", removed)
+
+
+def word_synced(text: str) -> bool:
+    """Words in time (enhanced LRC), not only lines."""
+    return bool(WORD_STAMP.search(text))
+
 
 @dataclass
 class Line:
@@ -174,7 +244,7 @@ def read_embedded(audio_path: str) -> Lyrics | None:
 
 @dataclass
 class Origin:
-    source: str  # lrclib | ai | person | unknown
+    source: str  # lrclib | netease | musixmatch | genius | ai | person | unknown
     ai_state: str | None  # unchecked | checked | corrected (AI files only)
     unsure: int
     checked: int
@@ -198,8 +268,10 @@ def origin(lyrics: Lyrics) -> Origin:
     if by.startswith("AI-generated"):
         state = "corrected" if "corrected" in by else "checked" if "checked by a person" in by and "not" not in by else "unchecked"
         return Origin("ai", state, unsure, checked)
-    if "lrclib" in re_.lower():
-        return Origin("lrclib", None, 0, 0)
+    # A source's file says so: [re:<its name> via Stanzarr].
+    for mark, source in (("lrclib", "lrclib"), ("netease", "netease"), ("musixmatch", "musixmatch"), ("genius", "genius")):
+        if mark in re_.lower():
+            return Origin(source, None, 0, 0)
     if "stanzarr" in re_.lower() or "a person" in by:
         return Origin("person", None, 0, 0)
     return Origin("unknown", None, 0, 0)

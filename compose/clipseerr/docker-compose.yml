@@ -53,6 +53,9 @@ services:
       - CLIPSEERR_SONGDROP_API_KEY=${SONGDROP_CLIPSEERR_KEY:-}
       - CLIPSEERR_VIDEODROP_URL=http://videodrop:8840
       - CLIPSEERR_VIDEODROP_API_KEY=${VIDEODROP_CLIPSEERR_KEY:-}
+      # Lyrics from stanzarr first (a key of its own, Settings, API keys); LRCLIB when it's down or unset.
+      - CLIPSEERR_STANZARR_URL=http://stanzarr:6868
+      - CLIPSEERR_STANZARR_API_KEY=${STANZARR_CLIPSEERR_KEY:-}
       # The first libraries (Settings, Libraries): Navidrome's songs, through
       # Caddy's :4534 (a scan asked there never reaches Navidrome), with the
       # token Homepage reads it with; and the music videos folder.

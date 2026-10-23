@@ -5,12 +5,12 @@ result. A worker authenticates with the workers' key (X-Stanzarr-Key), not
 an account; the protocol answers at /api/v1/worker/… and, for the workers
 before 1.0, /api/worker/…."""
 
-import hmac
 import os
 import time
 
 from batlab_common.accounts import Unauthorized
 from fastapi import APIRouter, Depends, Request, Response
+from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse
 
 from ... import operations
@@ -37,10 +37,12 @@ def jobs(ctx: Ctx):
 
 @router.delete("/jobs/{job_id}", summary="Cancel a queued or running job", response_model=schemas.Ok,
                dependencies=[need("ai")])
-def cancel(job_id: int, ctx: Ctx):
+def cancel(job_id: int, ctx: Ctx, who: Who):
     if not ctx.db.run("UPDATE jobs SET status='cancelled', finished_at=? WHERE id=? AND status IN ('queued','running')",
                       (int(time.time()), job_id)):
         raise NotFound("There's no queued or running job with that id.")
+    job = ctx.db.one("SELECT song_id FROM jobs WHERE id=?", (job_id,))
+    ctx.db.event("ai", "AI sync cancelled", job["song_id"] if job else None, who.name)
     return {"ok": True}
 
 
@@ -53,32 +55,74 @@ def retry(job_id: int, ctx: Ctx):
     return {"ok": True}
 
 
-@router.get("/workers", summary="The workers, and their key for who may change settings",
-            response_model=schemas.WorkerList)
-def workers(ctx: Ctx, who: Who):
-    rows = ctx.db.all("SELECT * FROM workers ORDER BY last_seen DESC")
+class WorkerIn(BaseModel):
+    name: str = Field(min_length=1, max_length=64, description="How it shows here and in the queue: laptop, desktop…")
+
+
+def _workers(ctx) -> list[dict]:
+    """Each worker with a key, and what it reported last; the ones on the shared key too."""
+    seen = {r["name"]: r for r in ctx.db.all("SELECT * FROM workers")}
     now = int(time.time())
-    for r in rows:
-        r["online"] = now - r["last_seen"] < 60
-    return {"workers": rows, "key": ctx.worker_key() if who.can("settings") else None,
-            "key_fixed": bool(ctx.config.worker_key)}
+    out = []
+    for key in ctx.worker_keys():
+        report = seen.pop(key["name"], None) or {}
+        out.append({**key, "shared_key": False, "gpu": report.get("gpu", ""), "vram": report.get("vram", 0),
+                    "version": report.get("version", ""), "last_seen": report.get("last_seen"),
+                    "online": bool(report) and now - report["last_seen"] < 60})
+    for name, report in seen.items():
+        out.append({"id": None, "name": name, "prefix": None, "created_at": None, "last_used": None, "shared_key": True,
+                    "gpu": report["gpu"], "vram": report["vram"], "version": report["version"],
+                    "last_seen": report["last_seen"], "online": now - report["last_seen"] < 60})
+    return out
 
 
-@router.post("/workers/key", summary="A new workers' key: the workers need it before their next job",
-             dependencies=[need("settings")])
-def new_key(ctx: Ctx):
-    if ctx.config.worker_key:
-        raise Conflict("The key is set by STANZARR_WORKER_KEY: change it there.")
-    return {"key": ctx.new_worker_key()}
+@router.get("/workers", summary="The workers: their keys' names, and what each reported last",
+            response_model=schemas.WorkerList)
+def workers(ctx: Ctx):
+    return {"workers": _workers(ctx), "shared_key": bool(ctx.legacy_key()), "shared_key_fixed": bool(ctx.config.worker_key)}
+
+
+@router.post("/workers", status_code=201, summary="Add a worker: its key is answered this once",
+             response_model=schemas.WorkerMade, dependencies=[need("settings")])
+def add_worker(body: WorkerIn, ctx: Ctx, who: Who):
+    key, row = ctx.add_worker(body.name)
+    ctx.db.event("workers", f"Worker {row['name']} added", actor=who.name)
+    return {"key": key, "worker": {**row, "shared_key": False, "gpu": "", "vram": 0, "version": "", "last_seen": None,
+                                   "online": False}}
+
+
+@router.patch("/workers/{worker_id}", summary="Rename a worker", response_model=schemas.Ok,
+              dependencies=[need("settings")])
+def rename_worker(worker_id: str, body: WorkerIn, ctx: Ctx, who: Who):
+    row = ctx.rename_worker(worker_id, body.name)
+    ctx.db.event("workers", f"Worker renamed {row['name']}", actor=who.name)
+    return {"ok": True}
+
+
+@router.delete("/workers/{worker_id}", status_code=204, summary="Remove a worker: its key stops working at once",
+               dependencies=[need("settings")])
+def remove_worker(worker_id: str, ctx: Ctx, who: Who):
+    ctx.remove_worker(worker_id)
+    ctx.db.event("workers", "A worker was removed: its key no longer works", actor=who.name)
+    return Response(status_code=204)
+
+
+@router.delete("/workers-shared-key", status_code=204, summary="Retire the key all workers shared before 1.1",
+               dependencies=[need("settings")])
+def forget_shared_key(ctx: Ctx, who: Who):
+    ctx.forget_legacy_key()
+    ctx.db.event("workers", "The workers' shared key was retired", actor=who.name)
+    return Response(status_code=204)
 
 
 # ---- the protocol -------------------------------------------------------------------------
 
 def worker(request: Request, ctx: Ctx) -> str:
-    key = request.headers.get("x-stanzarr-key", "")
-    if not key or not hmac.compare_digest(key, ctx.worker_key()):
-        raise Unauthorized("Not a worker of this Stanzarr: check the key (Settings, Workers).")
-    return request.headers.get("x-stanzarr-worker", "worker")[:64]
+    """Which worker asks: by its own key, or (before 1.1) the shared key and the name it gives."""
+    name = ctx.worker_for(request.headers.get("x-stanzarr-key", ""), request.headers.get("x-stanzarr-worker", ""))
+    if not name:
+        raise Unauthorized("Not a worker of this stanzarr: check its key (Settings, Workers).")
+    return name
 
 
 def _running(ctx, job_id: int, name: str) -> dict:
@@ -154,7 +198,7 @@ def job_result(job_id: int, body: dict, ctx: Ctx, name: str = Depends(worker)):
     lines = body.get("lines")
     if not isinstance(lines, list) or not lines:
         raise Invalid("Send the lines.")
-    outcome = operations.save_ai_result(ctx.db, ctx.config, job["song_id"], lines, str(body.get("method", ""))[:200])
+    outcome = operations.save_ai_result(ctx.db, ctx.config, job["song_id"], lines, str(body.get("method", ""))[:200], name)
     ctx.db.run("UPDATE jobs SET status='finished', stage=?, finished_at=? WHERE id=?",
                (outcome[:80], int(time.time()), job_id))
     song = song_or_404(ctx, job["song_id"])
@@ -172,7 +216,7 @@ def job_fail(job_id: int, body: dict, ctx: Ctx, name: str = Depends(worker)):
     job = _running(ctx, job_id, name)
     error = str(body.get("error", "failed"))[:500]
     ctx.db.run("UPDATE jobs SET status='failed', error=?, finished_at=? WHERE id=?", (error, int(time.time()), job_id))
-    ctx.db.event("ai", f"AI sync failed: {error}", job["song_id"])
+    ctx.db.event("ai", "AI sync failed", job["song_id"], name, ok=False, detail=error)
     song = song_or_404(ctx, job["song_id"])
     ctx.notifier.emit(Event("ai.failed", f"{song['artist']} – {song['title']}: AI sync failed", (error,),
                             ctx.link(f"/songs/{song['id']}"),

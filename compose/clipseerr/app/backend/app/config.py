@@ -49,6 +49,9 @@ class Config:
     songdrop_url: str
     videodrop_url: str
     videodrop_api_key: str
+    # Lyrics from stanzarr first, when given (an API key that reads); LRCLIB when it's down.
+    stanzarr_url: str
+    stanzarr_api_key: str
     songdrop_api_key: str
     # The first libraries (seed.py): Navidrome, and the music videos folder.
     navidrome_url: str
@@ -82,6 +85,8 @@ def load() -> Config:
         songdrop_url=_text("CLIPSEERR_SONGDROP_URL"),
         videodrop_url=_text("CLIPSEERR_VIDEODROP_URL"),
         videodrop_api_key=_text("CLIPSEERR_VIDEODROP_API_KEY"),
+        stanzarr_url=_text("CLIPSEERR_STANZARR_URL").rstrip("/"),
+        stanzarr_api_key=_text("CLIPSEERR_STANZARR_API_KEY"),
         songdrop_api_key=_text("CLIPSEERR_SONGDROP_API_KEY"),
         navidrome_url=_text("CLIPSEERR_NAVIDROME_URL"),
         navidrome_user=_text("CLIPSEERR_NAVIDROME_USER"),

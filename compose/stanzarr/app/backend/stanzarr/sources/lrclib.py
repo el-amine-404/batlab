@@ -81,7 +81,8 @@ def pick(results: list[dict], seconds: float, title: str = "", artist: str = "")
     best, best_key = None, None
     for entry in results or []:
         try:
-            gap = abs(float(entry.get("duration") or 0) - seconds)
+            # The length unknown (a song asked for by its name): any length will do.
+            gap = abs(float(entry.get("duration") or 0) - seconds) if seconds > 0 else 0.0
         except (TypeError, ValueError):
             continue
         if gap >= LENGTH_SLACK:
@@ -104,15 +105,19 @@ def pick(results: list[dict], seconds: float, title: str = "", artist: str = "")
 
 def lookup(artist: str, title: str, album: str, seconds: float, api: str = API) -> tuple[str, str, int | None]:
     """("synced" | "plain" | "instrumental" | "none", text, LRCLIB id)."""
-    params = {"artist_name": artist, "track_name": title, "duration": int(round(seconds))}
-    if album:
-        params["album_name"] = album
     candidates = []
-    exact = _get("get", params, api=api)
-    if exact:
-        candidates.append(exact)
-    candidates += _get("search", {"artist_name": artist, "track_name": title}, api=api) or []
-    if not any(_synced(c) and abs(float(c.get("duration") or 0) - seconds) < LENGTH_SLACK for c in candidates):
+    # The exact match needs the length; without it, only the searches.
+    if seconds > 0 and artist:
+        params = {"artist_name": artist, "track_name": title, "duration": int(round(seconds))}
+        if album:
+            params["album_name"] = album
+        exact = _get("get", params, api=api)
+        if exact:
+            candidates.append(exact)
+    if artist:
+        candidates += _get("search", {"artist_name": artist, "track_name": title}, api=api) or []
+    if not any(_synced(c) and (seconds <= 0 or abs(float(c.get("duration") or 0) - seconds) < LENGTH_SLACK)
+               for c in candidates):
         candidates += _get("search", {"track_name": title}, api=api) or []
     found = pick(candidates, seconds, title, artist)
     if not found:

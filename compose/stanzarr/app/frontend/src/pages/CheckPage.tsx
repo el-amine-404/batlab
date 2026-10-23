@@ -1,6 +1,7 @@
 import { ListChecks } from "lucide-react";
+import { useState } from "react";
 
-import { SongRows } from "@/components/library/SongRows";
+import { Pager, SongTable } from "@/components/library/SongTable";
 import { Empty, Failed, Loading, PageHeader } from "@/components/layout/States";
 import { useSongs, useStatus } from "@/lib/queries";
 
@@ -11,9 +12,8 @@ import { useSongs, useStatus } from "@/lib/queries";
  */
 export function CheckPage() {
   const { data: status } = useStatus();
-  const songs = useSongs({ to_check: true, sort: "added" });
-  const pages = songs.data?.pages ?? [];
-  const rows = pages.flatMap((page) => page.songs);
+  const [page, setPage] = useState(1);
+  const songs = useSongs({ to_check: true, sort: "added", direction: "desc" }, page, 50);
 
   return (
     <>
@@ -24,11 +24,13 @@ export function CheckPage() {
         <Loading />
       ) : songs.error ? (
         <Failed error={songs.error} retry={() => void songs.refetch()} />
-      ) : !rows.length ? (
+      ) : !songs.data.songs.length ? (
         <Empty icon={<ListChecks />} title="Nothing to check">Every AI line has been looked at, or the AI hasn't synced anything yet.</Empty>
       ) : (
-        <SongRows songs={rows} total={pages[0]?.total ?? 0} more={!!songs.hasNextPage} loadingMore={songs.isFetchingNextPage}
-                  onMore={() => void songs.fetchNextPage()} />
+        <>
+          <SongTable songs={songs.data.songs} sort="added" direction="desc" look={{ compact: false, grouped: false }} />
+          <Pager page={page} size={50} total={songs.data.total} onPage={setPage} />
+        </>
       )}
     </>
   );

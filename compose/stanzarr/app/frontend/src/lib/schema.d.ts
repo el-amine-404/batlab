@@ -226,8 +226,42 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The songs, filtered, a page at a time */
+        /** The songs, filtered and sorted, a page at a time */
         get: operations["songs_api_v1_songs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/songs/facets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What the library's filters can choose from, with how many songs each */
+        get: operations["facets_api_v1_songs_facets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/songs/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The coverage, day by day: songs by status at each day's last scan */
+        get: operations["history_api_v1_songs_history_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -355,6 +389,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/songs/{song_id}/cover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The song's cover: the one in its file, else the folder's
+         * @description Read once, then kept (until the file changes): never asked of the network.
+         */
+        get: operations["cover_api_v1_songs__song_id__cover_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/songs/{song_id}/files/{file_id}/lines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One version of the song's lyrics, line by line */
+        get: operations["version_lines_api_v1_songs__song_id__files__file_id__lines_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/songs/{song_id}/files/{file_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download one version: the file itself, or the embedded lyrics as .lrc or .txt */
+        get: operations["download_api_v1_songs__song_id__files__file_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/lyrics": {
         parameters: {
             query?: never;
@@ -364,6 +452,57 @@ export interface paths {
         };
         /** Lyrics for any song: the library's, else the sources' */
         get: operations["lyrics_api_v1_lyrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/find": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Find lyrics for a song's name or a link: your library, then every source on */
+        post: operations["find_api_v1_find_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/activity/now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What stanzarr is doing now: the scan or the search and how far, the AI jobs */
+        get: operations["now_api_v1_activity_now_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What stanzarr did, newest first: who asked, what happened, what failed */
+        get: operations["log_api_v1_activity_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -430,17 +569,18 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The workers, and their key for who may change settings */
+        /** The workers: their keys' names, and what each reported last */
         get: operations["workers_api_v1_workers_get"];
         put?: never;
-        post?: never;
+        /** Add a worker: its key is answered this once */
+        post: operations["add_worker_api_v1_workers_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/workers/key": {
+    "/api/v1/workers/{worker_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -449,9 +589,27 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** A new workers' key: the workers need it before their next job */
-        post: operations["new_key_api_v1_workers_key_post"];
-        delete?: never;
+        post?: never;
+        /** Remove a worker: its key stops working at once */
+        delete: operations["remove_worker_api_v1_workers__worker_id__delete"];
+        options?: never;
+        head?: never;
+        /** Rename a worker */
+        patch: operations["rename_worker_api_v1_workers__worker_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/workers-shared-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Retire the key all workers shared before 1.1 */
+        delete: operations["forget_shared_key_api_v1_workers_shared_key_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1060,6 +1218,14 @@ export interface components {
              */
             kind: "info" | "success" | "warning" | "failure";
         };
+        /** FindIn */
+        FindIn: {
+            /**
+             * Query
+             * @description A song's name (Artist - Title, or a title), or a link to it: YouTube, Spotify, Apple Music, Deezer…
+             */
+            query: string;
+        };
         /** FormField */
         FormField: {
             /** Key */
@@ -1390,6 +1556,17 @@ export interface components {
              * @description The page's address, for links in messages; empty leaves them out.
              */
             public_url: string;
+            /**
+             * Cutoff
+             * @description The quality a song is searched until (the ladder, best last: plain words, AI synced, AI checked by a person, synced by a person, words in time). A better version found later still replaces a worse one.
+             * @enum {string}
+             */
+            cutoff: "plain" | "ai" | "ai_checked" | "synced" | "words";
+            /**
+             * Auto Ai
+             * @description Songs with words but no timings, once the sources had nothing better, are sent to the GPU workers by themselves.
+             */
+            auto_ai: boolean;
         };
         /**
          * SettingsPatch
@@ -1402,6 +1579,10 @@ export interface components {
             retry_days?: number | null;
             /** Public Url */
             public_url?: string | null;
+            /** Cutoff */
+            cutoff?: ("plain" | "ai" | "ai_checked" | "synced" | "words") | null;
+            /** Auto Ai */
+            auto_ai?: boolean | null;
         };
         /** SetupIn */
         SetupIn: {
@@ -1459,6 +1640,13 @@ export interface components {
              * @description The lyrics files it has: lrc, txt, embedded…
              */
             formats: string[];
+            /**
+             * Made By
+             * @description Who made them: person, ai, lrclib, netease, musixmatch, genius, unknown.
+             */
+            made_by: string[];
+            /** Added At */
+            added_at: number;
             /** Languages */
             languages: components["schemas"]["Language"][];
             /**
@@ -1508,7 +1696,7 @@ export interface components {
              * @description One of GET /api/v1/sources/types.
              * @enum {string}
              */
-            type: "lrclib";
+            type: "genius" | "lrclib" | "musixmatch" | "netease";
             /**
              * Enabled
              * @default true
@@ -1659,33 +1847,78 @@ export interface components {
         };
         /** Worker */
         Worker: {
+            /**
+             * Id
+             * @description Its key's id; None for a worker on the shared key (before 1.1).
+             */
+            id: string | null;
             /** Name */
             name: string;
-            /** Gpu */
+            /**
+             * Prefix
+             * @description The key's first letters, to tell keys apart.
+             */
+            prefix: string | null;
+            /** Created At */
+            created_at: number | null;
+            /** Last Used */
+            last_used: number | null;
+            /**
+             * Shared Key
+             * @description It uses the key all workers shared before 1.1.
+             */
+            shared_key: boolean;
+            /**
+             * Gpu
+             * @description The GPU it reported, as the driver names it; empty: none.
+             */
             gpu: string;
-            /** Vram */
+            /**
+             * Vram
+             * @description Its GPU's memory, MB.
+             */
             vram: number;
-            /** Version */
+            /**
+             * Version
+             * @description Its stanzarr-worker.
+             */
             version: string;
             /** Last Seen */
-            last_seen: number;
+            last_seen: number | null;
             /** Online */
             online: boolean;
+        };
+        /** WorkerIn */
+        WorkerIn: {
+            /**
+             * Name
+             * @description How it shows here and in the queue: laptop, desktop…
+             */
+            name: string;
         };
         /** WorkerList */
         WorkerList: {
             /** Workers */
             workers: components["schemas"]["Worker"][];
             /**
-             * Key
-             * @description The workers' key; only for who may change settings.
+             * Shared Key
+             * @description The key all workers shared before 1.1 still works.
              */
-            key?: string | null;
+            shared_key: boolean;
             /**
-             * Key Fixed
-             * @description Set by STANZARR_WORKER_KEY: it can't be changed here.
+             * Shared Key Fixed
+             * @description It is set by STANZARR_WORKER_KEY: retired by removing it there.
              */
-            key_fixed: boolean;
+            shared_key_fixed: boolean;
+        };
+        /** WorkerMade */
+        WorkerMade: {
+            /**
+             * Key
+             * @description Its key: shown this once, kept only as a fingerprint.
+             */
+            key: string;
+            worker: components["schemas"]["Worker"];
         };
     };
     responses: never;
@@ -2256,14 +2489,20 @@ export interface operations {
     songs_api_v1_songs_get: {
         parameters: {
             query?: {
-                status?: ("synced" | "ai_corrected" | "ai_checked" | "ai_unchecked" | "plain" | "instrumental" | "missing") | null;
+                /** @description Any of these; repeat it for several. */
+                status?: ("synced" | "ai_corrected" | "ai_checked" | "ai_unchecked" | "plain" | "instrumental" | "missing")[];
                 /** @description In the title, the artist and the album. */
                 q?: string;
                 language_code?: string;
                 format?: string;
+                /** @description Who made a file: person, ai, lrclib, netease… */
+                made_by?: string;
+                artist?: string;
+                album?: string;
                 /** @description Only songs with AI lines still to check. */
                 to_check?: boolean;
-                sort?: "artist" | "added" | "title";
+                sort?: "artist" | "title" | "album" | "duration" | "added" | "status";
+                direction?: "asc" | "desc";
                 page?: number;
                 size?: number;
             };
@@ -2280,6 +2519,93 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SongList"];
+                };
+            };
+            /** @description Nobody signed in, or an unknown key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Signed in, but not allowed this. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    facets_api_v1_songs_facets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Nobody signed in, or an unknown key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Signed in, but not allowed this. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    history_api_v1_songs_history_get: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Nobody signed in, or an unknown key. */
@@ -2741,6 +3067,178 @@ export interface operations {
             };
         };
     };
+    cover_api_v1_songs__song_id__cover_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                song_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Nobody signed in, or an unknown key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Signed in, but not allowed this. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    version_lines_api_v1_songs__song_id__files__file_id__lines_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                song_id: number;
+                file_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Nobody signed in, or an unknown key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Signed in, but not allowed this. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    download_api_v1_songs__song_id__files__file_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                song_id: number;
+                file_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Nobody signed in, or an unknown key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Signed in, but not allowed this. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     lyrics_api_v1_lyrics_get: {
         parameters: {
             query: {
@@ -2763,6 +3261,170 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LyricsAnswer"];
+                };
+            };
+            /** @description Nobody signed in, or an unknown key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Signed in, but not allowed this. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    find_api_v1_find_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FindIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description The body isn't JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nobody signed in, or an unknown key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Signed in, but not allowed this. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The body is over 2 MB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    now_api_v1_activity_now_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Nobody signed in, or an unknown key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Signed in, but not allowed this. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    log_api_v1_activity_get: {
+        parameters: {
+            query?: {
+                /** @description One of lyrics, search, filter, ai, scan, workers. */
+                kind?: string;
+                /** @description false: only what failed. */
+                ok?: boolean | null;
+                /** @description In what happened and who asked. */
+                q?: string;
+                song_id?: number | null;
+                page?: number;
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Nobody signed in, or an unknown key. */
@@ -2986,7 +3648,212 @@ export interface operations {
             };
         };
     };
-    new_key_api_v1_workers_key_post: {
+    add_worker_api_v1_workers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkerIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerMade"];
+                };
+            };
+            /** @description The body isn't JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nobody signed in, or an unknown key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Signed in, but not allowed this. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The body is over 2 MB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    remove_worker_api_v1_workers__worker_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                worker_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Nobody signed in, or an unknown key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Signed in, but not allowed this. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such thing, or not one this caller may see. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    rename_worker_api_v1_workers__worker_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                worker_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkerIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ok"];
+                };
+            };
+            /** @description The body isn't JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nobody signed in, or an unknown key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Signed in, but not allowed this. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such thing, or not one this caller may see. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The body is over 2 MB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    forget_shared_key_api_v1_workers_shared_key_delete: {
         parameters: {
             query?: never;
             header?: never;
@@ -2996,13 +3863,11 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Successful Response */
-            200: {
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": unknown;
-                };
+                content?: never;
             };
             /** @description Nobody signed in, or an unknown key. */
             401: {

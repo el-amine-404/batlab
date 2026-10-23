@@ -3,7 +3,7 @@ server stays responsive whatever yt-dlp and ffmpeg do, a download is stopped
 by stopping its process (and its ffmpeg with it), and a crash ends only it.
 
 stdin: one line, a JSON object {"url", "work_dir", "options", "output",
-"section", "rate_limit", "max_filesize", "cookies", "deno", "song"}; later, one more line
+"section", "rate_limit", "max_filesize", "cookies", "deno", "song", "stanzarr"}; later, one more line
 answering the fingerprint event: {"reuse": <an earlier job's id> or null}.
 stdout: events, one JSON object a line (EVENTS); anything else the process
 prints goes to stderr, which the server keeps in the job's log. Exit 0 when at least one file was
@@ -232,19 +232,28 @@ def main() -> int:
             emit("note", message="No lyrics: the song couldn't be told from the video's title.")
             return
         artist, title = named
-        try:
-            found = lyrics.find(artist, title, info.get("duration"))
-        except OSError as exc:
-            emit("note", message=f"No lyrics: LRCLIB couldn't be reached ({exc.__class__.__name__}).")
-            return
-        if not found:
-            emit("note", message=f"No synced lyrics on LRCLIB for {artist} – {title}.")
-            return
+        # Asked of stanzarr before the download (scheduler.py), when it could be; else LRCLIB, now.
+        asked = config.get("stanzarr")
+        if asked is not None:
+            found, where = asked.get("lrc"), asked.get("from") or "stanzarr"
+            if not found:
+                emit("note", message=f"No synced lyrics from stanzarr for {artist} – {title}.")
+                return
+        else:
+            where = "LRCLIB"
+            try:
+                found = lyrics.find(artist, title, info.get("duration"))
+            except OSError as exc:
+                emit("note", message=f"No lyrics: LRCLIB couldn't be reached ({exc.__class__.__name__}).")
+                return
+            if not found:
+                emit("note", message=f"No synced lyrics on LRCLIB for {artist} – {title}.")
+                return
         srt = work_dir / ".lyrics.srt"
         srt.write_text(lyrics.to_srt(found, info.get("duration")), encoding="utf-8")
         try:
             checks.embed_subtitles(path, srt, "Lyrics")
-            emit("note", message=f"Lyrics added as subtitles (LRCLIB: {artist} – {title}).")
+            emit("note", message=f"Lyrics added as subtitles ({where}: {artist} – {title}).")
         except ValueError as exc:
             emit("note", message=f"No lyrics: {exc}")
         finally:

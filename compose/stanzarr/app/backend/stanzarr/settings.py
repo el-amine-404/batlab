@@ -2,6 +2,7 @@
 environment gives the first values (config.py); what is saved wins."""
 
 import re
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -9,6 +10,8 @@ from .config import Config
 from .db import Database
 
 KEY = "general"
+# The quality ladder (library.LEVELS), as the cutoff is chosen.
+Cutoff = Literal["plain", "ai", "ai_checked", "synced", "words"]
 
 
 class Settings(BaseModel):
@@ -16,6 +19,11 @@ class Settings(BaseModel):
     retry_days: int = Field(description="A song without lyrics synced by a person is asked about again after "
                                         "this many days.")
     public_url: str = Field(description="The page's address, for links in messages; empty leaves them out.")
+    cutoff: Cutoff = Field(description="The quality a song is searched until (the ladder, best last: plain words, AI "
+                                       "synced, AI checked by a person, synced by a person, words in time). A better "
+                                       "version found later still replaces a worse one.")
+    auto_ai: bool = Field(description="Songs with words but no timings, once the sources had nothing better, are "
+                                      "sent to the GPU workers by themselves.")
 
 
 class SettingsPatch(BaseModel):
@@ -27,6 +35,8 @@ class SettingsPatch(BaseModel):
     scan_minutes: int | None = Field(None, ge=1, le=1440)
     retry_days: int | None = Field(None, ge=1, le=365)
     public_url: str | None = Field(None, max_length=300)
+    cutoff: Cutoff | None = None
+    auto_ai: bool | None = None
 
     @field_validator("public_url")
     @classmethod
@@ -43,7 +53,7 @@ class SettingsStore:
     def __init__(self, db: Database, config: Config):
         self._db = db
         self._defaults = Settings(scan_minutes=config.scan_minutes, retry_days=config.retry_days,
-                                  public_url=config.public_url)
+                                  public_url=config.public_url, cutoff="synced", auto_ai=False)
         self._value = self._load()
 
     def _load(self) -> Settings:

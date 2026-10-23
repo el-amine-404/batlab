@@ -16,7 +16,7 @@ from . import lyricsfiles
 from .config import Config
 from .db import Database
 from .library import sync_lyrics
-from .sources import NOTHING, SongQuery
+from .sources import NOTHING, Found, SongQuery
 
 
 class ReadOnly(Exception):
@@ -49,7 +49,16 @@ def needs_search(db: Database, cfg: Config, song_id: int, now: float | None = No
     return not attempt or now - attempt["at"] >= cfg.retry_days * 86400
 
 
-def search(db: Database, cfg: Config, song_id: int, sources: list, note=None, found=None) -> str:
+def _quarantine(cfg: Config, song: dict, source: str, text: str, reason: str) -> None:
+    """A source's answer the filter refused, kept aside with why, never written beside the song."""
+    folder = os.path.join(cfg.config_dir, "quarantine")
+    os.makedirs(folder, exist_ok=True)
+    name = f"{song['id']}-{source}-{time.strftime('%Y%m%d-%H%M%S')}.txt"
+    with open(os.path.join(folder, name), "w", encoding="utf-8") as out:
+        out.write(f"# refused: {reason}\n{text[:lyricsfiles.MAX_BYTES]}")
+
+
+def search(db: Database, cfg: Config, song_id: int, sources: list, note=None, found=None, actor: str = "") -> str:
     """Ask the sources (Settings, Sources: [(item, LyricsSource)], first to
     last) for one song, and write the best answer by the rules above: synced
     lyrics from any source end the search; plain text, or "instrumental", is
@@ -67,7 +76,7 @@ def search(db: Database, cfg: Config, song_id: int, sources: list, note=None, fo
         return "no artist or title to search with"
     if not sources:
         return "no source is on (Settings, Sources)"
-    query = SongQuery(artist, title, song["album"], song["duration"])
+    query = SongQuery(artist, title, song["album"], song["duration"], song.get("isrc") or "")
     best, best_from, failed = NOTHING, None, None
     for item, kind in sources:
         try:
@@ -77,6 +86,19 @@ def search(db: Database, cfg: Config, song_id: int, sources: list, note=None, fo
             if note:
                 note(item["id"], False, f"{artist} – {title}: {error}")
             continue
+        if answer.kind in ("synced", "plain"):
+            checked = lyricsfiles.sanitize(answer.text, song["duration"])
+            if checked.refused:
+                _quarantine(cfg, song, kind.key, answer.text, checked.refused)
+                db.event("filter", f"{artist} – {title}: {kind.label}'s lyrics refused: {checked.refused}", song_id,
+                         actor, ok=False, detail="; ".join(checked.removed))
+                if note:
+                    note(item["id"], False, f"{artist} – {title}: refused, {checked.refused}")
+                continue
+            if checked.removed:
+                db.event("filter", f"{artist} – {title}: {kind.label}'s lyrics cleaned", song_id, actor,
+                         detail="; ".join(checked.removed))
+            answer = Found(answer.kind, checked.text, answer.reference)
         if note:
             note(item["id"], True, f"{artist} – {title}: {answer.kind}")
         if answer.kind == "synced":
@@ -103,7 +125,7 @@ def search(db: Database, cfg: Config, song_id: int, sources: list, note=None, fo
         lyricsfiles.write_atomic(lrc, lyricsfiles.render_lrc(lyrics.lines, tags))
         sync_lyrics(db, song_id, song["path"], force=True)
         message = f"synced lyrics from {label}" + (" replaced the AI-synced ones (kept in backups)" if replaced else "")
-        db.event("lyrics", f"{artist} – {title}: {message}", song_id)
+        db.event("lyrics", f"{artist} – {title}: {message}", song_id, actor)
         if found:
             found(song, message)
         return message
@@ -114,7 +136,7 @@ def search(db: Database, cfg: Config, song_id: int, sources: list, note=None, fo
             return f"{label} has plain lyrics (read-only: not written)"
         lyricsfiles.write_atomic(txt, best.text)
         sync_lyrics(db, song_id, song["path"], force=True)
-        db.event("lyrics", f"{artist} – {title}: plain lyrics from {label}", song_id)
+        db.event("lyrics", f"{artist} – {title}: plain lyrics from {label}", song_id, actor)
         if found:
             found(song, f"plain lyrics from {label}")
         return f"plain lyrics from {label}"
@@ -174,7 +196,7 @@ def _marked(lyrics: lyricsfiles.Lyrics, label: str) -> set[int]:
     return set()
 
 
-def save_from_editor(db: Database, cfg: Config, song_id: int, lines: list[dict]) -> int:
+def save_from_editor(db: Database, cfg: Config, song_id: int, lines: list[dict], actor: str = "") -> int:
     """Write the editor's lines as the song's .lrc. A file that was AI-synced
     stays flagged AI-generated (so a person-synced one may still replace it);
     otherwise it is marked as edited by a person."""
@@ -186,7 +208,7 @@ def save_from_editor(db: Database, cfg: Config, song_id: int, lines: list[dict])
     clean = []
     for line in lines:
         t = float(line["t"])
-        text = lyricsfiles.clean(str(line.get("s", ""))).strip().replace("[", "(").replace("]", ")")
+        text = lyricsfiles.HIDDEN.sub("", lyricsfiles.clean(str(line.get("s", "")))).strip().replace("[", "(").replace("]", ")")[:lyricsfiles.MAX_LINE]
         if text and 0 <= t < 24 * 3600:
             clean.append((t, text, bool(line.get("fixed")), bool(line.get("u"))))
     clean.sort(key=lambda c: c[0])
@@ -208,11 +230,11 @@ def save_from_editor(db: Database, cfg: Config, song_id: int, lines: list[dict])
         tags = ["[by:a person]", f"[re:Stanzarr editor {date.today()}]"]
     lyricsfiles.write_atomic(lrc, lyricsfiles.render_lrc([lyricsfiles.Line(t, s) for t, s, _, _ in clean], tags))
     sync_lyrics(db, song_id, song["path"], force=True)
-    db.event("lyrics", f"{song['artist']} – {song['title']}: edited ({len(clean)} lines)", song_id)
+    db.event("lyrics", f"{song['artist']} – {song['title']}: edited ({len(clean)} lines)", song_id, actor)
     return len(clean)
 
 
-def save_ai_result(db: Database, cfg: Config, song_id: int, lines: list[dict], method: str) -> str:
+def save_ai_result(db: Database, cfg: Config, song_id: int, lines: list[dict], method: str, actor: str = "") -> str:
     """Write an AI sync as the song's .lrc, flagged as AI-generated. Never over
     lyrics synced by a person."""
     song = song_or_none(db, song_id)
@@ -228,8 +250,9 @@ def save_ai_result(db: Database, cfg: Config, song_id: int, lines: list[dict], m
     unsure = [str(i + 1) for i, l in enumerate(lines) if l.get("u")]
     tags = ["[by:AI-generated, not checked by a person]", f"[re:Stanzarr AI sync {date.today()}: {method}]",
             "[#:uncertain lines (the methods disagree): " + (", ".join(unsure) or "none") + "]"]
-    body = [lyricsfiles.Line(float(l["t"]), lyricsfiles.clean(str(l["s"])).strip()) for l in lines]
+    body = [lyricsfiles.Line(float(l["t"]), lyricsfiles.HIDDEN.sub("", lyricsfiles.clean(str(l["s"]))).strip()[:lyricsfiles.MAX_LINE])
+            for l in lines]
     lyricsfiles.write_atomic(lrc, lyricsfiles.render_lrc(body, tags))
     sync_lyrics(db, song_id, song["path"], force=True)
-    db.event("ai", f"{song['artist']} – {song['title']}: synced by AI ({len(unsure)} unsure lines)", song_id)
+    db.event("ai", f"{song['artist']} – {song['title']}: synced by AI ({len(unsure)} unsure lines)", song_id, actor)
     return f"written, {len(unsure)} lines to check"

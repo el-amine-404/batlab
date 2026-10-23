@@ -13,7 +13,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from batlab_common import callbacks, fingerprint, http as fetch, notify, titles  # noqa: E402
+from batlab_common import callbacks, fingerprint, http as fetch, lyrics, notify, titles  # noqa: E402
 
 
 def ffmpeg(*args):
@@ -213,3 +213,48 @@ class SignedCallbacks(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Lyrics(http.server.BaseHTTPRequestHandler):
+    """A stanzarr that answers, or (slow) takes too long."""
+
+    slow = False
+    asked: list = []
+
+    def do_GET(self):
+        Lyrics.asked.append((self.path, self.headers.get("X-Api-Key")))
+        if Lyrics.slow:
+            time.sleep(0.5)
+        body = json.dumps({"found": True, "synced": True, "lrc": "[00:01.00] hi", "from": "library"}).encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+class StanzarrLyrics(unittest.TestCase):
+    def setUp(self):
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Lyrics)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        Lyrics.slow, Lyrics.asked = False, []
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+    def test_asks_with_its_key(self):
+        found = lyrics.Stanzarr(self.url, "k", "test").lyrics("Band", "Song", duration=200.4)
+        self.assertEqual(found["lrc"], "[00:01.00] hi")
+        self.assertEqual(Lyrics.asked, [("/api/v1/lyrics?artist=Band&title=Song&duration=200", "k")])
+
+    def test_off_without_an_address_and_paused_once_down(self):
+        self.assertIsNone(lyrics.Stanzarr("", "", "test").lyrics("Band", "Song"))
+        Lyrics.slow = True
+        client = lyrics.Stanzarr(self.url, "k", "test", timeout=0.1, pause=60)
+        self.assertIsNone(client.lyrics("Band", "Song"))
+        self.assertIsNone(client.lyrics("Band", "Other"))
+        self.assertEqual(len(Lyrics.asked), 1, "down: not asked again during the pause")

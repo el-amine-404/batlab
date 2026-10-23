@@ -27,6 +27,8 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from batlab_common.lyrics import Stanzarr
+
 from . import cookies, folders, placement
 from .callbacks import Callbacks
 from .config import Config
@@ -140,6 +142,8 @@ class Scheduler:
         self._publish = publish
         self._journal = journal
         self._runs: dict[str, Run] = {}
+        # Lyrics from stanzarr, asked here: the download's process reaches only the proxy.
+        self._stanzarr = Stanzarr(config.stanzarr_url, config.stanzarr_api_key, "videodrop")
         self._wake = asyncio.Event()
         self._task: asyncio.Task | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -254,6 +258,20 @@ class Scheduler:
 
     # ---- one job ------------------------------------------------------------------------------------
 
+    async def _ask_stanzarr(self, request: dict) -> dict | None:
+        """The song's lyrics from stanzarr, for a job that asks for lyrics and
+        names its song: {"lrc"} (none when it has no synced ones), or None
+        when stanzarr can't be asked; the download's process then asks LRCLIB."""
+        song = request.get("song") or {}
+        if not request["options"].get("lyrics") or not song.get("artist") or not song.get("title"):
+            return None
+        answer = await asyncio.to_thread(self._stanzarr.lyrics, song["artist"], song["title"], song.get("album") or "",
+                                         song.get("duration"))
+        if answer is None:
+            return None
+        source = answer.get("source") or ("your library" if answer.get("from") == "library" else "")
+        return {"lrc": answer.get("lrc") if answer.get("synced") else None, "from": f"stanzarr{f', {source}' if source else ''}"}
+
     async def _run(self, run: Run) -> None:
         job_id = run.job_id
         work = self._config.work_dir / job_id
@@ -278,6 +296,7 @@ class Scheduler:
                 "song": json.loads(row["song"]) if row["song"] else None,
                 "proxy": self._proxy,
             }
+            request["stanzarr"] = await self._ask_stanzarr(request)
             limits = [f"rate limit {settings.rate_limit_mib} MiB/s" if settings.rate_limit_mib else None,
                       f"files up to {settings.max_filesize_gb} GB" if settings.max_filesize_gb else None,
                       "with the saved YouTube cookies" if request["cookies"] else None]

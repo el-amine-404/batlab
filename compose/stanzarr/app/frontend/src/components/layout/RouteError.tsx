@@ -31,7 +31,7 @@ export function RouteError() {
       </div>
       <div className="flex gap-2">
         <Button size="sm" onClick={() => window.location.reload()}><RotateCw /> Reload</Button>
-        <Button size="sm" variant="ghost" asChild><Link to="/">Back to the library</Link></Button>
+        <Button size="sm" variant="ghost" asChild><Link to="/library">Back to the library</Link></Button>
       </div>
     </div>
   );

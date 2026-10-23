@@ -36,6 +36,8 @@ class SongRow(BaseModel):
     rel: str = Field(description="Where it is, under its library folder.")
     status: Status
     formats: list[str] = Field(description="The lyrics files it has: lrc, txt, embedded…")
+    made_by: list[str] = Field(description="Who made them: person, ai, lrclib, netease, musixmatch, genius, unknown.")
+    added_at: int
     languages: list[Language]
     to_check: int | None = Field(None, description="AI lines still to check.")
     job: str | None = Field(None, description="Its latest AI job's status.")
@@ -129,18 +131,28 @@ class Job(BaseModel):
 
 
 class Worker(BaseModel):
+    id: str | None = Field(description="Its key's id; None for a worker on the shared key (before 1.1).")
     name: str
-    gpu: str
-    vram: int
-    version: str
-    last_seen: int
+    prefix: str | None = Field(description="The key's first letters, to tell keys apart.")
+    created_at: float | None
+    last_used: float | None
+    shared_key: bool = Field(description="It uses the key all workers shared before 1.1.")
+    gpu: str = Field(description="The GPU it reported, as the driver names it; empty: none.")
+    vram: int = Field(description="Its GPU's memory, MB.")
+    version: str = Field(description="Its stanzarr-worker.")
+    last_seen: int | None
     online: bool
 
 
 class WorkerList(BaseModel):
     workers: list[Worker]
-    key: str | None = Field(None, description="The workers' key; only for who may change settings.")
-    key_fixed: bool = Field(description="Set by STANZARR_WORKER_KEY: it can't be changed here.")
+    shared_key: bool = Field(description="The key all workers shared before 1.1 still works.")
+    shared_key_fixed: bool = Field(description="It is set by STANZARR_WORKER_KEY: retired by removing it there.")
+
+
+class WorkerMade(BaseModel):
+    key: str = Field(description="Its key: shown this once, kept only as a fingerprint.")
+    worker: Worker
 
 
 # ---- integrations (sources, notifications) ------------------------------------------------

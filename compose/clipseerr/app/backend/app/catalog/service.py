@@ -55,6 +55,14 @@ def _source_failed(name: str, exc: Exception) -> Problem:
     return Problem(502, f"{name} didn't answer. Try again in a moment.")
 
 
+def _from_stanzarr(answer: dict) -> dict:
+    """stanzarr's answer as clipseerr's Lyrics: its timed lines, its words."""
+    synced = lrclib.parse_lrc(answer.get("lrc") or "") if answer.get("synced") else []
+    source = "stanzarr" + (f" ({answer['source']})" if answer.get("source") else " (library)" if answer.get("from") == "library" else "")
+    return {"synced": synced, "plain": (answer.get("text") or "").strip() or None,
+            "instrumental": bool(answer.get("instrumental")), "source": source}
+
+
 class Catalog:
     def __init__(self, cache: Cache, http: httpx.AsyncClient, settings: Callable[[], dict]):
         self._cache = cache
@@ -68,6 +76,8 @@ class Catalog:
         self.known = None
         # Which of a feed's videos are real songs (verdicts.py), when there is one.
         self.verdicts = None
+        # Lyrics from stanzarr first, when there is one (batlab_common.lyrics).
+        self.stanzarr = None
         # The last answer or failure of each source, for the status screen.
         self.health: dict[str, dict] = {}
         # When the housekeeping loop warms the lists next, and how often (main.py): Hot's next check.
@@ -726,8 +736,9 @@ class Catalog:
         return found
 
     async def lyrics(self, video_id: str) -> Lyrics:
-        """The song's words: LRCLIB's (timed when it has them), else YouTube
-        Music's; none when neither has them."""
+        """The song's words: stanzarr's when there is one (the library's own,
+        else its sources'), LRCLIB's when stanzarr can't be asked (timed when
+        it has them), else YouTube Music's; none when none has them."""
         detail = await self.video(video_id)
         region = self.region
         song = detail.audio
@@ -737,10 +748,14 @@ class Catalog:
 
         async def fetch():
             found = None
-            try:
-                found = await lrclib.find(self._http, _bare(title), first, seconds)
-            except Exception as exc:
-                log.info("LRCLIB failed for %s - %s: %r", first, title, exc)
+            asked = await asyncio.to_thread(self.stanzarr.lyrics, first, _bare(title), "", seconds) if self.stanzarr else None
+            if asked is not None:
+                found = _from_stanzarr(asked)
+            else:
+                try:
+                    found = await lrclib.find(self._http, _bare(title), first, seconds)
+                except Exception as exc:
+                    log.info("LRCLIB failed for %s - %s: %r", first, title, exc)
             if not found or not (found["synced"] or found["plain"]):
                 youtube_id = song.youtube_id if song else detail.youtube_id
                 try:

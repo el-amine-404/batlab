@@ -132,3 +132,29 @@ the image build.
 3. The page on batlab-ui, with its new look.
 4. clipseerr and videodrop ask Stanzarr; their LRCLIB clients go.
 5. Homepage card, docs site, appcheck.
+
+## Done in 1.1
+
+- **Find lyrics** is the home page: a song's name or a link (YouTube's
+  oEmbed, Spotify's embed page, Deezer's and Apple's lookup APIs, other
+  music sites' page title; never a link inside the network), the library
+  first, then every source, each answer to copy or download. Odesli's
+  public API, the first plan for links, closed in 2026.
+- **Sources**: NetEase, Musixmatch and Genius beside LRCLIB; the ISRC from
+  the tags matches Musixmatch exactly. The filter between them and the disk,
+  with a quarantine.
+- **Quality profile**: a cutoff on the ladder (plain, AI, AI checked, synced,
+  words in time) and AI sync by itself for plain songs when a GPU is online.
+- **Library**: a sortable table, filters (status, language, format, made by,
+  artist, album) with counts, page numbers and sizes, grouped by album with
+  the embedded covers, compact rows, j/k; the coverage bar or ring says each
+  part on hover and narrows to it on click; the coverage day by day.
+- **Song page**: every version in a tab, side by side, downloadable; who
+  made each, its timings, its language, each a link to the songs like it;
+  why an action can't run, said under it; back to the library as it was left.
+- **Activity**: what runs now (the scan's and the search's progress, the AI
+  jobs) and the log, with who asked and what failed.
+- **Workers**: a key each, added, renamed and removed in Settings, Workers;
+  the old shared key works until retired.
+- **clipseerr and videodrop** ask stanzarr first, LRCLIB when it is down
+  (`batlab_common/lyrics.py`).

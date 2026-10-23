@@ -189,7 +189,7 @@ class Lyrics(BaseModel):
     synced: list[LyricLine] = Field(default_factory=list)
     plain: str | None = None
     instrumental: bool = False
-    source: str | None = Field(None, description='"LRCLIB" or "YouTube Music (LyricFind)".')
+    source: str | None = Field(None, description='"stanzarr (…)", "LRCLIB" or "YouTube Music (LyricFind)".')
     language: str | None = Field(None, description='What they are sung in, when sure: "en", "el", "zh-cn".')
     language_name: str | None = Field(None, description='The same in English: "Greek".')
 

@@ -3,7 +3,7 @@
  * the screens; a new screen is one page component, one route, and one entry
  * here. need: the permission it is shown for (the server refuses the rest anyway).
  */
-import { Bell, Cable, CircleGauge, Cpu, KeyRound, Library, ListChecks, ListOrdered, type LucideIcon,
+import { Activity, Bell, Cable, CircleGauge, Cpu, KeyRound, Library, ListChecks, ListOrdered, type LucideIcon, Search,
          SlidersHorizontal, UserRound, Users } from "lucide-react";
 
 import type { Permission } from "@/lib/api";
@@ -11,8 +11,10 @@ import type { Permission } from "@/lib/api";
 export type Entry = { path: string; label: string; icon: LucideIcon; need?: Permission };
 
 export const BROWSE: Entry[] = [
-  { path: "/", label: "Library", icon: Library },
+  { path: "/", label: "Find lyrics", icon: Search },
+  { path: "/library", label: "Library", icon: Library },
   { path: "/check", label: "To check", icon: ListChecks },
+  { path: "/activity", label: "Activity", icon: Activity },
   { path: "/queue", label: "AI queue", icon: ListOrdered },
 ];
 

@@ -15,6 +15,7 @@ export type Coverage = Schemas["Coverage"];
 export type Job = Schemas["Job"];
 export type Worker = Schemas["Worker"];
 export type WorkerList = Schemas["WorkerList"];
+export type WorkerMade = Schemas["WorkerMade"];
 export type Source = Schemas["Source"];
 export type SourceIn = Schemas["SourceIn"];
 export type SourceTypes = Schemas["SourceTypes"];
@@ -51,17 +52,49 @@ export type LyricsFile = {
   checked: number;
 };
 
-export type ActivityEvent = { id: number; at: number; kind: string; song_id: number | null; message: string };
+export type ActivityEvent = {
+  id: number; at: number; kind: string; song_id: number | null; message: string;
+  actor: string; ok: boolean; detail: string; artist?: string | null; title?: string | null;
+};
+export type ActivityLog = { total: number; page: number; size: number; failed_today: number; events: ActivityEvent[] };
+export type ActivityNow = {
+  busy: string;
+  progress: { seen?: number; folder?: string; done?: number; total?: number };
+  last_scan: { added?: number; changed?: number; removed?: number; at?: number };
+  jobs: { id: number; song_id: number; status: string; stage: string; worker: string; created_at: number;
+          started_at: number | null; artist: string; title: string }[];
+  workers_online: { name: string; gpu: string }[];
+};
+
+export type Facet = { value: string; songs: number; label?: string; artist?: string };
+export type Facets = { languages: Facet[]; formats: Facet[]; made_by: Facet[]; artists: Facet[]; albums: Facet[] };
+export type CoverageDay = { day: string; counts: Record<LyricsStatus, number> };
+
+/** One answer of Find lyrics: the library's, or a source's. */
+export type FindAnswer = {
+  found: boolean; synced: boolean; instrumental?: boolean; lrc?: string | null; text?: string | null;
+  from: "library" | "source" | "none"; source?: string | null; label: string; song_id?: number; error?: string;
+};
+export type FindResult = {
+  artist: string; title: string;
+  resolved: { artist: string; title: string; duration: number; via: string } | null;
+  answers: FindAnswer[];
+};
 
 export type SongDetail = {
   song: { id: number; artist: string; album: string; title: string; duration: number; rel: string; root: string;
-          path: string; added_at: number; status: LyricsStatus };
+          path: string; added_at: number; status: LyricsStatus; isrc: string; mbid: string };
   files: LyricsFile[];
   attempt: { at: number; result: string; source: string } | null;
   jobs: { id: number; status: string; stage: string; error: string; created_at: number; finished_at: number | null }[];
   events: ActivityEvent[];
   has_voice: boolean;
   has_text: boolean;
+  /** Where its best lyrics stand on the quality ladder, and the cutoff (Settings, General). */
+  quality: { rank: number; cutoff: number };
+  /** Why AI sync or asking the sources can't be done now; null: they can. */
+  ai_blocked: string | null;
+  search_blocked: string | null;
 };
 
 export type EditorLine = { t: number; s: string; u?: boolean; fixed?: boolean };
@@ -124,29 +157,47 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
 
-/** What the library is narrowed to. */
+export type SortKey = "artist" | "title" | "album" | "duration" | "added" | "status";
+
+/** What the library is narrowed to, and how it is ordered. */
 export type SongFilters = {
-  status?: LyricsStatus;
+  status?: LyricsStatus[];
   q?: string;
   language_code?: string;
+  format?: string;
+  made_by?: string;
+  artist?: string;
+  album?: string;
   to_check?: boolean;
-  sort?: "artist" | "added" | "title";
+  sort?: SortKey;
+  direction?: "asc" | "desc";
 };
 
-/** Songs a page of the library. */
-export const PAGE = 50;
+type Param = string | number | boolean | undefined | string[];
 
-function query(params: Record<string, string | number | boolean | undefined>): string {
+function query(params: Record<string, Param>): string {
   const out = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== "" && value !== false) out.set(key, String(value));
+    if (Array.isArray(value)) value.forEach((one) => out.append(key, one));
+    else if (value !== undefined && value !== "" && value !== false) out.set(key, String(value));
   }
   return out.toString();
 }
 
+export type ActivityFilters = { kind?: string; ok?: boolean; q?: string; song_id?: number };
+
 export const api = {
-  songs: (filters: SongFilters, page: number, signal?: AbortSignal) =>
-    request<SongList>(`/songs?${query({ ...filters, page, size: PAGE })}`, { signal }),
+  songs: (filters: SongFilters, page: number, size: number, signal?: AbortSignal) =>
+    request<SongList>(`/songs?${query({ ...filters, page, size })}`, { signal }),
+  facets: () => request<Facets>("/songs/facets"),
+  history: (days = 90) => request<CoverageDay[]>(`/songs/history?days=${days}`),
+  coverUrl: (id: number) => `/api/v1/songs/${id}/cover`,
+  fileUrl: (id: number, file: number) => `/api/v1/songs/${id}/files/${file}`,
+  fileLines: (id: number, file: number) => request<{ synced: boolean; lines: { t: number; s: string }[] }>(`/songs/${id}/files/${file}/lines`),
+  find: (text: string) => request<FindResult>("/find", json("POST", { query: text })),
+  activity: (filters: ActivityFilters, page: number, size = 50) =>
+    request<ActivityLog>(`/activity?${query({ ...filters, ok: filters.ok === undefined ? undefined : String(filters.ok), page, size })}`),
+  activityNow: () => request<ActivityNow>("/activity/now"),
   song: (id: number) => request<SongDetail>(`/songs/${id}`),
   searchSong: (id: number) => request<{ result: string }>(`/songs/${id}/search`, { method: "POST" }),
   aiSync: (id: number) => request<{ job: number }>(`/songs/${id}/ai-sync`, { method: "POST" }),
@@ -159,7 +210,10 @@ export const api = {
   cancelJob: (id: number) => request<void>(`/jobs/${id}`, { method: "DELETE" }),
   retryJob: (id: number) => request<void>(`/jobs/${id}/retry`, { method: "POST" }),
   workers: () => request<WorkerList>("/workers"),
-  newWorkerKey: () => request<{ key: string }>("/workers/key", { method: "POST" }),
+  addWorker: (name: string) => request<WorkerMade>("/workers", json("POST", { name })),
+  renameWorker: (id: string, name: string) => request<void>(`/workers/${encodeURIComponent(id)}`, json("PATCH", { name })),
+  removeWorker: (id: string) => request<void>(`/workers/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  retireSharedKey: () => request<void>("/workers-shared-key", { method: "DELETE" }),
 
   sourceTypes: () => request<SourceTypes>("/sources/types"),
   sources: () => request<{ items: Source[] }>("/sources"),

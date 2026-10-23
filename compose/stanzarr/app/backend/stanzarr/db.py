@@ -130,6 +130,30 @@ SCHEMA = [
         reference TEXT
     );
     """,
+    # version 3: who did what (the activity), what identifies a song, one key per worker, the coverage by day
+    """
+    ALTER TABLE events ADD COLUMN actor TEXT NOT NULL DEFAULT '';
+    ALTER TABLE events ADD COLUMN ok INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE events ADD COLUMN detail TEXT NOT NULL DEFAULT '';
+    CREATE INDEX events_kind ON events(kind, id);
+    ALTER TABLE songs ADD COLUMN albumartist TEXT NOT NULL DEFAULT '';
+    ALTER TABLE songs ADD COLUMN isrc TEXT NOT NULL DEFAULT '';
+    ALTER TABLE songs ADD COLUMN mbid TEXT NOT NULL DEFAULT '';
+    -- Read every song's tags again once, for the new columns.
+    UPDATE songs SET mtime = 0;
+    CREATE TABLE worker_keys (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        key_hash TEXT NOT NULL UNIQUE,
+        prefix TEXT NOT NULL,
+        created_at REAL NOT NULL,
+        last_used REAL
+    );
+    CREATE TABLE coverage_daily (
+        day TEXT PRIMARY KEY,
+        counts TEXT NOT NULL
+    );
+    """,
 ]
 
 
@@ -213,8 +237,11 @@ class Database:
         self.run("INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                  (key, value))
 
-    def event(self, kind: str, message: str, song_id: int | None = None) -> None:
-        self.run("INSERT INTO events(at, kind, song_id, message) VALUES(?, ?, ?, ?)",
-                 (int(time.time()), kind, song_id, message))
+    def event(self, kind: str, message: str, song_id: int | None = None, actor: str = "", ok: bool = True,
+              detail: str = "") -> None:
+        """The activity (Activity, Log): what happened, to which song, who asked
+        (a person's or a key's name; empty: stanzarr itself), whether it went well."""
+        self.run("INSERT INTO events(at, kind, song_id, message, actor, ok, detail) VALUES(?, ?, ?, ?, ?, ?, ?)",
+                 (int(time.time()), kind, song_id, message, actor[:80], int(ok), detail[:2000]))
         # A bounded log: the newest 5000 events.
         self.run("DELETE FROM events WHERE id <= (SELECT id FROM events ORDER BY id DESC LIMIT 1 OFFSET 5000)")

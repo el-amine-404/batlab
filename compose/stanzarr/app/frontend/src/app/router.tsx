@@ -3,7 +3,9 @@ import { createBrowserRouter, Navigate, useParams } from "react-router";
 
 import { FullScreen, Layout, SettingsFrame } from "@/components/layout/Layout";
 import { RouteError } from "@/components/layout/RouteError";
+import { ActivityPage } from "@/pages/ActivityPage";
 import { CheckPage } from "@/pages/CheckPage";
+import { FindPage } from "@/pages/FindPage";
 import { LibraryPage } from "@/pages/LibraryPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 import { QueuePage } from "@/pages/QueuePage";
@@ -41,13 +43,14 @@ export const router = createBrowserRouter([
         // A screen breaking: only it is replaced, the sidebar stays.
         errorElement: <RouteError />,
         children: [
-          { path: "/", element: <LibraryPage /> },
+          { path: "/", element: <FindPage /> },
+          { path: "/library", element: <LibraryPage /> },
+          { path: "/activity", element: <ActivityPage /> },
           { path: "/check", element: <CheckPage /> },
           { path: "/queue", element: <QueuePage /> },
           { path: "/songs/:id", element: <SongPage /> },
           // The page before 1.0: its addresses lead to where those screens are now.
           { path: "/editor/:id", element: <OldEditor /> },
-          { path: "/library", element: <Navigate to="/" replace /> },
           { path: "/workers", element: <Navigate to="/settings/workers" replace /> },
           {
             path: "/settings",

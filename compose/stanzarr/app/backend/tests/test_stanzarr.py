@@ -117,6 +117,77 @@ class LyricsFiles(unittest.TestCase):
         self.assertEqual(language.detect("anything", "es"), "es")
 
 
+# ---- the filter between the sources and the library ------------------------------------------
+
+class Filter(unittest.TestCase):
+    def test_hidden_characters_html_and_site_lines_go(self):
+        text = ("[00:01.00] hel\u200blo \u202eworld\n<script>alert(1)</script>[00:02.00] two\n"
+                "[00:03.00] Lyrics provided by SomeSite\nYou might also like\n[00:04.00] www.example.com\n12Embed\n")
+        checked = lyricsfiles.sanitize(text, 200)
+        self.assertIsNone(checked.refused)
+        self.assertEqual(checked.text, "[00:01.00] hello world\nalert(1)[00:02.00] two\n")
+        self.assertTrue(any("hidden" in r for r in checked.removed))
+
+    def test_times_past_the_end_binary_and_empty_are_handled(self):
+        self.assertEqual(lyricsfiles.sanitize("[00:10.00] in\n[09:00.00] out\n", 60).text, "[00:10.00] in\n")
+        self.assertEqual(lyricsfiles.sanitize("a\x00b").refused, "it holds binary data")
+        self.assertIsNotNone(lyricsfiles.sanitize("\u200b\n").refused)
+        self.assertIsNotNone(lyricsfiles.sanitize("x" * (lyricsfiles.MAX_BYTES + 1)).refused)
+
+
+# ---- the sources, on answers like theirs (never the network) ---------------------------------
+
+class Sources(unittest.TestCase):
+    QUERY = SongQuery("Band", "Song", "Record", 200.0, "USABC1234567")
+
+    def test_netease_picks_the_closest_and_drops_credits(self):
+        from stanzarr.sources import netease
+        search = {"result": {"songs": [
+            {"id": 1, "name": "Song", "duration": 120000, "artists": [{"name": "Band"}]},
+            {"id": 2, "name": "Song", "duration": 201000, "artists": [{"name": "Band"}]},
+            {"id": 3, "name": "Other", "duration": 200000, "artists": [{"name": "Band"}]}]}}
+        lyric = {"lrc": {"lyric": "[00:00.00] 作词 : Someone\n[00:01.00] words\n"}}
+        with mock.patch.object(netease.http, "get_json", side_effect=[search, lyric]) as asked:
+            found = netease.NetEase().search(self.QUERY, {})
+        self.assertEqual((found.kind, found.text, found.reference), ("synced", "[00:01.00] words\n", "netease id: 2"))
+        self.assertEqual(asked.call_args_list[1].args[1]["id"], 2)
+
+    def test_genius_reads_the_lyrics_containers(self):
+        from stanzarr.sources import genius
+        search = {"response": {"hits": [{"type": "song", "result": {
+            "id": 9, "title": "Song", "url": "https://genius.example/song", "lyrics_state": "complete",
+            "primary_artist": {"name": "Band"}}}]}}
+        page = ('<div data-lyrics-container="true"><div data-exclude-from-selection="true">Song Lyrics</div>'
+                '[Verse 1]<br/>First &amp; line<br><a href="#">Second</a> line</div><div>not this</div>'
+                '<div data-lyrics-container="true">Third line</div>').encode()
+        with mock.patch.object(genius.http, "get_json", return_value=search), \
+                mock.patch.object(genius.http, "get", return_value=page):
+            found = genius.Genius().search(self.QUERY, {"token": "t"})
+        self.assertEqual(found.kind, "plain")
+        self.assertEqual(found.text, "[Verse 1]\nFirst & line\nSecond line\nThird line\n")
+
+    def test_musixmatch_subtitles_and_the_isrc(self):
+        from stanzarr.sources import musixmatch
+        body = '[{"text": "words", "time": {"total": 1.5}}, {"text": "more", "time": {"total": 63.25}}]'
+        answer = {"message": {"header": {"status_code": 200}, "body": {"macro_calls": {
+            "matcher.track.get": {"message": {"body": {"track": {"track_id": 5, "instrumental": 0}}}},
+            "track.subtitles.get": {"message": {"body": {"subtitle_list": [{"subtitle": {"subtitle_body": body}}]}}}}}}}
+        with mock.patch.object(musixmatch.http, "get_json", return_value=answer) as asked:
+            found = musixmatch.Musixmatch().search(self.QUERY, {"token": "t"})
+        self.assertEqual(found.text, "[00:01.50] words\n[01:03.25] more\n")
+        self.assertEqual(asked.call_args.args[1]["track_isrc"], "USABC1234567")
+        refused = {"message": {"header": {"status_code": 401, "hint": "captcha"}, "body": ""}}
+        with mock.patch.object(musixmatch.http, "get_json", return_value=refused), self.assertRaises(Exception) as error:
+            musixmatch.Musixmatch().search(self.QUERY, {"token": "t"})
+        self.assertIn("captcha", str(error.exception))
+
+    def test_lrclib_without_a_length_takes_any(self):
+        from stanzarr.sources import lrclib
+        entry = {"id": 1, "trackName": "Song", "artistName": "Band", "duration": 321, "syncedLyrics": "[00:01.00] a"}
+        self.assertEqual(lrclib.pick([entry], 0, "Song", "Band"), entry)
+        self.assertIsNone(lrclib.pick([entry], 100, "Song", "Band"))
+
+
 # ---- the library and the rules ---------------------------------------------------------------
 
 @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg")
@@ -177,6 +248,45 @@ class LibraryAndRules(unittest.TestCase):
         self.assertIn("synced lyrics from Fake", operations.search(self.db, self.cfg, song_id, sources))
         self.assertEqual((first.asked, second.asked, third.asked), (1, 1, 0))
         self.assertIn("synced words", Path(path[:-4] + ".lrc").read_text())
+
+    def test_a_refused_answer_is_kept_aside_and_logged(self):
+        path, song_id = self.song()
+        self.search(song_id, Found("synced", "[00:01.00] a\x00b\n"))
+        self.assertFalse(os.path.exists(path[:-4] + ".lrc"))
+        self.assertEqual(len(os.listdir(os.path.join(self.cfg.config_dir, "quarantine"))), 1)
+        event = self.db.one("SELECT * FROM events WHERE kind='filter'")
+        self.assertEqual(event["ok"], 0)
+
+    def test_the_isrc_is_read_and_asked_with(self):
+        path = tone(os.path.join(self.root, "Band", "Record", "01 - Song.mp3"))
+        audio = mutagen.File(path, easy=True)
+        audio["isrc"] = "usabc1234567"
+        audio.save()
+        library.scan(self.db, [self.root])
+        song_id = self.db.one("SELECT id, isrc FROM songs")
+        self.assertEqual(song_id["isrc"], "USABC1234567")
+        fake = Fake(Found("none"))
+        seen = []
+        fake.search = lambda song, config: seen.append(song) or Found("none")
+        operations.search(self.db, self.cfg, song_id["id"], [({"id": "1", "config": {}}, fake)])
+        self.assertEqual(seen[0].isrc, "USABC1234567")
+
+    def test_the_quality_rank(self):
+        path, song_id = self.song()
+        rank = lambda: self.db.one(f"SELECT {library.RANK_SQL} AS r FROM songs s WHERE s.id=?", (song_id,))["r"]
+        self.assertEqual(rank(), 0)
+        with open(path[:-4] + ".txt", "w") as out:
+            out.write("words\n")
+        library.scan(self.db, [self.root])
+        self.assertEqual(rank(), 1)
+        with open(path[:-4] + ".lrc", "w") as out:
+            out.write("[by:AI-generated, not checked by a person]\n[00:01.00] words\n")
+        library.sync_lyrics(self.db, song_id, path, force=True)
+        self.assertEqual(rank(), 2)
+        with open(path[:-4] + ".lrc", "w") as out:
+            out.write("[00:01.00] words\n")
+        library.sync_lyrics(self.db, song_id, path, force=True)
+        self.assertEqual(rank(), 4)
 
     def test_a_failing_source_doesnt_stop_the_next(self):
         path, song_id = self.song()
@@ -331,8 +441,11 @@ class Api(unittest.TestCase):
         library.scan(self.services.db, self.cfg.library)
         song_id = self.client.get("/api/v1/songs").json()["songs"][0]["id"]
         self.assertEqual(self.client.post(f"/api/v1/songs/{song_id}/ai-sync", headers=PAGE).status_code, 409)
-        key = self.client.get("/api/v1/workers").json()["key"]
-        worker = {"X-Stanzarr-Key": key, "X-Stanzarr-Worker": "laptop"}
+        made = self.client.post("/api/v1/workers", json={"name": "laptop"}, headers=PAGE).json()
+        self.assertTrue(made["key"].startswith("szw_"))
+        self.assertNotIn("key", self.client.get("/api/v1/workers").json())
+        # Its own key names it, whatever name it gives.
+        worker = {"X-Stanzarr-Key": made["key"], "X-Stanzarr-Worker": "something else"}
         self.assertEqual(self.client.post("/api/v1/worker/heartbeat", json={"gpu": ""},
                                           headers={"X-Stanzarr-Key": "wrong"}).status_code, 401)
         # A worker from before 1.0: /api/worker/….
@@ -356,6 +469,84 @@ class Api(unittest.TestCase):
         self.assertEqual(self.client.post("/api/v1/worker/next", headers=worker).status_code, 204)
         checked = self.client.get("/api/v1/songs", params={"to_check": True}).json()
         self.assertEqual(checked["total"], 1)
+        listed = self.client.get("/api/v1/workers").json()["workers"]
+        self.assertEqual([(w["name"], w["online"], w["shared_key"]) for w in listed], [("laptop", True, False)])
+        # Who did it is in the activity.
+        log = self.client.get("/api/v1/activity", params={"kind": "ai"}).json()["events"]
+        self.assertIn("laptop", [e["actor"] for e in log])
+        # Removed: its key stops working at once.
+        self.assertEqual(self.client.delete(f"/api/v1/workers/{made['worker']['id']}", headers=PAGE).status_code, 204)
+        self.assertEqual(self.client.post("/api/v1/worker/heartbeat", json={"gpu": ""}, headers=worker).status_code, 401)
+
+    def test_shared_key_from_before_works_until_retired(self):
+        self.services.db.set_setting("worker_key", "old-shared-key")
+        worker = {"X-Stanzarr-Key": "old-shared-key", "X-Stanzarr-Worker": "desktop"}
+        self.assertEqual(self.client.post("/api/v1/worker/heartbeat", json={"gpu": ""}, headers=worker).status_code, 200)
+        listed = self.client.get("/api/v1/workers").json()
+        self.assertTrue(listed["shared_key"])
+        self.assertEqual([(w["name"], w["shared_key"]) for w in listed["workers"]], [("desktop", True)])
+        self.assertEqual(self.client.delete("/api/v1/workers-shared-key", headers=PAGE).status_code, 204)
+        self.assertEqual(self.client.post("/api/v1/worker/heartbeat", json={"gpu": ""}, headers=worker).status_code, 401)
+
+    @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg")
+    def test_library_sorting_filters_facets_files_and_history(self):
+        for n, (artist, title) in enumerate((("Zed", "Alpha"), ("Abba", "Omega"), ("Mid", "Beta"))):
+            song = tone(os.path.join(self.cfg.library[0], artist, "R", f"0{n} - {title}.mp3"), seconds=5,
+                        title=title, artist=artist)
+            if artist == "Abba":
+                with open(song[:-4] + ".lrc", "w") as out:
+                    out.write("[00:01.00] words\n")
+        library.scan(self.services.db, self.cfg.library)
+        by = lambda **p: [r["artist"] for r in self.client.get("/api/v1/songs", params=p).json()["songs"]]
+        self.assertEqual(by(), ["Abba", "Mid", "Zed"])
+        self.assertEqual(by(sort="title"), ["Zed", "Mid", "Abba"])
+        self.assertEqual(by(status=["synced"]), ["Abba"])
+        self.assertEqual(by(status=["missing", "synced"], size=2, page=2), ["Zed"])
+        self.assertEqual(by(sort="status"), ["Abba", "Mid", "Zed"])
+        self.assertEqual(by(made_by="unknown"), ["Abba"])
+        facets = self.client.get("/api/v1/songs/facets").json()
+        self.assertEqual([f["value"] for f in facets["formats"]], ["lrc"])
+        song_id = self.client.get("/api/v1/songs", params={"status": ["synced"]}).json()["songs"][0]["id"]
+        detail = self.client.get(f"/api/v1/songs/{song_id}").json()
+        self.assertEqual(detail["ai_blocked"], "No GPU worker is online: start one (Settings, Workers).")
+        self.assertIsNotNone(detail["search_blocked"])
+        file_id = detail["files"][0]["id"]
+        self.assertEqual(self.client.get(f"/api/v1/songs/{song_id}/files/{file_id}").text, "[00:01.00] words\n")
+        lines = self.client.get(f"/api/v1/songs/{song_id}/files/{file_id}/lines").json()
+        self.assertEqual(lines, {"synced": True, "lines": [{"t": 1.0, "s": "words"}]})
+        self.assertEqual(self.client.get(f"/api/v1/songs/{song_id}/files/999").status_code, 404)
+        self.assertEqual(self.client.get(f"/api/v1/songs/{song_id}/cover").status_code, 404)
+        self.services.note_coverage()
+        history = self.client.get("/api/v1/songs/history").json()
+        self.assertEqual(history[-1]["counts"]["synced"], 1)
+
+    def test_find_lyrics_by_name_and_link(self):
+        self.client.post("/api/v1/sources", json={"name": "LRCLIB", "type": "lrclib"}, headers=PAGE)
+        with mock.patch("stanzarr.sources.lrclib.lookup", return_value=("synced", "[00:01.00] hello\n", 7)) as asked:
+            found = self.client.post("/api/v1/find", json={"query": "Band - Song (Official Video)"}, headers=PAGE).json()
+        self.assertEqual((found["artist"], found["title"]), ("Band", "Song"))
+        self.assertEqual(asked.call_args.args[:2], ("Band", "Song"))
+        self.assertTrue(found["answers"][0]["synced"])
+        deezer = {"title": "Song (feat. Other)", "duration": 200, "artist": {"name": "Band"}}
+        with mock.patch("stanzarr.api.routes.lyrics.web.get_json", return_value=deezer), \
+                mock.patch("stanzarr.sources.lrclib.lookup", return_value=("none", "", None)) as asked:
+            linked = self.client.post("/api/v1/find", json={"query": "https://www.deezer.com/en/track/123"},
+                                      headers=PAGE).json()
+        self.assertEqual((linked["artist"], linked["title"], linked["resolved"]["via"]), ("Band", "Song", "deezer"))
+        self.assertEqual(asked.call_args.args[3], 200)
+        # Never a link inside the network.
+        for inside in ("http://192.168.1.10/admin", "http://stanzarr.homelab.lan/", "https://soundcloud.com:8443/x",
+                       "ftp://soundcloud.com/x"):
+            self.assertEqual(self.client.post("/api/v1/find", json={"query": inside}, headers=PAGE).status_code, 422, inside)
+        log = self.client.get("/api/v1/activity", params={"kind": "search"}).json()
+        self.assertEqual([e["actor"] for e in log["events"]][-2:], ["admin", "admin"])
+        self.assertEqual(self.client.get("/api/v1/activity", params={"ok": False}).json()["total"], 5)
+        self.assertIn("busy", self.client.get("/api/v1/activity/now").json())
+
+    def test_settings_cutoff(self):
+        changed = self.client.patch("/api/v1/settings", json={"cutoff": "ai", "auto_ai": True}, headers=PAGE).json()
+        self.assertEqual((changed["cutoff"], changed["auto_ai"]), ("ai", True))
+        self.assertEqual(self.client.patch("/api/v1/settings", json={"cutoff": "best"}, headers=PAGE).status_code, 422)
 
     @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg")
     def test_editor_roundtrip_and_audio_ranges(self):

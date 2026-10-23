@@ -50,6 +50,9 @@ class Config:
     prober: tuple[str, ...]
     # Whether to ask PyPI daily for yt-dlp's newest release (issues.py).
     check_releases: bool
+    # Lyrics from stanzarr first, when given (an API key that reads); LRCLIB when it's down.
+    stanzarr_url: str = ""
+    stanzarr_api_key: str = ""
 
     @property
     def database(self) -> Path:
@@ -109,4 +112,6 @@ def load(env: Mapping[str, str] = os.environ) -> Config:
         runner=(sys.executable, "-m", "videodrop.runner"),
         prober=(sys.executable, "-m", "videodrop.probe"),
         check_releases=env.get("VIDEODROP_CHECK_RELEASES", "1").strip() not in ("0", "false", "no"),
+        stanzarr_url=env.get("VIDEODROP_STANZARR_URL", "").strip().rstrip("/"),
+        stanzarr_api_key=env.get("VIDEODROP_STANZARR_API_KEY", "").strip(),
     )

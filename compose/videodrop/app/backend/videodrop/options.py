@@ -31,9 +31,9 @@ class VideoOptions(BaseModel):
     subtitles: list[str] = Field(description="Subtitle languages to embed (en, fr, pt-BR…); empty: none.")
     auto_subtitles: bool = Field(description="Also the site's automatic captions, when a language has no "
                                              "subtitles.")
-    lyrics: bool = Field(description="A music video: its synced lyrics (LRCLIB) as a subtitle track named Lyrics, "
-                                     "when there are some. The job's song names the song; else it is guessed from "
-                                     "the video's title.")
+    lyrics: bool = Field(description="A music video: its synced lyrics (stanzarr's, else LRCLIB's) as a subtitle "
+                                     "track named Lyrics, when there are some. The job's song names the song; else it "
+                                     "is guessed from the video's title.")
     embed_metadata: bool = Field(description="Title, artist, date and description written into the file.")
     embed_thumbnail: bool = Field(description="The video's picture as the file's cover (not in webm).")
     embed_chapters: bool = Field(description="The video's chapters as the file's chapters.")
