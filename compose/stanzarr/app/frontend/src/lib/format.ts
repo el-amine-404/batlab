@@ -24,7 +24,7 @@ export const FORMAT: Record<string, string> = {
 
 /** Who made a lyrics file. */
 export const SOURCE: Record<string, string> = {
-  lrclib: "LRCLIB", netease: "NetEase", musixmatch: "Musixmatch", genius: "Genius", ai: "AI sync", person: "A person",
+  lrclib: "LRCLIB", netease: "NetEase", musixmatch: "Musixmatch", genius: "Genius", lyricsovh: "lyrics.ovh", ai: "AI sync", person: "A person",
   unknown: "Unknown",
 };
 

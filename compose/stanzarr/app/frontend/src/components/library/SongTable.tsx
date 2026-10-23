@@ -3,7 +3,7 @@ import { type KeyboardEvent, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 
 import { api, type SongRow, type SortKey } from "@/lib/api";
-import { FORMAT, length, SOURCE } from "@/lib/format";
+import { FORMAT, length, SOURCE, STATUS } from "@/lib/format";
 import { cn, timeAgo } from "@/lib/utils";
 
 import { StatusBadge } from "./StatusBadge";
@@ -15,7 +15,7 @@ const COLUMNS: { key: SortKey | null; label: string; className: string }[] = [
   { key: "artist", label: "Artist", className: "hidden min-w-0 flex-1 md:block" },
   { key: "album", label: "Album", className: "hidden min-w-0 flex-1 xl:block" },
   { key: "status", label: "Lyrics", className: "w-32 shrink-0" },
-  { key: null, label: "Files", className: "hidden w-28 shrink-0 lg:block" },
+  { key: null, label: "Files", className: "hidden w-28 shrink-0 flex-wrap gap-1 lg:flex" },
   { key: null, label: "Made by", className: "hidden w-28 shrink-0 2xl:block" },
   { key: null, label: "Language", className: "hidden w-24 shrink-0 lg:block" },
   { key: "duration", label: "Length", className: "w-12 shrink-0 text-right" },
@@ -33,34 +33,50 @@ function Cover({ id, className }: { id: number; className?: string }) {
 }
 
 function Row({ song, compact, open }: { song: SongRow; compact: boolean; open: (id: number) => void }) {
+  const busy = song.job === "queued" || song.job === "running";
   return (
     <li>
       <Link to={`/songs/${song.id}`} data-row
             onKeyDown={(e) => e.key === " " && (e.preventDefault(), open(song.id))}
-            className={cn("group flex items-center gap-3 px-4 text-sm transition-colors hover:bg-accent/60 focus-visible:bg-accent focus-visible:outline-none",
-                          compact ? "py-1.5" : "py-2.5")}>
-        <div className={COLUMNS[0].className}>
-          <p className="truncate font-medium">{song.title}</p>
-          {!compact && <p className="truncate text-xs text-muted-foreground md:hidden">{song.artist}</p>}
+            className="group block text-sm transition-colors hover:bg-accent/60 focus-visible:bg-accent focus-visible:outline-none">
+        {/* A phone: the title in full width, what it has under it. */}
+        <div className={cn("flex items-center gap-3 px-4 sm:hidden", compact ? "py-2" : "py-3")}>
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-medium">{song.title}</p>
+            <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="size-2 shrink-0 rounded-full" style={{ background: STATUS[song.status].color }} aria-label={STATUS[song.status].label} />
+              <span className="truncate">{song.artist}{song.album ? ` · ${song.album}` : ""}</span>
+            </p>
+          </div>
+          <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{length(song.duration)}</span>
         </div>
-        <span className={cn(COLUMNS[1].className, "truncate text-muted-foreground")}>{song.artist}</span>
-        <span className={cn(COLUMNS[2].className, "truncate text-muted-foreground")}>{song.album}</span>
-        <div className={cn(COLUMNS[3].className, "flex flex-col items-start gap-0.5")}>
-          <StatusBadge status={song.status} />
-          {!compact && !!song.to_check && song.to_check > 0 && <span className="text-[11px] text-muted-foreground">{song.to_check} {song.to_check === 1 ? "line" : "lines"} to check</span>}
-          {!compact && (song.job === "queued" || song.job === "running") && <span className="text-[11px] text-primary">AI sync {song.job}</span>}
+        {/* Wider: the table's columns. */}
+        <div className={cn("hidden items-center gap-3 px-4 sm:flex", compact ? "py-1.5" : "py-2.5")}>
+          <div className={COLUMNS[0].className}>
+            <p className="truncate font-medium">{song.title}</p>
+            {!compact && <p className="truncate text-xs text-muted-foreground md:hidden">{song.artist}</p>}
+          </div>
+          <span className={cn(COLUMNS[1].className, "truncate text-muted-foreground")}>{song.artist}</span>
+          <span className={cn(COLUMNS[2].className, "truncate text-muted-foreground")}>{song.album}</span>
+          <div className={cn(COLUMNS[3].className, "flex flex-col items-start gap-0.5")}>
+            <StatusBadge status={song.status} />
+            {!compact && !!song.to_check && song.to_check > 0 && (
+              <span className="text-[11px] text-muted-foreground">{song.to_check} {song.to_check === 1 ? "line" : "lines"} to check</span>
+            )}
+            {!compact && busy && <span className="text-[11px] text-primary">AI sync {song.job}</span>}
+          </div>
+          <div className={COLUMNS[4].className}>
+            {song.formats.map((format) => (
+              <span key={format} className="rounded border border-border px-1.5 text-[10px] font-medium text-muted-foreground uppercase">
+                {FORMAT[format] ?? format}
+              </span>
+            ))}
+          </div>
+          <span className={cn(COLUMNS[5].className, "truncate text-xs text-muted-foreground")}>{song.made_by.map((m) => SOURCE[m] ?? m).join(", ")}</span>
+          <span className={cn(COLUMNS[6].className, "truncate text-xs text-muted-foreground")}>{song.languages.map((l) => l.name).join(", ")}</span>
+          <span className={cn(COLUMNS[7].className, "text-xs text-muted-foreground tabular-nums")}>{length(song.duration)}</span>
+          <span className={cn(COLUMNS[8].className, "text-xs text-muted-foreground")}>{timeAgo(song.added_at)}</span>
         </div>
-        <div className={cn(COLUMNS[4].className, "flex flex-wrap gap-1")}>
-          {song.formats.map((format) => (
-            <span key={format} className="rounded border border-border px-1.5 text-[10px] font-medium text-muted-foreground uppercase">
-              {FORMAT[format] ?? format}
-            </span>
-          ))}
-        </div>
-        <span className={cn(COLUMNS[5].className, "truncate text-xs text-muted-foreground")}>{song.made_by.map((m) => SOURCE[m] ?? m).join(", ")}</span>
-        <span className={cn(COLUMNS[6].className, "truncate text-xs text-muted-foreground")}>{song.languages.map((l) => l.name).join(", ")}</span>
-        <span className={cn(COLUMNS[7].className, "text-xs text-muted-foreground tabular-nums")}>{length(song.duration)}</span>
-        <span className={cn(COLUMNS[8].className, "text-xs text-muted-foreground")}>{timeAgo(song.added_at)}</span>
       </Link>
     </li>
   );
@@ -106,7 +122,7 @@ export function SongTable({ songs, sort, direction, onSort, look }: {
 
   return (
     <div ref={list} onKeyDown={move} className="overflow-hidden rounded-2xl border border-border bg-card">
-      <div className="flex items-center gap-3 border-b border-border bg-muted/30 px-4 py-2 text-xs font-medium text-muted-foreground" role="row">
+      <div className="hidden items-center gap-3 border-b border-border bg-muted/30 px-4 py-2 text-xs font-medium text-muted-foreground sm:flex" role="row">
         {COLUMNS.map((column) => (
           <div key={column.label} className={cn(column.className, "truncate")} role="columnheader"
                aria-sort={column.key === sort ? (direction === "asc" ? "ascending" : "descending") : undefined}>

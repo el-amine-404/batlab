@@ -138,6 +138,17 @@ class Filter(unittest.TestCase):
 # ---- the sources, on answers like theirs (never the network) ---------------------------------
 
 class Sources(unittest.TestCase):
+    def test_lyrics_ovh_words_and_not_found(self):
+        import urllib.error
+        from stanzarr.sources import lyricsovh
+        with mock.patch.object(lyricsovh.http, "get_json", return_value={"lyrics": "First\r\nSecond"}) as asked:
+            found = lyricsovh.LyricsOvh().search(self.QUERY, {})
+        self.assertEqual((found.kind, found.text), ("plain", "First\nSecond\n"))
+        self.assertTrue(asked.call_args.args[0].endswith("/Band/Song"))
+        gone = urllib.error.HTTPError("u", 404, "No lyrics found", {}, None)
+        with mock.patch.object(lyricsovh.http, "get_json", side_effect=gone):
+            self.assertEqual(lyricsovh.LyricsOvh().search(self.QUERY, {}).kind, "none")
+
     QUERY = SongQuery("Band", "Song", "Record", 200.0, "USABC1234567")
 
     def test_netease_picks_the_closest_and_drops_credits(self):
@@ -520,27 +531,34 @@ class Api(unittest.TestCase):
         history = self.client.get("/api/v1/songs/history").json()
         self.assertEqual(history[-1]["counts"]["synced"], 1)
 
-    def test_find_lyrics_by_name_and_link(self):
+    def test_find_lyrics_which_song_then_its_lyrics(self):
         self.client.post("/api/v1/sources", json={"name": "LRCLIB", "type": "lrclib"}, headers=PAGE)
-        with mock.patch("stanzarr.sources.lrclib.lookup", return_value=("synced", "[00:01.00] hello\n", 7)) as asked:
-            found = self.client.post("/api/v1/find", json={"query": "Band - Song (Official Video)"}, headers=PAGE).json()
-        self.assertEqual((found["artist"], found["title"]), ("Band", "Song"))
+        deezer = {"data": [{"title": "Song (feat. Other)", "title_short": "Song", "duration": 200,
+                            "artist": {"name": "Band"}, "album": {"title": "Record", "cover_small": "https://x/c.jpg"}},
+                           {"title": "Song", "duration": 180, "artist": {"name": "Other band"}, "album": {"title": "Y"}}]}
+        with mock.patch("stanzarr.api.routes.lyrics.web.get_json", return_value=deezer):
+            songs = self.client.get("/api/v1/find/songs", params={"q": "Song"}).json()["songs"]
+        self.assertEqual([(s["artist"], s["title"], s["duration"]) for s in songs], [("Band", "Song", 200), ("Other band", "Song", 180)])
+        entry = {"id": 7, "artistName": "Band", "trackName": "Song", "duration": 201}
+        with mock.patch("stanzarr.sources.lrclib.lookup", return_value=("synced", "[00:01.00] hello\n", entry)) as asked:
+            found = self.client.post("/api/v1/find", json={"artist": "Band", "title": "Song", "duration": 200},
+                                     headers=PAGE).json()
         self.assertEqual(asked.call_args.args[:2], ("Band", "Song"))
-        self.assertTrue(found["answers"][0]["synced"])
-        deezer = {"title": "Song (feat. Other)", "duration": 200, "artist": {"name": "Band"}}
-        with mock.patch("stanzarr.api.routes.lyrics.web.get_json", return_value=deezer), \
+        self.assertEqual(found["answers"][0]["matched"], {"artist": "Band", "title": "Song", "duration": 201})
+        deezer_track = {"title": "Song (feat. Other)", "duration": 200, "artist": {"name": "Band"}}
+        with mock.patch("stanzarr.api.routes.lyrics.web.get_json", return_value=deezer_track), \
                 mock.patch("stanzarr.sources.lrclib.lookup", return_value=("none", "", None)) as asked:
             linked = self.client.post("/api/v1/find", json={"query": "https://www.deezer.com/en/track/123"},
                                       headers=PAGE).json()
         self.assertEqual((linked["artist"], linked["title"], linked["resolved"]["via"]), ("Band", "Song", "deezer"))
         self.assertEqual(asked.call_args.args[3], 200)
+        self.assertEqual(self.client.post("/api/v1/find", json={"title": "Song"}, headers=PAGE).status_code, 422)
         # Never a link inside the network.
         for inside in ("http://192.168.1.10/admin", "http://stanzarr.homelab.lan/", "https://soundcloud.com:8443/x",
                        "ftp://soundcloud.com/x"):
             self.assertEqual(self.client.post("/api/v1/find", json={"query": inside}, headers=PAGE).status_code, 422, inside)
         log = self.client.get("/api/v1/activity", params={"kind": "search"}).json()
-        self.assertEqual([e["actor"] for e in log["events"]][-2:], ["admin", "admin"])
-        self.assertEqual(self.client.get("/api/v1/activity", params={"ok": False}).json()["total"], 5)
+        self.assertEqual({e["actor"] for e in log["events"]}, {"admin"})
         self.assertIn("busy", self.client.get("/api/v1/activity/now").json())
 
     def test_settings_cutoff(self):

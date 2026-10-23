@@ -456,7 +456,8 @@ itself, and [its README](../compose/stanzarr/app/README.md).
 - **Sources are add-ons** (`backend/stanzarr/sources/`): one `LyricsSource`
   module each, chosen, ordered and tested in Settings, Sources: LRCLIB,
   NetEase Cloud Music (no account), Musixmatch (one's own user token; its
-  terms don't allow this use), Genius (words only, a free token). Every
+  terms don't allow this use), Genius (words only, a free token),
+  lyrics.ovh (words only, free). Every
   answer goes through a filter first (hidden and direction-turning
   characters, HTML, site credits and links, times past the song's end);
   what it refuses is kept aside in `quarantine/` with why, and said in

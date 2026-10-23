@@ -31,8 +31,14 @@ def list_sources(ctx: Ctx):
     return {"items": ctx.sources.list()}
 
 
+def _forget_nothing(ctx) -> None:
+    """Other sources, other answers: what none of the old ones had is asked again."""
+    ctx.db.run("DELETE FROM lookups WHERE kind IN ('none', 'plain')")
+
+
 @router.post("", status_code=201, summary="Add a source", response_model=schemas.Source, responses=_PROBLEMS)
 def create_source(body: SourceIn, ctx: Ctx):
+    _forget_nothing(ctx)
     return ctx.sources.create(body.model_dump())
 
 
@@ -44,6 +50,7 @@ async def test_new_source(body: SourceIn, ctx: Ctx):
 
 @router.put("/order", summary="Put the sources in order", response_model=schemas.SourceList, responses=_PROBLEMS)
 def order_sources(body: schemas.Order, ctx: Ctx):
+    _forget_nothing(ctx)
     return {"items": ctx.sources.reorder(body.ids)}
 
 
@@ -55,6 +62,7 @@ def get_source(item_id: str, ctx: Ctx):
 @router.put("/{item_id}", summary="Change a source; a secret left empty keeps its value",
             response_model=schemas.Source, responses=_PROBLEMS)
 def update_source(item_id: str, body: SourceIn, ctx: Ctx):
+    _forget_nothing(ctx)
     return ctx.sources.update(item_id, body.model_dump())
 
 
@@ -66,5 +74,6 @@ async def test_source(item_id: str, body: SourceIn, ctx: Ctx):
 
 @router.delete("/{item_id}", status_code=204, summary="Remove a source", responses=_PROBLEMS)
 def delete_source(item_id: str, ctx: Ctx):
+    _forget_nothing(ctx)
     ctx.sources.delete(item_id)
     return Response(status_code=204)

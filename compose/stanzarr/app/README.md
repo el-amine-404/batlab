@@ -39,7 +39,7 @@ the running service.
 A source is one module in `backend/stanzarr/sources/`: a `LyricsSource` with
 its form's fields and a `search()`, listed in `TYPES`. Settings, Sources
 makes them, orders them, turns them on and off and tests them; nothing else
-in stanzarr knows which there are. LRCLIB, NetEase, Musixmatch and Genius
+in stanzarr knows which there are. LRCLIB, NetEase, Musixmatch, Genius and lyrics.ovh
 come with it; `sources/http.py` keeps each site to one question a second.
 
 ## The GPU worker

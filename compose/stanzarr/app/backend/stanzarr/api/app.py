@@ -57,7 +57,8 @@ TAGS = [
 ]
 
 # The page loads only its own files; the editor plays the song and draws on canvases (blob:).
-PAGE_POLICY = ("default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' "
+# Find lyrics' song choice shows Deezer's album covers.
+PAGE_POLICY = ("default-src 'self'; img-src 'self' data: blob: https://*.dzcdn.net; media-src 'self' blob:; style-src 'self' "
                "'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
                "form-action 'self'; object-src 'none'")
 

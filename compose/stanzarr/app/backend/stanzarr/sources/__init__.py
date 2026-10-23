@@ -17,10 +17,11 @@ from ..domain import Invalid, NotFound
 from .base import NOTHING, Found, LyricsSource, SongQuery
 from .genius import Genius
 from .lrclib import LRCLIB
+from .lyricsovh import LyricsOvh
 from .musixmatch import Musixmatch
 from .netease import NetEase
 
-TYPES: dict[str, LyricsSource] = {kind.key: kind for kind in (LRCLIB(), NetEase(), Musixmatch(), Genius())}
+TYPES: dict[str, LyricsSource] = {kind.key: kind for kind in (LRCLIB(), NetEase(), Musixmatch(), Genius(), LyricsOvh())}
 MAX_ITEMS = 10
 
 

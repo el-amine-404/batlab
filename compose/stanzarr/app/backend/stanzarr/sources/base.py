@@ -31,6 +31,9 @@ class Found:
     text: str = ""
     # Where at the source, written into the file: "lrclib id: 123".
     reference: str | None = None
+    # The song it matched, as the source names it: {"artist", "title", "duration"}
+    # (Find lyrics shows it, so a loose match shows as one).
+    song: dict | None = None
 
 
 NOTHING = Found("none")

@@ -7,11 +7,11 @@ answer kept from before (LOOKUP_DAYS); else the sources, asked now, their
 answer kept. Nothing is written into the library for a song outside it."""
 
 import asyncio
-import time
-
 import html
 import json
+import logging
 import re
+import time
 import urllib.parse
 
 from fastapi import APIRouter, Query
@@ -26,6 +26,7 @@ from .. import schemas
 from ..auth import Who
 from ..deps import Ctx
 
+log = logging.getLogger(__name__)
 router = APIRouter(tags=["Lyrics"])
 LOOKUP_DAYS = 30
 
@@ -90,7 +91,9 @@ async def lyrics(ctx: Ctx, artist: str = Query(min_length=1, max_length=200),
     if found:
         return found
     key = f"{simple(query.artist)}|{simple(query.title)}|{round(duration)}"
-    kept = ctx.db.one("SELECT * FROM lookups WHERE key = ? AND at > ?", (key, time.time() - LOOKUP_DAYS * 86400))
+    # Nothing found is asked again the next day: sources learn songs (a new one, often).
+    kept = ctx.db.one("SELECT * FROM lookups WHERE key = ? AND at > ? AND (kind != 'none' OR at > ?)",
+                      (key, time.time() - LOOKUP_DAYS * 86400, time.time() - 86400))
     if kept:
         return _answer(kept["kind"], kept["text"], kept["source"] or None)
     try:
@@ -120,8 +123,17 @@ META = re.compile(r'<meta\s+(?:property|name)="(og:title|og:description|music:du
 
 
 class FindIn(BaseModel):
-    query: str = Field(min_length=1, max_length=500, description="A song's name (Artist - Title, or a title), or a "
-                                                                 "link to it: YouTube, Spotify, Apple Music, Deezer…")
+    """A link to the song, or the song itself (as Which song? chose it)."""
+
+    query: str = Field("", max_length=500, description="A link: YouTube, Spotify, Deezer, Apple Music, SoundCloud, "
+                                                       "Bandcamp, Tidal, Amazon Music.")
+    artist: str = Field("", max_length=200)
+    title: str = Field("", max_length=200)
+    album: str = Field("", max_length=200)
+    duration: float = Field(0, ge=0, le=24 * 3600)
+
+
+DEEZER = "https://api.deezer.com/search"
 
 
 def _split(name: str) -> tuple[str, str]:
@@ -226,17 +238,57 @@ def _resolve(link: str) -> dict:
     return found
 
 
-def _find(ctx, text: str) -> dict:
+def _songs(ctx, text: str) -> list[dict]:
+    """Which songs a name may be: the library's first, then Deezer's catalogue
+    (title, artist, album, length, cover; free, no account), one of each."""
     text = text.strip()
-    resolved = None
-    if re.match(r"[a-z][a-z0-9+.-]*://", text, re.IGNORECASE):
-        resolved = _resolve(text)
-        artist, title, seconds = resolved["artist"], resolved["title"], resolved["duration"]
-    else:
-        (artist, title), seconds = _split(text), 0.0
-    query = SongQuery(artist, title, "", seconds)
+    artist, title = _split(text)
+    words = f"%{(title or text).strip()}%"
+    rows = ctx.db.all("SELECT id, artist, title, album, duration FROM songs WHERE title LIKE ? OR (artist || ' ' || title) LIKE ?"
+                      " ORDER BY (title = ? COLLATE NOCASE) DESC LIMIT 5", (words, f"%{text}%", title or text))
+    out, seen = [], set()
+    for row in rows:
+        if artist and not names(row["artist"]) & names(artist):
+            continue
+        seen.add((simple(row["artist"]), simple(row["title"])))
+        out.append({"artist": row["artist"], "title": row["title"], "album": row["album"], "duration": row["duration"],
+                    "cover": f"/api/v1/songs/{row['id']}/cover", "song_id": row["id"]})
+    try:
+        found = web.get_json(DEEZER, {"q": f'artist:"{artist}" track:"{title}"' if artist else text, "limit": 12})
+        if artist and not (found or {}).get("data"):
+            found = web.get_json(DEEZER, {"q": text, "limit": 12})
+    except Exception as error:
+        log.info("Deezer's search failed: %s", error)
+        found = {}
+    catalogue = []
+    for track in (found or {}).get("data") or []:
+        name = (track.get("artist") or {}).get("name") or ""
+        song = FEATURING.sub("", track.get("title_short") or track.get("title") or "").strip()
+        key = (simple(name), simple(song))
+        if not song or key in seen:
+            continue
+        seen.add(key)
+        catalogue.append({"artist": name, "title": song, "album": (track.get("album") or {}).get("title") or "",
+                          "duration": track.get("duration") or 0, "cover": (track.get("album") or {}).get("cover_small"),
+                          "song_id": None})
+    # Only what has the words typed, the closest first: the very title, the same title, an artist in common.
+    wanted = title or text
+    words = [simple(w) for w in re.findall(r"\w+", text) if simple(w)]
+    catalogue = [c for c in catalogue
+                 if all(w in simple(f"{c['artist']} {c['title']} {c['album']}") for w in words)]
+    catalogue.sort(key=lambda c: (simple(c["title"]) != simple(wanted), not same_title(c["title"], wanted),
+                                  not (artist and names(c["artist"]) & names(artist))))
+    # "Artist - Title" as typed, when nothing says it better: a song no catalogue has yet.
+    if artist and title and (simple(artist), simple(title)) not in seen and not any(
+            same_title(c["title"], title) and names(c["artist"]) & names(artist) for c in out + catalogue):
+        out.append({"artist": artist, "title": title, "album": "", "duration": 0, "cover": None, "song_id": None,
+                    "typed": True})
+    return (out + catalogue)[:12]
+
+
+def _answers(ctx, query: SongQuery) -> list[dict]:
     answers = []
-    library = _from_library(ctx, query) if artist else None
+    library = _from_library(ctx, query) if query.artist else None
     if library:
         answers.append(library | {"label": "Your library"})
     for item, kind in ctx.sources.asked():
@@ -247,26 +299,39 @@ def _find(ctx, text: str) -> dict:
                             "label": item["name"], "error": web.explain(error)})
             continue
         if found.kind in ("synced", "plain"):
-            checked = lyricsfiles.sanitize(found.text, seconds)
+            checked = lyricsfiles.sanitize(found.text, query.duration)
             if checked.refused:
                 answers.append({"found": False, "synced": False, "from": "source", "source": kind.label,
                                 "label": item["name"], "error": f"refused by the filter: {checked.refused}"})
                 continue
-            found = Found(found.kind, checked.text, found.reference)
-        answers.append(_answer(found.kind, found.text, kind.label) | {"label": item["name"]})
-    return {"artist": artist, "title": title, "resolved": resolved, "answers": answers}
+            found = Found(found.kind, checked.text, found.reference, found.song)
+        answers.append(_answer(found.kind, found.text, kind.label) | {"label": item["name"], "matched": found.song})
+    return answers
 
 
-@router.post("/find", summary="Find lyrics for a song's name or a link: your library, then every source on")
+@router.get("/find/songs", summary="Which songs a name may be: the library's, then Deezer's catalogue")
+async def find_songs(ctx: Ctx, q: str = Query(min_length=1, max_length=200)):
+    return {"songs": await asyncio.to_thread(_songs, ctx, q)}
+
+
+@router.post("/find", summary="Lyrics for one song (or a link to it): your library, then every source that is on")
 async def find(body: FindIn, ctx: Ctx, who: Who):
+    resolved = None
     try:
-        result = await asyncio.to_thread(_find, ctx, body.query)
+        if body.query.strip():
+            resolved = await asyncio.to_thread(_resolve, body.query.strip())
+            query = SongQuery(resolved["artist"], resolved["title"], "", resolved["duration"])
+        elif body.artist.strip() and body.title.strip():
+            query = SongQuery(body.artist.strip(), body.title.strip(), body.album.strip(), body.duration)
+        else:
+            raise Invalid("Give a link, or the song's artist and title.")
     except Invalid as error:
-        ctx.db.event("search", f"Find lyrics: {body.query[:200]}", actor=who.name, ok=False, detail=str(error))
+        ctx.db.event("search", f"Find lyrics: {(body.query or body.title)[:200]}", actor=who.name, ok=False, detail=str(error))
         raise
-    good = [a for a in result["answers"] if a.get("found")]
-    ctx.db.event("search", f"Find lyrics: {result['artist']} – {result['title']}".replace(" –  ", " ").strip(),
-                 actor=who.name, ok=bool(good),
+    answers = await asyncio.to_thread(_answers, ctx, query)
+    good = [a for a in answers if a.get("found")]
+    ctx.db.event("search", f"Find lyrics: {query.artist} – {query.title}", actor=who.name, ok=bool(good),
                  detail=", ".join(f"{a.get('label')}: {'synced' if a.get('synced') else 'words' if a.get('found') else a.get('error') or 'nothing'}"
-                                  for a in result["answers"]))
-    return result
+                                  for a in answers))
+    return {"artist": query.artist, "title": query.title, "album": query.album, "duration": query.duration,
+            "resolved": resolved, "answers": answers}

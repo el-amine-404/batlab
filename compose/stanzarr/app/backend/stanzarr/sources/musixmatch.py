@@ -60,6 +60,7 @@ class Musixmatch(LyricsSource):
         if not track:
             return NOTHING
         reference = f"musixmatch id: {track.get('track_id')}"
+        matched = {"artist": track.get("artist_name"), "title": track.get("track_name"), "duration": track.get("track_length")}
         if track.get("instrumental"):
             return Found("instrumental", "", reference)
         subtitles = _body(calls.get("track.subtitles.get")).get("subtitle_list") or []
@@ -72,9 +73,9 @@ class Musixmatch(LyricsSource):
             text = "\n".join(f"{_stamp(float((line.get('time') or {}).get('total') or 0))} {line.get('text') or ''}"
                              for line in lines if isinstance(line, dict))
             if text.strip():
-                return Found("synced", text + "\n", reference)
+                return Found("synced", text + "\n", reference, matched)
         lyrics = _body(calls.get("track.lyrics.get")).get("lyrics") or {}
         if lyrics.get("instrumental"):
             return Found("instrumental", "", reference)
         words = (lyrics.get("lyrics_body") or "").split("*******")[0].strip()
-        return Found("plain", words + "\n", reference) if words else NOTHING
+        return Found("plain", words + "\n", reference, matched) if words else NOTHING

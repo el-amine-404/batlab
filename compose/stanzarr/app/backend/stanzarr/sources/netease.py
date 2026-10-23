@@ -60,6 +60,8 @@ class NetEase(LyricsSource):
         if any(mark in text for mark in INSTRUMENTAL):
             return Found("instrumental", "", f"netease id: {best['id']}")
         reference = f"netease id: {best['id']}"
+        matched = {"artist": ", ".join(a.get("name") or "" for a in best.get("artists") or []), "title": best.get("name"),
+                   "duration": (best.get("duration") or 0) / 1000}
         if re.search(r"^\s*\[\d{1,3}:\d{2}", text, re.MULTILINE):
-            return Found("synced", text + "\n", reference)
-        return Found("plain", text + "\n", reference)
+            return Found("synced", text + "\n", reference, matched)
+        return Found("plain", text + "\n", reference, matched)

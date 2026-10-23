@@ -70,14 +70,19 @@ export type Facet = { value: string; songs: number; label?: string; artist?: str
 export type Facets = { languages: Facet[]; formats: Facet[]; made_by: Facet[]; artists: Facet[]; albums: Facet[] };
 export type CoverageDay = { day: string; counts: Record<LyricsStatus, number> };
 
-/** One answer of Find lyrics: the library's, or a source's. */
+/** A song Find lyrics may mean: the library's, the catalogue's, or as typed. */
+export type FindSong = {
+  artist: string; title: string; album: string; duration: number; cover: string | null; song_id: number | null; typed?: boolean;
+};
+/** One answer of Find lyrics: the library's, or a source's, and the song it matched. */
 export type FindAnswer = {
   found: boolean; synced: boolean; instrumental?: boolean; lrc?: string | null; text?: string | null;
   from: "library" | "source" | "none"; source?: string | null; label: string; song_id?: number; error?: string;
+  matched?: { artist: string | null; title: string | null; duration: number | null } | null;
 };
 export type FindResult = {
-  artist: string; title: string;
-  resolved: { artist: string; title: string; duration: number; via: string } | null;
+  artist: string; title: string; album: string; duration: number;
+  resolved: { artist: string; title: string; duration: number; via: string; cover: string | null } | null;
   answers: FindAnswer[];
 };
 
@@ -194,7 +199,9 @@ export const api = {
   coverUrl: (id: number) => `/api/v1/songs/${id}/cover`,
   fileUrl: (id: number, file: number) => `/api/v1/songs/${id}/files/${file}`,
   fileLines: (id: number, file: number) => request<{ synced: boolean; lines: { t: number; s: string }[] }>(`/songs/${id}/files/${file}/lines`),
-  find: (text: string) => request<FindResult>("/find", json("POST", { query: text })),
+  findSongs: (q: string) => request<{ songs: FindSong[] }>(`/find/songs?${query({ q })}`),
+  find: (body: { query: string } | { artist: string; title: string; album?: string; duration?: number }) =>
+    request<FindResult>("/find", json("POST", body)),
   activity: (filters: ActivityFilters, page: number, size = 50) =>
     request<ActivityLog>(`/activity?${query({ ...filters, ok: filters.ok === undefined ? undefined : String(filters.ok), page, size })}`),
   activityNow: () => request<ActivityNow>("/activity/now"),

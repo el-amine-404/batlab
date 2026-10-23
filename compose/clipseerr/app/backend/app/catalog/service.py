@@ -770,8 +770,8 @@ class Catalog:
             words.language_name = language.name(words.language)
             return words.model_dump()
 
-        # lyrics2: with the language they are in.
-        key = f"lyrics2:{titles.simple(first)}:{titles.simple(title)}:{seconds or 0}"
+        # lyrics3: stanzarr's first (lyrics2: with the language they are in).
+        key = f"lyrics3:{titles.simple(first)}:{titles.simple(title)}:{seconds or 0}"
         found = Lyrics.model_validate(await self._cache.get(key, fetch, fresh=7 * DAY, stale=90 * DAY))
         if found.language and self.known:
             self.known.set_language(video_id, found.language)

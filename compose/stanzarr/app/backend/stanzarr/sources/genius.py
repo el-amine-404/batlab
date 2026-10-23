@@ -102,5 +102,6 @@ class Genius(LyricsSource):
                 continue
             text = words_of(http.get(result["url"], browser=True).decode("utf-8", "replace"))
             if text:
-                return Found("plain", text + "\n", f"genius id: {result.get('id')}")
+                return Found("plain", text + "\n", f"genius id: {result.get('id')}",
+                             {"artist": artist, "title": result.get("title"), "duration": None})
         return NOTHING

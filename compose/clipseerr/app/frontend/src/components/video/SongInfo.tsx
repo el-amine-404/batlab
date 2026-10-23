@@ -62,7 +62,8 @@ export function LyricsPanel({ video }: { video: VideoDetail }) {
 
   return (
     <Panel title="Lyrics" icon={<Mic2 />} actions={actions}>
-      <div ref={box} className="rail relative h-72 overflow-y-auto px-4 py-3">
+      {/* Lyrics fill a box that scrolls; none, a line that says so. */}
+      <div ref={box} className={cn("rail relative overflow-y-auto px-4 py-3", (isPending || lines.length || data?.plain) && "h-72")}>
         {isPending ? (
           <div className="flex flex-col gap-2" aria-hidden>
             {Array.from({ length: 8 }, (_, i) => <div key={i} className="skeleton h-3.5 rounded" style={{ width: `${55 + ((i * 17) % 40)}%` }} />)}

@@ -1,4 +1,4 @@
-import { Library, ListFilter, RefreshCw, Rows3, Rows4, Search, SquareLibrary, X } from "lucide-react";
+import { Library, List, ListFilter, RefreshCw, Rows4, Search, SlidersHorizontal, SquareLibrary, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation, useSearchParams } from "react-router";
 import { toast } from "sonner";
@@ -19,6 +19,11 @@ import { cn } from "@/lib/utils";
 
 const SORTS: SortKey[] = ["artist", "title", "album", "duration", "added", "status"];
 const ANY = "_any";
+const SORT_CHOICES: [string, string][] = [
+  ["artist:asc", "Artist, A to Z"], ["title:asc", "Title, A to Z"], ["album:asc", "Album, A to Z"],
+  ["added:desc", "Newest first"], ["status:asc", "Best lyrics first"], ["status:desc", "Missing lyrics first"],
+  ["duration:desc", "Longest first"],
+];
 
 /** A filter from a list: "Any" and each value, with how many songs have it. */
 function Pick({ label, value, options, onChange, name }: {
@@ -30,7 +35,7 @@ function Pick({ label, value, options, onChange, name }: {
 }) {
   return (
     <Select value={value || ANY} onValueChange={(v) => onChange(v === ANY ? undefined : v)}>
-      <SelectTrigger className={cn("h-9 w-auto min-w-36", value && "border-primary/50")} aria-label={label}>
+      <SelectTrigger className={cn("h-9 w-full md:w-auto md:min-w-36", value && "border-primary/50")} aria-label={label}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -56,6 +61,8 @@ export function LibraryPage() {
   const [params, setParams] = useSearchParams();
   const [look, setLook] = useState<Look>(() => stored("stanzarr:library-look", { compact: false, grouped: false }));
   const [size, setSize] = useState<number>(() => stored("stanzarr:library-size", 50));
+  // A phone: the filters open under a button.
+  const [panel, setPanel] = useState(false);
 
   const status = (params.get("status") ?? "").split(",").filter((s): s is LyricsStatus => (STATUS_ORDER as string[]).includes(s));
   const typed = params.get("q") ?? "";
@@ -128,34 +135,51 @@ export function LibraryPage() {
                   actions={can("settings") && <Button variant="secondary" onClick={() => void scan()}><RefreshCw /> Scan now</Button>} />
       {counts && <Coverage counts={counts.by_status} chosen={status} onChoose={toggleStatus} history={history} />}
 
-      <div className="mt-5 mb-3 flex flex-wrap items-center gap-2">
-        <div className="relative min-w-52 flex-1">
-          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input type="search" value={typed} onChange={(e) => change({ q: e.target.value || undefined }, true)}
-                 placeholder="Search titles, artists and albums" className="pl-9" aria-label="Search the library" />
+      <div className="mt-5 mb-3 flex flex-col gap-2">
+        <div className="flex gap-2">
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input type="search" value={typed} onChange={(e) => change({ q: e.target.value || undefined }, true)}
+                   placeholder="Search the library" className="pl-9" aria-label="Search titles, artists and albums" />
+          </div>
+          <Button variant="secondary" className="md:hidden" onClick={() => setPanel(!panel)} aria-expanded={panel}>
+            <SlidersHorizontal /> Filters{chosen.length ? ` (${chosen.length})` : ""}
+          </Button>
         </div>
-        {facets && (
-          <>
-            <Pick label="Language" value={params.get("lang") ?? ""} options={facets.languages} onChange={(v) => change({ lang: v })}
-                  name={(_, f) => f.label ?? f.value} />
-            <Pick label="Format" value={params.get("format") ?? ""} options={facets.formats} onChange={(v) => change({ format: v })}
-                  name={(v) => FORMAT[v] ?? v} />
-            <Pick label="Made by" value={params.get("by") ?? ""} options={facets.made_by} onChange={(v) => change({ by: v })}
-                  name={(v) => SOURCE[v] ?? v} />
-            <Pick label="Artist" value={params.get("artist") ?? ""} options={facets.artists} onChange={(v) => change({ artist: v })} />
-          </>
-        )}
-        <div className="flex items-center gap-1" role="group" aria-label="How the table looks">
-          <button type="button" aria-pressed={look.grouped} title="Group by album, with covers"
-                  onClick={() => setLookStored({ ...look, grouped: !look.grouped })}
-                  className={cn("rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground", look.grouped && "bg-accent text-foreground")}>
-            <SquareLibrary className="size-4" />
-          </button>
-          <button type="button" aria-pressed={look.compact} title={look.compact ? "Roomy rows" : "Compact rows"}
-                  onClick={() => setLookStored({ ...look, compact: !look.compact })}
-                  className={cn("rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground", look.compact && "bg-accent text-foreground")}>
-            {look.compact ? <Rows4 className="size-4" /> : <Rows3 className="size-4" />}
-          </button>
+        <div className={cn("flex-col gap-2 md:flex md:flex-row md:flex-wrap md:items-center", panel ? "flex" : "hidden")}>
+          {facets && (
+            <>
+              <Pick label="Language" value={params.get("lang") ?? ""} options={facets.languages} onChange={(v) => change({ lang: v })}
+                    name={(_, f) => f.label ?? f.value} />
+              <Pick label="Format" value={params.get("format") ?? ""} options={facets.formats} onChange={(v) => change({ format: v })}
+                    name={(v) => FORMAT[v] ?? v} />
+              <Pick label="Made by" value={params.get("by") ?? ""} options={facets.made_by} onChange={(v) => change({ by: v })}
+                    name={(v) => SOURCE[v] ?? v} />
+              <Pick label="Artist" value={params.get("artist") ?? ""} options={facets.artists} onChange={(v) => change({ artist: v })} />
+            </>
+          )}
+          {/* Sorting on a phone: the table's header (that sorts) isn't shown there. */}
+          <Select value={`${sort}:${direction}`} onValueChange={(v) => { const [k, d] = v.split(":"); change({ sort: k === "artist" ? undefined : k, dir: d === "desc" ? "desc" : undefined }); }}>
+            <SelectTrigger className="h-9 w-full sm:hidden" aria-label="Order"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {SORT_CHOICES.map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <div className="flex items-center gap-1 rounded-lg border border-border p-0.5 md:ml-auto" role="group" aria-label="How the songs show">
+            <button type="button" aria-pressed={!look.grouped} onClick={() => setLookStored({ ...look, grouped: false })}
+                    className={cn("flex flex-1 items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground", !look.grouped && "bg-accent text-foreground")}>
+              <List className="size-3.5" /> Songs
+            </button>
+            <button type="button" aria-pressed={look.grouped} onClick={() => setLookStored({ ...look, grouped: true })}
+                    className={cn("flex flex-1 items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground", look.grouped && "bg-accent text-foreground")}>
+              <SquareLibrary className="size-3.5" /> By album
+            </button>
+            <span className="mx-0.5 h-4 w-px bg-border" aria-hidden />
+            <button type="button" aria-pressed={look.compact} onClick={() => setLookStored({ ...look, compact: !look.compact })}
+                    className={cn("flex flex-1 items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground", look.compact && "bg-accent text-foreground")}>
+              <Rows4 className="size-3.5" /> Compact
+            </button>
+          </div>
         </div>
       </div>
 

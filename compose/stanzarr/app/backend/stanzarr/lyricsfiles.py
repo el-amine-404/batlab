@@ -269,7 +269,8 @@ def origin(lyrics: Lyrics) -> Origin:
         state = "corrected" if "corrected" in by else "checked" if "checked by a person" in by and "not" not in by else "unchecked"
         return Origin("ai", state, unsure, checked)
     # A source's file says so: [re:<its name> via Stanzarr].
-    for mark, source in (("lrclib", "lrclib"), ("netease", "netease"), ("musixmatch", "musixmatch"), ("genius", "genius")):
+    for mark, source in (("lrclib", "lrclib"), ("netease", "netease"), ("musixmatch", "musixmatch"), ("genius", "genius"),
+                         ("lyrics.ovh", "lyricsovh")):
         if mark in re_.lower():
             return Origin(source, None, 0, 0)
     if "stanzarr" in re_.lower() or "a person" in by:

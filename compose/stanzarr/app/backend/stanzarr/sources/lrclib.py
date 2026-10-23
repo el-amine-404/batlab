@@ -103,8 +103,8 @@ def pick(results: list[dict], seconds: float, title: str = "", artist: str = "")
     return best
 
 
-def lookup(artist: str, title: str, album: str, seconds: float, api: str = API) -> tuple[str, str, int | None]:
-    """("synced" | "plain" | "instrumental" | "none", text, LRCLIB id)."""
+def lookup(artist: str, title: str, album: str, seconds: float, api: str = API) -> tuple[str, str, dict | None]:
+    """("synced" | "plain" | "instrumental" | "none", text, LRCLIB's entry)."""
     candidates = []
     # The exact match needs the length; without it, only the searches.
     if seconds > 0 and artist:
@@ -123,12 +123,12 @@ def lookup(artist: str, title: str, album: str, seconds: float, api: str = API) 
     if not found:
         return "none", "", None
     if found.get("instrumental"):
-        return "instrumental", "", found.get("id")
+        return "instrumental", "", found
     synced = _synced(found)
     if synced:
-        return "synced", synced, found.get("id")
+        return "synced", synced, found
     plain = lyricsfiles.clean(found.get("plainLyrics") or "")
-    return ("plain", plain, found.get("id")) if plain.strip() else ("none", "", None)
+    return ("plain", plain, found) if plain.strip() else ("none", "", None)
 
 
 class LRCLIB(LyricsSource):
@@ -144,4 +144,7 @@ class LRCLIB(LyricsSource):
     def search(self, song: SongQuery, config: dict) -> Found:
         api = (config.get("url") or API).rstrip("/")
         kind, text, entry = lookup(song.artist, song.title, song.album, song.duration, api)
-        return Found(kind, text, f"lrclib id: {entry}" if entry else None)
+        entry = entry if isinstance(entry, dict) else {"id": entry} if entry else None
+        matched = {"artist": entry.get("artistName"), "title": entry.get("trackName"),
+                   "duration": entry.get("duration")} if entry and entry.get("trackName") else None
+        return Found(kind, text, f"lrclib id: {entry['id']}" if entry and entry.get("id") else None, matched)
