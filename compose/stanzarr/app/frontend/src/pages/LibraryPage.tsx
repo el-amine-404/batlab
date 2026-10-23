@@ -1,4 +1,4 @@
-import { Library, List, ListFilter, RefreshCw, Rows4, Search, SlidersHorizontal, SquareLibrary, X } from "lucide-react";
+import { ChevronDown, Library, List, ListFilter, RefreshCw, Rows4, Search, SlidersHorizontal, SquareLibrary, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation, useSearchParams } from "react-router";
 import { toast } from "sonner";
@@ -142,11 +142,15 @@ export function LibraryPage() {
             <Input type="search" value={typed} onChange={(e) => change({ q: e.target.value || undefined }, true)}
                    placeholder="Search the library" className="pl-9" aria-label="Search titles, artists and albums" />
           </div>
-          <Button variant="secondary" className="md:hidden" onClick={() => setPanel(!panel)} aria-expanded={panel}>
+          <Button variant={panel ? "default" : "secondary"} className="md:hidden" onClick={() => setPanel((open) => !open)}
+                  aria-expanded={panel} aria-controls="library-filters">
             <SlidersHorizontal /> Filters{chosen.length ? ` (${chosen.length})` : ""}
+            <ChevronDown className={cn("transition-transform", panel && "rotate-180")} />
           </Button>
         </div>
-        <div className={cn("flex-col gap-2 md:flex md:flex-row md:flex-wrap md:items-center", panel ? "flex" : "hidden")}>
+        <div id="library-filters"
+             className={cn("flex-col gap-2 rounded-xl border border-border bg-card p-3 md:flex md:flex-row md:flex-wrap md:items-center md:border-0 md:bg-transparent md:p-0",
+                           panel ? "flex" : "hidden")}>
           {facets && (
             <>
               <Pick label="Language" value={params.get("lang") ?? ""} options={facets.languages} onChange={(v) => change({ lang: v })}
@@ -180,6 +184,7 @@ export function LibraryPage() {
               <Rows4 className="size-3.5" /> Compact
             </button>
           </div>
+          <Button variant="secondary" className="md:hidden" onClick={() => setPanel(false)}>Done</Button>
         </div>
       </div>
 

@@ -1,6 +1,10 @@
-import { AudioWaveform, Download, FileText, type LucideIcon, Mic2, MicVocal, Music, PenLine, SlidersVertical, Users } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { AudioWaveform, Download, FileText, Loader2, type LucideIcon, Mic2, MicVocal, Music, PenLine, RotateCw, SlidersVertical,
+         Users } from "lucide-react";
 import { Link } from "react-router";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import { Button } from "@/components/ui/button";
 
 import { api, type VideoDetail } from "@/lib/api";
 import { playback, usePlayback } from "@/lib/playback";
@@ -38,6 +42,19 @@ export function LyricsPanel({ video }: { video: VideoDetail }) {
   const box = useRef<HTMLDivElement>(null);
   const following = now.mode === "audio" && now.videoId === video.audio?.youtube_id;
   const lines = data?.synced ?? [];
+  const client = useQueryClient();
+  const [again, setAgain] = useState(false);
+  // The sources asked now, past the kept answer: a song new to them may be there by now.
+  const lookAgain = async () => {
+    setAgain(true);
+    try {
+      client.setQueryData(["lyrics", video.id], await api.lyrics(video.id, undefined, true));
+    } catch {
+      // the panel keeps saying none
+    } finally {
+      setAgain(false);
+    }
+  };
 
   const current = useMemo(() => {
     if (!following || !lines.length) return -1;
@@ -87,7 +104,14 @@ export function LyricsPanel({ video }: { video: VideoDetail }) {
         ) : data?.plain ? (
           <p className="text-[15px] leading-relaxed whitespace-pre-line text-foreground/85">{data.plain}</p>
         ) : (
-          <p className="text-sm text-muted-foreground">{data?.instrumental ? "An instrumental: no lyrics." : "Lyrics not available."}</p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-muted-foreground">{data?.instrumental ? "An instrumental: no lyrics." : "No lyrics found yet."}</p>
+            {!data?.instrumental && (
+              <Button variant="secondary" size="sm" disabled={again} onClick={() => void lookAgain()}>
+                {again ? <Loader2 className="animate-spin" /> : <RotateCw />} Look again
+              </Button>
+            )}
+          </div>
         )}
       </div>
       {(data?.source || lines.length > 0) && (

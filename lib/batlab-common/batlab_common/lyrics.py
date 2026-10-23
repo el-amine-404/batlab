@@ -47,7 +47,8 @@ class Stanzarr:
             self._down_until = time.monotonic() + self.pause
         log.info("stanzarr unavailable (%s): own lyrics for %d s", why, int(self.pause))
 
-    def lyrics(self, artist: str, title: str, album: str = "", duration: float | None = None) -> dict | None:
+    def lyrics(self, artist: str, title: str, album: str = "", duration: float | None = None,
+               refresh: bool = False) -> dict | None:
         """stanzarr's answer ({"found", "synced", "lrc", "text", "instrumental",
         "from", "source", "origin"}), or None when it can't be asked: then the
         caller asks its own source. An answer of found: false is an answer."""
@@ -58,6 +59,9 @@ class Stanzarr:
             params["album"] = album[:200]
         if duration:
             params["duration"] = f"{float(duration):.0f}"
+        if refresh:
+            # Its sources asked now, not the answer it kept.
+            params["refresh"] = "true"
         request = urllib.request.Request(f"{self.url}/api/v1/lyrics?{urllib.parse.urlencode(params)}", headers={
             "X-Api-Key": self.key, "Accept": "application/json", "User-Agent": f"{self.app} (batlab)"})
         # Straight to stanzarr, never through an HTTP proxy the process may have.

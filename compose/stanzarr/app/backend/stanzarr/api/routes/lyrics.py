@@ -59,7 +59,29 @@ def _answer(kind: str, text: str, source: str | None) -> dict:
             "from": "source" if source else "none", "source": source}
 
 
+def _variants(title: str) -> list[str]:
+    """Shorter names of the same song, for when its full one finds nothing:
+    a video's "Thin Ice - Tina Tuesday Freestyle", "Song (Live at …)"."""
+    out = []
+    for shorter in (re.split(r"\s[-–—|:]\s", title)[0], re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", title)):
+        shorter = shorter.strip()
+        if shorter and shorter.casefold() != title.casefold() and shorter not in out:
+            out.append(shorter)
+    return out
+
+
 def _ask(ctx, query: SongQuery) -> tuple[str, str, str | None, str | None]:
+    """The sources' best answer; nothing for the full title: its shorter names
+    (any length then: a video is often longer or shorter than the song)."""
+    found = _ask_once(ctx, query)
+    for title in _variants(query.title) if found[0] == "none" else []:
+        found = _ask_once(ctx, SongQuery(query.artist, title, query.album, 0, query.isrc))
+        if found[0] != "none":
+            break
+    return found
+
+
+def _ask_once(ctx, query: SongQuery) -> tuple[str, str, str | None, str | None]:
     best, best_label, failed = NOTHING, None, None
     for item, kind in ctx.sources.asked():
         try:
@@ -85,15 +107,17 @@ def _ask(ctx, query: SongQuery) -> tuple[str, str, str | None, str | None]:
             response_model=schemas.LyricsAnswer, response_model_by_alias=True)
 async def lyrics(ctx: Ctx, artist: str = Query(min_length=1, max_length=200),
                  title: str = Query(min_length=1, max_length=200), album: str = Query("", max_length=200),
-                 duration: float = Query(0, ge=0, le=24 * 3600, description="Seconds; helps tell versions apart.")):
+                 duration: float = Query(0, ge=0, le=24 * 3600, description="Seconds; helps tell versions apart."),
+                 refresh: bool = Query(False, description="Ask the sources now, not the answer kept from before.")):
     query = SongQuery(artist.strip(), title.strip(), album.strip(), duration)
     found = _from_library(ctx, query)
     if found:
         return found
     key = f"{simple(query.artist)}|{simple(query.title)}|{round(duration)}"
     # Nothing found is asked again the next day: sources learn songs (a new one, often).
-    kept = ctx.db.one("SELECT * FROM lookups WHERE key = ? AND at > ? AND (kind != 'none' OR at > ?)",
-                      (key, time.time() - LOOKUP_DAYS * 86400, time.time() - 86400))
+    kept = None if refresh else ctx.db.one(
+        "SELECT * FROM lookups WHERE key = ? AND at > ? AND (kind != 'none' OR at > ?)",
+        (key, time.time() - LOOKUP_DAYS * 86400, time.time() - 86400))
     if kept:
         return _answer(kept["kind"], kept["text"], kept["source"] or None)
     try:
@@ -329,9 +353,16 @@ async def find(body: FindIn, ctx: Ctx, who: Who):
         ctx.db.event("search", f"Find lyrics: {(body.query or body.title)[:200]}", actor=who.name, ok=False, detail=str(error))
         raise
     answers = await asyncio.to_thread(_answers, ctx, query)
+    asked_as = None
+    # Nothing for the full title: its shorter names, any length.
+    for title in _variants(query.title) if not any(a.get("found") for a in answers) else []:
+        shorter = await asyncio.to_thread(_answers, ctx, SongQuery(query.artist, title, query.album, 0))
+        if any(a.get("found") for a in shorter):
+            answers, asked_as = shorter, title
+            break
     good = [a for a in answers if a.get("found")]
     ctx.db.event("search", f"Find lyrics: {query.artist} – {query.title}", actor=who.name, ok=bool(good),
                  detail=", ".join(f"{a.get('label')}: {'synced' if a.get('synced') else 'words' if a.get('found') else a.get('error') or 'nothing'}"
                                   for a in answers))
     return {"artist": query.artist, "title": query.title, "album": query.album, "duration": query.duration,
-            "resolved": resolved, "answers": answers}
+            "resolved": resolved, "answers": answers, "asked_as": asked_as}

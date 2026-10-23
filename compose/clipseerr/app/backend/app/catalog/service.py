@@ -55,6 +55,10 @@ def _source_failed(name: str, exc: Exception) -> Problem:
     return Problem(502, f"{name} didn't answer. Try again in a moment.")
 
 
+def _has_words(value: dict) -> bool:
+    return bool((value or {}).get("synced") or (value or {}).get("plain") or (value or {}).get("instrumental"))
+
+
 def _from_stanzarr(answer: dict) -> dict:
     """stanzarr's answer as clipseerr's Lyrics: its timed lines, its words."""
     synced = lrclib.parse_lrc(answer.get("lrc") or "") if answer.get("synced") else []
@@ -735,7 +739,7 @@ class Catalog:
             credit.people = [refs.get(n) or ArtistRef(name=n) for n in credit.names]
         return found
 
-    async def lyrics(self, video_id: str) -> Lyrics:
+    async def lyrics(self, video_id: str, fresh: bool = False) -> Lyrics:
         """The song's words: stanzarr's when there is one (the library's own,
         else its sources'), LRCLIB's when stanzarr can't be asked (timed when
         it has them), else YouTube Music's; none when none has them."""
@@ -748,7 +752,8 @@ class Catalog:
 
         async def fetch():
             found = None
-            asked = await asyncio.to_thread(self.stanzarr.lyrics, first, _bare(title), "", seconds) if self.stanzarr else None
+            asked = (await asyncio.to_thread(self.stanzarr.lyrics, first, _bare(title), "", seconds, fresh)
+                     if self.stanzarr else None)
             if asked is not None:
                 found = _from_stanzarr(asked)
             else:
@@ -772,6 +777,10 @@ class Catalog:
 
         # lyrics3: stanzarr's first (lyrics2: with the language they are in).
         key = f"lyrics3:{titles.simple(first)}:{titles.simple(title)}:{seconds or 0}"
+        kept = self._cache.peek(key)
+        # Asked again: on demand ("Look again"), or when it found nothing an hour ago (sources learn new songs).
+        if kept and (fresh or (not _has_words(kept[1]) and time.time() - kept[0] > HOUR)):
+            self._cache.forget(key)
         found = Lyrics.model_validate(await self._cache.get(key, fetch, fresh=7 * DAY, stale=90 * DAY))
         if found.language and self.known:
             self.known.set_language(video_id, found.language)

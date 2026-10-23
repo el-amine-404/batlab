@@ -84,6 +84,8 @@ export type FindResult = {
   artist: string; title: string; album: string; duration: number;
   resolved: { artist: string; title: string; duration: number; via: string; cover: string | null } | null;
   answers: FindAnswer[];
+  /** Nothing for the full title: what it was found as ("Thin Ice" for "Thin Ice - Tina Tuesday Freestyle"). */
+  asked_as?: string | null;
 };
 
 export type SongDetail = {

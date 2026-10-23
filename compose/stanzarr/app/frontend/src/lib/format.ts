@@ -36,13 +36,13 @@ export function timings(format: string, synced: boolean): { label: string; hint:
 }
 
 /** The quality ladder (Settings, General), as the server ranks a song's best lyrics. */
-export const LEVELS = ["Nothing", "Plain words", "AI synced", "AI, checked", "Synced by a person", "Words in time"];
+export const LEVELS = ["Nothing", "Words only", "AI synced", "AI synced, checked", "Synced", "Synced word by word"];
 export const CUTOFFS: { value: "plain" | "ai" | "ai_checked" | "synced" | "words"; label: string; rank: number }[] = [
-  { value: "plain", label: "Plain words", rank: 1 },
+  { value: "plain", label: "Words only", rank: 1 },
   { value: "ai", label: "AI synced", rank: 2 },
   { value: "ai_checked", label: "AI synced, checked by a person", rank: 3 },
-  { value: "synced", label: "Synced by a person", rank: 4 },
-  { value: "words", label: "Words in time", rank: 5 },
+  { value: "synced", label: "Synced (by a source or a person)", rank: 4 },
+  { value: "words", label: "Synced word by word", rank: 5 },
 ];
 
 /** 83.4567 -> "1:23.457" */

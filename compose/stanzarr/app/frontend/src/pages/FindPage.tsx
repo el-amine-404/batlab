@@ -108,6 +108,7 @@ function Result({ result, onBack }: { result: FindResult; onBack?: () => void })
             {result.artist}{result.album ? ` · ${result.album}` : ""}{result.duration ? ` · ${length(result.duration)}` : ""}
             {result.resolved && ` · from the ${result.resolved.via} link`}
           </p>
+          {result.asked_as && <p className="text-xs text-muted-foreground">Found as “{result.asked_as}”: nothing has the full title.</p>}
         </div>
       </div>
 

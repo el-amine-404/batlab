@@ -35,11 +35,11 @@ type Line = { t: number; s: string; u?: boolean; fixed?: boolean };
 function Lines({ lines, synced, className }: { lines: Line[]; synced: boolean; className?: string }) {
   if (!lines.length) return <p className="text-sm text-muted-foreground">This version has no line.</p>;
   return (
-    <ol className={cn("max-h-[60vh] overflow-y-auto pr-1 text-sm leading-6", className)}>
+    <ol className={cn("text-sm leading-6", className)}>
       {lines.map((line, n) => (
-        <li key={n} className={cn("grid items-baseline gap-3 rounded px-1.5", synced ? "grid-cols-[5.5rem_1fr]" : "grid-cols-1",
+        <li key={n} className={cn("grid items-baseline gap-3 rounded px-1.5", synced ? "grid-cols-[3.5rem_1fr]" : "grid-cols-1",
                                   line.u && !line.fixed && "bg-warning/10")}>
-          {synced && <span className="font-mono text-xs text-muted-foreground tabular-nums">{clock(line.t)}</span>}
+          {synced && <span className="font-mono text-[11px] text-muted-foreground tabular-nums">{clock(line.t).replace(/\.\d+$/, "")}</span>}
           <span className={cn(!line.s && "text-muted-foreground/50")}>
             {line.s || "♪"}
             {line.u && !line.fixed && <span className="ml-2 text-[11px] text-warning">unsure</span>}
@@ -50,31 +50,102 @@ function Lines({ lines, synced, className }: { lines: Line[]; synced: boolean; c
   );
 }
 
-const versionName = (file: LyricsFile) => `${FORMAT[file.format] ?? file.format} · ${SOURCE[file.source] ?? file.source}`;
+/** What a version is, in words: "LRC file", "Embedded in the audio", with who made it when the file says. */
+function versionName(file: LyricsFile): string {
+  const what = file.format === "embedded" ? "Embedded" : `${FORMAT[file.format] ?? file.format} file`;
+  return file.source === "unknown" ? what : `${what} · ${SOURCE[file.source] ?? file.source}`;
+}
 
 function Version({ songId, file }: { songId: number; file: LyricsFile }) {
-  const { data, error, isPending } = useQuery({ queryKey: ["song", songId, "file", file.id], queryFn: () => api.fileLines(songId, file.id) });
+  const { data, error, isPending } = useVersion(songId, file);
   if (isPending) return <Loading />;
   if (error) return <Failed error={error} />;
   return <Lines lines={data.lines} synced={data.synced} />;
 }
 
-/** Two versions side by side, line by line. */
+type Pair = { a?: Line; b?: Line };
+
+const plainWords = (text: string) => text.toLowerCase().normalize("NFKD").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+
+/** The two versions' lines matched up (the longest run of the same words), the rest on their own. */
+function pairUp(a: Line[], b: Line[]): Pair[] {
+  const x = a.map((l) => plainWords(l.s));
+  const y = b.map((l) => plainWords(l.s));
+  const table = Array.from({ length: x.length + 1 }, () => new Array<number>(y.length + 1).fill(0));
+  for (let i = x.length - 1; i >= 0; i--)
+    for (let j = y.length - 1; j >= 0; j--)
+      table[i][j] = x[i] === y[j] ? table[i + 1][j + 1] + 1 : Math.max(table[i + 1][j], table[i][j + 1]);
+  const out: Pair[] = [];
+  let i = 0, j = 0;
+  while (i < x.length || j < y.length) {
+    if (i < x.length && j < y.length && x[i] === y[j]) out.push({ a: a[i++], b: b[j++] });
+    else if (j >= y.length || (i < x.length && table[i + 1][j] >= table[i][j + 1])) out.push({ a: a[i++] });
+    else out.push({ b: b[j++] });
+  }
+  return out;
+}
+
+function useVersion(songId: number, file: LyricsFile) {
+  return useQuery({ queryKey: ["song", songId, "file", file.id], queryFn: () => api.fileLines(songId, file.id) });
+}
+
+/**
+ * Two versions against each other, one list: lines both have, with how far
+ * apart their times are, and lines only one has, marked with which.
+ */
 function Compare({ songId, files }: { songId: number; files: LyricsFile[] }) {
   const [left, setLeft] = useState(files[0].id);
   const [right, setRight] = useState(files[1].id);
-  const pick = (value: number, set: (n: number) => void, label: string) => (
-    <select value={value} onChange={(e) => set(Number(e.target.value))} aria-label={label}
-            className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm">
-      {files.map((f) => <option key={f.id} value={f.id}>{f.name} ({versionName(f)})</option>)}
-    </select>
+  const one = useVersion(songId, files.find((f) => f.id === left)!);
+  const two = useVersion(songId, files.find((f) => f.id === right)!);
+  const pick = (value: number, set: (n: number) => void, label: string, tone: string) => (
+    <label className="flex min-w-0 flex-1 items-center gap-2 text-xs text-muted-foreground">
+      <span className={cn("size-2.5 shrink-0 rounded-full", tone)} aria-hidden />
+      <select value={value} onChange={(e) => set(Number(e.target.value))} aria-label={label}
+              className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground">
+        {files.map((f) => <option key={f.id} value={f.id}>{versionName(f)}</option>)}
+      </select>
+    </label>
   );
-  const one = files.find((f) => f.id === left)!;
-  const two = files.find((f) => f.id === right)!;
+  const pairs = one.data && two.data ? pairUp(one.data.lines, two.data.lines) : null;
+  const both = pairs?.filter((p) => p.a && p.b) ?? [];
+  // Times compared only when both have them.
+  const timed = !!(one.data?.synced && two.data?.synced);
+  const gaps = timed ? both.map((p) => Math.abs(p.a!.t - p.b!.t)) : [];
+  const moved = gaps.filter((g) => g >= 0.3).length;
   return (
-    <div className="grid gap-4 md:grid-cols-2">
-      <div className="flex min-w-0 flex-col gap-2">{pick(left, setLeft, "First version")}<Version songId={songId} file={one} /></div>
-      <div className="flex min-w-0 flex-col gap-2">{pick(right, setRight, "Second version")}<Version songId={songId} file={two} /></div>
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-2 sm:flex-row">
+        {pick(left, setLeft, "First version", "bg-sky-400")}
+        {pick(right, setRight, "Second version", "bg-amber-400")}
+      </div>
+      {!pairs ? <Loading /> : left === right ? <p className="text-sm text-muted-foreground">Pick two different versions.</p> : (
+        <>
+          <p className="text-xs text-muted-foreground">
+            {both.length} lines in both{!timed ? " (one has no timings)" : moved ? `, ${moved} timed differently (0.3 s or more)` : ", timed the same"}
+            {pairs.length - both.length ? `; ${pairs.length - both.length} in only one` : ""}.
+            {gaps.length > 0 && ` Largest gap ${Math.max(...gaps).toFixed(2)} s.`}
+          </p>
+          <ol className="text-sm leading-6">
+            {pairs.map((p, n) => {
+              const gap = timed && p.a && p.b ? p.b.t - p.a.t : 0;
+              return (
+                <li key={n} className={cn("grid grid-cols-[3.5rem_1fr_auto] items-baseline gap-2 rounded px-1.5",
+                                          !p.b && "bg-sky-400/10", !p.a && "bg-amber-400/10")}>
+                  <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
+                    {(p.a && one.data?.synced) || (!p.a && two.data?.synced) ? clock((p.a ?? p.b)!.t).replace(/\.\d+$/, "") : ""}
+                  </span>
+                  <span className={cn(!(p.a ?? p.b)!.s && "text-muted-foreground/50")}>{(p.a ?? p.b)!.s || "♪"}</span>
+                  <span className="text-[11px] tabular-nums">
+                    {!p.b ? <span className="text-sky-300">only first</span> : !p.a ? <span className="text-amber-300">only second</span>
+                      : Math.abs(gap) >= 0.3 ? <span className="text-warning">{gap > 0 ? "+" : ""}{gap.toFixed(2)} s</span> : ""}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        </>
+      )}
     </div>
   );
 }
@@ -82,7 +153,7 @@ function Compare({ songId, files }: { songId: number; files: LyricsFile[] }) {
 /** An action, and when it can't be done now, why, said under it (not only in a tooltip). */
 function Action({ children, reason }: { children: ReactNode; reason?: string | null }) {
   return (
-    <div className="flex max-w-56 flex-col gap-1">
+    <div className="flex min-w-0 flex-col gap-1 sm:max-w-56 [&>button]:w-full [&>a]:w-full sm:[&>button]:w-auto sm:[&>a]:w-auto">
       {children}
       {reason && <p className="flex items-start gap-1 text-[11px] leading-snug text-muted-foreground"><Info className="mt-px size-3 shrink-0" />{reason}</p>}
     </div>
@@ -145,14 +216,14 @@ export function SongPage() {
             <div className="mt-2 flex flex-wrap items-center gap-3">
               <StatusBadge status={song.status} linked />
               {quality.rank !== 9 && (
-                <span className="text-xs text-muted-foreground" title="The quality ladder, and the cutoff it is searched until (Settings, General)">
-                  {LEVELS[quality.rank]} · {reached ? "good enough: no more searching" : `searched until ${LEVELS[quality.cutoff].toLowerCase()}`}
+                <span className="text-xs text-muted-foreground" title="Settings, General: the quality songs are searched until">
+                  {reached ? "Good enough: not searched again" : `Searched again until ${LEVELS[quality.cutoff].toLowerCase()}`}
                 </span>
               )}
             </div>
           </div>
         </div>
-        <div className="flex flex-wrap items-start gap-3">
+        <div className="grid w-full grid-cols-2 items-start gap-2 sm:flex sm:w-auto sm:flex-wrap sm:gap-3">
           {can("edit") && (
             <Action>
               <Button asChild><Link to={`/songs/${id}/edit`}><Pencil /> {data.has_text ? "Edit timings" : "Write lyrics"}</Link></Button>
@@ -180,17 +251,19 @@ export function SongPage() {
           {!files.length ? (
             <p className="text-sm text-muted-foreground">No lyrics yet. Ask the sources, or write them in the editor.</p>
           ) : (
-            <Tabs defaultValue="best">
-              <TabsList className="mb-3 flex h-auto flex-wrap justify-start">
-                <TabsTrigger value="best" title="The version players get: the best one">As players show it</TabsTrigger>
-                {files.map((file) => <TabsTrigger key={file.id} value={String(file.id)} title={file.name}>{versionName(file)}</TabsTrigger>)}
-                {files.length > 1 && <TabsTrigger value="compare">Compare</TabsTrigger>}
+            <Tabs defaultValue={String(files[0].id)}>
+              <TabsList className="mb-3 flex h-auto w-full justify-start overflow-x-auto">
+                {files.map((file) => (
+                  <TabsTrigger key={file.id} value={String(file.id)} title={file.name} className="shrink-0 flex-none">{versionName(file)}</TabsTrigger>
+                ))}
+                {files.length > 1 && <TabsTrigger value="compare" className="shrink-0 flex-none">Compare</TabsTrigger>}
               </TabsList>
-              <TabsContent value="best">
-                {!best ? <Loading /> : <Lines lines={best.lines} synced={best.origin !== "plain"} />}
-              </TabsContent>
               {files.map((file) => (
-                <TabsContent key={file.id} value={String(file.id)}><Version songId={id} file={file} /></TabsContent>
+                <TabsContent key={file.id} value={String(file.id)}>
+                  {file.source === "ai" && best && best.lines.some((l) => l.u && !l.fixed)
+                    ? <Lines lines={best.lines} synced={best.origin !== "plain"} />
+                    : <Version songId={id} file={file} />}
+                </TabsContent>
               ))}
               {files.length > 1 && <TabsContent value="compare"><Compare songId={id} files={files} /></TabsContent>}
             </Tabs>
@@ -214,7 +287,7 @@ export function SongPage() {
                           <span title={timing.hint}>Timings: {timing.label.toLowerCase()}</span>
                           <span aria-hidden>·</span>
                           <Link to={`/library?by=${file.source}`} className="hover:text-foreground hover:underline" title="Every song with a file made so">
-                            By {SOURCE[file.source] ?? file.source}
+                            {file.source === "unknown" ? "Maker not recorded" : `By ${SOURCE[file.source] ?? file.source}`}
                           </Link>
                           <span aria-hidden>·</span>
                           {file.language ? <Link to={`/library?lang=${file.language}`} className="hover:text-foreground hover:underline">{file.language_name}</Link>

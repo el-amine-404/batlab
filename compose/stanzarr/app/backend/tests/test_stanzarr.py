@@ -1,5 +1,6 @@
 """python -m unittest discover -s tests (in the image: the Dockerfile's tested stage)."""
 
+import importlib
 import os
 import shutil
 import sqlite3
@@ -434,6 +435,26 @@ class Api(unittest.TestCase):
         self.assertEqual(first["text"], "hello")
         self.assertEqual(again["lrc"], first["lrc"])
         self.assertEqual(asked.call_count, 1, "the answer is kept")
+
+    def test_a_videos_longer_title_is_asked_shorter_and_refresh_skips_the_kept_answer(self):
+        route = importlib.import_module("stanzarr.api.routes.lyrics")
+        self.assertEqual(route._variants("Thin Ice - Tina Tuesday Freestyle"), ["Thin Ice"])
+        self.assertEqual(route._variants("Song (Live at X)"), ["Song"])
+        self.assertEqual(route._variants("Song"), [])
+        self.client.post("/api/v1/sources", json={"name": "LRCLIB", "type": "lrclib"}, headers=PAGE)
+
+        def lookup(artist, title, album, seconds, api):
+            return ("plain", "words\n", None) if title == "Thin Ice" else ("none", "", None)
+
+        params = {"artist": "Megan Thee Stallion", "title": "Thin Ice - Tina Tuesday Freestyle", "duration": 147}
+        with mock.patch("stanzarr.sources.lrclib.lookup", side_effect=lookup) as asked:
+            found = self.client.get("/api/v1/lyrics", params=params).json()
+            self.assertEqual((found["found"], found["text"]), (True, "words\n"))
+            self.assertEqual(asked.call_args.args[1:4], ("Thin Ice", "", 0))
+            self.client.get("/api/v1/lyrics", params=params)
+            kept = asked.call_count
+            self.client.get("/api/v1/lyrics", params=params | {"refresh": True})
+            self.assertGreater(asked.call_count, kept, "refresh asks again")
 
     @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg")
     def test_lyrics_of_a_library_song_come_from_the_library(self):

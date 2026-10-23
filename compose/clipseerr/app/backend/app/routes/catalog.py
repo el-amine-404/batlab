@@ -240,8 +240,8 @@ async def credits(video_id: str):
 
 @router.get("/videos/{video_id}/lyrics", summary="The song's words: timed lines (LRCLIB, else YouTube Music) "
             "or plain text", response_model=Lyrics, responses=_404)
-async def lyrics(video_id: str):
-    return await catalog.lyrics(video_id)
+async def lyrics(video_id: str, fresh: bool = Query(False, description="Ask the sources again now, not the kept answer.")):
+    return await catalog.lyrics(video_id, fresh)
 
 
 def _file_name(detail: VideoDetail, ext: str) -> str:

@@ -141,7 +141,8 @@ export const api = {
                                                         ["limit", String(page.limit ?? PAGE)], ["offset", String(page.offset ?? 0)]])}`,
                    { signal }),
   credits: (id: string, signal?: AbortSignal) => request<Credits>(`/videos/${encodeURIComponent(id)}/credits`, { signal }),
-  lyrics: (id: string, signal?: AbortSignal) => request<Lyrics>(`/videos/${encodeURIComponent(id)}/lyrics`, { signal }),
+  lyrics: (id: string, signal?: AbortSignal, fresh = false) =>
+    request<Lyrics>(`/videos/${encodeURIComponent(id)}/lyrics${fresh ? "?fresh=true" : ""}`, { signal }),
   /** Where the lyrics download as a file. */
   lyricsFile: (id: string, format: "lrc" | "txt") => `/api/v1/videos/${encodeURIComponent(id)}/lyrics.${format}`,
   hotPicks: (signal?: AbortSignal) => request<{ ids: string[] }>("/hot/picks", { signal }),
