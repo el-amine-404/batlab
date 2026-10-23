@@ -1045,5 +1045,23 @@ class GeniusCredits(unittest.TestCase):
 
 
 
+class DiscogsCredits(unittest.TestCase):
+    def test_a_tracks_credits_and_the_releases_that_name_it(self):
+        from app.credits import discogs_credits
+        release = {"tracklist": [{"position": "A1", "title": "Other"},
+                                 {"position": "A2", "title": "Get Lucky", "extraartists": [
+                                     {"name": "Pharrell Williams", "role": "Vocals, Written-By"}]}],
+                   "extraartists": [{"name": "Mick Guzauski (2)", "role": "Mixed By", "tracks": ""},
+                                    {"name": "Someone", "role": "Producer", "tracks": "A1"},
+                                    {"name": "Bob Ludwig", "role": "Mastered By", "tracks": "A1, A2"}]}
+        self.assertEqual(discogs_credits(release, "Get Lucky"), [
+            {"role": "Performed by", "names": ["Pharrell Williams"]},
+            {"role": "Written by", "names": ["Pharrell Williams"]},
+            {"role": "Mixed by", "names": ["Mick Guzauski"]},
+            {"role": "Mastered by", "names": ["Bob Ludwig"]}])
+        self.assertEqual(discogs_credits(release, "Not on it"), [])
+
+
+
 if __name__ == "__main__":
     unittest.main()
