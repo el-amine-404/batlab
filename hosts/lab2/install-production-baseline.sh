@@ -55,7 +55,10 @@ ufw allow 67/udp comment 'batlab DHCP'
 ufw --force enable
 
 systemctl daemon-reload
-systemctl reset-failed smartmontools.service batlab-restic-backup.service || true
+# Clear historical states after installing policies that distinguish notified
+# media findings (successful exit 1) from real scanner failures (exit 2).
+systemctl reset-failed smartmontools.service batlab-restic-backup.service \
+  batlab-mediascan-sweep.service batlab-mediascan-deep.service || true
 systemctl enable --now smartmontools.service batlab-watchdog-heartbeat.timer batlab-oom-watch.timer
 
 systemctl is-active --quiet smartmontools.service
