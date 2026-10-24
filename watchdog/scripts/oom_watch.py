@@ -123,21 +123,24 @@ def notify(events: list[OomEvent], test: bool = False) -> None:
     for name, found in groups.items():
         if test:
             kind = "info"
-            title = "OOM monitoring test"
-            fields = ["Host", socket.gethostname(), "Result", "Kernel OOM notifications are active"]
+            title = "TEST: OOM alerts work"
+            fields = ["Host", socket.gethostname(), "Result", "Notification delivery succeeded",
+                      "Action", "None — this was a test; no process was killed"]
         else:
             last = found[-1]
             kind = "failure"
             title = f"Out of memory: {name}"
             processes = ", ".join(f"{event.process} (PID {event.pid})" for event in found[-6:])
             fields = [
+                "Issue", f"The kernel killed {processes} because the memory limit was exhausted",
                 "Container", name,
-                "Killed", processes,
                 "RAM", size(last.memory),
                 "Swap", size(last.swap),
                 "When", last.timestamp.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z"),
                 "Occurrences", str(len(found)),
-                "Inspect", f"journalctl -k --since '{last.timestamp.isoformat()}'",
+                "Impact", "The killed process stopped and its service may have restarted",
+                "Fix", (f"Inspect: journalctl -k --since '{last.timestamp.isoformat()}'; "
+                        f"then reduce workload or raise {name}'s compose memory limit"),
             ]
         command = [sys.executable, "-I", str(NOTIFY), "watchdog", "alerts", kind, title]
         for field_name, value in zip(fields[::2], fields[1::2]):

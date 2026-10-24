@@ -99,14 +99,15 @@ fi
 if [[ -n "${WATCHDOG_DNS_SERVER:-}" ]]; then
   run_check "dns" dns_answers
 fi
-run_check "sshd" sshd_answers
-run_check "journald" journald_answers
-run_check "root disk (at least ${WATCHDOG_ROOT_DISK_PERCENT:-85}% used)" root_disk_healthy
+run_check "SSH is not answering on localhost:${WATCHDOG_SSH_PORT:-22}" sshd_answers
+run_check "journald did not complete a sync" journald_answers
+root_used="$(df --output=pcent / | tail -1 | tr -cd '0-9')"
+run_check "Root filesystem is ${root_used:-unknown}% used; alert limit is ${WATCHDOG_ROOT_DISK_PERCENT:-85}%" root_disk_healthy
 if systemctl cat smartmontools.service >/dev/null 2>&1; then
-  run_check "SMART monitoring" smartd_active
+  run_check "SMART disk monitoring is not running" smartd_active
 fi
 if systemctl cat batlab-restic-backup.service >/dev/null 2>&1; then
-  run_check "backup or backup freshness" backup_healthy
+  run_check "Restic last failed or the NetAlertX database dump is missing/older than ${WATCHDOG_BACKUP_MAX_AGE_HOURS:-36} hours" backup_healthy
 fi
 
 install -d -m 750 "$STATE_DIR"
@@ -125,11 +126,26 @@ if ((${#failures[@]})) && [[ ! -e "$FAILING_FILE" ]]; then
       "Disk" "$(data_disk_label)" "Log" "$(code_block "$(data_disk_log)")" \
       "Fix" "the data guard stops the disk's containers after ${WATCHDOG_DISK_HUNG_AFTER:-2} failed runs; revive-data-disk.sh takes it from there"
   else
-    watchdog_notify "Self-test failing" failure "Failed" "$(printf '%s\n' "${failures[@]}")" \
-      "Fix" "journalctl -u batlab-watchdog-heartbeat -n 30"
+    fixes=()
+    [[ " ${failures[*]} " == *" Root filesystem "* ]] && \
+      fixes+=("Run: cd ~/batlab && dockerprune/scripts/dockerprune.py")
+    [[ " ${failures[*]} " == *" SMART disk "* ]] && \
+      fixes+=("Run: sudo systemctl restart smartmontools; check: journalctl -u smartmontools -n 50")
+    [[ " ${failures[*]} " == *" Restic last failed "* ]] && \
+      fixes+=("Check: journalctl -u batlab-restic-backup -n 100; retry: sudo systemctl start batlab-restic-backup")
+    [[ " ${failures[*]} " == *" SSH is not "* ]] && \
+      fixes+=("Check locally: sudo systemctl restart ssh")
+    [[ " ${failures[*]} " == *" journald "* ]] && \
+      fixes+=("Check: journalctl -u systemd-journald -n 50")
+    watchdog_notify "Lab2 health check failed" failure \
+      "Issue" "$(printf '%s\n' "${failures[@]}")" \
+      "Impact" "Healthchecks.io is marked down until every check passes" \
+      "Fix" "$(printf '%s\n' "${fixes[@]}")"
   fi
 elif ((${#failures[@]} == 0)) && [[ -e "$FAILING_FILE" ]]; then
-  watchdog_notify "Self-test passing again" success "Was failing" "$(<"$FAILING_FILE")"
+  watchdog_notify "Lab2 health check recovered" success \
+    "Resolved" "$(<"$FAILING_FILE")" \
+    "Action" "None; all checks pass now"
   rm -f "$FAILING_FILE"
 fi
 

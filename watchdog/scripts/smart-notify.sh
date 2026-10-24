@@ -27,7 +27,7 @@ fi
 
 case "$failure" in
   EmailTest)
-    title="SMART test message"
+    title="TEST: SMART alerts work"
     kind=info
     ;;
   Temperature | Usage | SelfTest | ErrorCount | CurrentPendingSector | OfflineUncorrectableSector)
@@ -40,7 +40,12 @@ case "$failure" in
     ;;
 esac
 
-fields=(Device "$device" Problem "$message")
+if [[ "$failure" == EmailTest ]]; then
+  fields=(Result "Notification delivery succeeded" Action "None — this was a test; no disk fault occurred")
+else
+  fields=(Issue "$failure: $message" Device "$device" Impact "Disk health or data may be at risk" \
+    Fix "Run: sudo smartctl -a '$device'; inspect: journalctl -u smartmontools -n 100")
+fi
 [[ -n "${SMARTD_TFIRST:-}" ]] && fields+=("First seen" "$SMARTD_TFIRST")
 [[ -n "$detail" ]] && fields+=(Detail "$(printf '%s' "$detail" | tail -c 900)")
 
