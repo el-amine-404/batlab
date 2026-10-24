@@ -36,6 +36,12 @@ restic restore latest --target "$work" \
   --include /mnt/docker-volumes/database-dumps/sqlite/netalertx/db/app.db \
   --include /home/potato/batlab/compose/versions.env
 
+stage="excluded Frigate media audit"
+if restic ls latest | grep -Eq '^/mnt/docker-volumes/frigate/(media\.img|media/)'; then
+  echo "The newest snapshot unexpectedly contains Frigate camera media" >&2
+  exit 1
+fi
+
 paperless="$work/mnt/docker-volumes/database-dumps/paperless.dump"
 immich="$work/mnt/docker-volumes/database-dumps/immich.dump"
 sqlite="$work/mnt/docker-volumes/database-dumps/sqlite/netalertx/db/app.db"
@@ -61,7 +67,7 @@ docker exec -i immich-db pg_restore --list <"$immich" >/dev/null
 elapsed="$(($(date +%s) - started))"
 stage="success notification"
 restic_notify success "Backup restore test passed" \
-  "Validated" "Paperless PostgreSQL, Immich PostgreSQL, NetAlertX SQLite and repository configuration" \
+  "Validated" "Paperless PostgreSQL, Immich PostgreSQL, NetAlertX SQLite, repository configuration and Frigate-media exclusion" \
   "Source" "Newest off-site Restic snapshot" \
   "Action" "None" \
   "Duration" "${elapsed}s" || echo "Restore-test success notification was not delivered" >&2
