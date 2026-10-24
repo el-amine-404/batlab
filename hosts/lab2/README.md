@@ -35,7 +35,7 @@ NIC    Intel I219-LM, 1 Gbit, enp0s31f6, static 192.168.1.201
 | Disk revival | `watchdog/scripts/revive-data-disk.sh`, `WATCHDOG_DATA_USB_PORT=usb1-port1` | every 2 min: dead mount cleared, disk mounted, its USB 2 port power-cycled, USB 3 as a last resort | the disk does not come back from USB 3 to USB 2 by itself (2026-10-01, -03, -17) | with a new enclosure |
 | Freeze and panic reboot | `systemd/system.conf.d/watchdog.conf`, `sysctl.d/90-batlab-panic.conf` | iTCO hardware watchdog at 60 s; reboot 10 s after a panic | 2026-10-17 21:48: down with nothing in the journal | never |
 | Jellyfin transcode disk | `compose/jellyfin/setup-storage.sh` | 30 GB ext4 image at `$VOLUMES_ROOT/jellyfin/transcodes`, `/etc/fstab` | the root SSD is 221 GB; an open live TV stream filled 37.8 GB of it on 2026-10-20 | if 4K transcodes run out of room |
-| SMART monitoring | `smartd.conf` | root SSD and data disk by serial | USB names move between reboots | check both with `smartctl -a` once |
+| SMART monitoring | `smartd.conf` | root SSD and removable data disk by serial | USB names move between reboots; `-d removable` keeps smartd alive when the data disk is absent at boot | check both with `smartctl -a` once |
 | Battery | BIOS | charge limit ~80% if offered, power on after AC loss | a worn battery kept at 100% swells | check for swelling now and then |
 | Server lid policy | `logind.conf.d/60-batlab-server-lid.conf`, `systemd/batlab-lid-screen.service` | closing the lid blanks the built-in panel without suspending | network services must stay available while the laptop is closed | if this stops being a server |
 
