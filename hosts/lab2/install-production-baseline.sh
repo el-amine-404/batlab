@@ -47,6 +47,9 @@ ufw allow from "$LAN_CIDR" to any port 3000 proto tcp comment 'batlab AdGuard UI
 ufw allow from "$LAN_CIDR" to any port 445 proto tcp comment 'batlab Samba'
 ufw allow from "$LAN_CIDR" to any port 137:138 proto udp comment 'batlab Samba discovery'
 ufw allow in from 172.19.0.0/16 comment 'batlab containers to host'
+# Remove the older narrower DNS rule before adding the authoritative one. DHCP
+# clients need DNS before they necessarily have an address in LAN_CIDR.
+ufw --force delete allow from "$LAN_CIDR" to any port 53 || true
 ufw allow 53 comment 'batlab DNS'
 ufw allow 67/udp comment 'batlab DHCP'
 ufw --force enable
