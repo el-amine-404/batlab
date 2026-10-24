@@ -10,6 +10,12 @@ configuration, Docker application state, and Paperless documents. Replaceable
 media, download queues, caches, Redis state, and downloaded AI models are
 excluded by `conf/excludes.txt`.
 
+Secrets are included inside the encrypted Restic repository: `compose/.env`,
+root-owned service configuration below `/etc`, SSH material, and rclone's
+configuration. Git continues to ignore them. Keep the Restic repository
+password in an independent password manager: the copy inside the encrypted
+repository cannot unlock that repository after a total host loss.
+
 Before every snapshot, `scripts/dump-databases.sh` creates consistent custom
 format PostgreSQL dumps from `paperless-db` and `immich-db`. The raw database
 volumes remain in the backup as secondary recovery paths.
@@ -127,7 +133,8 @@ sudo rm -r -- "$restore_dir"
 The backup timer runs daily at 02:00. The repository check runs every Sunday at
 03:30 and reads one seventh of the stored data each time. On the first day of
 each month, `batlab-restic-restore-test.timer` restores the Paperless and Immich
-PostgreSQL dumps, NetAlertX SQLite database and repository version pins from the
-newest off-site snapshot, then validates every restored artifact. Backup and
+PostgreSQL dumps, NetAlertX SQLite database, `compose/.env`, and repository
+version pins from the newest off-site snapshot, then validates every restored
+artifact without printing secret values. Backup and
 restore-test results go to the `backups` notification channel with the failed
 stage and recovery command when action is required.

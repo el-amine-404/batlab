@@ -34,6 +34,7 @@ restic restore latest --target "$work" \
   --include /mnt/docker-volumes/database-dumps/paperless.dump \
   --include /mnt/docker-volumes/database-dumps/immich.dump \
   --include /mnt/docker-volumes/database-dumps/sqlite/netalertx/db/app.db \
+  --include /home/potato/batlab/compose/.env \
   --include /home/potato/batlab/compose/versions.env
 
 stage="excluded Frigate media audit"
@@ -46,9 +47,24 @@ paperless="$work/mnt/docker-volumes/database-dumps/paperless.dump"
 immich="$work/mnt/docker-volumes/database-dumps/immich.dump"
 sqlite="$work/mnt/docker-volumes/database-dumps/sqlite/netalertx/db/app.db"
 versions="$work/home/potato/batlab/compose/versions.env"
-for restored in "$paperless" "$immich" "$sqlite" "$versions"; do
+secrets="$work/home/potato/batlab/compose/.env"
+for restored in "$paperless" "$immich" "$sqlite" "$versions" "$secrets"; do
   [[ -s "$restored" ]] || { echo "Missing or empty restored file: $restored" >&2; exit 1; }
 done
+
+stage="secrets-file validation"
+[[ "$(stat -c %a "$secrets")" == 600 ]] || {
+  echo "Restored compose/.env does not have mode 600" >&2
+  exit 1
+}
+grep -q '^DISCORD_WEBHOOK_BACKUPS=' "$secrets" || {
+  echo "Restored compose/.env lacks DISCORD_WEBHOOK_BACKUPS" >&2
+  exit 1
+}
+if grep -q '^DISCORD_WABHOOK_BACKUPS=' "$secrets"; then
+  echo "Restored compose/.env still contains the misspelled backup webhook name" >&2
+  exit 1
+fi
 
 stage="NetAlertX SQLite integrity check"
 python3 - "$sqlite" <<'PY'
@@ -67,7 +83,7 @@ docker exec -i immich-db pg_restore --list <"$immich" >/dev/null
 elapsed="$(($(date +%s) - started))"
 stage="success notification"
 restic_notify success "Backup restore test passed" \
-  "Validated" "Paperless PostgreSQL, Immich PostgreSQL, NetAlertX SQLite, repository configuration and Frigate-media exclusion" \
+  "Validated" "Paperless PostgreSQL, Immich PostgreSQL, NetAlertX SQLite, encrypted secrets, repository configuration and Frigate-media exclusion" \
   "Source" "Newest off-site Restic snapshot" \
   "Action" "None" \
   "Duration" "${elapsed}s" || echo "Restore-test success notification was not delivered" >&2
