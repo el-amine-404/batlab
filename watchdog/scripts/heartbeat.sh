@@ -74,6 +74,18 @@ backup_healthy() {
   (( $(date +%s) - $(stat -c %Y "$backup_file") < max_age * 3600 ))
 }
 
+no_failed_units() {
+  local found
+  found="$(systemctl --failed --no-legend --plain 2>/dev/null)" || return 1
+  [[ -z "$found" ]]
+}
+
+no_unhealthy_containers() {
+  local found
+  found="$(docker ps --filter health=unhealthy --format '{{.Names}}' 2>/dev/null)" || return 1
+  [[ -z "$found" ]]
+}
+
 # A full answer, not just a reply: AdGuard alone replies SERVFAIL when Unbound
 # behind it is down, and the house has no working DNS either way.
 dns_answers() {
@@ -109,6 +121,12 @@ fi
 if systemctl cat batlab-restic-backup.service >/dev/null 2>&1; then
   run_check "Restic last failed or the NetAlertX database dump is missing/older than ${WATCHDOG_BACKUP_MAX_AGE_HOURS:-36} hours" backup_healthy
 fi
+failed_units="$(systemctl --failed --no-legend --plain 2>/dev/null | awk '{print $1}' | paste -sd, -)"
+run_check "Systemd has failed units: ${failed_units:-unknown}" no_failed_units
+if systemctl is-active --quiet docker.service; then
+  unhealthy_containers="$(docker ps --filter health=unhealthy --format '{{.Names}}' | paste -sd, -)"
+  run_check "Docker has unhealthy containers: ${unhealthy_containers:-unknown}" no_unhealthy_containers
+fi
 
 install -d -m 750 "$STATE_DIR"
 
@@ -137,6 +155,10 @@ if ((${#failures[@]})) && [[ ! -e "$FAILING_FILE" ]]; then
       fixes+=("Check locally: sudo systemctl restart ssh")
     [[ " ${failures[*]} " == *" journald "* ]] && \
       fixes+=("Check: journalctl -u systemd-journald -n 50")
+    [[ " ${failures[*]} " == *" Systemd has failed units "* ]] && \
+      fixes+=("Run: systemctl --failed; inspect: journalctl -u UNIT -n 100")
+    [[ " ${failures[*]} " == *" Docker has unhealthy containers "* ]] && \
+      fixes+=("Run: docker ps --filter health=unhealthy; inspect: docker logs --tail 100 CONTAINER")
     watchdog_notify "Lab2 health check failed" failure \
       "Issue" "$(printf '%s\n' "${failures[@]}")" \
       "Impact" "Healthchecks.io is marked down until every check passes" \

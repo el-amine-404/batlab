@@ -14,7 +14,9 @@ answering, and nothing told anyone.
   no integration. On 2026-10-10 it failed every run for ten hours and nobody
   heard of it. It also fails when the root filesystem reaches 85%, SMART
   monitoring stops, the backup unit fails, or the NetAlertX consistent dump is
-  older than 36 hours. The thresholds are configurable in `watchdog.env`.
+  older than 36 hours. It also reports any failed systemd unit or unhealthy
+  container, including failures added after this policy was installed. The
+  thresholds are configurable in `watchdog.env`.
   On a host serving the network's DNS, set `WATCHDOG_DNS_SERVER` and the
   heartbeat also asks it for a name and fails without an address back. On a
   host without the data disk, leave `WATCHDOG_DATA_ROOT` empty: the disk check is
