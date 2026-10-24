@@ -38,3 +38,37 @@ require_command() {
     exit 1
   }
 }
+
+backup_webhook() {
+  local env_file="${BATLAB_COMPOSE_ENV:-/home/potato/batlab/compose/.env}"
+  python3 - "$env_file" <<'PY'
+import sys
+try:
+    lines = open(sys.argv[1], encoding="utf-8")
+except OSError:
+    raise SystemExit(0)
+values = {}
+for raw in lines:
+    if "=" not in raw or raw.lstrip().startswith("#"):
+        continue
+    key, value = raw.rstrip("\n").split("=", 1)
+    values[key.strip()] = value.strip().strip('"').strip("'")
+print(values.get("DISCORD_WEBHOOK_BACKUPS") or values.get("DISCORD_WABHOOK_BACKUPS") or "")
+PY
+}
+
+# restic_notify KIND TITLE FIELD VALUE...; notification failure never changes
+# backup integrity, but is visible in the journal and Healthchecks still fires.
+restic_notify() {
+  local kind="$1" title="$2" fields=() fallback
+  shift 2
+  while (($#)); do
+    fields+=(--field "$1" "${2-}")
+    shift
+    (($#)) && shift
+  done
+  fallback="$(backup_webhook)"
+  BATLAB_NOTIFY_FALLBACK="$fallback" python3 -I \
+    "$SCRIPT_DIR/../../lib/batlab-common/batlab_common/notify.py" \
+    restic backups "$kind" "$title" "${fields[@]}"
+}

@@ -38,6 +38,7 @@ services:
       - NOTIFY_UPDATES=${NOTIFY_UPDATES:-${DISCORD_WEBHOOK_UPDATES:-}}
       - NOTIFY_REQUESTS=${NOTIFY_REQUESTS:-${DISCORD_WEBHOOK_REQUESTS:-}}
       - NOTIFY_CAMERAS=${NOTIFY_CAMERAS:-${DISCORD_WEBHOOK_CAMERAS:-}}
+      - NOTIFY_BACKUPS=${NOTIFY_BACKUPS:-${DISCORD_WEBHOOK_BACKUPS:-${DISCORD_WABHOOK_BACKUPS:-}}}
     volumes:
       - ./render.py:/render.py:ro
       # Relative to this file, not CONFIGS_ROOT (a symlink on lab2).

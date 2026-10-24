@@ -1,0 +1,11 @@
+[Unit]
+Description=Test a real Restic restore every month
+
+[Timer]
+OnCalendar=*-*-01 05:00:00
+Persistent=true
+RandomizedDelaySec=30m
+Unit=batlab-restic-restore-test.service
+
+[Install]
+WantedBy=timers.target

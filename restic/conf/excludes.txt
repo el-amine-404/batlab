@@ -10,10 +10,9 @@
 # Models can be downloaded again and are several gigabytes.
 /mnt/docker-volumes/ollama/**
 
-# Frigate's media disk image, and the recordings inside it: the DVR keeps the
-# full archive. Snapshots (frigate/clips) stay in the backup.
+# Frigate camera media is intentionally not an off-site backup target.
 /mnt/docker-volumes/frigate/media.img
-/mnt/docker-volumes/frigate/media/frigate/recordings/**
+/mnt/docker-volumes/frigate/media/**
 
 # Redis is transient queue/cache state; Paperless rebuilds it.
 /mnt/docker-volumes/paperless/redis/**

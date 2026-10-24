@@ -18,6 +18,7 @@
   "livetvguard": {"name": "live TV guard", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/jellyfin.png"},
   "dockerprune": {"name": "docker prune on {host}", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/docker.png"},
   "backupprune": {"name": "backup prune on {host}", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/debian-linux.png"},
+  "restic": {"name": "backup on {host}", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/restic.png"},
   "watchdog": {"name": "watchdog on {host}", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/debian-linux.png"},
   "uptime": {"name": "uptime kuma", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/uptime-kuma.png",
              "link": "http://uptimekuma.homelab.lan"},

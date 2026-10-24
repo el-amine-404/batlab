@@ -3,9 +3,6 @@
 set -Eeuo pipefail
 
 readonly DUMP_DIR="${BATLAB_DUMP_DIR:-/mnt/docker-volumes/database-dumps}"
-readonly PAPERLESS_DB_CONTAINER="${PAPERLESS_DB_CONTAINER:-paperless-db}"
-readonly PAPERLESS_DUMP="$DUMP_DIR/paperless.dump"
-readonly PAPERLESS_TMP="$PAPERLESS_DUMP.tmp"
 readonly LOCK_FILE="$DUMP_DIR/.dump-databases.lock"
 
 for command_name in docker flock; do
@@ -16,54 +13,47 @@ for command_name in docker flock; do
 done
 
 install -d -m 700 "$DUMP_DIR"
-
 exec 9>"$LOCK_FILE"
-if ! flock -n 9; then
-  echo "Another database export is already running" >&2
-  exit 1
-fi
+flock -n 9 || { echo "Another database export is already running" >&2; exit 1; }
 
-rm -f -- "$PAPERLESS_TMP"
-trap 'rm -f -- "$PAPERLESS_TMP"' EXIT
+temporary=()
+cleanup() { rm -f -- "${temporary[@]}"; }
+trap cleanup EXIT
 
-# A stopped Postgres leaves consistent files in its volume, which the snapshot
-# already includes. The dump only matters while the database is live, and a
-# stack stopped to save RAM must not abort the whole backup.
-if [[ "$(docker inspect --format '{{.State.Running}}' "$PAPERLESS_DB_CONTAINER" 2>/dev/null || true)" != true ]]; then
-  echo "Skipping Paperless export: $PAPERLESS_DB_CONTAINER is not running, its volume is backed up as-is" >&2
-  if [[ -e "$PAPERLESS_DUMP" ]]; then
-    echo "The previous $PAPERLESS_DUMP from $(date -r "$PAPERLESS_DUMP" '+%F %R') stays in the snapshot" >&2
+dump_postgres() {
+  local label="$1" container="$2" destination="$3" temporary_dump="$3.tmp"
+  temporary+=("$temporary_dump")
+  rm -f -- "$temporary_dump"
+
+  # A cleanly stopped PostgreSQL volume is consistent on disk. Preserve the
+  # previous dump and let Restic also capture the raw volume in that case.
+  if [[ "$(docker inspect --format '{{.State.Running}}' "$container" 2>/dev/null || true)" != true ]]; then
+    echo "Skipping $label export: $container is not running; its volume is backed up as-is" >&2
+    [[ ! -e "$destination" ]] || echo "Previous dump from $(date -r "$destination" '+%F %R') remains" >&2
+    return 0
   fi
-  exit 0
-fi
 
-docker exec "$PAPERLESS_DB_CONTAINER" sh -ceu '
-  command -v pg_dump >/dev/null
-  command -v pg_restore >/dev/null
-  test -n "$POSTGRES_USER"
-  test -n "$POSTGRES_DB"
-  pg_isready --quiet --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"
-'
+  docker exec "$container" sh -ceu '
+    command -v pg_dump >/dev/null
+    command -v pg_restore >/dev/null
+    test -n "$POSTGRES_USER"
+    test -n "$POSTGRES_DB"
+    pg_isready --quiet --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"
+  '
 
-echo "Exporting Paperless PostgreSQL database..."
-umask 077
-docker exec "$PAPERLESS_DB_CONTAINER" sh -ceu \
-  'exec pg_dump --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" \
-    --format=custom --no-owner --no-acl' \
-  >"$PAPERLESS_TMP"
+  echo "Exporting $label PostgreSQL database..."
+  umask 077
+  docker exec "$container" sh -ceu \
+    'exec pg_dump --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --format=custom --no-owner --no-acl' \
+    >"$temporary_dump"
+  [[ -s "$temporary_dump" ]] || { echo "$label database export is empty" >&2; return 1; }
+  docker exec -i "$container" pg_restore --list <"$temporary_dump" >/dev/null || {
+    echo "$label database export failed archive validation" >&2
+    return 1
+  }
+  mv -f -- "$temporary_dump" "$destination"
+  echo "Created $destination ($(du -h "$destination" | cut -f1))"
+}
 
-if [[ ! -s "$PAPERLESS_TMP" ]]; then
-  echo "Paperless database export is empty" >&2
-  exit 1
-fi
-
-# Parsing the table of contents catches a truncated or invalid custom archive.
-if ! docker exec -i "$PAPERLESS_DB_CONTAINER" \
-  pg_restore --list <"$PAPERLESS_TMP" >/dev/null; then
-  echo "Paperless database export failed archive validation" >&2
-  exit 1
-fi
-
-mv -f -- "$PAPERLESS_TMP" "$PAPERLESS_DUMP"
-trap - EXIT
-echo "Created $PAPERLESS_DUMP ($(du -h "$PAPERLESS_DUMP" | cut -f1))"
+dump_postgres Paperless "${PAPERLESS_DB_CONTAINER:-paperless-db}" "$DUMP_DIR/paperless.dump"
+dump_postgres Immich "${IMMICH_DB_CONTAINER:-immich-db}" "$DUMP_DIR/immich.dump"

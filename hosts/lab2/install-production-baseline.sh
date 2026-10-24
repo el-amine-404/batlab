@@ -35,6 +35,8 @@ install -m 644 "$REPO/watchdog/systemd/batlab-watchdog-heartbeat.service" \
   "$REPO/watchdog/systemd/batlab-oom-watch.timer" /etc/systemd/system/
 install -m 644 "$REPO/mediascan/systemd/batlab-mediascan-sweep.service" \
   "$REPO/mediascan/systemd/batlab-mediascan-deep.service" /etc/systemd/system/
+install -m 644 "$REPO/restic/systemd/batlab-restic-restore-test.service" \
+  "$REPO/restic/systemd/batlab-restic-restore-test.timer" /etc/systemd/system/
 
 # Install allow rules before enabling the firewall so an SSH deployment cannot
 # lock itself out. DNS and DHCP must accept clients before they have an address;
@@ -60,9 +62,11 @@ systemctl daemon-reload
 systemctl reset-failed smartmontools.service batlab-restic-backup.service \
   batlab-mediascan-sweep.service batlab-mediascan-deep.service || true
 systemctl enable --now smartmontools.service batlab-watchdog-heartbeat.timer batlab-oom-watch.timer
+systemctl enable --now batlab-restic-restore-test.timer
 
 systemctl is-active --quiet smartmontools.service
 systemctl is-active --quiet batlab-watchdog-heartbeat.timer
 systemctl is-active --quiet batlab-oom-watch.timer
+systemctl is-active --quiet batlab-restic-restore-test.timer
 ufw status verbose
 echo "lab2 production baseline installed"

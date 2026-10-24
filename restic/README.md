@@ -10,15 +10,13 @@ configuration, Docker application state, and Paperless documents. Replaceable
 media, download queues, caches, Redis state, and downloaded AI models are
 excluded by `conf/excludes.txt`.
 
-Before every snapshot, `scripts/dump-databases.sh` creates a consistent custom
-format PostgreSQL dump from `paperless-db`. The raw database volume remains in
-the backup as a temporary second recovery path. It can be excluded later, after
-a database restore has been tested successfully.
+Before every snapshot, `scripts/dump-databases.sh` creates consistent custom
+format PostgreSQL dumps from `paperless-db` and `immich-db`. The raw database
+volumes remain in the backup as secondary recovery paths.
 
-When `paperless-db` is stopped, the export is skipped rather than failing the
-backup: a cleanly stopped database is consistent on disk, so the raw volume is
-the recovery path, and the previous dump stays in the snapshot. Do not exclude
-the raw volume while the Paperless stack is ever left stopped.
+When either database is stopped, its export is skipped rather than failing the
+backup: a cleanly stopped database is consistent on disk, so its raw volume is
+the recovery path, and the previous dump stays in the snapshot.
 
 Then `scripts/dump-sqlite.py` copies every SQLite database in the Docker
 volumes (the apps' own: the *arr apps, Jellyfin, videodrop, clipseerr…) into
@@ -88,7 +86,8 @@ sudo install -m 644 restic/systemd/batlab-restic-backup.timer /etc/systemd/syste
 sudo install -m 644 restic/systemd/batlab-restic-check.service /etc/systemd/system/
 sudo install -m 644 restic/systemd/batlab-restic-check.timer /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now batlab-restic-backup.timer batlab-restic-check.timer
+sudo systemctl enable --now batlab-restic-backup.timer batlab-restic-check.timer \
+  batlab-restic-restore-test.timer
 ```
 
 The unit paths assume the repository is `/home/potato/batlab`. Adjust the two
@@ -126,4 +125,9 @@ sudo rm -r -- "$restore_dir"
 ```
 
 The backup timer runs daily at 02:00. The repository check runs every Sunday at
-03:30 and reads one seventh of the stored data each time.
+03:30 and reads one seventh of the stored data each time. On the first day of
+each month, `batlab-restic-restore-test.timer` restores the Paperless and Immich
+PostgreSQL dumps, NetAlertX SQLite database and repository version pins from the
+newest off-site snapshot, then validates every restored artifact. Backup and
+restore-test results go to the `backups` notification channel with the failed
+stage and recovery command when action is required.
