@@ -77,6 +77,19 @@ data_disk_label() {
   echo "$(cat "$WATCHDOG_DISK_LABEL_FILE" 2>/dev/null || echo "data disk"), $where, UUID ${uuid:0:8}"
 }
 
+# USB link rate of the configured data disk, in Mbit/s (usually 480 or 5000).
+data_disk_usb_speed() {
+  local uuid device parent dir
+  uuid="$(data_disk_uuid)"
+  device="$(readlink -f "/dev/disk/by-uuid/$uuid" 2>/dev/null || true)"
+  [[ -b "$device" ]] || return 1
+  parent="$(lsblk -no PKNAME "$device" 2>/dev/null | head -n 1)"
+  [[ -n "$parent" ]] || return 1
+  dir="/sys$(udevadm info -q path -n "/dev/$parent" 2>/dev/null)"
+  while [[ "$dir" != /sys && ! -r "$dir/speed" ]]; do dir="$(dirname "$dir")"; done
+  [[ -r "$dir/speed" ]] && cat "$dir/speed"
+}
+
 # The kernel's last lines about USB disks: what a reader needs to see why.
 data_disk_log() {
   journalctl -k --since "-${1:-30} min" --no-pager -o short-iso 2>/dev/null |

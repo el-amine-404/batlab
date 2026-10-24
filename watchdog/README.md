@@ -179,9 +179,12 @@ Two things now do the replug in software, where a root hub lets them:
   `WATCHDOG_REVIVE_USB3_FALLBACK=0`: a disk found at USB 3 is cleanly unmounted,
   retried three times on USB 2, and stays offline rather than returning to the
   known-unstable bus. Other hosts may explicitly allow USB 3 as a last resort.
-  Each revival posts to the alerts
-  channel with how it was done; a disk none of this brings back is announced
-  once as needing a hand and tried again every `WATCHDOG_REVIVE_RETRY_MINUTES`.
+  Each revival posts to the alerts channel once: the data guard reports the
+  outage duration, USB link and exact
+  container set after all recorded containers are confirmed running; the
+  revival script reports only when no containers were recorded.
+  A disk none of this brings back is announced once as needing a hand and tried
+  again every `WATCHDOG_REVIVE_RETRY_MINUTES`.
 
 A lab2 that freezes outright reboots itself: systemd pings the laptop's iTCO
 hardware watchdog (`hosts/lab2/systemd/system.conf.d/watchdog.conf`), and a

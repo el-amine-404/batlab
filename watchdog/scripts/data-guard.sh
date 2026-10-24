@@ -28,21 +28,26 @@ data_containers() {
 }
 
 stop_data_containers() {
-  local reason="$1" names
+  local reason="$1" names log count fields
   names="$(data_containers | awk '$3 == "true" { print $1 }' | xargs)"
+  count="$(wc -w <<<"$names")"
+  log="$(data_disk_log || true)"
 
   echo "$reason; stopping: ${names:-none}"
   # Before stopping: a container stuck on a hung disk can keep docker stop
   # waiting, and the card must go out regardless.
   install -d -m 750 "$STATE_DIR"
   [[ -e "$DOWN_FILE" ]] || date +%s >"$DOWN_FILE"
-  watchdog_notify "Data disk unavailable" failure \
+  fields=( \
     "Disk" "$(data_disk_label)" \
     "Mount" "\`$WATCHDOG_DATA_ROOT\`" \
     "Why" "$reason" \
-    "Stopped" "${names:+${names// /, }}" \
-    "Log" "$(code_block "$(data_disk_log)")" \
-    "Fix" "revive-data-disk.sh tries every 2 min (clears the mount, power-cycles the USB port); a replug if that fails"
+    "Stopped" "${count}: ${names// /, }" )
+  [[ -n "$log" ]] && fields+=("Log" "$(code_block "$log")")
+  fields+=( \
+    "Recovery" "automatic USB 2 recovery retries every 2 min" \
+    "Action" "if no recovery card arrives within 10 min, replug enclosure power and USB" )
+  watchdog_notify "Data disk unavailable" failure "${fields[@]}"
 
   if [[ -n "$names" ]]; then
     install -d -m 750 "$STATE_DIR"
@@ -53,7 +58,7 @@ stop_data_containers() {
 }
 
 start_data_containers() {
-  local wanted="" names name running="" remaining=""
+  local wanted="" names name running="" remaining="" speed=""
 
   if ! mountpoint -q "$WATCHDOG_DATA_ROOT"; then
     echo "$WATCHDOG_DATA_ROOT is not mounted" >&2
@@ -109,11 +114,13 @@ start_data_containers() {
 
   local down=""
   [[ -r "$DOWN_FILE" ]] && down="$(since "$(<"$DOWN_FILE")")"
+  speed="$(data_disk_usb_speed 2>/dev/null || true)"
   rm -f "$DOWN_FILE"
   watchdog_notify "Data disk back" success \
     "Disk" "$(data_disk_label)" \
     "Mount" "\`$WATCHDOG_DATA_ROOT\`" \
     "Down for" "${down:-unknown}" \
+    "USB link" "${speed:-unknown} Mbit/s" \
     "Restarted" "${wanted// /, }"
 }
 
