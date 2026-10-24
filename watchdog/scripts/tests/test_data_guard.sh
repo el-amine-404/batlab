@@ -80,3 +80,17 @@ fi
 [[ "$(<"$tmp/state/beta")" == true ]]
 [[ ! -e "$tmp/state/stopped-containers" ]]
 echo "data guard transactional restart test passed"
+
+# Bash accepts `local` at parse time even when it appears outside a function;
+# it then fails only on the rare recovery-exhausted path.
+if awk '
+  /^[[:space:]]*[a-zA-Z_][a-zA-Z0-9_]*\(\)[[:space:]]*\{/ { depth++ }
+  /^[[:space:]]*}/ && depth { depth-- }
+  !depth && /^[[:space:]]*local([[:space:]]|$)/ { print; bad=1 }
+  END { exit bad }
+' "$REPO/watchdog/scripts/revive-data-disk.sh"; then
+  :
+else
+  echo "revive-data-disk.sh declares local variables outside a function" >&2
+  exit 1
+fi
