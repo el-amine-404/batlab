@@ -24,8 +24,8 @@ on the "Apprise (alerts)" notification, Webhook, custom body; README.md.
       {%- assign down_at = hb.lastDownTime | date: "%s" | plus: 0 -%}
       {%- assign secs = up_at | minus: down_at -%}
       {%- if secs < 60 -%}{{ secs }} s
-      {%- elsif secs < 3600 -%}{{ secs | divided_by: 60 }} min
-      {%- else -%}{{ secs | divided_by: 3600 }} h {{ secs | modulo: 3600 | divided_by: 60 }} min{%- endif -%}
+      {%- elsif secs < 3600 -%}{{ secs | divided_by: 60 | floor }} min
+      {%- else -%}{{ secs | divided_by: 3600 | floor }} h {{ secs | modulo: 3600 | divided_by: 60 | floor }} min{%- endif -%}
     {%- endif -%}
   {%- endcapture -%}
   {%- capture body -%}{%- if down_for != "" -%}**Down for**  {{ down_for }}

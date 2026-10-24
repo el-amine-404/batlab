@@ -33,7 +33,7 @@ load_watchdog_config
 [[ -n "$WATCHDOG_DATA_ROOT" ]] || exit 0
 
 readonly ROOT="$WATCHDOG_DATA_ROOT"
-readonly STATE_DIR="/var/lib/batlab-watchdog"
+readonly STATE_DIR="${WATCHDOG_STATE_DIR:-/var/lib/batlab-watchdog}"
 readonly STATE_FILE="$STATE_DIR/revive"
 readonly DISK_FAILS_FILE="$STATE_DIR/data-disk-failures"
 readonly DOWN_FILE="$STATE_DIR/data-disk-down"
@@ -41,7 +41,8 @@ readonly RETRY_SECONDS=$((${WATCHDOG_REVIVE_RETRY_MINUTES:-10} * 60))
 # The USB 2 side of the connector the disk hangs on, as sysfs names it.
 readonly USB2_PORT="${WATCHDOG_DATA_USB_PORT:-}"
 # Seconds a disk gets to show up after its port comes back.
-readonly SETTLE=45
+readonly SETTLE="${WATCHDOG_USB_SETTLE_SECONDS:-45}"
+readonly USB2_ATTEMPTS="${WATCHDOG_USB2_ATTEMPTS:-3}"
 # What holds the mount open, or watches it, and must let go before it can be
 # cleared; started again once the disk is back.
 readonly HOLDERS=(smbd nmbd batlab-mediascan-watch)
@@ -124,6 +125,23 @@ mount_disk() {
   systemctl start "$MOUNT_UNIT" && mounted
 }
 
+# Speed of the USB device above a block device (480 or 5000).
+usb_speed_for() {
+  local source="$1" parent dir
+  [[ -b "$source" ]] || return 1
+  parent="$(lsblk -no PKNAME "$source" 2>/dev/null | head -n 1)"
+  [[ -n "$parent" ]] || return 1
+  dir="/sys$(udevadm info -q path -n "/dev/$parent")"
+  while [[ "$dir" != /sys && ! -r "$dir/speed" ]]; do dir="$(dirname "$dir")"; done
+  [[ -r "$dir/speed" ]] && cat "$dir/speed"
+}
+
+mounted_usb_speed() {
+  local source
+  source="$(findmnt -no SOURCE "$ROOT" 2>/dev/null || true)"
+  usb_speed_for "$source"
+}
+
 # usb1-port1 -> /sys/bus/usb/devices/usb1/1-0:1.0/usb1-port1
 port_dir() {
   local hub="${1%-port*}"
@@ -149,12 +167,28 @@ usb3_peer() {
 }
 
 back() {
-  local how="$1" down=""
+  local how="$1" down="" speed=""
+  mountpoint -q "$ROOT" || { echo "$ROOT is not mounted after recovery" >&2; return 1; }
+  timeout "${WATCHDOG_CHECK_TIMEOUT:-10}" stat "$ROOT" >/dev/null || {
+    echo "$ROOT does not answer after recovery" >&2
+    return 1
+  }
+  # The mount starts the guard through systemd. Reconcile once more before a
+  # success notification so "back" means all recorded containers are back.
+  if [[ -s "$STATE_DIR/stopped-containers" ]]; then
+    "$SCRIPT_DIR/data-guard.sh" start || return 1
+  fi
+  speed="$(mounted_usb_speed 2>/dev/null || true)"
+  if [[ "${WATCHDOG_FORCE_USB2:-0}" == 1 && "$speed" != 480 ]]; then
+    echo "recovery produced a ${speed:-unknown}M link, not USB 2" >&2
+    return 1
+  fi
   echo "Data disk back: $how"
   [[ -r "$DOWN_FILE" ]] && down="$(since "$(<"$DOWN_FILE")")"
   watchdog_notify "Data disk revived" success \
     "Disk" "$(data_disk_label)" \
     "Mount" "\`$ROOT\`" \
+    "USB link" "${speed:-unknown} Mbit/s" \
     "How" "$how" \
     "Down for" "${down:-unknown}" \
     "Tries" "$attempts"
@@ -162,17 +196,34 @@ back() {
   save
 }
 
-# ---- healthy: nothing to do ----------------------------------------------------------
+# ---- healthy: finish recovery, and enforce USB 2 on lab2 -----------------------------
 
+migrating_usb2=0
 if mounted && ! dead_mount; then
-  if ((attempts)); then attempts=0 last=0 asked=0; save; fi
-  exit 0
+  # A prior partial `docker start` is retried transactionally every two minutes.
+  if [[ -s "$STATE_DIR/stopped-containers" ]]; then
+    "$SCRIPT_DIR/data-guard.sh" start || exit 1
+  fi
+  speed="$(mounted_usb_speed 2>/dev/null || true)"
+  if [[ "${WATCHDOG_FORCE_USB2:-0}" != 1 || -z "$speed" || "$speed" -le 480 ]]; then
+    if ((attempts)); then attempts=0 last=0 asked=0; save; fi
+    exit 0
+  fi
+
+  echo "Data disk is at ${speed}M; migrating it safely to USB 2"
+  release_holders
+  trap restore_holders EXIT
+  # This invokes the guard, which records and stops every disk-backed
+  # container before the USB link is changed.
+  systemctl stop "$MOUNT_UNIT"
+  mounted && { echo "$ROOT did not unmount" >&2; exit 1; }
+  migrating_usb2=1
 fi
 
 # ---- not yet time for another try -----------------------------------------------------
 
 now="$(date +%s)"
-if ((asked && now - last < RETRY_SECONDS)); then
+if ((!migrating_usb2 && asked && now - last < RETRY_SECONDS)); then
   exit 0
 fi
 attempts=$((attempts + 1)) last=$now
@@ -183,7 +234,9 @@ trap restore_holders EXIT
 dead_mount && clear_dead_mount
 
 # 2. Present already (back by itself, or a replug): mount it.
-if [[ -b "$DEVICE" ]]; then
+device_speed="$(usb_speed_for "$DEVICE" 2>/dev/null || true)"
+if ((!migrating_usb2)) && [[ -b "$DEVICE" ]] &&
+  [[ "${WATCHDOG_FORCE_USB2:-0}" != 1 || -z "$device_speed" || "$device_speed" -le 480 ]]; then
   mount_disk && { back "mounted (the disk was on the bus)"; exit 0; }
 fi
 
@@ -192,14 +245,19 @@ if [[ -z "$USB2_PORT" ]]; then
 else
   port="$(port_dir "$USB2_PORT")"
 
-  # 3. The software replug, on the USB 2 side.
-  if cycle_port "$port" && wait_for_device && mount_disk; then
-    back "its USB 2 port was power-cycled"
-    exit 0
-  fi
+  # 3. Keep USB 3 disabled and retry the software replug on USB 2. Some
+  # JMS578 bridges need more than one cycle after moving between buses.
+  if peer="$(usb3_peer "$port")"; then echo 1 >"$peer/disable"; fi
+  for ((try = 1; try <= USB2_ATTEMPTS; try++)); do
+    echo "USB 2 recovery attempt $try/$USB2_ATTEMPTS"
+    if cycle_port "$port" && wait_for_device && mount_disk; then
+      back "USB 2 restored after $try attempt(s)"
+      exit 0
+    fi
+  done
 
   # 4. Last resort: let it back on at USB 3.
-  if [[ "${WATCHDOG_REVIVE_USB3_FALLBACK:-1}" == 1 ]] && peer="$(usb3_peer "$port")"; then
+  if [[ "${WATCHDOG_REVIVE_USB3_FALLBACK:-0}" == 1 ]] && peer="$(usb3_peer "$port")"; then
     echo "Enabling the USB 3 side, $(basename "$peer")"
     echo 0 >"$peer/disable"
     if wait_for_device && mount_disk; then
@@ -219,7 +277,7 @@ if ((!asked)); then
     "Mount" "\`$ROOT\`" \
     "Problem" "$problem" \
     "Log" "$(code_block "$(data_disk_log 60)")" \
-    "Tried" "clearing the mount, mounting, power-cycling its USB port$([[ "${WATCHDOG_REVIVE_USB3_FALLBACK:-1}" == 1 ]] && echo ", USB 3")" \
+    "Tried" "clearing the mount, mounting, power-cycling its USB 2 port ${USB2_ATTEMPTS} time(s)$([[ "${WATCHDOG_REVIVE_USB3_FALLBACK:-0}" == 1 ]] && echo ", USB 3")" \
     "Do" "unplug the enclosure's USB and power, wait 10 s, plug both back" \
     "Next try" "in ${WATCHDOG_REVIVE_RETRY_MINUTES:-10} min, then every ${WATCHDOG_REVIVE_RETRY_MINUTES:-10} min"
   asked=1

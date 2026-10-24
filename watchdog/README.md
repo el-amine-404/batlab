@@ -175,9 +175,11 @@ Two things now do the replug in software, where a root hub lets them:
   dead mount (gone, or hung per the heartbeat's failed reads), mounts a disk that
   is present (fsck first; the data guard then starts its containers), and if the
   disk is off the bus power-cycles the USB 2 side of its connector
-  (`WATCHDOG_DATA_USB_PORT`). As a last resort it lets the disk back on at USB 3
-  (`WATCHDOG_REVIVE_USB3_FALLBACK=1`) and says so: a disk that may hang later
-  still serves more than one off the bus. Each revival posts to the alerts
+  (`WATCHDOG_DATA_USB_PORT`). Lab2 sets `WATCHDOG_FORCE_USB2=1` and
+  `WATCHDOG_REVIVE_USB3_FALLBACK=0`: a disk found at USB 3 is cleanly unmounted,
+  retried three times on USB 2, and stays offline rather than returning to the
+  known-unstable bus. Other hosts may explicitly allow USB 3 as a last resort.
+  Each revival posts to the alerts
   channel with how it was done; a disk none of this brings back is announced
   once as needing a hand and tried again every `WATCHDOG_REVIVE_RETRY_MINUTES`.
 

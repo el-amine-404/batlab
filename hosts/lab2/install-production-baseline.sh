@@ -38,6 +38,36 @@ install -m 644 "$REPO/mediascan/systemd/batlab-mediascan-sweep.service" \
 install -m 644 "$REPO/restic/systemd/batlab-restic-restore-test.service" \
   "$REPO/restic/systemd/batlab-restic-restore-test.timer" /etc/systemd/system/
 
+# The JMS578 enclosure is reliable only at USB 2 on lab2. Install the boot
+# policy and the runtime recovery path together so a fresh host cannot get one
+# half without the other. Runtime migration is performed by the revival
+# service after it has cleanly stopped the mount and its containers.
+install -m 755 "$REPO/watchdog/scripts/usb2-only.sh" /usr/local/sbin/batlab-usb2-only
+install -m 644 "$SCRIPT_DIR/systemd/batlab-usb2-only.service" \
+  "$REPO/watchdog/systemd/batlab-data-disk-revive.service" \
+  "$REPO/watchdog/systemd/batlab-data-disk-revive.timer" \
+  "$REPO/watchdog/systemd/batlab-data-guard.service" \
+  "$REPO/watchdog/systemd/batlab-data-guard-boot.service" /etc/systemd/system/
+
+watchdog_config=/etc/batlab-watchdog/watchdog.env
+if [[ ! -e "$watchdog_config" ]]; then
+  install -d -m 750 /etc/batlab-watchdog
+  install -m 600 "$REPO/watchdog/conf/watchdog.env.example" "$watchdog_config"
+fi
+set_watchdog_value() {
+  local key="$1" value="$2"
+  if grep -qE "^${key}=" "$watchdog_config"; then
+    sed -i -E "s|^${key}=.*|${key}=${value}|" "$watchdog_config"
+  else
+    printf '%s=%s\n' "$key" "$value" >>"$watchdog_config"
+  fi
+}
+set_watchdog_value WATCHDOG_DATA_ROOT /mnt/storage/data
+set_watchdog_value WATCHDOG_DATA_USB_PORT usb1-port1
+set_watchdog_value WATCHDOG_FORCE_USB2 1
+set_watchdog_value WATCHDOG_USB2_ATTEMPTS 3
+set_watchdog_value WATCHDOG_REVIVE_USB3_FALLBACK 0
+
 # Install allow rules before enabling the firewall so an SSH deployment cannot
 # lock itself out. DNS and DHCP must accept clients before they have an address;
 # administration and Samba remain limited to the local subnet.
@@ -63,10 +93,15 @@ systemctl reset-failed smartmontools.service batlab-restic-backup.service \
   batlab-mediascan-sweep.service batlab-mediascan-deep.service || true
 systemctl enable --now smartmontools.service batlab-watchdog-heartbeat.timer batlab-oom-watch.timer
 systemctl enable --now batlab-restic-restore-test.timer
+systemctl enable batlab-usb2-only.service batlab-data-guard.service batlab-data-guard-boot.service
+systemctl enable --now batlab-data-disk-revive.timer
+mountpoint -q /mnt/storage/data && systemctl start batlab-data-guard.service
 
 systemctl is-active --quiet smartmontools.service
 systemctl is-active --quiet batlab-watchdog-heartbeat.timer
 systemctl is-active --quiet batlab-oom-watch.timer
 systemctl is-active --quiet batlab-restic-restore-test.timer
+systemctl is-active --quiet batlab-data-disk-revive.timer
+systemctl is-enabled --quiet batlab-usb2-only.service
 ufw status verbose
 echo "lab2 production baseline installed"

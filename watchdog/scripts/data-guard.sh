@@ -10,10 +10,14 @@ source "$SCRIPT_DIR/common.sh"
 load_watchdog_config
 : "${WATCHDOG_DATA_ROOT:?the data guard needs WATCHDOG_DATA_ROOT}"
 
-readonly STATE_DIR="/var/lib/batlab-watchdog"
+readonly STATE_DIR="${WATCHDOG_STATE_DIR:-/var/lib/batlab-watchdog}"
 readonly STOPPED_FILE="$STATE_DIR/stopped-containers"
+readonly START_FAILURE_FILE="$STATE_DIR/container-start-failures"
 # When the disk went: "back" and "revived" cards say for how long.
 readonly DOWN_FILE="$STATE_DIR/data-disk-down"
+
+exec 9>"${WATCHDOG_LOCK_FILE:-/run/batlab-data-guard.lock}"
+flock 9
 
 # name, restart policy, running, whether the last start failed; only for
 # containers bind-mounting something under the data root.
@@ -49,27 +53,60 @@ stop_data_containers() {
 }
 
 start_data_containers() {
-  local wanted="" names
+  local wanted="" names name running="" remaining=""
 
   if ! mountpoint -q "$WATCHDOG_DATA_ROOT"; then
     echo "$WATCHDOG_DATA_ROOT is not mounted" >&2
     exit 1
   fi
 
-  [[ -r "$STOPPED_FILE" ]] && wanted="$(xargs <"$STOPPED_FILE")"
+  if [[ -r "$STOPPED_FILE" ]]; then
+    wanted="$(sort -u "$STOPPED_FILE" | xargs)"
+  fi
 
   # Only containers this guard stopped, or that Docker failed to start while the
   # disk was missing. Containers stopped on purpose stay stopped.
   names="$(data_containers | awk -v wanted="$wanted" '
     BEGIN { n = split(wanted, w, " "); for (i = 1; i <= n; i++) want[w[i]] = 1 }
     $2 != "no" && $3 == "false" && ($1 in want || $4 == "failed") { print $1 }' | xargs)"
-  rm -f "$STOPPED_FILE"
+  for name in $names; do
+    if docker start "$name" >/dev/null &&
+      [[ "$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null)" == true ]]; then
+      running+="${running:+ }$name"
+    fi
+  done
 
-  [[ -n "$names" ]] || return 0
+  # Keep recovery intent until every container is confirmed running. A USB
+  # disconnect in the middle of `docker start a b c ...` used to erase this
+  # file after only the first few containers had started.
+  for name in $wanted; do
+    if [[ "$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null || true)" != true ]]; then
+      remaining+="${remaining:+ }$name"
+    fi
+  done
+  if [[ -n "$remaining" ]]; then
+    tr ' ' '\n' <<<"$remaining" >"$STOPPED_FILE"
+  else
+    rm -f "$STOPPED_FILE"
+  fi
 
-  # shellcheck disable=SC2086
-  docker start $names >/dev/null
-  echo "started: $names"
+  [[ -n "$running" ]] && echo "started: $running"
+  if [[ -n "$remaining" ]]; then
+    if [[ ! -r "$START_FAILURE_FILE" ]] || [[ "$(<"$START_FAILURE_FILE")" != "$remaining" ]]; then
+      printf '%s\n' "$remaining" >"$START_FAILURE_FILE"
+      watchdog_notify "Data disk recovery incomplete" failure \
+        "Disk" "$(data_disk_label)" \
+        "Mount" "\`$WATCHDOG_DATA_ROOT\`" \
+        "Still stopped" "${remaining// /, }" \
+        "Issue" "containers did not all restart after the disk returned" \
+        "Fix" "the data-disk revival timer retries every 2 min; inspect: docker logs <container>"
+    fi
+    return 1
+  fi
+  rm -f "$START_FAILURE_FILE"
+
+  [[ -n "$wanted" ]] || return 0
+
   local down=""
   [[ -r "$DOWN_FILE" ]] && down="$(since "$(<"$DOWN_FILE")")"
   rm -f "$DOWN_FILE"
@@ -77,7 +114,7 @@ start_data_containers() {
     "Disk" "$(data_disk_label)" \
     "Mount" "\`$WATCHDOG_DATA_ROOT\`" \
     "Down for" "${down:-unknown}" \
-    "Restarted" "${names// /, }"
+    "Restarted" "${wanted// /, }"
 }
 
 case "${1:-}" in

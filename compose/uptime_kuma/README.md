@@ -12,5 +12,12 @@ The notification lives in Uptime Kuma's database, not here. To set it up again
 - Request body **Custom body**: the contents of `notifications/apprise-body.liquid`
 - Additional headers: `{"Content-Type": "application/json"}`
 
+Install an updated version-controlled body on a running server (a timestamped,
+SQLite-consistent database backup is made first):
+
+```bash
+compose/uptime_kuma/install-notification-template.sh
+```
+
 Its Discord integration wrote "✅ Your service X is up! ✅" with the name
 repeated below it; that is what this replaced on 2026-10-17.
