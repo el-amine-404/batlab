@@ -1,0 +1,12 @@
+[Unit]
+Description=Check every minute for kernel out-of-memory kills
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Persistent=yes
+Unit=batlab-oom-watch.service
+
+[Install]
+WantedBy=timers.target

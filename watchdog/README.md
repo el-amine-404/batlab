@@ -30,6 +30,10 @@ answering, and nothing told anyone.
   nobody reads, so a failing disk was announced to no one. Which disks are
   watched, and with what temperature limits, is a host file:
   `hosts/<profile>/smartd.conf`.
+- **Memory alerts** — Netdata warns when a limited container stays near its
+  cgroup limit. `oom_watch.py` checks the kernel journal every minute and sends
+  a failure card naming the container and killed process after any container or
+  host OOM, even when the machine as a whole still has free RAM.
 
 Netdata's Discord alerts, including the blocked-process alert that would have
 caught the outage, are configured in `compose/netdata/alerts/`.
@@ -77,6 +81,7 @@ Install and enable the units:
 sudo install -m 644 watchdog/systemd/*.service watchdog/systemd/*.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now batlab-watchdog-heartbeat.timer
+sudo systemctl enable --now batlab-oom-watch.timer
 sudo systemctl enable batlab-data-guard-boot.service
 sudo systemctl enable --now batlab-data-guard.service
 ```
@@ -88,6 +93,12 @@ The unit paths assume the repository is `/home/potato/batlab`.
 ```bash
 sudo systemctl start batlab-watchdog-heartbeat.service
 sudo journalctl -u batlab-watchdog-heartbeat.service -n 20 --no-pager
+```
+
+Test the OOM notification route without consuming memory or killing anything:
+
+```bash
+sudo watchdog/scripts/oom_watch.py --test-notification
 ```
 
 The `lab1` check should turn green. For the guard, with the arr stack idle:

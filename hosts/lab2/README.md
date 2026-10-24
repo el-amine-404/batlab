@@ -21,6 +21,7 @@ NIC    Intel I219-LM, 1 Gbit, enp0s31f6, static 192.168.1.201
 | Setting | Where | lab2 value | Why | Revisit |
 | --- | --- | --- | --- | --- |
 | Container CPU and memory limits | `compose.env` | lab1's, with Ollama at 6 CPUs / 12 GB and Immich ML at 4 GB | twice lab1's RAM and threads | after a week of Netdata |
+| Carwatch memory | `compose.env`, `CARWATCH_MEM_LIMIT` | 1.5 GB | its model and concurrent FFmpeg jobs hit the old 768 MB limit 11 times on 2026-10-18 and 19 | if it stays above 85% |
 | Render group for Jellyfin and Frigate | `compose.env`, `RENDER_GID` | `992` | Debian assigns the gid at install | on reinstall |
 | Stacks on this host | `stacks.txt` | all but `adguardhome-sync` | lab1 holds the AdGuard settings and pushes them here | when a stack moves |
 | DHCP range | `AdGuardHome.yaml`, `dhcp` | `.101`-`.200`, 7-day leases, DNS `.201` then `.3` (each host lists itself first) | lab1 serves `.4`-`.100`; ranges must never overlap | if a third DHCP host joins |

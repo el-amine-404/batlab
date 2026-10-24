@@ -209,7 +209,7 @@ services:
       - /dev/dri:/dev/dri
     group_add:
       - "${RENDER_GID:?set in hosts/<profile>/compose.env}"
-    mem_limit: 768m
+    mem_limit: ${CARWATCH_MEM_LIMIT:?set in hosts/<profile>/compose.env}
     cpus: 3
     read_only: true
     # The last 15 min of the sub stream for the clips (about 70 MB).
