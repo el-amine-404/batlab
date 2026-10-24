@@ -55,6 +55,25 @@ journald_answers() {
   journalctl --sync
 }
 
+root_disk_healthy() {
+  local used
+  used="$(df --output=pcent / | tail -1 | tr -cd '0-9')"
+  [[ "$used" =~ ^[0-9]+$ ]] || return 1
+  ((used < ${WATCHDOG_ROOT_DISK_PERCENT:-85}))
+}
+
+smartd_active() {
+  systemctl is-active --quiet smartmontools.service
+}
+
+backup_healthy() {
+  local backup_file="${WATCHDOG_BACKUP_FILE:-/mnt/docker-volumes/database-dumps/sqlite/netalertx/db/app.db}"
+  local max_age="${WATCHDOG_BACKUP_MAX_AGE_HOURS:-36}"
+  systemctl is-failed --quiet batlab-restic-backup.service && return 1
+  [[ -s "$backup_file" ]] || return 1
+  (( $(date +%s) - $(stat -c %Y "$backup_file") < max_age * 3600 ))
+}
+
 # A full answer, not just a reply: AdGuard alone replies SERVFAIL when Unbound
 # behind it is down, and the house has no working DNS either way.
 dns_answers() {
@@ -82,6 +101,13 @@ if [[ -n "${WATCHDOG_DNS_SERVER:-}" ]]; then
 fi
 run_check "sshd" sshd_answers
 run_check "journald" journald_answers
+run_check "root disk (at least ${WATCHDOG_ROOT_DISK_PERCENT:-85}% used)" root_disk_healthy
+if systemctl cat smartmontools.service >/dev/null 2>&1; then
+  run_check "SMART monitoring" smartd_active
+fi
+if systemctl cat batlab-restic-backup.service >/dev/null 2>&1; then
+  run_check "backup or backup freshness" backup_healthy
+fi
 
 install -d -m 750 "$STATE_DIR"
 

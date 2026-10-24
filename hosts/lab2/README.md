@@ -75,3 +75,15 @@ Remove the policy and restore Debian's default lid behavior with:
 ```bash
 sudo hosts/lab2/install-lid-policy.sh --uninstall
 ```
+
+Install or refresh the security, monitoring and bounded-retry policy with the
+idempotent repository installer. It installs SMART and UFW, permits SSH and
+administration only from `192.168.1.0/24`, permits DNS/DHCP clients, enables the
+heartbeat and OOM timers, and installs the Restic/SMART restart policies:
+
+```bash
+sudo hosts/lab2/install-production-baseline.sh
+```
+
+Set `LAB2_LAN_CIDR` when provisioning on a different LAN. The installer adds
+the SSH allow rule before enabling UFW so it does not cut off its own session.

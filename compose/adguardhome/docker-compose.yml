@@ -15,7 +15,9 @@ services:
     healthcheck:
       # The UI is on 3000; port 80 is Caddy when it runs on the same host, and
       # nothing at all when it does not.
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/login.html"]
+      # Use IPv4 explicitly: BusyBox wget resolves localhost to ::1 first, but
+      # AdGuard listens on IPv4 here and Docker otherwise reports a false fault.
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000/login.html"]
       interval: 30s
       timeout: 10s
       retries: 3
