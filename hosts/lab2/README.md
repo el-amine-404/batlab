@@ -36,6 +36,7 @@ NIC    Intel I219-LM, 1 Gbit, enp0s31f6, static 192.168.1.201
 | Jellyfin transcode disk | `compose/jellyfin/setup-storage.sh` | 30 GB ext4 image at `$VOLUMES_ROOT/jellyfin/transcodes`, `/etc/fstab` | the root SSD is 221 GB; an open live TV stream filled 37.8 GB of it on 2026-10-20 | if 4K transcodes run out of room |
 | SMART monitoring | `smartd.conf` | root SSD and data disk by serial | USB names move between reboots | check both with `smartctl -a` once |
 | Battery | BIOS | charge limit ~80% if offered, power on after AC loss | a worn battery kept at 100% swells | check for swelling now and then |
+| Server lid policy | `logind.conf.d/60-batlab-server-lid.conf`, `systemd/batlab-lid-screen.service` | closing the lid blanks the built-in panel without suspending | network services must stay available while the laptop is closed | if this stops being a server |
 
 ## Installing on lab2
 
@@ -53,4 +54,23 @@ sudo apt install smartmontools
 sudo cp /etc/smartd.conf /etc/smartd.conf.packaged
 sudo install -m 644 hosts/lab2/smartd.conf /etc/smartd.conf
 sudo systemctl restart smartmontools.service
+sudo hosts/lab2/install-lid-policy.sh
+```
+
+The lid installer disables every logind lid action and enables
+`batlab-lid-screen.service`. The service listens to the kernel's `Lid Switch`
+events, blanks the framebuffer and Intel backlight on close, and restores the
+previous brightness on open. It discovers the input event number at runtime, so
+renumbering after a kernel update does not break it. Verify it after installation:
+
+```bash
+systemctl is-enabled batlab-lid-screen.service
+systemctl is-active batlab-lid-screen.service
+sudo journalctl -u batlab-lid-screen.service -n 20 --no-pager
+```
+
+Remove the policy and restore Debian's default lid behavior with:
+
+```bash
+sudo hosts/lab2/install-lid-policy.sh --uninstall
 ```
