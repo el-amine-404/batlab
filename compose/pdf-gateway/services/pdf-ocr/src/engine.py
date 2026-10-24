@@ -197,15 +197,93 @@ class OcrCoordinator:
         self.runner = runner or OcrMyPdfRunner()
         self.assessor = assessor or LexicalQualityAssessor()
 
+    def _enrich_embedded_diagrams(self, input_path: str, output_path: str, fallback_text: str) -> Tuple[bool, str]:
+        """
+        Scans born-digital PDF for embedded diagram images (width >= 350, height >= 200).
+        Runs Tesseract OCR directly on the isolated image crops and injects invisible
+        searchable text layers (render_mode=3) at the exact diagram coordinates.
+        Preserves 100% of native vector text while making diagrams fully selectable.
+        """
+        try:
+            import fitz
+            doc = fitz.open(input_path)
+            diagrams_ocred = 0
+
+            # Fast check if any images exist
+            total_images = sum(len(page.get_images()) for page in doc)
+            if total_images == 0:
+                doc.close()
+                shutil.copy2(input_path, output_path)
+                return False, fallback_text
+
+            for page_idx in range(len(doc)):
+                page = doc[page_idx]
+                for img in page.get_images(full=True):
+                    xref = img[0]
+                    w, h = img[2], img[3]
+                    # Only process large diagrams/figures, ignore tiny icons, logos, bullets
+                    if w >= 350 and h >= 200:
+                        try:
+                            bbox = page.get_image_bbox(img)
+                        except Exception:
+                            continue
+
+                        try:
+                            base_img = doc.extract_image(xref)
+                            img_bytes = base_img["image"]
+                            ext = base_img.get("ext", "png")
+                            tmp_img = f"/tmp/diag_{xref}.{ext}"
+                            with open(tmp_img, "wb") as f:
+                                f.write(img_bytes)
+
+                            res = subprocess.run(
+                                ["tesseract", tmp_img, "stdout", "-l", "fra+eng"],
+                                capture_output=True,
+                                text=True,
+                                timeout=15
+                            )
+                            if os.path.exists(tmp_img):
+                                os.remove(tmp_img)
+
+                            txt = res.stdout.strip()
+                            if txt and len(txt) > 5:
+                                # Render mode 3 = invisible text (preserves image appearance while making text selectable)
+                                page.insert_textbox(bbox, txt, fontsize=10, render_mode=3)
+                                diagrams_ocred += 1
+                        except Exception:
+                            continue
+
+            if diagrams_ocred > 0:
+                doc.save(output_path)
+                doc.close()
+                try:
+                    res = subprocess.run(
+                        [config.pdftotext_cmd, "-l", "2", output_path, "-"],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        timeout=10
+                    )
+                    extracted_text = res.stdout.strip()
+                except Exception:
+                    extracted_text = fallback_text
+                return True, extracted_text
+            else:
+                doc.close()
+                shutil.copy2(input_path, output_path)
+                return False, fallback_text
+        except Exception:
+            shutil.copy2(input_path, output_path)
+            return False, fallback_text
+
     def process(self, input_path: str, output_path: str) -> Dict[str, Any]:
         # 1. Step 1: Check if already native vector text
         is_native, char_count, sample_text = self.detector.is_native_vector_pdf(input_path)
 
         ocr_applied = False
         if is_native:
-            # Already clean vector PDF -> copy directly, bypass OCR to save CPU!
-            shutil.copy2(input_path, output_path)
-            extracted_text = sample_text
+            # Native vector document: perform selective OCR on embedded diagrams
+            ocr_applied, extracted_text = self._enrich_embedded_diagrams(input_path, output_path, sample_text)
         else:
             # Check if document has Arabic characters
             has_arabic = bool(re.search(r'[\u0600-\u06FF]', sample_text))
