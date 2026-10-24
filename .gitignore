@@ -53,3 +53,10 @@ __pycache__/
 untrunc/cases/*.json
 !untrunc/cases/*.example.json
 untrunc/recipes/
+
+# Ephemeral video experiments and benchmarks
+*.mp4
+benchmarks/
+realesrgan/
+upscale_video.sh
+

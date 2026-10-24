@@ -1,0 +1,180 @@
+name: ${PDF_GATEWAY_PROJECT_NAME:-pdf-gateway}
+# PDF Security Gateway & Ingestion Pipeline:
+# Sanitizes untrusted PDFs, scans for exploits/malware, injects lossless OCR
+# (English, French, Arabic), dynamically classifies via local GPU AI, and
+# dispatches clean documents into Paperless-ngx on Lab2.
+
+services:
+  pdf-db:
+    image: ${IMAGE_PDF_DB:-postgres}:${TAG_PDF_DB:-16-alpine}
+    container_name: pdf-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=pipeline
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${PDF_DB_PASSWORD:-postgres}
+    volumes:
+      - ${VOLUMES_ROOT}/pdf-gateway/db:/var/lib/postgresql/data
+      - ./shared/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - home_server
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pipeline"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    cpus: ${PDF_DB_CPUS:-0.5}
+    mem_limit: ${PDF_DB_MEM_LIMIT:-512mb}
+    mem_reservation: ${PDF_DB_MEM_RESERVATION:-128mb}
+
+  pdf-shield:
+    build:
+      context: ./services/pdf-shield
+      dockerfile: Dockerfile
+      network: host
+    image: local/batlab-pdf-shield:latest
+    container_name: pdf-shield
+    restart: unless-stopped
+    networks:
+      - home_server
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    mem_limit: 512mb
+
+  pdf-sanitizer:
+    build:
+      context: ./services/pdf-sanitizer
+      dockerfile: Dockerfile
+      network: host
+    image: local/batlab-pdf-sanitizer:latest
+    container_name: pdf-sanitizer
+    restart: unless-stopped
+    networks:
+      - home_server
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    mem_limit: 512mb
+
+  pdf-ocr:
+    build:
+      context: ./services/pdf-ocr
+      dockerfile: Dockerfile
+      network: host
+    image: local/batlab-pdf-ocr:latest
+    container_name: pdf-ocr
+    restart: unless-stopped
+    environment:
+      - OCR_JOBS=1
+    networks:
+      - home_server
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    cpus: 1.0
+    mem_limit: 2gb
+
+  pdf-enricher:
+    build:
+      context: ./services/pdf-enricher
+      dockerfile: Dockerfile
+      network: host
+    image: local/batlab-pdf-enricher:latest
+    container_name: pdf-enricher
+    restart: unless-stopped
+    environment:
+      - LM_STUDIO_URL=http://${AI_LAPTOP_IP:-192.168.1.130}:${AI_LAPTOP_LM_STUDIO_PORT:-1234}/v1
+      - TEXT_MODEL=qwen2.5-3b-instruct
+      - VISION_MODEL=qwen2.5-vl-3b-instruct
+    networks:
+      - home_server
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    mem_limit: 512mb
+
+  pdf-orchestrator:
+    build:
+      context: ./services/pdf-orchestrator
+      dockerfile: Dockerfile
+      network: host
+    image: local/batlab-pdf-orchestrator:latest
+    container_name: pdf-orchestrator
+    restart: unless-stopped
+    ports:
+      - ${HOST_LOOPBACK_IP:-127.0.0.1}:${PDF_GATEWAY_HTTP_PORT:-8850}:8000
+    depends_on:
+      pdf-db:
+        condition: service_healthy
+      pdf-shield:
+        condition: service_healthy
+      pdf-sanitizer:
+        condition: service_healthy
+      pdf-ocr:
+        condition: service_healthy
+      pdf-enricher:
+        condition: service_healthy
+    environment:
+      - TZ=${TZ}
+      - POSTGRES_HOST=pdf-db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${PDF_DB_PASSWORD:-postgres}
+      - POSTGRES_DB=pipeline
+      - SHIELD_URL=http://pdf-shield:8001
+      - SANITIZER_URL=http://pdf-sanitizer:8002
+      - OCR_URL=http://pdf-ocr:8003
+      - ENRICHER_URL=http://pdf-enricher:8004
+      - PAPERLESS_URL=http://paperless:8000
+      - PAPERLESS_TOKEN=${PAPERLESS_API_TOKEN:-b962163c29b0edd3711522adcdd602170709c609}
+      - PAPERLESS_HOST_HEADER=paperless.homelab.lan
+      - APPRISE_URL=http://apprise:8000/notify/pdf-gateway
+      - APPRISE_ALERT_TAG=alerts
+      - APPRISE_IMPORT_TAG=downloads
+      - HOLDING_DIR=/data/holding
+      - QUARANTINE_DIR=/data/quarantine
+      - ARCHIVE_DIR=/data/archive
+    volumes:
+      - ${DATA_ROOT}/documents/archive:/data/archive
+      - ${DATA_ROOT}/documents/holding:/data/holding
+      - ${DATA_ROOT}/documents/quarantine:/data/quarantine
+    networks:
+      - home_server
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    cpus: ${PDF_GATEWAY_CPUS:-1.0}
+    mem_limit: ${PDF_GATEWAY_MEM_LIMIT:-1gb}
+    mem_reservation: ${PDF_GATEWAY_MEM_RESERVATION:-256mb}
+
+networks:
+  home_server:
+    external: true
+    name: home_server

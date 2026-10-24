@@ -17,6 +17,7 @@ HOST_ENV := hosts/$(HOST_PROFILE)/compose.env
 # Image versions are tracked in git and bumped by Renovate; secrets stay in $(ENV).
 VERSIONS_ENV := compose/versions.env
 
+export DOCKER_BUILDKIT ?= 0
 DC := docker compose --env-file $(VERSIONS_ENV) --env-file $(ENV) --env-file $(HOST_ENV)
 
 # Auto-discover stacks. A host that runs only some of them lists those in
@@ -39,7 +40,7 @@ SITES_ROOT   ?= /srv/sites
 PUID := $(shell id -u)
 PGID := $(shell id -g)
 
-.PHONY: help list setup network up down restart pull config logs ps check-stack check-all-confirm
+.PHONY: help list setup network up down restart pull build config logs ps check-stack check-all-confirm
 
 define compose-loop
 @for s in $(TARGETS); do \
@@ -151,6 +152,9 @@ restart: check-stack check-all-confirm
 pull: check-stack check-all-confirm
 	$(call compose-loop,pull)
 
+build: check-stack check-all-confirm
+	$(call compose-loop,build)
+
 config: check-stack check-all-confirm
 	$(call compose-loop,config,-q)
 
@@ -230,7 +234,9 @@ setup: check-env
 		$(VOLUMES_ROOT)/clipseerr \
 		$(VOLUMES_ROOT)/subfeed \
 		$(VOLUMES_ROOT)/videodrop \
-		$(VOLUMES_ROOT)/musicguard
+		$(VOLUMES_ROOT)/musicguard \
+		$(VOLUMES_ROOT)/pdf-gateway/db \
+		$(VOLUMES_ROOT)/pdf-gateway/archive
 
 	@echo "==> Creating data directories..."
 	sudo mkdir -p \
@@ -242,6 +248,8 @@ setup: check-env
 		$(DATA_ROOT)/documents/media \
 		$(DATA_ROOT)/documents/export \
 		$(DATA_ROOT)/documents/consume \
+		$(DATA_ROOT)/documents/holding \
+		$(DATA_ROOT)/documents/quarantine \
 		$(DATA_ROOT)/media/music \
 		$(DATA_ROOT)/media/music-aurral \
 		$(DATA_ROOT)/media/music-extras \
@@ -286,6 +294,8 @@ setup: check-env
 		$(DATA_ROOT)/documents/media \
 		$(DATA_ROOT)/documents/export \
 		$(DATA_ROOT)/documents/consume \
+		$(DATA_ROOT)/documents/holding \
+		$(DATA_ROOT)/documents/quarantine \
 		$(DATA_ROOT)/photos \
 		$(DATA_ROOT)/files \
 		$(VOLUMES_ROOT)/aurral \
@@ -295,6 +305,7 @@ setup: check-env
 		$(VOLUMES_ROOT)/subfeed \
 		$(VOLUMES_ROOT)/videodrop \
 		$(VOLUMES_ROOT)/musicguard \
+		$(VOLUMES_ROOT)/pdf-gateway \
 		$(DATA_ROOT)/media/music \
 		$(DATA_ROOT)/media/music-aurral \
 		$(DATA_ROOT)/media/music-extras \

@@ -189,6 +189,20 @@
           type: paperlessngx
           url: http://paperless:8000
           key: "{{HOMEPAGE_VAR_PAPERLESS_API_TOKEN}}"
+    - docdrop:
+        icon: mdi-file-document-check-outline
+        href: http://docdrop.homelab.lan
+        description: Drop PDFs to sanitize, OCR, and AI-catalog into Paperless
+        siteMonitor: http://pdf-orchestrator:8000/health
+        widget:
+          type: customapi
+          url: http://pdf-orchestrator:8000/api/v1/stats
+          refreshInterval: 15000
+          mappings:
+            - field: total_documents
+              label: Processed
+            - field: pending_night_vision
+              label: Night Queue
     - FileBrowser:
         icon: filebrowser
         href: http://filebrowser.homelab.lan

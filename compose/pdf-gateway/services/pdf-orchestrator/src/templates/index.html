@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>docdrop — Document Ingestion & AI Gateway</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdf4',
+              500: '#22c55e',
+              600: '#16a34a',
+              700: '#15803d',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @keyframes pulse-subtle {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+    .pulse-glow { animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans antialiased selection:bg-brand-500 selection:text-white">
+
+  <!-- Header -->
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-brand-600 to-emerald-400 flex items-center justify-center shadow-lg shadow-brand-500/20 text-white font-bold text-lg">
+          🛡️
+        </div>
+        <div>
+          <h1 class="text-base font-bold tracking-tight text-white flex items-center gap-2">
+            docdrop
+            <span class="text-xs bg-brand-500/10 text-brand-400 border border-brand-500/20 px-2 py-0.5 rounded-full font-mono">T1000 GPU</span>
+          </h1>
+          <p class="text-xs text-slate-400 hidden sm:block">Drop PDFs to sanitize, OCR, and AI-catalog into Paperless</p>
+        </div>
+      </div>
+
+      <div class="flex items-center space-x-3">
+        <span id="backend-status" class="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-950/60 border border-emerald-800/80 px-2.5 py-1 rounded-full font-medium">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          Pipeline Online
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <main class="flex-1 max-w-6xl mx-auto w-full px-4 py-8 space-y-8">
+
+    <!-- KPI / Stats Grid -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between">
+        <div class="text-xs font-medium text-slate-400 uppercase tracking-wider">Total Processed</div>
+        <div class="text-2xl font-bold text-white mt-1" id="stat-total">0</div>
+        <div class="text-[11px] text-slate-500 mt-1">Deduped via SHA-256</div>
+      </div>
+
+      <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between">
+        <div class="text-xs font-medium text-slate-400 uppercase tracking-wider">Paperless Ingested</div>
+        <div class="text-2xl font-bold text-emerald-400 mt-1" id="stat-dispatched">0</div>
+        <div class="text-[11px] text-slate-500 mt-1">Dispatched to Lab2</div>
+      </div>
+
+      <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between">
+        <div class="text-xs font-medium text-slate-400 uppercase tracking-wider">Quarantined</div>
+        <div class="text-2xl font-bold text-rose-400 mt-1" id="stat-quarantined">0</div>
+        <div class="text-[11px] text-slate-500 mt-1">Malware & /Launch blocked</div>
+      </div>
+
+      <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between relative overflow-hidden">
+        <div class="text-xs font-medium text-slate-400 uppercase tracking-wider">Night Vision Queue</div>
+        <div class="flex items-baseline justify-between mt-1">
+          <span class="text-2xl font-bold text-amber-400" id="stat-vision">0</span>
+          <button id="btn-run-vision" onclick="triggerNightVision()" class="text-[11px] bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 px-2 py-1 rounded-lg font-medium transition flex items-center gap-1">
+            <span>🌙</span> Run Now
+          </button>
+        </div>
+        <div class="text-[11px] text-slate-500 mt-1">Scheduled at 02:00 AM</div>
+      </div>
+    </div>
+
+    <!-- Upload Card -->
+    <section class="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 md:p-8 shadow-2xl relative overflow-hidden">
+      <div class="max-w-2xl mx-auto text-center space-y-4">
+        <h2 class="text-xl md:text-2xl font-bold text-white tracking-tight">Ingest & Sanitize PDF Documents</h2>
+        <p class="text-sm text-slate-400">
+          Upload any PDF. It will be scanned for malware, scrubbed of hardware/GPS metadata, OCR'd trilingually (Arabic, French, English), and classified by AI before reaching Paperless.
+        </p>
+
+        <!-- Dropzone -->
+        <div id="dropzone" class="border-2 border-dashed border-slate-700 hover:border-brand-500 bg-slate-950/40 rounded-2xl p-8 transition-all cursor-pointer flex flex-col items-center justify-center space-y-3 group">
+          <input type="file" id="file-input" accept="application/pdf" class="hidden">
+          <div class="w-16 h-16 rounded-2xl bg-slate-800/80 group-hover:bg-brand-500/10 group-hover:text-brand-400 text-slate-400 flex items-center justify-center text-3xl transition">
+            📄
+          </div>
+          <div>
+            <span class="text-brand-400 font-semibold text-sm">Choose a PDF</span>
+            <span class="text-slate-400 text-sm"> or drag and drop it here</span>
+          </div>
+          <p class="text-xs text-slate-500">PDF documents up to 100 MB · Mobile Safari compatible</p>
+        </div>
+
+        <!-- Selected File & Ingest Button -->
+        <div id="file-selected-bar" class="hidden bg-slate-800/60 border border-slate-700/80 rounded-2xl p-4 flex items-center justify-between text-left">
+          <div class="flex items-center space-x-3 overflow-hidden">
+            <span class="text-2xl">📑</span>
+            <div class="truncate">
+              <div id="selected-filename" class="text-sm font-semibold text-white truncate">document.pdf</div>
+              <div id="selected-filesize" class="text-xs text-slate-400">0 KB</div>
+            </div>
+          </div>
+          <button id="btn-process" onclick="uploadAndProcess()" class="bg-brand-600 hover:bg-brand-500 text-white font-medium text-sm px-5 py-2.5 rounded-xl shadow-lg shadow-brand-600/30 transition flex items-center gap-2 flex-shrink-0">
+            <span>Ingest Document</span> ➔
+          </button>
+        </div>
+
+        <!-- Processing Stepper (Hidden by default) -->
+        <div id="stepper" class="hidden bg-slate-950/80 border border-slate-800 rounded-2xl p-6 text-left space-y-4">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-semibold text-white flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-brand-500 animate-ping"></span>
+              Processing Pipeline Active
+            </span>
+            <span id="step-percentage" class="text-xs font-mono text-brand-400">Step 1/5</span>
+          </div>
+
+          <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+            <div id="progress-bar" class="bg-gradient-to-r from-brand-500 to-emerald-400 h-2 rounded-full transition-all duration-500 w-1/5"></div>
+          </div>
+
+          <div class="grid grid-cols-5 text-[10px] sm:text-xs text-center font-medium gap-1 text-slate-500">
+            <div id="step-shield" class="text-brand-400">1. Security Shield</div>
+            <div id="step-sanitizer">2. OPSEC Scrubber</div>
+            <div id="step-ocr">3. Trilingual OCR</div>
+            <div id="step-enrich">4. AI Taxonomy</div>
+            <div id="step-dispatch">5. Lab2 Dispatch</div>
+          </div>
+        </div>
+
+        <!-- Result Box (Hidden by default) -->
+        <div id="result-card" class="hidden text-left bg-slate-950/90 border rounded-2xl p-6 space-y-4"></div>
+
+      </div>
+    </section>
+
+    <!-- Recent Ingestion Queue & History -->
+    <section class="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <h3 class="text-lg font-bold text-white tracking-tight">Recent Pipeline Ingests & Queue</h3>
+          <p class="text-xs text-slate-400">Live PostgreSQL state machine & deduplicated document index</p>
+        </div>
+        <button onclick="loadQueue()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-xl border border-slate-700 transition flex items-center gap-1.5">
+          <span>🔄</span> Refresh
+        </button>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs">
+          <thead>
+            <tr class="text-slate-400 border-b border-slate-800 pb-2">
+              <th class="py-2 px-3 font-semibold">Status</th>
+              <th class="py-2 px-3 font-semibold">Document</th>
+              <th class="py-2 px-3 font-semibold">Verified Title / Taxonomy</th>
+              <th class="py-2 px-3 font-semibold">OCR & AI</th>
+              <th class="py-2 px-3 font-semibold">Target / Dispatch</th>
+            </tr>
+          </thead>
+          <tbody id="queue-table-body" class="divide-y divide-slate-800/60">
+            <tr>
+              <td colspan="5" class="py-6 text-center text-slate-500">Loading pipeline records...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="border-t border-slate-900 py-6 text-center text-xs text-slate-500">
+    PDF Security Gateway · Antigravity Homelab · Connected to Lab2 (192.168.1.201)
+  </footer>
+
+  <script>
+    let selectedFile = null;
+
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('file-input');
+    const fileBar = document.getElementById('file-selected-bar');
+    const filenameEl = document.getElementById('selected-filename');
+    const filesizeEl = document.getElementById('selected-filesize');
+    const stepper = document.getElementById('stepper');
+    const progressBar = document.getElementById('progress-bar');
+    const stepPercentage = document.getElementById('step-percentage');
+    const resultCard = document.getElementById('result-card');
+
+    dropzone.addEventListener('click', () => fileInput.click());
+
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length > 0) handleFile(e.target.files[0]);
+    });
+
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.classList.add('border-brand-500', 'bg-brand-500/5');
+    });
+
+    dropzone.addEventListener('dragleave', () => {
+      dropzone.classList.remove('border-brand-500', 'bg-brand-500/5');
+    });
+
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('border-brand-500', 'bg-brand-500/5');
+      if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
+    });
+
+    function handleFile(file) {
+      if (!file.name.toLowerCase().endsWith('.pdf')) {
+        alert('Only PDF files are supported.');
+        return;
+      }
+      selectedFile = file;
+      filenameEl.textContent = file.name;
+      filesizeEl.textContent = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
+      fileBar.classList.remove('hidden');
+      resultCard.classList.add('hidden');
+    }
+
+    async function uploadAndProcess() {
+      if (!selectedFile) return;
+
+      const btn = document.getElementById('btn-process');
+      btn.disabled = true;
+      btn.classList.add('opacity-50', 'cursor-not-allowed');
+
+      stepper.classList.remove('hidden');
+      resultCard.classList.add('hidden');
+
+      // Animate progress phases
+      setStep(1, 20);
+      const timer1 = setTimeout(() => setStep(2, 40), 1200);
+      const timer2 = setTimeout(() => setStep(3, 60), 2400);
+      const timer3 = setTimeout(() => setStep(4, 80), 3800);
+
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+
+      try {
+        const resp = await fetch('/api/v1/process', {
+          method: 'POST',
+          body: formData
+        });
+
+        clearTimeout(timer1);
+        clearTimeout(timer2);
+        clearTimeout(timer3);
+
+        setStep(5, 100);
+
+        const data = await resp.json();
+        showResult(data);
+        loadStats();
+        loadQueue();
+      } catch (err) {
+        showError('Network error uploading file: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.classList.remove('opacity-50', 'cursor-not-allowed');
+        setTimeout(() => stepper.classList.add('hidden'), 2000);
+      }
+    }
+
+    function setStep(num, pct) {
+      progressBar.style.width = pct + '%';
+      stepPercentage.textContent = `Step ${num}/5`;
+
+      const steps = ['step-shield', 'step-sanitizer', 'step-ocr', 'step-enrich', 'step-dispatch'];
+      steps.forEach((s, idx) => {
+        const el = document.getElementById(s);
+        if (idx < num) {
+          el.className = 'text-brand-400 font-semibold';
+        } else {
+          el.className = 'text-slate-500';
+        }
+      });
+    }
+
+    function showResult(data) {
+      resultCard.classList.remove('hidden');
+
+      if (data.status === 'QUARANTINED') {
+        resultCard.className = 'text-left bg-rose-950/40 border border-rose-800 rounded-2xl p-6 space-y-3';
+        resultCard.innerHTML = `
+          <div class="flex items-center space-x-2 text-rose-400 font-bold text-base">
+            <span>🚨</span>
+            <span>MALWARE / EXPLOIT QUARANTINED</span>
+          </div>
+          <p class="text-xs text-rose-300">This document contains dangerous payloads and has been isolated. It was <b>blocked</b> from Paperless.</p>
+          <div class="text-xs bg-slate-950/80 p-3 rounded-xl border border-rose-900/60 font-mono text-rose-400">
+            ${data.threats ? data.threats.join('<br>') : 'Critical security threat detected'}
+          </div>
+          <div class="text-[11px] text-slate-500 font-mono">Quarantine Path: ${data.quarantine_path || 'Restricted Vault'}</div>
+        `;
+        return;
+      }
+
+      // Success or Deduplicated
+      const isDedup = (data.status === 'DEDUPLICATED');
+      resultCard.className = isDedup 
+        ? 'text-left bg-cyan-950/40 border border-cyan-800 rounded-2xl p-6 space-y-4'
+        : 'text-left bg-emerald-950/40 border border-emerald-800 rounded-2xl p-6 space-y-4';
+      
+      let dispatchMarkup = '';
+      if (data.dispatch_id && data.dispatch_id.startsWith('paperless_doc:')) {
+        const parts = data.dispatch_id.split(':');
+        const docId = parts[1];
+        const deepLink = parts.slice(2).join(':');
+        dispatchMarkup = `
+          <a href="${deepLink}" target="_blank" class="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs px-3.5 py-2 rounded-xl shadow transition">
+            <span>Open in Paperless-ngx #${docId}</span> ↗
+          </a>
+        `;
+      } else {
+        dispatchMarkup = `<span class="text-xs font-mono text-slate-400">${data.dispatch_id || 'Processed'}</span>`;
+      }
+
+      const tagsHtml = (data.tags || []).map(t => `<span class="bg-slate-800 text-slate-300 px-2 py-0.5 rounded text-[11px] font-mono">#${t}</span>`).join(' ');
+
+      const headerTitle = isDedup ? 'DOCUMENT ALREADY INGESTED (DEDUPLICATED)' : 'DOCUMENT APPROVED & INGESTED';
+      const badgeClass = isDedup ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
+
+      resultCard.innerHTML = `
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-2 ${isDedup ? 'text-cyan-400' : 'text-emerald-400'} font-bold text-base">
+            <span>${isDedup ? 'ℹ️' : '✅'}</span>
+            <span>${headerTitle}</span>
+          </div>
+          <span class="text-xs ${badgeClass} px-2.5 py-0.5 rounded-full font-mono font-medium">${data.status || 'COMPLETED'}</span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+          <div>
+            <div class="text-slate-400">Verified Title:</div>
+            <div class="text-white font-semibold text-sm mt-0.5">${data.verified_title || data.filename}</div>
+            <div class="text-slate-400 mt-2">Author / Entity: <span class="text-slate-200">${data.verified_author || 'Unknown'}</span></div>
+          </div>
+          <div>
+            <div class="text-slate-400">Taxonomy Classification:</div>
+            <div class="text-brand-400 font-semibold mt-0.5">${data.domain || 'GENERAL'} / ${data.subdomain || 'UNSORTED'}</div>
+            <div class="mt-2 flex flex-wrap gap-1">${tagsHtml}</div>
+          </div>
+        </div>
+
+        <div class="border-t border-slate-800 pt-3 flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span class="text-[11px] text-slate-400">Destination: <span class="text-slate-200 font-medium uppercase">${data.target_system || 'paperless'}</span></span>
+            <button onclick="triggerReprocess('${data.sha256}')" class="text-[11px] text-brand-400 hover:text-brand-300 underline font-medium cursor-pointer">Force AI Reprocess</button>
+          </div>
+          <div>${dispatchMarkup}</div>
+        </div>
+      `;
+    }
+
+    function showError(msg) {
+      resultCard.classList.remove('hidden');
+      resultCard.className = 'text-left bg-rose-950/40 border border-rose-800 rounded-2xl p-6';
+      resultCard.innerHTML = `<div class="text-rose-400 font-bold text-sm">Error: ${msg}</div>`;
+    }
+
+    async function loadStats() {
+      try {
+        const resp = await fetch('/api/v1/stats');
+        const data = await resp.json();
+        document.getElementById('stat-total').textContent = data.total_documents || 0;
+        
+        const byStatus = data.by_status || {};
+        const completed = (byStatus['COMPLETED'] || 0) + (byStatus['ENRICHED'] || 0) + (byStatus['DISPATCHED'] || 0);
+        document.getElementById('stat-dispatched').textContent = completed;
+        document.getElementById('stat-quarantined').textContent = byStatus['QUARANTINED'] || byStatus['INFECTED'] || 0;
+        document.getElementById('stat-vision').textContent = data.pending_night_vision || 0;
+      } catch (e) {
+        console.error('Failed to load stats', e);
+      }
+    }
+
+    async function triggerNightVision() {
+      const btn = document.getElementById('btn-run-vision');
+      btn.disabled = true;
+      btn.textContent = 'Running...';
+      try {
+        const resp = await fetch('/api/v1/night-batch', { method: 'POST' });
+        const res = await resp.json();
+        alert(`Night Vision Batch Complete!\nProcessed: ${res.processed_count} document(s).`);
+        loadStats();
+        loadQueue();
+      } catch (e) {
+        alert('Night Vision error: ' + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>🌙</span> Run Now';
+      }
+    }
+
+    async function loadQueue() {
+      const tbody = document.getElementById('queue-table-body');
+      try {
+        const resp = await fetch('/api/v1/queue');
+        const docs = await resp.json();
+
+        if (!docs || docs.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" class="py-6 text-center text-slate-500">No documents processed yet.</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = docs.map(d => {
+          let badge = '';
+          if (d.status === 'QUARANTINED' || d.status === 'INFECTED') {
+            badge = '<span class="px-2 py-0.5 rounded-full text-[10px] bg-rose-500/20 text-rose-400 border border-rose-500/30 font-medium">QUARANTINED</span>';
+          } else if (d.status === 'COMPLETED' || d.status === 'ENRICHED' || d.status === 'DISPATCHED') {
+            badge = '<span class="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-medium">CLEAN</span>';
+          } else {
+            badge = `<span class="px-2 py-0.5 rounded-full text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 font-medium">${d.status}</span>`;
+          }
+
+          let link = '-';
+          if (d.lab2_dispatch_id && d.lab2_dispatch_id.includes('paperless_doc:')) {
+            const parts = d.lab2_dispatch_id.split(':');
+            const docId = parts[1];
+            const deep = parts.slice(2).join(':');
+            link = `<a href="${deep}" target="_blank" class="text-brand-400 hover:underline font-medium">Paperless #${docId} ↗</a>`;
+          }
+
+          const visionTag = d.needs_vision_review ? '<span class="text-amber-400 text-[10px] block">🌙 Pending Vision</span>' : '<span class="text-slate-500 text-[10px] block">Vision OK</span>';
+
+          return `
+            <tr class="hover:bg-slate-900/40 transition">
+              <td class="py-3 px-3">${badge}</td>
+              <td class="py-3 px-3">
+                <div class="font-medium text-white truncate max-w-xs">${d.original_filename}</div>
+                <div class="text-[10px] text-slate-500 font-mono">${d.sha256.substring(0, 12)}...</div>
+              </td>
+              <td class="py-3 px-3">
+                <div class="font-medium text-slate-200">${d.verified_title || '-'}</div>
+                <div class="text-[11px] text-brand-400">${d.domain || 'GENERAL'} / ${d.subdomain || '-'}</div>
+              </td>
+              <td class="py-3 px-3">
+                <span class="text-slate-300 font-mono">${(d.dictionary_validity_ratio * 100).toFixed(0)}% valid</span>
+                ${visionTag}
+              </td>
+              <td class="py-3 px-3">
+                <div class="flex items-center gap-2">
+                  ${link}
+                  <button onclick="triggerVision('${d.sha256}')" title="Run Vision AI Review" class="text-[10px] px-2 py-0.5 bg-indigo-950/80 hover:bg-indigo-800 text-indigo-300 border border-indigo-800/60 rounded cursor-pointer transition">Vision</button>
+                  <button onclick="triggerReprocess('${d.sha256}')" title="Force AI Reprocess" class="text-[10px] px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded cursor-pointer transition">Reprocess</button>
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-rose-500">Failed to load queue.</td></tr>';
+      }
+    }
+
+    async function triggerVision(sha256) {
+      try {
+        const resp = await fetch(`/api/v1/documents/${sha256}/vision`, { method: 'POST' });
+        const res = await resp.json();
+        alert(`Vision AI result: ${res.status || 'Done'}\nTitle: ${res.verified_title || '-'}`);
+        loadStats();
+        loadQueue();
+      } catch (err) {
+        alert('Vision trigger failed: ' + err.message);
+      }
+    }
+
+    async function triggerReprocess(sha256) {
+      try {
+        const resp = await fetch(`/api/v1/documents/${sha256}/reprocess`, { method: 'POST' });
+        const res = await resp.json();
+        alert(`Reprocessed: ${res.status || 'Done'}\nTitle: ${res.verified_title || '-'}`);
+        loadStats();
+        loadQueue();
+      } catch (err) {
+        alert('Reprocess failed: ' + err.message);
+      }
+    }
+
+    // Initial load
+    loadStats();
+    loadQueue();
+    // Auto-refresh stats every 15s
+    setInterval(loadStats, 15000);
+  </script>
+</body>
+</html>

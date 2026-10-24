@@ -23,5 +23,7 @@
   "uptime": {"name": "uptime kuma", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/uptime-kuma.png",
              "link": "http://uptimekuma.homelab.lan"},
   "netdata": {"name": "netdata on {host}", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/netdata.png",
-              "link": "http://netdata.homelab.lan"}
+              "link": "http://netdata.homelab.lan"},
+  "pdf-gateway": {"name": "docdrop", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/paperless-ngx.png",
+                  "link": "http://docdrop.homelab.lan"}
 }

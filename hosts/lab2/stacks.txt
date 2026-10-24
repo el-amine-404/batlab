@@ -35,3 +35,4 @@ unbound
 untrunc
 videodrop
 uptime_kuma
+pdf-gateway

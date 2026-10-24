@@ -501,10 +501,24 @@ itself, and [its README](../compose/stanzarr/app/README.md).
   send keys.
 - **Alone**: yes; it talks only to the TVs.
 
+### docdrop (pdf-gateway): Document Ingestion & AI Gateway
+
+`compose/pdf-gateway`, `http://docdrop.homelab.lan` (alias: `http://pdf.homelab.lan`). Docs: `/docs` on the orchestrator service itself.
+
+- **Job**: untrusted PDF security gateway, sanitization, multilingual OCR, and dynamic metadata enrichment before ingesting clean documents into Paperless-ngx.
+  - **Fail-closed security (`pdf-shield`)**: scans incoming files for PDF exploits (embedded JavaScript, `/Launch` actions, suspicious streams, structural anomalies), quarantines threats to `/data/quarantine`, and triggers Apprise alerts.
+  - **Lossless sanitization & Metadata Injection (`pdf-sanitizer`)**: neutralizes executable objects and re-serializes clean documents while writing verified, clean standard PDF metadata (Title, Author, Subject, Keywords, Creation Date).
+  - **Multilingual OCR (`pdf-ocr`)**: Tesseract OCR supporting English, French, and Arabic (`eng+fra+ara`) with invisible text layer injection and confidence scoring.
+  - **Distributed AI enrichment (`pdf-enricher`)**: offloads heavy LLM and Vision inference (document classification, correspondent extraction, title and date parsing, ISBN validation, presentation detection) to the laptop GPU via LM Studio (`http://${AI_LAPTOP_IP}:${AI_LAPTOP_LM_STUDIO_PORT}/v1`). Falls back gracefully to intelligent regex heuristics if the laptop is offline, queuing documents for nightly enrichment.
+  - **Paperless-ngx dispatch & Browsable Library (`pdf-orchestrator`)**: uploads sanitized documents with sidecar provenance metadata, creates tags, correspondents, and document types dynamically, sets creation date, attaches Markdown notes, and maintains a shallow human-browsable folder structure (`/data/archive/library/`).
+  - **Ingestion channels**: drag-and-drop web UI at `http://docdrop.homelab.lan` with live 5-stage progress animation, plus an automatic background holding watcher polling `/data/holding` every 10 seconds.
+  - **Notifications**: Apprise alerts on `/notify/pdf-gateway` for threats/quarantine, successful ingests with Paperless deep links, and batch runs.
+- **Alone**: runs standalone with internal Postgres DB (`pdf-db`); optionally connects to Paperless-ngx, Apprise, and the remote GPU host.
+
 ## Where the services stand
 
 | Service | One job | API v1 | Docs at `/docs` | Settings API | Events |
-| --- | --- | --- | --- | --- | --- |
+| --- | --- | --- | --- | --- | --- | --- |
 | songdrop | yes | yes | yes | yes | its connections (Apprise here; Discord, Webhook) |
 | subfeed | yes | yes | yes | yes | its notifications (Apprise here; Discord, Webhook) |
 | videodrop | yes | yes | yes | yes | its notifications (Apprise here; Discord, Webhook), and each job's callback |
@@ -513,5 +527,6 @@ itself, and [its README](../compose/stanzarr/app/README.md).
 | camwatch | yes | none (needs none) | none | environment only | Apprise |
 | carwatch | yes | none (needs none) | none | environment only | Apprise |
 | tv-remote | yes | unversioned | no | environment only | none |
+| docdrop | yes | yes | yes | environment only | Apprise |
 
 Next: installing batlab elsewhere (published images, a short `.env.example`).

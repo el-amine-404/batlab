@@ -1,0 +1,4 @@
+http://docdrop.homelab.lan {
+	import localSubnets
+	reverse_proxy @localSubnets http://pdf-orchestrator:8000
+}
