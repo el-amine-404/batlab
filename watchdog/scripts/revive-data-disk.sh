@@ -184,7 +184,15 @@ back() {
     return 1
   fi
   echo "Data disk back: $how"
-  [[ -r "$DOWN_FILE" ]] && down="$(since "$(<"$DOWN_FILE")")"
+  # The guard normally owns the single recovery card and removes DOWN_FILE
+  # after every recorded container is running. Only announce here when there
+  # were no recorded containers for the guard to report.
+  if [[ ! -r "$DOWN_FILE" ]]; then
+    attempts=0 last=0 asked=0
+    save
+    return 0
+  fi
+  down="$(since "$(<"$DOWN_FILE")")"
   watchdog_notify "Data disk revived" success \
     "Disk" "$(data_disk_label)" \
     "Mount" "\`$ROOT\`" \

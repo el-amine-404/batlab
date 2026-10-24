@@ -18,6 +18,12 @@ EOF
 
 cat >"$tmp/bin/python3" <<'EOF'
 #!/bin/sh
+printf '%s\n' "$*" >"${FAKE_NOTIFY_LOG:?}"
+exit 0
+EOF
+
+cat >"$tmp/bin/journalctl" <<'EOF'
+#!/bin/sh
 exit 0
 EOF
 
@@ -54,6 +60,9 @@ start)
   printf 'true\n' >"$state/$name"
   printf '%s\n' "$name"
   ;;
+stop)
+  for name in "$@"; do printf 'false\n' >"$state/$name"; done
+  ;;
 *) exit 2 ;;
 esac
 EOF
@@ -67,6 +76,7 @@ export WATCHDOG_CONFIG_FILE="$tmp/watchdog.env"
 export WATCHDOG_STATE_DIR="$tmp/state"
 export WATCHDOG_LOCK_FILE="$tmp/guard.lock"
 export FAKE_DOCKER_STATE="$tmp/state"
+export FAKE_NOTIFY_LOG="$tmp/notification"
 
 if "$REPO/watchdog/scripts/data-guard.sh" start; then
   echo "first partial start unexpectedly succeeded" >&2
@@ -79,6 +89,11 @@ fi
 "$REPO/watchdog/scripts/data-guard.sh" start
 [[ "$(<"$tmp/state/beta")" == true ]]
 [[ ! -e "$tmp/state/stopped-containers" ]]
+
+"$REPO/watchdog/scripts/data-guard.sh" stop
+[[ "$(sort "$tmp/state/stopped-containers" | xargs)" == "alpha beta" ]]
+grep -q -- '--field Recovery automatic USB 2 recovery retries every 2 min' "$FAKE_NOTIFY_LOG"
+! grep -q -- '--field Log' "$FAKE_NOTIFY_LOG"
 echo "data guard transactional restart test passed"
 
 # Bash accepts `local` at parse time even when it appears outside a function;
