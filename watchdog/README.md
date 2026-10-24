@@ -103,6 +103,13 @@ Test the OOM notification route without consuming memory or killing anything:
 sudo watchdog/scripts/oom_watch.py --test-notification
 ```
 
+Test both host emergency routes after provisioning, without creating an OOM or
+disk fault:
+
+```bash
+sudo watchdog/scripts/test-notifications.sh
+```
+
 The `lab1` check should turn green. For the guard, with the arr stack idle:
 
 ```bash
