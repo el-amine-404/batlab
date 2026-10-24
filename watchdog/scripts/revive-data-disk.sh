@@ -270,7 +270,7 @@ else
 fi
 
 if ((!asked)); then
-  local problem="off the USB bus: the system doesn't see it"
+  problem="off the USB bus: the system doesn't see it"
   mounted && problem="mounted, but not answering reads"
   watchdog_notify "Data disk needs a replug" failure \
     "Disk" "$(data_disk_label)" \
