@@ -20,6 +20,11 @@ updater holds for a rollback.
 | exited containers no compose stack owns | for a day after they stopped | after that |
 | anonymous volumes | in use | unused |
 
+At 85% root-disk use, pressure mode keeps the same running, configured,
+newly-pulled and rollback images, but trims genuinely unused images after one
+day and build cache to 2 GB. An incomplete cleanup alerts `#alerts` and fails
+the unit instead of looking successful.
+
 To roll back, put the previous tag back in `compose/versions.env` and
 `make up STACK=<stack>`: nothing is downloaded. A locally built app's previous
 build is the updater's `local/batlab-rollback:<service>`; one rebuilt by hand

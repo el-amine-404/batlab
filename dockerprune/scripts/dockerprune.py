@@ -45,6 +45,9 @@ UNUSED_IMAGE_DAYS = 7
 UNTAGGED_IMAGE_HOURS = 24
 STRAY_CONTAINER_HOURS = 24
 BUILD_CACHE_MAX = "10GB"
+PRESSURE_PERCENT = 85
+PRESSURE_UNUSED_IMAGE_DAYS = 1
+PRESSURE_BUILD_CACHE_MAX = "2GB"
 REPORT_FREED_BYTES = 1_000_000_000
 
 
@@ -128,7 +131,8 @@ def pinned_from(values: dict[str, str]) -> set[str]:
             for name in values if name.startswith("IMAGE_") and "TAG_" + name[6:] in values}
 
 
-def removable(images: list[Image], used_ids: set[str], pins: set[str], now: float) -> list[tuple[Image, str]]:
+def removable(images: list[Image], used_ids: set[str], pins: set[str], now: float,
+              unused_image_days: int = UNUSED_IMAGE_DAYS) -> list[tuple[Image, str]]:
     """(image, why) for every image that can go, keeping one previous version per repository."""
     groups: dict[str, list[Image]] = {}
     for image in images:
@@ -145,7 +149,7 @@ def removable(images: list[Image], used_ids: set[str], pins: set[str], now: floa
         members = sorted({image.id: image for image in members}.values(), key=lambda image: image.arrived, reverse=True)
         current = [image for image in members if in_use(image)]
         if not current:
-            keep.update(image.id for image in members if now - image.arrived < UNUSED_IMAGE_DAYS * 86400)
+            keep.update(image.id for image in members if now - image.arrived < unused_image_days * 86400)
             continue
         newest_used = max(image.arrived for image in current)
         older = [image for image in members if not in_use(image) and image.arrived < newest_used]
@@ -164,7 +168,7 @@ def removable(images: list[Image], used_ids: set[str], pins: set[str], now: floa
                  for ref in image.refs):
             found.append((image, "older than the previous version"))
         else:
-            found.append((image, f"unused for {UNUSED_IMAGE_DAYS} days"))
+            found.append((image, f"unused for {unused_image_days} days"))
     return found
 
 
@@ -260,6 +264,13 @@ def prune(args: argparse.Namespace, env: Path, repo: Path) -> int:
 
     now = time.time()
     before = shutil.disk_usage("/").free
+    total = shutil.disk_usage("/").total
+    used_before = 100 * (1 - before / total)
+    pressure = used_before >= PRESSURE_PERCENT
+    unused_days = PRESSURE_UNUSED_IMAGE_DAYS if pressure else UNUSED_IMAGE_DAYS
+    cache_max = PRESSURE_BUILD_CACHE_MAX if pressure else BUILD_CACHE_MAX
+    if pressure:
+        print(f"root disk is {used_before:.0f}% used: pressure cleanup is active")
     report = Report()
 
     for name in stray_containers(now):
@@ -277,7 +288,7 @@ def prune(args: argparse.Namespace, env: Path, repo: Path) -> int:
     except RuntimeError as error:
         report.failed.append(str(error))
         images, pins = [], set()
-    for image, why in removable(images, used_image_ids(), pins, now):
+    for image, why in removable(images, used_image_ids(), pins, now, unused_days):
         label = ", ".join(image.refs) or f"untagged {image.id[7:19]}"
         print(f"image {label} ({gb(image.size)}): {why}")
         if args.dry_run:
@@ -292,7 +303,7 @@ def prune(args: argparse.Namespace, env: Path, repo: Path) -> int:
 
     if not args.dry_run:
         try:
-            report.build_cache = reclaimed(run("docker", "builder", "prune", "-f", "--max-used-space", BUILD_CACHE_MAX))
+            report.build_cache = reclaimed(run("docker", "builder", "prune", "-f", "--max-used-space", cache_max))
             run("docker", "volume", "prune", "-f")
         except RuntimeError as error:
             report.failed.append(str(error))
@@ -309,6 +320,14 @@ def prune(args: argparse.Namespace, env: Path, repo: Path) -> int:
                             fallback=webhook if webhook.startswith("http") else None)
         except apprise.NotSent as error:
             print(f"message not sent: {error}", file=sys.stderr)
+    if report.failed and not args.dry_run:
+        webhook = env_value(env, "DISCORD_WEBHOOK_ALERTS")
+        try:
+            apprise.deliver("dockerprune", "alerts", "Docker cleanup incomplete", body, "failure",
+                            fallback=webhook if webhook.startswith("http") else None)
+        except apprise.NotSent as error:
+            print(f"failure message not sent: {error}", file=sys.stderr)
+        return 1
     return 0
 
 

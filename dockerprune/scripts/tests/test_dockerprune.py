@@ -50,6 +50,15 @@ class ImageTests(unittest.TestCase):
                   Image("fresh", ["try-me:latest"], NOW - DAY, 2)]
         self.assertEqual(ids(prune.removable(images, set(), set(), NOW)), {"test"})
 
+    def test_pressure_mode_removes_a_genuinely_unused_image_after_a_day(self) -> None:
+        images = [Image("unused", ["try-me:latest"], NOW - 2 * DAY, 2),
+                  Image("configured", ["important:latest"], NOW - 90 * DAY, 2)]
+        self.assertEqual(
+            ids(prune.removable(images, set(), {"important:latest"}, NOW,
+                                prune.PRESSURE_UNUSED_IMAGE_DAYS)),
+            {"unused"},
+        )
+
     def test_untagged_images_go_after_a_day_unless_running(self) -> None:
         images = [Image("dangling", [], NOW - 2 * DAY, 1), Image("young", [], NOW - 3600, 1),
                   Image("running", [], NOW - 9 * DAY, 1)]
