@@ -70,9 +70,9 @@ def check(path: Path) -> None:
         raise RuntimeError(f"quick_check: {found}")
 
 
-def as_owner(source: Path, target: Path) -> None:
+def as_owner(source: Path, target: Path, helper: Path) -> None:
     owner = source.stat()
-    command = [sys.executable, "-I", __file__, "--copy", str(source), str(target)]
+    command = [sys.executable, "-I", str(helper), "--copy", str(source), str(target)]
     if os.geteuid() == 0 and owner.st_uid != 0:
         command = ["setpriv", f"--reuid={owner.st_uid}", f"--regid={owner.st_gid}", "--clear-groups", *command]
     elif os.geteuid() not in (0, owner.st_uid):
@@ -82,18 +82,9 @@ def as_owner(source: Path, target: Path) -> None:
         raise RuntimeError((done.stderr.strip().splitlines() or ["the copy failed"])[-1])
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--volumes", type=Path, default=Path("/mnt/docker-volumes"))
-    parser.add_argument("--out", type=Path)
-    parser.add_argument("--copy", nargs=2, type=Path, help=argparse.SUPPRESS)
-    args = parser.parse_args()
-    if args.copy:
-        copy(*args.copy)
-        return 0
-
-    volumes = args.volumes.resolve()
-    out = (args.out or volumes / "database-dumps" / "sqlite").resolve()
+def dump_all(volumes: Path, out: Path) -> int:
+    volumes = volumes.resolve()
+    out = out.resolve()
     out.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(out, 0o700)
     # The copies are made here, on the same disk, then moved: the dumps' folder is root's only, and an
@@ -102,6 +93,14 @@ def main() -> int:
     shutil.rmtree(staging, ignore_errors=True)
     staging.mkdir(mode=0o711)
     os.chmod(staging, 0o711)
+    # The checkout normally lives below /home/potato (0700). A worker that has
+    # dropped to a database owner's uid cannot traverse that directory to run
+    # this file, so give it a private, executable copy on the volumes disk.
+    # The staging directory cannot be listed, and only root can replace this
+    # helper; database owners can merely traverse it and execute the known path.
+    helper = staging / ".dump-sqlite-worker.py"
+    shutil.copyfile(__file__, helper)
+    os.chmod(helper, 0o755)
     failed, made, kept = [], 0, set()
     for source in databases(volumes):
         relative = source.relative_to(volumes)
@@ -114,7 +113,7 @@ def main() -> int:
             if os.geteuid() == 0:
                 os.chown(work, source.stat().st_uid, source.stat().st_gid)
             fresh = work / source.name
-            as_owner(source, fresh)
+            as_owner(source, fresh, helper)
             check(fresh)
             target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             os.chmod(fresh, 0o600)
@@ -140,6 +139,18 @@ def main() -> int:
 
     print(f"{made} SQLite databases copied into {out}" + (f"; {len(failed)} failed: {', '.join(failed)}" if failed else ""))
     return 1 if failed else 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--volumes", type=Path, default=Path("/mnt/docker-volumes"))
+    parser.add_argument("--out", type=Path)
+    parser.add_argument("--copy", nargs=2, type=Path, help=argparse.SUPPRESS)
+    args = parser.parse_args()
+    if args.copy:
+        copy(*args.copy)
+        return 0
+    return dump_all(args.volumes, args.out or args.volumes / "database-dumps" / "sqlite")
 
 
 if __name__ == "__main__":
