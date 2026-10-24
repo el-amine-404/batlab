@@ -33,6 +33,8 @@ install -m 644 "$REPO/watchdog/systemd/batlab-watchdog-heartbeat.service" \
   "$REPO/watchdog/systemd/batlab-watchdog-heartbeat.timer" \
   "$REPO/watchdog/systemd/batlab-oom-watch.service" \
   "$REPO/watchdog/systemd/batlab-oom-watch.timer" /etc/systemd/system/
+install -m 644 "$REPO/mediascan/systemd/batlab-mediascan-sweep.service" \
+  "$REPO/mediascan/systemd/batlab-mediascan-deep.service" /etc/systemd/system/
 
 # Install allow rules before enabling the firewall so an SSH deployment cannot
 # lock itself out. DNS and DHCP must accept clients before they have an address;

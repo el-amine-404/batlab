@@ -29,6 +29,7 @@ readonly YARA_REPORT="$MEDIASCAN_REPORT_DIR/yara.jsonl"
 readonly VIRUSTOTAL_REPORT="$MEDIASCAN_REPORT_DIR/virustotal.jsonl"
 
 flagged=0
+operational_failure=0
 summary_arguments=()
 
 run_check() {
@@ -45,6 +46,7 @@ run_check() {
   # lie, see conf/accepted.txt); anything else means the check itself failed.
   if ((status > 1)); then
     flagged=1
+    operational_failure=1
   fi
 }
 
@@ -118,13 +120,18 @@ if ! summary="$(python3 "$SCRIPT_DIR/summarize-sweep.py" --report-dir "$MEDIASCA
   "${summary_arguments[@]}" --quarantine-status "$quarantine_status" \
   --accepted "$MEDIASCAN_DIR/conf/accepted.txt")"; then
   flagged=1
+  operational_failure=1
 fi
 if [[ -z "$summary" ]]; then
   summary="Report summary failed. Inspect journalctl -u batlab-mediascan-sweep.service and $MEDIASCAN_REPORT_DIR"
   flagged=1
+  operational_failure=1
 fi
 printf '%s\n' "$summary"
-if ((flagged)); then
+if ((operational_failure)); then
+  echo "Sweep failed. Reports are in $MEDIASCAN_REPORT_DIR."
+  mediascan_notify "Media scan failed on $(hostname)" "$summary"
+elif ((flagged)); then
   echo "Sweep finished with findings. Reports are in $MEDIASCAN_REPORT_DIR."
   mediascan_notify "Media scan: findings on $(hostname)" \
     "$summary"
@@ -132,4 +139,5 @@ else
   echo "Sweep finished clean."
 fi
 
+((operational_failure)) && exit 2
 exit "$flagged"

@@ -16,7 +16,8 @@ require_command ffmpeg
 mapfile -t roots < <(read_path_list "$MEDIASCAN_DIR/conf/roots.txt")
 mapfile -t excludes < <(read_exclude_list "$MEDIASCAN_DIR/conf/excludes.txt")
 
-status=0
+deep_status=0
+embedded_status=0
 
 python3 "$SCRIPT_DIR/deep-verify.py" "${roots[@]}" \
   "${excludes[@]}" --exclude "$MEDIASCAN_QUARANTINE" \
@@ -27,7 +28,7 @@ python3 "$SCRIPT_DIR/deep-verify.py" "${roots[@]}" \
   --time-budget "${MEDIASCAN_DEEP_TIME_BUDGET:-7200}" \
   --max-cpu-temp "${MEDIASCAN_MAX_CPU_TEMP:-0}" \
   --cpu-temp-sensor "${MEDIASCAN_CPU_TEMP_SENSOR:-}" \
-  "$@" || status=$?
+  "$@" || deep_status=$?
 
 # Reading a container to its end is what makes the embedded parts reachable, and
 # the pass above has just done it. A container carrying nothing costs one
@@ -39,6 +40,20 @@ python3 "$SCRIPT_DIR/verify-embedded.py" "${roots[@]}" \
   --report "$MEDIASCAN_REPORT_DIR/embedded.jsonl" \
   --state "$MEDIASCAN_STATE_DIR/embedded-state.json" \
   --time-budget "${MEDIASCAN_EMBEDDED_TIME_BUDGET:-3600}" \
-  --quiet || status=1
+  --quiet || embedded_status=$?
 
-exit "$status"
+if ((deep_status > 1 || embedded_status > 1)); then
+  mediascan_notify "Deep media scan failed on $(hostname)" \
+    "Decode status: $deep_status
+Embedded status: $embedded_status
+Reports: $MEDIASCAN_REPORT_DIR"
+  exit 2
+fi
+if ((deep_status == 1 || embedded_status == 1)); then
+  mediascan_notify "Deep media scan: findings on $(hostname)" \
+    "Decode status: $deep_status
+Embedded status: $embedded_status
+Reports: $MEDIASCAN_REPORT_DIR"
+  exit 1
+fi
+exit 0

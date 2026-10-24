@@ -118,7 +118,7 @@ class SweepIntegrationTests(unittest.TestCase):
             env = {k: v for k, v in os.environ.items() if not k.startswith("MEDIASCAN_") and k != "VT_API_KEY"}
             env["MEDIASCAN_CONFIG_FILE"] = str(config)
             result = subprocess.run(["bash", str(scripts / "sweep.sh")], env=env, capture_output=True, text=True)
-            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertEqual(result.returncode, 2, result.stderr)
             self.assertIn("ClamAV: exited 2", result.stdout)
             self.assertIn("YARA: skipped", result.stdout)
             self.assertIn("VirusTotal: skipped", result.stdout)

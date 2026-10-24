@@ -9,6 +9,8 @@ Type=oneshot
 User=root
 Group=root
 ExecStart=/home/potato/batlab/mediascan/scripts/sweep.sh
+# Exit 1 means findings were reported; exit 2 means the scan itself failed.
+SuccessExitStatus=1
 Nice=19
 IOSchedulingClass=idle
 
