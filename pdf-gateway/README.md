@@ -101,3 +101,15 @@ pdf-archive --root ARCHIVE verify | reindex --catalog c.sqlite | repair [--apply
 Lab2-only tests must go through `pdf-gateway/tools/lab2_test.sh <test>`. It
 builds images locally, samples temperature every second, and the tests abort
 themselves at 85 °C. Lab2 runs live services.
+
+## M5: web UI
+
+`web/` is a React PWA served by the stateless `web` container (127.0.0.1:18088 by
+default; put the homelab Caddy in front for HTTPS). It proxies `/api` same-origin.
+Sign in with an API token: it is exchanged for an HttpOnly session cookie and is not
+stored. The app never previews originals; approved PDFs are downloads only.
+
+```bash
+pdf-gateway/tests/test_m5_api.sh
+VENV=… PLAYWRIGHT_BROWSERS_PATH=… pdf-gateway/tests/test_m5_ui.sh [SCREENSHOT_DIR]
+```

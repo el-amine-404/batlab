@@ -404,3 +404,27 @@ Ran on the local PC with the real API (Flyway V001–V008) and archive worker.
 
 Commands: `pdf-gateway/tests/test_m5_api.sh`, `test_m1.sh`, `test_m4_gate.sh`, Maven, contracts (OpenAPI 0.4.0).
 Not done: login rate limiting (tokens are 256-bit random), quarantine override/rescan.
+
+## 2026-10-25 — M5 slices 2–3: web UI and browser tests
+
+`pdf-gateway/web/`: React 19, TypeScript 7, Vite 8, Tailwind 4, TanStack Query 5 and Zod 4, every package
+exact-pinned and integrity-locked (`package-lock.json`, `npm ci`). It is served same-origin by a non-root,
+read-only Caddy container that proxies `/api`. Tests ran on the local PC (headless Firefox 152 via
+Selenium for desktop; Playwright Firefox 142 for the exact phone viewport).
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Screens | VERIFIED | Sign-in (token used once, never stored), upload (multi-file, drag and drop, progress, real file input), jobs (polls only while something is moving), scan detail (pipeline stages, findings, signatures, CDR and final checks, SSE with polling fallback), archive browser grouped by folder, document page (filing reason, downloads, title/tag editor), quarantine (admin delete with confirmation; signed originals warned), status (real summary and health). |
+| Strict CSP | VERIFIED | `default-src 'none'; script-src 'self'; style-src 'self'; …; frame-ancestors 'none'`, with no `unsafe-inline`. The build emits a single module script; CSS and JS ran under it. Plus nosniff, no-referrer, Permissions-Policy, COOP/CORP, X-Frame-Options and no Server header. |
+| XSS | VERIFIED | A held document named `<img src=x onerror=alert(1)>.pdf` rendered as text in jobs and quarantine; no element was created and no dialog fired. |
+| Session hygiene | VERIFIED | After sign-in, localStorage and sessionStorage were empty, the token appeared nowhere in the page, and `document.cookie` was empty (HttpOnly). Sign-out returned the UI to the login form, and the old cookie then got 401 from the API. |
+| Edits through the UI | VERIFIED | Tag edit → `Saved (revision 2)` → persisted after reload; the database showed revision 2. Found by the test: the web proxy compressed API responses and so rewrote ETags, breaking `If-Match`. Compression is now limited to static files, which also keeps CSRF tokens out of compressed responses (BREACH). |
+| Downloads only | VERIFIED | The document page links only to `/api/v1/archive/{id}/file` and `/sidecar` with `download`; there is no original or quarantine link and no inline preview (the API serves sandboxed attachments). |
+| PWA without sensitive caching | VERIFIED | Manifest with SVG and PNG icons, installable. The service worker caches only the shell and hashed assets; after use, Cache Storage held no `/api/` entry. |
+| Desktop 1280×800 | VERIFIED | The full flow above. |
+| iPhone viewport 390×844 at 3× | VERIFIED (emulated) | Playwright Firefox with an exact 390 CSS-px viewport, touch and iPhone UA: bottom navigation shown and desktop navigation hidden; no horizontal overflow on upload, jobs, archive, document, scan or status; tab targets ≥ 44 px; tap navigation works. WebDriver Firefox cannot go below 500 px, so the first phone run was really at 500 px and is not counted. |
+| Real iPhone Safari | NOT STARTED | Needs your phone and deployment over HTTPS (Safari/WebKit was not available locally). |
+| Bugs found and fixed | VERIFIED | Caddy's file capability could not exec under `no-new-privileges` + `cap_drop: ALL` (the image now runs a copy without it); ETag rewriting (above); sign-out left the shell signed in (`queryClient.clear()` detached the observed session query). |
+
+Commands: `VENV=<venv with selenium, playwright> PLAYWRIGHT_BROWSERS_PATH=<dir> pdf-gateway/tests/test_m5_ui.sh [SCREENSHOT_DIR]`,
+`pdf-gateway/tests/test_m5_api.sh`.

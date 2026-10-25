@@ -65,9 +65,9 @@ mean verified behavior, not merely committed code.
 
 ## M5 — mobile frontend/PWA
 
-- [ ] Authenticated upload, jobs/SSE, findings, quarantine, archive, stats, and health.
-- [ ] No raw-original preview or sensitive offline caching.
-- [ ] CSP, CSRF, XSS, IDOR, desktop, and iPhone viewport tests.
+- [x] Authenticated upload, jobs/SSE, findings, quarantine, archive, stats, and health. (Quarantine override/rescan NOT STARTED.)
+- [x] No raw-original preview or sensitive offline caching.
+- [x] CSP, CSRF, XSS, IDOR, desktop, and iPhone viewport tests (iPhone viewport emulated in Firefox; real iPhone Safari pending deployment).
 
 ## M6 — Paperless projection
 

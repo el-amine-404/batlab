@@ -80,6 +80,34 @@ services:
     restart: unless-stopped
     networks: [backend, edge]
 
+  # Stateless UI: static files and a same-origin reverse proxy to the API. It
+  # mounts no document storage. Put it behind the homelab Caddy for TLS.
+  web:
+    build:
+      context: web
+    environment:
+      PDF_GATEWAY_API_UPSTREAM: api:8080
+    depends_on:
+      api: {condition: service_healthy}
+    ports:
+      - 127.0.0.1:${PDF_GATEWAY_WEB_PORT:-18088}:8080
+    read_only: true
+    tmpfs:
+      - /config:size=1m,mode=0700,uid=10006,gid=10006
+      - /data:size=1m,mode=0700,uid=10006,gid=10006
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 32
+    mem_limit: 128m
+    cpus: ${PDF_GATEWAY_CPUS_CORE:-0.25}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/manifest.webmanifest"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+    networks: [edge]
+
   clamav:
     profiles: [scanning]
     image: clamav/clamav:1.4@sha256:3bba6dd5ac6663d55b80f86a3126e146612d93b593cc2617188d13f637d91260

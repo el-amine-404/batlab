@@ -1,0 +1,20 @@
+# Adds the web UI container to docker-compose.m4-gate.yml for browser tests.
+services:
+  web:
+    image: pdf-gateway-m5-test/web:local
+    environment:
+      PDF_GATEWAY_API_UPSTREAM: api:8080
+    depends_on:
+      api: {condition: service_healthy}
+    ports:
+      - 127.0.0.1:18290:8080
+    read_only: true
+    tmpfs:
+      - /config:size=1m,mode=0700,uid=10006,gid=10006
+      - /data:size=1m,mode=0700,uid=10006,gid=10006
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 32
+    mem_limit: 128m
+    cpus: 0.25
+    networks: [edge]
