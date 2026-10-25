@@ -71,7 +71,7 @@ at 85 °C), one at a time, starting below 75 °C. Production CPU caps are config
 | `501124a` | Budget/healthcheck changes, `lab2_test.sh`, `test_pipeline_e2e.sh` through the archive, docs |
 | `25ee7a4` | M5-1 sessions + CSRF, scan/quarantine lists, findings, SSE, safe delete, summary, health, V008 |
 | `b3dbb3c` | M5-2/3 web UI, web container, Firefox/Playwright UI tests |
-| (M6 commit) | Paperless adapter, V009, import API, archive-worker hooks, bypass doc, TCP RabbitMQ probes |
+| `5a01bc2` | Paperless adapter, V009, import API, archive-worker hooks, bypass doc, TCP RabbitMQ probes |
 
 ### Pipeline as implemented
 
