@@ -36,4 +36,6 @@ ssh "$remote" "cd '$remote_dir' || exit 1
   rm -f /tmp/$test_name.log
   echo \"peak package temperature: \$(sort -k2 -n /tmp/$test_name.temps | tail -1) (\$(wc -l < /tmp/$test_name.temps) samples at 1 s)\"
   rm -rf '$remote_dir'
+  # Remove exactly the images this run loaded (never a prune).
+  docker rmi -f ${tags[*]} >/dev/null 2>&1 || true
   exit \$status"
