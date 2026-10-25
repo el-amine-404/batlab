@@ -32,6 +32,27 @@ services:
       - ${TEST_FIXTURES}:/fixtures:ro
     networks: [scan]
 
+  fixture-builder:
+    build:
+      context: ../analysis-worker
+    entrypoint: ["qpdf"]
+    volumes:
+      - ${TEST_FIXTURES}:/fixtures
+    working_dir: /fixtures
+    networks: [scan]
+
+  clamav-timeout:
+    build:
+      context: ../analysis-worker
+    entrypoint:
+      - python3
+      - -c
+      - "import socket,time;s=socket.socket();s.bind(('0.0.0.0',3310));s.listen();[(lambda c:(time.sleep(30),c.close()))(s.accept()[0]) for _ in iter(int,1)]"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [scan]
+
 networks:
   scan:
     internal: true

@@ -5,7 +5,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 compose="$root/pdf-gateway/tests/docker-compose.m2.yml"
 scratch="$(mktemp -d)"
 export TEST_FIXTURES="$scratch/fixtures"
-mkdir -m 0755 "$TEST_FIXTURES"
+mkdir -m 0777 "$TEST_FIXTURES"
 
 cleanup() {
   status=$?
@@ -45,8 +45,12 @@ eicar=b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
 pathlib.Path(sys.argv[3]).write_bytes(eicar)
 PY
 printf '%%PDF-1.4\nmalformed with no objects or trailer\n' >"$TEST_FIXTURES/malformed.pdf"
+printf 'safe attachment fixture\n' >"$TEST_FIXTURES/note.txt"
 
 docker compose -f "$compose" up -d --build --wait clamav
+docker compose -f "$compose" run --rm --no-deps fixture-builder clean.pdf --encrypt user owner 256 -- encrypted.pdf
+docker compose -f "$compose" run --rm --no-deps fixture-builder clean.pdf --add-attachment note.txt -- attachment.pdf
+docker compose -f "$compose" up -d clamav-timeout
 
 definitions_fresh=false
 for _ in $(seq 1 90); do
@@ -106,6 +110,23 @@ assert any(f["code"]=="PDF_KEYWORD_OPENACTION" for f in r["findings"]),r
 PY
 
 set +e
+run_scan encrypted.pdf "$scratch/encrypted.json"
+encrypted_status=$?
+run_scan attachment.pdf "$scratch/attachment.json"
+attachment_status=$?
+set -e
+[[ $encrypted_status -eq 2 && $attachment_status -eq 0 ]]
+python3 - "$scratch/encrypted.json" "$scratch/attachment.json" <<'PY'
+import json,sys
+encrypted=json.load(open(sys.argv[1])); assert encrypted["detection"]=="UNKNOWN",encrypted
+assert encrypted["policyDecision"]=="REVIEW_REQUIRED",encrypted
+assert any(f["code"] in {"PDF_ENCRYPTED","PDF_STRUCTURE_INVALID"} for f in encrypted["findings"]),encrypted
+attachment=json.load(open(sys.argv[2])); assert attachment["detection"]=="SUSPICIOUS",attachment
+assert attachment["policyDecision"]=="REVIEW_REQUIRED",attachment
+assert any(f["code"]=="PDF_KEYWORD_EMBEDDEDFILE" for f in attachment["findings"]),attachment
+PY
+
+set +e
 run_scan eicar.com "$scratch/eicar.json"
 eicar_status=$?
 set -e
@@ -134,9 +155,11 @@ docker compose -f "$compose" run --rm --no-deps analyzer --max-definition-age-ho
 stale_status=$?
 docker compose -f "$compose" run --rm --no-deps analyzer --clamd-host unavailable /fixtures/clean.pdf >"$scratch/unavailable.json"
 unavailable_status=$?
+docker compose -f "$compose" run --rm --no-deps analyzer --clamd-host clamav-timeout --clamd-timeout 1 /fixtures/clean.pdf >"$scratch/timeout.json"
+timeout_status=$?
 set -e
-[[ $stale_status -eq 2 && $unavailable_status -eq 2 ]]
-python3 - "$scratch/stale.json" "$scratch/unavailable.json" <<'PY'
+[[ $stale_status -eq 2 && $unavailable_status -eq 2 && $timeout_status -eq 2 ]]
+python3 - "$scratch/stale.json" "$scratch/unavailable.json" "$scratch/timeout.json" <<'PY'
 import json,sys
 for name in sys.argv[1:]:
     r=json.load(open(name)); assert r["detection"]=="UNKNOWN",r

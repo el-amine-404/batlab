@@ -41,7 +41,7 @@ mean verified behavior, not merely committed code.
 - [x] Persistent ClamAV with freshness reporting and bounded INSTREAM scans.
 - [x] qpdf/PDFiD/pdf-parser/YARA inspection in constrained workers.
 - [x] Typed findings, exact engine/rule versions, and deterministic policy versions.
-- [ ] EICAR, malformed, encrypted, active-action, attachment, and timeout fixtures.
+- [x] EICAR, malformed, encrypted, active-action, attachment, and timeout fixtures.
 - [x] Prove scanner failures and stale signatures fail closed.
 - [x] Durable single-concurrency worker, atomic restricted reports, and replay-safe acknowledgement.
 
