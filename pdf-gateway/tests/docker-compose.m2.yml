@@ -1,0 +1,59 @@
+name: pdf-gateway-m2-test
+services:
+  clamav:
+    image: clamav/clamav:1.4@sha256:3bba6dd5ac6663d55b80f86a3126e146612d93b593cc2617188d13f637d91260
+    healthcheck:
+      test: ["CMD", "clamdscan", "--ping", "3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    mem_limit: 4g
+    cpus: 2.0
+    networks: [scan, updates]
+
+  analyzer:
+    build:
+      context: ../analysis-worker
+    entrypoint: ["python3", "/opt/pdf-gateway/scan.py"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 768m
+    cpus: 1.0
+    depends_on:
+      clamav: {condition: service_healthy}
+    volumes:
+      - ${TEST_FIXTURES}:/fixtures:ro
+    networks: [scan]
+
+  fixture-builder:
+    build:
+      context: ../analysis-worker
+    entrypoint: ["qpdf"]
+    volumes:
+      - ${TEST_FIXTURES}:/fixtures
+    working_dir: /fixtures
+    networks: [scan]
+
+  clamav-timeout:
+    build:
+      context: ../analysis-worker
+    entrypoint:
+      - python3
+      - -c
+      - "import socket,time;s=socket.socket();s.bind(('0.0.0.0',3310));s.listen();[(lambda c:(time.sleep(30),c.close()))(s.accept()[0]) for _ in iter(int,1)]"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [scan]
+
+networks:
+  scan:
+    internal: true
+  updates: {}

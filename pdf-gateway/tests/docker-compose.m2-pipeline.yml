@@ -1,0 +1,73 @@
+name: pdf-gateway-m2-pipeline-test
+services:
+  postgres:
+    image: postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
+    environment:
+      POSTGRES_DB: pdf_gateway
+      POSTGRES_USER: pdf_gateway
+      POSTGRES_PASSWORD: test-database-password
+    volumes:
+      - ../api/src/main/resources/db/migration/V001__m1_core.sql:/docker-entrypoint-initdb.d/001.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pdf_gateway -d pdf_gateway"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    networks: [backend]
+
+  rabbitmq:
+    image: rabbitmq:4.1-alpine@sha256:3dd4ce7606f9fbf2e2dbca90a02f29c19c5cdf66bf15cdf5237430e3614128ca
+    environment:
+      RABBITMQ_DEFAULT_USER: pdf_gateway
+      RABBITMQ_DEFAULT_PASS: test-rabbit-password
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    networks: [backend]
+
+  clamav:
+    image: clamav/clamav:1.4@sha256:3bba6dd5ac6663d55b80f86a3126e146612d93b593cc2617188d13f637d91260
+    healthcheck:
+      test: ["CMD", "clamdscan", "--ping", "3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    mem_limit: 4g
+    networks: [backend, updates]
+
+  worker:
+    build:
+      context: ../analysis-worker
+    environment:
+      PDF_GATEWAY_DATABASE_HOST: postgres
+      PDF_GATEWAY_DATABASE_NAME: pdf_gateway
+      PDF_GATEWAY_DATABASE_USER: pdf_gateway
+      PDF_GATEWAY_DATABASE_PASSWORD: test-database-password
+      PDF_GATEWAY_RABBITMQ_HOST: rabbitmq
+      PDF_GATEWAY_RABBITMQ_USER: pdf_gateway
+      PDF_GATEWAY_RABBITMQ_PASSWORD: test-rabbit-password
+      PDF_GATEWAY_CLAMD_HOST: clamav
+      PDF_GATEWAY_STORAGE_ROOT: /var/lib/pdf-gateway
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+      clamav: {condition: service_healthy}
+    volumes:
+      - ${TEST_STORAGE}/quarantine:/var/lib/pdf-gateway/quarantine:ro
+      - ${TEST_STORAGE}/reports:/var/lib/pdf-gateway/reports
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 768m
+    cpus: 1.0
+    networks: [backend]
+
+networks:
+  backend: {internal: true}
+  updates: {}
