@@ -118,6 +118,39 @@ None. The worktree is clean at the handoff commit.
 4. M7 optional OCR/AI with offline-safe behavior.
 5. M8 hardening, measured Lab2 impact, monitoring, encrypted backup and clean restore.
 
+### M4 plan (written 2026-10-25, before implementation)
+
+Constraint from the user: Lab2 must stay healthy. Run M4 tests on the local PC.
+Use Lab2 only for the final CDR-integrated run, under the thermal guard and one
+test at a time.
+
+Design (safe, reversible): `pdf-gateway/archive-worker/` holds a library + CLI
+(`pdf-archive`: `publish`, `verify`, `reindex`, `repair --dry-run|--apply`,
+`export`, `import`) on Python stdlib plus hash-locked `jsonschema`. The archive
+root has `archive/`, `staging/` (same filesystem, checked by `st_dev`) and
+`manifests/`. Publishing stages the PDF + `metadata.json` (+ `content.txt`),
+fsyncs, validates schema and hash, renames the directory atomically (never
+overwrites), fsyncs the parent, then appends the manifest. Sidecars are
+authoritative; the manifest and PostgreSQL are rebuildable. Reindex writes a
+standalone SQLite catalog from sidecars alone.
+
+Slices:
+1. Library, CLI, path normaliser, atomic publish/verify/reindex/repair/export/import,
+   including a real SIGKILL crash loop and a tamper test. Local.
+2. Deterministic organisation: default `taxonomy.json` + reviewed `rules.json`;
+   bounded native-text extraction from the original inside the networkless analysis
+   sandbox (untrusted, classification-only); title/date/issuer/type with
+   provenance; filename template; `Unsorted` fallback with review reason. Local.
+3. Durable `archive-worker` consuming `pdf.gateway.archive.v1`: re-verify
+   FINAL_VALIDATED + PASS + hash, organise, publish. V005 `archive_documents`/
+   `archive_versions`; READY only after publish (extend V004 guard). Local.
+4. Allowlisted embedded metadata: a new unsigned artifact version that goes back
+   through the validation worker before publish. Local.
+5. API read endpoints + sidecar PATCH with ETag/CAS (no PDF rewrite). Gate test:
+   drop PostgreSQL, reindex from the archive alone; crash-safe publish;
+   export/import into a fresh archive. One thermally guarded Lab2 run of the
+   CDR chain into the archive.
+
 ### First command for the next agent
 
 ```bash

@@ -1,0 +1,6 @@
+*
+!archive-worker/requirements.txt
+!archive-worker/*.py
+!contracts/archive-metadata.schema.json
+!contracts/taxonomy.schema.json
+**/__pycache__
