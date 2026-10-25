@@ -55,22 +55,21 @@ if [[ ! -f $SOURCE ]] || [[ $(<"$SOURCE") != "$source_line" ]]; then
 fi
 
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y dangerzone-full runsc
+DEBIAN_FRONTEND=noninteractive apt-get install -y dangerzone-full crun
 
-# Keep the gVisor selection scoped to the PDF gateway. Dangerzone disables
-# cgroups for rootless conversions, so Podman must also know that runsc supports
-# that mode; otherwise it rejects the conversion before the sandbox starts.
+# Keep the outer OCI-runtime selection scoped to the PDF gateway. Dangerzone
+# runs its bundled gVisor/runsc sandbox *inside* this networkless outer Podman
+# container. The outer runtime must support rootless cgroups=disabled; crun does.
 install -d -o root -g root -m 0755 "$CDR_CONFIG_DIR"
 config_tmp="$(mktemp)"
 cleanup_config() { rm -f -- "$config_tmp"; }
 trap 'cleanup; cleanup_config' EXIT
 cat >"$config_tmp" <<'EOF'
 [engine]
-runtime = "runsc"
-runtime_supports_nocgroups = ["runsc"]
+runtime = "crun"
 
 [engine.runtimes]
-runsc = ["/usr/bin/runsc"]
+crun = ["/usr/bin/crun"]
 EOF
 install -o root -g root -m 0644 "$config_tmp" "$CONTAINERS_CONF"
 
@@ -87,10 +86,10 @@ run_as_runtime_user dangerzone-image upgrade
 run_as_runtime_user dangerzone-image verify-local
 
 configured_runtime="$(run_as_runtime_user podman info --format '{{.Host.OCIRuntime.Name}}')"
-if [[ $configured_runtime != runsc ]]; then
-  echo "Dangerzone Podman configuration selected '$configured_runtime', expected 'runsc'" >&2
+if [[ $configured_runtime != crun ]]; then
+  echo "Dangerzone outer Podman runtime is '$configured_runtime', expected 'crun'" >&2
   exit 1
 fi
 
-echo "Dangerzone CDR runtime and signed image installed with gVisor; run the tracked isolation verification next."
+echo "Dangerzone outer runtime and signed image installed; run the tracked inner-gVisor isolation verification next."
 
