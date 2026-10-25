@@ -80,7 +80,9 @@ status=$(curl -sS -o "$scratch/readonly.json" -w '%{http_code}' -H "Authorizatio
 [[ $status == 403 ]]
 
 status=$(curl -sS -o "$scratch/raw.json" -w '%{http_code}' -H "Authorization: Bearer $TEST_ADMIN_TOKEN" "$base/api/v1/quarantine/$scan_id")
-[[ $status == 404 ]]
+# No route serves quarantined bytes: 404, or 405 since M5 added an admin DELETE on this path.
+[[ $status == 404 || $status == 405 ]]
+! grep -q '%PDF' "$scratch/raw.json"
 
 docker compose -f "$compose" restart api >/dev/null
 for _ in $(seq 1 40); do curl -fsS "$base/internal/actuator/health/readiness" >/dev/null 2>&1 && break; sleep 1; done

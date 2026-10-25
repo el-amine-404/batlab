@@ -385,3 +385,22 @@ scratch removed, and test images deleted.
 | Corpus profile (read-only) | VERIFIED | 703 PDFs, median 421 KB, max 45 MB. No `/ByteRange` (no cryptographic signatures) anywhere, so signed handling stays covered only by generated fixtures. In a deterministic sample of 61: 41 have a text layer and 16 are scan-like. Originals are read through symlinks; copies only, by index, in 0700 scratch. |
 | Real-sample pipeline run | BLOCKED (thermal) | Two documents (1-page with a text layer, 2-page scan) were added to `test_pipeline_e2e` through the anonymous `REAL_SAMPLE_DIR` hook. It reports invariants and non-identifying facts only, never names, titles, paths or text. Both attempts were stopped by the thermal guard (88 °C at an 85 limit, 92 °C at a raised 90 limit) during the 13-document conversion burst, with Lab2 already at 72–80 °C from its own services. No outcome for the real documents is claimed. |
 | Data handling | VERIFIED | Source SHA-256 identical before and after. Local and Lab2 copies, the remote 0700 sample directory, logs and test images were all deleted. carwatch was stopped at the user's request (Frigate 88% → 21% CPU); restart with `docker compose start carwatch` in `compose/frigate`. |
+
+## 2026-10-25 — M5 slice 1: API for the web UI
+
+Ran on the local PC with the real API (Flyway V001–V008) and archive worker.
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Browser sessions | VERIFIED | `POST /api/v1/session` exchanges an API token (never stored by the browser or echoed back) for `__Host-pgw_session`: HttpOnly, Secure, SameSite=Strict, Path=/, no Domain. Only the cookie's SHA-256 is stored. 8 h absolute expiry; a session idle for more than 2 h returned 401. Logout revoked the session and cleared the cookie. A bad token returned 401 and was audited. |
+| CSRF / Origin | VERIFIED | Cookie-authenticated `DELETE` without, or with a wrong, `X-CSRF-Token` → 403 `CSRF_REJECTED`; correct token but `Origin: https://evil.example` → 403. Nothing changed on any refused attempt. The correct token with a same-origin Origin succeeded. Bearer clients are unaffected (`test_m1.sh`, `test_m4_gate.sh`). |
+| IDOR | VERIFIED | Another USER's session saw 0 scans and got 404 on findings and events, and 403 on quarantine delete. |
+| Lists and contract | VERIFIED | `GET /scans` (newest first, cursor), `GET /quarantine` (held only). Scan views pass the OpenAPI `Scan` schema, now with an untrusted `displayName` (an XSS payload filename is returned verbatim as data; the UI must render it as text). |
+| Findings without content | VERIFIED | `/scans/{id}/findings` is built by PostgreSQL from an allowlist (typed codes, severities, versions, verdicts, steps, archive placement, limitations). No document text, `sourceSha256` or evidence blobs; checked against strings from the fixture. |
+| Live events | VERIFIED | `/scans/{id}/events` (SSE) sent one `status` event for a READY scan and completed; it authorises before opening; 1 s polls on two virtual-thread pollers. |
+| Quarantine safe delete | VERIFIED | Admin + CSRF only. Released documents are refused (409). A signed original needs `confirmSigned=true` (409 `SIGNED_ORIGINAL` otherwise). Delete removes the quarantine file last within the transaction, sets the scan `CANCELLED`, and is audited (2 events). |
+| Summary / health | VERIFIED | Counts, statuses, archived, CDR failures and READY latency percentiles. Health covers DB, broker, archive readability, outbox backlog, pipeline counts, latest ClamAV definitions and CDR outcome (inferred, not probed). |
+| Regressions found | VERIFIED fixed | The new `DELETE /quarantine/{id}` made `GET` on that path a 500; it now returns a 405 problem. M1's "no raw quarantine route" check accepts 404/405 and asserts no PDF bytes. |
+
+Commands: `pdf-gateway/tests/test_m5_api.sh`, `test_m1.sh`, `test_m4_gate.sh`, Maven, contracts (OpenAPI 0.4.0).
+Not done: login rate limiting (tokens are 256-bit random), quarantine override/rescan.

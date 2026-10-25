@@ -118,6 +118,23 @@ None after the checkpoint commit.
    iPhone viewports. Cookie sessions require CSRF (SecurityConfig currently disables CSRF for bearer-only use).
 2. M6 exactly-once Paperless projection. 3. M7 optional OCR/AI. 4. M8 hardening, budget measurement, backup/restore.
 
+### M5 plan (written 2026-10-25, before implementation)
+
+1. Backend for a browser UI: `POST/DELETE /api/v1/session` exchanges an API token for an
+   HttpOnly, Secure, SameSite=Strict session cookie (hashed server-side, expiring) plus a CSRF
+   token required on every unsafe cookie-authenticated request. Also `GET /scans` (own, paginated),
+   `/scans/{id}/findings` (typed, no document content), `/scans/{id}/events` (SSE, poll fallback),
+   `GET /quarantine` + admin safe `DELETE`, `/dashboard/summary`, `/system/health`. Local curl tests.
+2. `web/`: React + TypeScript + Vite + Tailwind + TanStack Query + Zod. Hand-written shadcn-style
+   primitives (no extra codegen). Caddy `web` container serves the build same-origin, proxies `/api`,
+   and sends strict CSP/security headers. PWA manifest plus a service worker that caches only the
+   static shell (never `/api`).
+3. Headless-Firefox tests (Selenium; no large image pulls): login, upload, live progress, findings,
+   archive browse/edit, download attributes, XSS via hostile filename/title, at 1280×800 and 390×844.
+   CSRF and IDOR at the API. All local; Lab2 not needed.
+
+Not in M5 scope: quarantine override/rescan (NOT STARTED, needs a reviewed policy), OIDC/2FA.
+
 ### First command for the next agent
 
 ```bash

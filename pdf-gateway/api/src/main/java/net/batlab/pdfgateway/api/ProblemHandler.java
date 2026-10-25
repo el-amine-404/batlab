@@ -8,6 +8,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authorization.AuthorizationDeniedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -28,6 +29,14 @@ class ProblemHandler {
         return ResponseEntity.status(404).contentType(MediaType.APPLICATION_PROBLEM_JSON)
                 .body(new Problem("about:blank", "Not found", 404,
                         "The requested resource does not exist", "NOT_FOUND", trace));
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    ResponseEntity<Problem> methodNotAllowed(HttpRequestMethodNotSupportedException error, HttpServletRequest request) {
+        String trace = Optional.ofNullable(request.getHeader("X-Request-ID")).filter(v -> v.length() <= 80).orElse("unavailable");
+        return ResponseEntity.status(405).contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(new Problem("about:blank", "Method not allowed", 405,
+                        "This resource does not support that method", "METHOD_NOT_ALLOWED", trace));
     }
 
     @ExceptionHandler(AuthorizationDeniedException.class)
