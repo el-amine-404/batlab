@@ -113,3 +113,21 @@ stored. The app never previews originals; approved PDFs are downloads only.
 pdf-gateway/tests/test_m5_api.sh
 VENV=… PLAYWRIGHT_BROWSERS_PATH=… pdf-gateway/tests/test_m5_ui.sh [SCREENSHOT_DIR]
 ```
+
+## M7: optional OCR and AI (laptop agent)
+
+Enrichment is off unless `PDF_GATEWAY_ENRICHMENT_ENABLED=true`. When on, documents
+filed for review get an OCR job (no text layer) or an AI suggestion job. The agent
+in `enrichment-agent/` runs on the AI laptop next to LM Studio and *pulls* work, so
+the laptop exposes nothing and may be off at any time.
+
+1. Create a dedicated agent account and token (store only the token's SHA-256):
+   `INSERT INTO users(id,username,role) VALUES (gen_random_uuid(),'t1000-agent','ENRICHMENT');`
+   `INSERT INTO api_tokens(id,user_id,token_hash,label) SELECT gen_random_uuid(),id,'<sha256 of token>','agent' FROM users WHERE username='t1000-agent';`
+2. On the laptop: copy `agent.env.example` to `agent.env` (gateway URL, token, model), then
+   `docker compose -f pdf-gateway/enrichment-agent/compose.yml up -d --build`.
+3. The agent loads `qwen/qwen3-4b-2507` in LM Studio at a 4096-token context, which
+   fits a 4 GB GPU; OCR uses Tesseract (eng+fra+ara).
+
+OCR text may re-file a document through the reviewed rules. AI output only becomes
+proposals with quoted evidence, which a user applies or dismisses in the UI.

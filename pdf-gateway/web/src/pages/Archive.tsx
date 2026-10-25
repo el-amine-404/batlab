@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { api, ApiError, type Session } from "../api";
+import { api, ApiError, type Session, type Suggestion } from "../api";
 import { Badge, Button, Card, ErrorNote, Field, formatBytes, formatDate } from "../components/ui";
 
 export function ArchivePage() {
@@ -49,6 +49,7 @@ export function DocumentPage({ session }: { session: Session }) {
   const client = useQueryClient();
   const doc = useQuery({ queryKey: ["document", documentId], queryFn: () => api.document(documentId) });
   const meta = useQuery({ queryKey: ["sidecar", documentId], queryFn: () => api.sidecar(documentId) });
+  const suggestions = useQuery({ queryKey: ["suggestions", documentId], queryFn: () => api.suggestions(documentId) });
   const [title, setTitle] = useState<string | null>(null);
   const [tags, setTags] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -111,6 +112,21 @@ export function DocumentPage({ session }: { session: Session }) {
           <a className="inline-flex min-h-11 items-center rounded-lg px-4 text-sm font-medium ring-1 ring-slate-300" href={`/api/v1/archive/${encodeURIComponent(documentId)}/sidecar`} download>Download metadata</a>
         </div>
       </Card>
+      {suggestions.data?.some((item) => item.status === "PROPOSED") && (
+        <Card title="AI suggestions">
+          <p className="mb-2 text-xs text-slate-500">Proposed by a local model from this document's text. Nothing changes unless you apply it.</p>
+          {suggestions.data.filter((item) => item.status === "PROPOSED").map((item) => (
+            <SuggestionCard key={item.id} item={item} canEdit={canEdit} onApply={async () => {
+              setError(null);
+              try {
+                await api.applySuggestion(documentId, item.id, meta.data!.etag);
+                setMessage("Suggestion applied; saving…");
+                setTimeout(() => { client.invalidateQueries({ queryKey: ["sidecar", documentId] }); client.invalidateQueries({ queryKey: ["suggestions", documentId] }); }, 1500);
+              } catch (failure) { setError(failure); }
+            }} onDismiss={async () => { await api.dismissSuggestion(documentId, item.id); client.invalidateQueries({ queryKey: ["suggestions", documentId] }); }} />
+          ))}
+        </Card>
+      )}
       <Card title="Edit metadata">
         <form onSubmit={save} className="space-y-3">
           <Field label="Title" value={titleValue} maxLength={200} disabled={!canEdit} onChange={(event) => setTitle(event.target.value)} />
@@ -122,5 +138,30 @@ export function DocumentPage({ session }: { session: Session }) {
         </form>
       </Card>
     </>
+  );
+}
+
+function SuggestionCard({ item, canEdit, onApply, onDismiss }: { item: Suggestion; canEdit: boolean; onApply: () => void; onDismiss: () => void }) {
+  const rows: [string, string, string][] = [];
+  for (const key of ["title", "issuer", "documentType", "documentDate"] as const) {
+    const field = item.fields[key];
+    if (field) rows.push([key, field.value, field.evidence]);
+  }
+  return (
+    <div className="mb-3 rounded-lg bg-slate-50 p-3 text-sm ring-1 ring-slate-200" data-testid="suggestion">
+      <ul className="space-y-1">
+        {rows.map(([key, value, evidence]) => (
+          <li key={key}><span className="font-medium">{key}:</span> {value} <span className="block text-xs text-slate-500">“{evidence}”</span></li>
+        ))}
+        {item.fields.tags && <li><span className="font-medium">tags:</span> {item.fields.tags.join(", ")}</li>}
+      </ul>
+      <p className="mt-1 text-xs text-slate-500">{item.model}</p>
+      {canEdit && (
+        <div className="mt-2 flex gap-2">
+          <Button className="min-h-9" onClick={onApply} disabled={!item.fields.title && !item.fields.tags}>Apply title and tags</Button>
+          <Button variant="secondary" className="min-h-9" onClick={onDismiss}>Dismiss</Button>
+        </div>
+      )}
+    </div>
   );
 }

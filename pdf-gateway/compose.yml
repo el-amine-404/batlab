@@ -54,6 +54,8 @@ services:
       PDF_GATEWAY_STORAGE_ROOT: /var/lib/pdf-gateway
       PDF_GATEWAY_MULTIPART_DIR: /var/lib/pdf-gateway/multipart
       PDF_GATEWAY_ARCHIVE_ROOT: /var/lib/pdf-archive
+      # Optional OCR/AI enrichment by the laptop agent (enrichment-agent/compose.yml).
+      PDF_GATEWAY_ENRICHMENT_ENABLED: ${PDF_GATEWAY_ENRICHMENT_ENABLED:-false}
     depends_on:
       postgres: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}
@@ -310,6 +312,7 @@ services:
       PDF_GATEWAY_RABBITMQ_PASSWORD: ${PDF_GATEWAY_RABBITMQ_PASSWORD:?set in the deployment environment}
       PDF_GATEWAY_STORAGE_ROOT: /var/lib/pdf-gateway
       PDF_GATEWAY_ARCHIVE_ROOT: /var/lib/pdf-archive
+      PDF_GATEWAY_ENRICHMENT_ENABLED: ${PDF_GATEWAY_ENRICHMENT_ENABLED:-false}
     depends_on:
       postgres: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}

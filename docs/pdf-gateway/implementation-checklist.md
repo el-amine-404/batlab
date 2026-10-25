@@ -77,10 +77,10 @@ mean verified behavior, not merely committed code.
 
 ## M7 — optional OCR and AI enrichment
 
-- [ ] English/French/Arabic OCR with provenance and bounded resource use.
-- [ ] Explicit private AI endpoint, authentication, schema validation, and redaction.
-- [ ] Cached availability state machine, backoff/circuit breaker, and bounded queue.
-- [ ] Offline/missing/busy/malformed/unauthorized/recovery tests.
+- [x] English/French/Arabic OCR with provenance and bounded resource use (Arabic installed, not yet exercised by a fixture).
+- [x] Private AI via a pull agent with a scoped token, schema-constrained output, evidence and vocabulary validation; only released text is sent.
+- [x] Availability state machine from heartbeats, circuit breaker, bounded queue with expiry.
+- [x] Offline/missing/service-down/malformed/injection/unauthorized/recovery tests (BUSY reported by heartbeat, not separately forced).
 
 ## M8 — hardening, operations, and recovery
 

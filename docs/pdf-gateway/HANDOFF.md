@@ -33,7 +33,7 @@ Every agent that continues this project must update this file before stopping:
 
 The latest green checkpoint is the source of truth; chat summaries are advisory.
 
-## Verified state (2026-10-25 UTC, after M6)
+## Verified state (2026-10-25 UTC, after M7)
 
 - M0 VERIFIED, including the user's acceptance of the measured CDR approach (a VM was offered and declined).
 - M1, M2 VERIFIED. M3 VERIFIED (see `verification.md` gate table). M4 VERIFIED for its spec gate
@@ -47,6 +47,9 @@ The latest green checkpoint is the source of truth; chat summaries are advisory.
 - M6 VERIFIED against a disposable Paperless 3.3.2 on Lab2: exactly-once import via a `gateway_document_id`
   marker field (Paperless 3 accepts duplicates and exposes no checksum), outage/resume, metadata sync,
   `resync`, token never exposed. Bypass paths are documented in `paperless-bypass.md` (not changed).
+- M7 VERIFIED on this PC (the AI laptop) with real Tesseract and LM Studio `qwen/qwen3-4b-2507`: pull agent with
+  a scoped `ENRICHMENT` token, OCR re-filing through a recoverable move, evidence-checked AI proposals, breaker,
+  availability states. Pending: M6 Lab2 rerun after this slice; Arabic OCR fixture.
 - Nothing is deployed as a service. The provider unit and the `cdr`/`archive`/`paperless` profiles are installable only.
 
 ### Lab2 thermal rule (user requirement, 2026-10-25)
@@ -72,6 +75,7 @@ at 85 °C), one at a time, starting below 75 °C. Production CPU caps are config
 | `25ee7a4` | M5-1 sessions + CSRF, scan/quarantine lists, findings, SSE, safe delete, summary, health, V008 |
 | `b3dbb3c` | M5-2/3 web UI, web container, Firefox/Playwright UI tests |
 | `5a01bc2` | Paperless adapter, V009, import API, archive-worker hooks, bypass doc, TCP RabbitMQ probes |
+| `0d6276d` | M7 enrichment: pull agent, OCR re-filing, AI proposals, V010, UI |
 
 ### Pipeline as implemented
 
@@ -129,17 +133,17 @@ None after the checkpoint commit.
 
 ## Next implementation order
 
-1. M7 optional OCR and AI enrichment: OCR (English/French/Arabic) for textless scans, so they can be
-   organised instead of always landing in Unsorted (CPU-heavy: bounded, low priority, thermally tested,
-   preferably off Lab2). Remote Ollama availability state machine with circuit breaker; AI only proposes
-   fields with evidence and can never change a security verdict.
-2. M8 hardening, measured budget, monitoring, backup/restore, real-iPhone check, deployment, and the
-   Homepage `customapi` tile.
+1. M8 hardening and operations: adversarial/fuzz/load/disk-full tests; measured host budget (Paperless,
+   DNS, Jellyfin latency before/after) on Lab2 within the thermal rule; private metrics and alerts;
+   encrypted backup and a clean-host restore drill; scheduled `pdf-archive repair`/verify; deployment
+   runbook (provider install, linger, archive root, ownership, Caddy/HTTPS, Homepage `customapi` tile);
+   real-iPhone Safari check; rerun the M6 Paperless test; light real-document run (2 documents only).
+2. Final Discord notification only when every M0–M8 gate passes.
 
 ### First command for the next agent
 
 ```bash
-cd /home/bro/.codex-worktrees/pdf-security-gateway && git fetch origin && git status --short && git log --oneline -10 && pdf-gateway/tools/lab2_test.sh test_m6_paperless
+cd /home/bro/.codex-worktrees/pdf-security-gateway && git fetch origin && git status --short && git log --oneline -10 && pdf-gateway/tests/test_m7_enrichment.sh
 ```
 
 ## M3 plan as written before implementation (completed; kept for history)

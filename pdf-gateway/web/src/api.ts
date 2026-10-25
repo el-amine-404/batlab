@@ -92,6 +92,19 @@ export const Health = z.object({
   limitations: z.array(z.string()),
 });
 
+export const Ai = z.object({
+  enabled: z.boolean(), state: z.string(), agent: z.string().nullable(), model: z.string().nullable(),
+  ocrReady: z.boolean().nullable(), lastSeenAt: z.string().nullable(), lastSuccessAt: z.string().nullable(),
+  reason: z.string().nullable(), queue: z.object({ waiting: z.number(), running: z.number(), failed: z.number() }),
+});
+const Evidenced = z.object({ value: z.string(), evidence: z.string() });
+export const Suggestion = z.object({
+  id: z.string(), model: z.string(), promptVersion: z.string(), status: z.enum(["PROPOSED", "APPLIED", "DISMISSED"]), createdAt: z.string(),
+  fields: z.object({ title: Evidenced.optional(), issuer: Evidenced.optional(), documentType: Evidenced.optional(),
+    documentDate: Evidenced.optional(), tags: z.array(z.string()).optional(), dropped: z.array(z.string()).optional() }),
+});
+export type Suggestion = z.infer<typeof Suggestion>;
+
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) { super(message); }
 }
@@ -143,6 +156,12 @@ export const api = {
   edit: (url: string) => request(Edit, url),
   summary: () => request(Summary, "/api/v1/dashboard/summary"),
   health: () => request(Health, "/api/v1/system/health"),
+  ai: () => request(Ai, "/api/v1/system/ai"),
+  suggestions: (id: string) => request(z.array(Suggestion), `/api/v1/archive/${encodeURIComponent(id)}/suggestions`),
+  applySuggestion: (id: string, suggestion: string, etag: string) =>
+    request(Edit, `/api/v1/archive/${encodeURIComponent(id)}/suggestions/${encodeURIComponent(suggestion)}/apply`, { method: "POST", headers: { "If-Match": etag } }),
+  dismissSuggestion: (id: string, suggestion: string) =>
+    request(z.undefined(), `/api/v1/archive/${encodeURIComponent(id)}/suggestions/${encodeURIComponent(suggestion)}/dismiss`, { method: "POST" }),
 };
 
 /** Upload with progress (fetch has no upload progress). The original is never read back by the UI. */

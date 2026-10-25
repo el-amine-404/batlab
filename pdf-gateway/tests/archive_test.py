@@ -262,6 +262,51 @@ applied = crash.repair(apply=True, grace_seconds=0)
 check("repair re-records it, tolerating the torn line", applied["manifestMissing"] == [lost]
       and not crash.repair(apply=False, grace_seconds=0)["manifestMissing"] and crash.verify()["ok"])
 
+# Re-filing (e.g. after OCR): move out of Unsorted, rename the PDF, never change its bytes.
+refile = Archive(DATA / "refile")
+scan_pdf, scan_digest = put("scan.pdf", pdf_bytes("scan"))
+unsorted = doc_id()
+moved_from = refile.publish(scan_pdf, scan_digest, sidecar(unsorted, title="Unclassified document", issuer=None,
+                                                          date=None, category="Unsorted", tags=()))
+organised = {"title": "Internet Invoice - October 2026", "titleSource": "rule",
+             "organization": {"category": "Finance", "reviewState": "RULE", "folder": "Invoices", "reason": "rule after OCR"},
+             "documentType": "invoice", "tags": ["finance", "invoice"],
+             "issuer": {"value": "Example Telecom", "source": "rule", "reviewState": "UNVERIFIED"},
+             "documentDate": {"value": "2026-10-15", "source": "ocr", "reviewState": "UNVERIFIED"}}
+ocr_meta = {"method": "ocr", "source": "viewing_copy", "engine": "tesseract 5", "pages": 1, "characters": 30, "truncated": False}
+result = refile.reorganise(unsorted, 1, organised, text="Example Telecom invoice 29.99", text_extraction=ocr_meta)
+moved_to = refile.find(unsorted)
+check("re-filed to the rule's folder", moved_to.relative_to(refile.archive).as_posix().startswith("Finance/2026/Invoices/2026-10-15 - Example Telecom")
+      and not moved_from.exists() and result["metadataRevision"] == 2, moved_to)
+check("re-filed PDF bytes unchanged", hashlib.sha256((moved_to / result["relativePdfPath"]).read_bytes()).hexdigest() == scan_digest)
+check("OCR text and provenance recorded", (moved_to / "content.txt").read_text().startswith("Example Telecom")
+      and result["textExtraction"]["method"] == "ocr" and refile.verify()["ok"])
+refused("REVISION_CONFLICT", refile.reorganise, unsorted, 1, organised)
+refused("FIELD_NOT_REORGANISABLE", refile.reorganise, unsorted, 2, {"integrity": {}})
+
+def interrupted(stage: int) -> None:
+    """Re-file a fresh Unsorted document, but stop after step 1 or 2 (simulated crash)."""
+    victim = doc_id()
+    source = refile.publish(*put(f"crash{stage}.pdf", pdf_bytes(f"crash {stage}")), sidecar(victim, title="Unclassified document",
+                            issuer=None, date=None, category="Unsorted", tags=()))
+    current = json.loads((source / SIDECAR).read_text())
+    target = {**current, **organised, "metadataRevision": 2, "title": f"Crash {stage}"}
+    path, name = document_paths(target)
+    target.update(archivePath=path, relativePdfPath=name)
+    (source / SIDECAR).write_text(json.dumps(target, indent=2, sort_keys=True) + "\n")   # step 1 done
+    if stage == 2:
+        old_pdf = next(entry for entry in source.iterdir() if entry.suffix == ".pdf")
+        old_pdf.rename(source / name)                                                      # step 2 done
+    check(f"crash after step {stage}: verify reports it", not refile.verify()["ok"])
+    check(f"crash after step {stage}: repair dry-run lists it, changes nothing",
+          refile.repair(apply=False, grace_seconds=0)["movesCompleted"] == [victim] and source.exists())
+    refile.repair(apply=True, grace_seconds=0)
+    check(f"crash after step {stage}: repair completes the move", refile.verify()["ok"] and not source.exists()
+          and refile.find(victim).relative_to(refile.archive).as_posix() == path)
+
+interrupted(1)
+interrupted(2)
+
 # CLI surface: verify exit codes on clean and damaged archives.
 clean = subprocess.run([*CLI, "--root", str(fresh.root), "verify"], capture_output=True, text=True)
 damaged = subprocess.run([*CLI, "--root", str(archive.root), "verify"], capture_output=True, text=True)
