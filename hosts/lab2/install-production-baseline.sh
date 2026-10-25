@@ -65,6 +65,7 @@ set_watchdog_value() {
 set_watchdog_value WATCHDOG_DATA_ROOT /mnt/storage/data
 set_watchdog_value WATCHDOG_DATA_USB_PORT usb1-port1
 set_watchdog_value WATCHDOG_FORCE_USB2 1
+set_watchdog_value WATCHDOG_USB3_PORTS usb2-port2
 set_watchdog_value WATCHDOG_USB2_ATTEMPTS 3
 set_watchdog_value WATCHDOG_REVIVE_USB3_FALLBACK 0
 
