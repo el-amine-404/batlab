@@ -18,6 +18,7 @@ class RabbitConfig {
     static final String ARCHIVE_QUEUE = "pdf.gateway.archive.v1";
     static final String METADATA_EDIT_QUEUE = "pdf.gateway.metadata-edit.v1";
     static final String PAPERLESS_QUEUE = "pdf.gateway.paperless.v1";
+    static final String ENRICHMENT_QUEUE = "pdf.gateway.enrichment-result.v1";
     @Bean DirectExchange jobExchange() { return new DirectExchange(EXCHANGE, true, false); }
     @Bean Queue scanQueue() { return new Queue(QUEUE, true, false, false); }
     @Bean Binding scanBinding(Queue scanQueue, DirectExchange jobExchange) {
@@ -46,5 +47,9 @@ class RabbitConfig {
     @Bean Queue paperlessQueue() { return new Queue(PAPERLESS_QUEUE, true, false, false); }
     @Bean Binding paperlessBinding(Queue paperlessQueue, DirectExchange jobExchange) {
         return BindingBuilder.bind(paperlessQueue).to(jobExchange).with("PAPERLESS_QUEUED");
+    }
+    @Bean Queue enrichmentQueue() { return new Queue(ENRICHMENT_QUEUE, true, false, false); }
+    @Bean Binding enrichmentBinding(Queue enrichmentQueue, DirectExchange jobExchange) {
+        return BindingBuilder.bind(enrichmentQueue).to(jobExchange).with("ENRICHMENT_RESULT_QUEUED");
     }
 }

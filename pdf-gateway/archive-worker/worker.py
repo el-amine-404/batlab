@@ -21,12 +21,14 @@ from pathlib import Path
 import pika
 import psycopg2
 
+import enrichment
 import metadata
-from archive import Archive, ArchiveError, SIDECAR, sha256_file
+from archive import Archive, ArchiveError, SIDECAR, canonical_json, sha256_file
 from organize import default_taxonomy, organise, validated
 
 QUEUE = "pdf.gateway.archive.v1"
 EDIT_QUEUE = "pdf.gateway.metadata-edit.v1"
+ENRICHMENT_QUEUE = "pdf.gateway.enrichment-result.v1"
 STORAGE = Path(os.getenv("PDF_GATEWAY_STORAGE_ROOT", "/var/lib/pdf-gateway"))
 ARCHIVE = Archive(Path(os.getenv("PDF_GATEWAY_ARCHIVE_ROOT", "/var/lib/pdf-archive")))
 MAX_ATTEMPTS = int(os.getenv("PDF_GATEWAY_ARCHIVE_MAX_ATTEMPTS", "5"))
@@ -60,6 +62,11 @@ def now() -> str:
 def audit(cursor, scan_id: str, action: str, outcome: str, details: dict) -> None:
     cursor.execute("INSERT INTO audit_events(action,resource_type,resource_id,outcome,trace_id,details) VALUES (%s,'SCAN',%s,%s,%s,%s::jsonb)",
                    (action, scan_id, outcome, str(uuid.uuid4()), json.dumps(details)))
+
+
+def audit_document(cursor, document_id: str, action: str, outcome: str, details: dict) -> None:
+    cursor.execute("INSERT INTO audit_events(action,resource_type,resource_id,outcome,trace_id,details) VALUES (%s,'DOCUMENT',%s,%s,%s,%s::jsonb)",
+                   (action, document_id, outcome, str(uuid.uuid4()), json.dumps(details)))
 
 
 def claim(scan_id: str) -> dict | None:
@@ -239,6 +246,8 @@ def commit(job: dict, directory: Path, sidecar: dict, evidence: dict) -> None:
             cursor.execute("UPDATE scan_jobs SET import_status='PENDING' WHERE id=%s", (scan_id,))
             cursor.execute("INSERT INTO outbox_events(id,aggregate_type,aggregate_id,event_type,payload) VALUES (%s,'DOCUMENT',%s,'PAPERLESS_QUEUED',jsonb_build_object('documentId',%s::text))",
                            (str(uuid.uuid4()), sidecar["documentId"], sidecar["documentId"]))
+        enrichment.queue_initial(cursor, sidecar["documentId"], sidecar["integrity"]["sha256"],
+                                 sidecar["organization"]["reviewState"], bool(sidecar.get("relativeTextPath")))
         audit(cursor, scan_id, "ARCHIVE_PUBLISHED", "SUCCESS",
               {"documentId": sidecar["documentId"], "category": sidecar["organization"]["category"],
                "reviewState": sidecar["organization"]["reviewState"]})
@@ -338,8 +347,99 @@ def handle_edit(channel, method, _properties, body: bytes) -> None:
         channel.basic_nack(method.delivery_tag, requeue=True)
 
 
+def manifests() -> tuple[dict, dict]:
+    try:
+        rules = validated(ARCHIVE.manifests / "rules.json", "rules.schema.json",
+                          {"schemaVersion": "1.0.0", "revision": 1, "updatedAt": now(), "rules": []})
+        taxonomy = validated(ARCHIVE.manifests / "taxonomy.json", "taxonomy.schema.json", default_taxonomy(now()))
+    except Exception as error:
+        raise ArchiveStageError("ARCHIVE_CONFIG_INVALID", type(error).__name__) from error
+    return rules, taxonomy
+
+
+def index_update(cursor, sidecar: dict) -> None:
+    cursor.execute("""UPDATE archive_documents SET archive_path=%s, pdf_file=%s, title=%s, category=%s, review_state=%s,
+                             metadata_revision=%s, sidecar=%s::jsonb, updated_at=now() WHERE document_id=%s""",
+                   (sidecar["archivePath"], sidecar["relativePdfPath"], sidecar["title"], sidecar["organization"]["category"],
+                    sidecar["organization"]["reviewState"], sidecar["metadataRevision"], json.dumps(sidecar), sidecar["documentId"]))
+    cursor.execute("""INSERT INTO outbox_events(id,aggregate_type,aggregate_id,event_type,payload)
+                      SELECT %s,'DOCUMENT',%s,'PAPERLESS_QUEUED',jsonb_build_object('documentId',%s::text)
+                       WHERE EXISTS (SELECT 1 FROM paperless_imports WHERE document_id=%s AND status<>'FAILED_FINAL')""",
+                   (str(uuid.uuid4()), sidecar["documentId"], sidecar["documentId"], sidecar["documentId"]))
+
+
+def handle_enrichment(channel, method, _properties, body: bytes) -> None:
+    """Validate a submitted OCR/AI result and apply it (OCR) or store it as a proposal (AI)."""
+    try:
+        job_id = str(uuid.UUID(json.loads(body)["jobId"]))
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        channel.basic_reject(method.delivery_tag, requeue=False)
+        return
+    try:
+        with database() as connection, connection.cursor() as cursor:
+            cursor.execute("""SELECT j.status,j.kind,j.document_id,j.artifact_sha256,j.result,j.lease_agent,d.sha256,d.metadata_revision
+                                FROM enrichment_jobs j JOIN archive_documents d USING (document_id) WHERE j.id=%s FOR UPDATE OF j""", (job_id,))
+            row = cursor.fetchone()
+            if row is None or row[0] != "SUBMITTED":
+                channel.basic_ack(method.delivery_tag)
+                return
+            _status, kind, document_id, job_sha, result, agent, current_sha, revision = row
+            if job_sha != current_sha:
+                enrichment.record_failure(cursor, job_id, None, "DOCUMENT_CHANGED")
+            else:
+                try:
+                    rules, taxonomy = manifests()
+                    if kind == "OCR":
+                        text, meta = enrichment.validate_ocr(result if isinstance(result, dict) else {})
+                        organisation = organise(text, rules, taxonomy)
+                        changes = {}
+                        if organisation.fields["organization"]["reviewState"] == "RULE":
+                            changes = dict(organisation.fields)
+                            if "documentDate" in changes:
+                                changes["documentDate"] = dict(changes["documentDate"], source="ocr")
+                        updated = ARCHIVE.reorganise(document_id, revision, changes, text=text, text_extraction=meta)
+                        index_update(cursor, updated)
+                        enrichment.record_success(cursor, job_id, agent)
+                        if updated["organization"]["reviewState"] in ("FALLBACK", "REVIEW_REQUIRED"):
+                            enrichment.queue(cursor, document_id, current_sha, "SUGGEST")
+                        audit_document(cursor, document_id, "OCR_APPLIED", "SUCCESS",
+                              {"jobId": job_id, "refiled": bool(changes), "category": updated["organization"]["category"]})
+                    else:
+                        directory = ARCHIVE.find(document_id)
+                        text_path = directory / "content.txt" if directory else None
+                        text = text_path.read_text(encoding="utf-8", errors="replace") if text_path and text_path.is_file() else ""
+                        vocabulary = {tag["id"] for tag in taxonomy.get("tags", []) if not tag.get("blocked") and not tag.get("private")}
+                        fields, dropped = enrichment.validate_suggestion(result if isinstance(result, dict) else {}, text, vocabulary)
+                        if fields:
+                            cursor.execute("INSERT INTO ai_suggestions(id,document_id,job_id,model,prompt_version,fields) VALUES (%s,%s,%s,%s,%s,%s::jsonb)",
+                                           enrichment.suggestion_record(job_id, document_id, result, fields, dropped))
+                        enrichment.record_success(cursor, job_id, agent)
+                        audit_document(cursor, document_id, "AI_SUGGESTION", "SUCCESS", {"jobId": job_id, "fields": sorted(fields), "dropped": len(dropped)})
+                except enrichment.InvalidResult as invalid:
+                    enrichment.record_failure(cursor, job_id, agent, "INVALID_RESULT")
+                    audit_document(cursor, document_id, "ENRICHMENT_REJECTED", "FAILURE", {"jobId": job_id, "reason": str(invalid)[:200]})
+                except (ArchiveError, ArchiveStageError) as error:
+                    # Our side could not apply it (e.g. a concurrent edit); not the agent's fault.
+                    enrichment.record_failure(cursor, job_id, None, "APPLY_" + getattr(error, "code", "FAILED"))
+        channel.basic_ack(method.delivery_tag)
+    except Exception as error:
+        print(json.dumps({"event": "enrichment_apply_error", "jobId": job_id, "errorType": type(error).__name__}), flush=True)
+        channel.basic_nack(method.delivery_tag, requeue=True)
+        time.sleep(5)
+
+
+def ensure_taxonomy() -> None:
+    """The portable archive carries its own vocabulary (manifests/taxonomy.json)."""
+    path = ARCHIVE.manifests / "taxonomy.json"
+    if not path.exists():
+        temporary = path.with_name(f".taxonomy.{uuid.uuid4().hex}")
+        temporary.write_bytes(canonical_json(default_taxonomy(now())))
+        os.replace(temporary, path)
+
+
 def main() -> None:
     ARCHIVE.initialise()
+    ensure_taxonomy()
     credentials = pika.PlainCredentials(os.environ["PDF_GATEWAY_RABBITMQ_USER"], os.environ["PDF_GATEWAY_RABBITMQ_PASSWORD"])
     parameters = pika.ConnectionParameters(os.getenv("PDF_GATEWAY_RABBITMQ_HOST", "rabbitmq"), credentials=credentials,
                                            heartbeat=600, blocked_connection_timeout=60)
@@ -349,9 +449,11 @@ def main() -> None:
             channel = connection.channel()
             channel.queue_declare(queue=QUEUE, durable=True)
             channel.queue_declare(queue=EDIT_QUEUE, durable=True)
+            channel.queue_declare(queue=ENRICHMENT_QUEUE, durable=True)
             channel.basic_qos(prefetch_count=1)
             channel.basic_consume(queue=QUEUE, on_message_callback=handle)
             channel.basic_consume(queue=EDIT_QUEUE, on_message_callback=handle_edit)
+            channel.basic_consume(queue=ENRICHMENT_QUEUE, on_message_callback=handle_enrichment)
             channel.start_consuming()
         except (pika.exceptions.AMQPError, psycopg2.Error, OSError):
             time.sleep(5)

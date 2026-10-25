@@ -315,6 +315,86 @@ class Archive:
                                    "sidecarSha256": sha256_file(directory / SIDECAR)})
             return updated
 
+    # ------------------------------------------------------------ re-filing
+
+    REORGANISE_FIELDS = {"title", "titleSource", "organization", "documentType", "documentDate", "issuer", "tags"}
+
+    def reorganise(self, document_id: str, expected_revision: int, changes: dict,
+                   text: str | None = None, text_extraction: dict | None = None) -> dict:
+        """Re-file a document (new organisation, so possibly a new folder and file name).
+
+        Recoverable at every step: (1) the new sidecar, which records the intended
+        location and name, replaces the old one in place; (2) the PDF is renamed;
+        (3) the directory is renamed. A crash after (1) or (2) leaves a document
+        whose sidecar points elsewhere, which repair() completes. The PDF bytes
+        never change.
+        """
+        if set(changes) - self.REORGANISE_FIELDS:
+            raise ArchiveError("FIELD_NOT_REORGANISABLE", ",".join(sorted(set(changes) - self.REORGANISE_FIELDS)))
+        with self.lock():
+            directory = self.find(document_id)
+            if directory is None:
+                raise ArchiveError("DOCUMENT_NOT_FOUND", document_id)
+            current = json.loads((directory / SIDECAR).read_text(encoding="utf-8"))
+            if current["metadataRevision"] != expected_revision:
+                raise ArchiveError("REVISION_CONFLICT", f"current revision {current['metadataRevision']}")
+            updated = {**current, **changes, "metadataRevision": expected_revision + 1, "updatedAt": now()}
+            for key in self.REORGANISE_FIELDS - {"title", "organization", "tags"}:
+                if key in changes and changes[key] is None:
+                    updated.pop(key, None)
+            archive_path, filename = document_paths(updated)
+            updated.update(archivePath=archive_path, relativePdfPath=filename)
+            if text is not None:
+                updated["relativeTextPath"] = TEXT
+                if text_extraction:
+                    updated["textExtraction"] = text_extraction
+            errors = schema_errors(updated)
+            if errors:
+                raise ArchiveError("SIDECAR_INVALID", "; ".join(errors)[:500])
+            target = self.archive / archive_path
+            if target != directory and (target.exists() or not _inside(self.archive, target)):
+                raise ArchiveError("PATH_COLLISION", archive_path)
+            if text is not None:
+                temporary = directory / f".{TEXT}.{secrets.token_hex(4)}"
+                write_file(temporary, text.encode("utf-8")[:MAX_TEXT_BYTES])
+                os.replace(temporary, directory / TEXT)
+            temporary = directory / f".{SIDECAR}.{secrets.token_hex(4)}"
+            write_file(temporary, canonical_json(updated))
+            os.replace(temporary, directory / SIDECAR)          # (1) intent recorded
+            fsync_dir(directory)
+            self._complete_move(directory, updated)              # (2) and (3)
+            self._append_manifest({"event": "REORGANISED", "documentId": document_id, "archivePath": archive_path,
+                                   "metadataRevision": updated["metadataRevision"],
+                                   "sidecarSha256": sha256_file(target / SIDECAR)})
+            return updated
+
+    def _complete_move(self, directory: Path, sidecar: dict) -> Path:
+        """Finish a recorded re-filing: rename the PDF, then the directory."""
+        wanted_pdf = directory / sidecar["relativePdfPath"]
+        if not wanted_pdf.exists():
+            candidates = [entry for entry in directory.iterdir() if entry.suffix == ".pdf" and entry.is_file()
+                          and not entry.is_symlink() and sha256_file(entry) == sidecar["integrity"]["sha256"]]
+            if len(candidates) != 1:
+                raise ArchiveError("MOVE_UNRECOVERABLE", "the recorded PDF bytes are not present exactly once")
+            os.rename(candidates[0], wanted_pdf)
+            fsync_dir(directory)
+        target = self.archive / sidecar["archivePath"]
+        if target == directory:
+            return directory
+        if target.exists() or not _inside(self.archive, target):
+            raise ArchiveError("PATH_COLLISION", sidecar["archivePath"])
+        created = []
+        for ancestor in reversed([target.parent, *target.parent.parents]):
+            if _inside(self.archive, ancestor) and not ancestor.exists():
+                ancestor.mkdir(mode=0o755)
+                created.append(ancestor)
+        for parent in created:
+            fsync_dir(parent.parent)
+        os.rename(directory, target)
+        fsync_dir(target.parent)
+        fsync_dir(directory.parent)
+        return target
+
     # ------------------------------------------------------------ verification
 
     def check_document(self, directory: Path, sidecar_location: str | None = None) -> list[str]:
@@ -432,10 +512,11 @@ class Archive:
     def repair(self, apply: bool = False, grace_seconds: int = STAGING_GRACE_SECONDS) -> dict:
         """Report (and with apply, fix) crash leftovers. Never touches valid documents.
 
-        Fixable: abandoned staging directories (never visible) and published
+        Fixable: abandoned staging directories (never visible), interrupted
+        re-filings (the sidecar already records the target), and published
         documents missing from the manifest. Everything else is reported only.
         """
-        actions = {"staleStaging": [], "manifestMissing": [], "reportedOnly": {}}
+        actions = {"staleStaging": [], "manifestMissing": [], "movesCompleted": [], "reportedOnly": {}}
         with self.lock():
             cutoff = time.time() - grace_seconds
             for entry in self.staging.iterdir():
@@ -455,6 +536,21 @@ class Archive:
                         continue  # a torn final line from a crash is ignored, then superseded
                     if event.get("event") == "PUBLISHED":
                         recorded.add(event.get("documentId"))
+            # Re-filings interrupted after the sidecar recorded the new location.
+            actions["movesCompleted"] = []
+            for directory in list(self.document_dirs()):
+                try:
+                    sidecar = json.loads((directory / SIDECAR).read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if schema_errors(sidecar) or sidecar["archivePath"] == directory.relative_to(self.archive).as_posix():
+                    continue
+                actions["movesCompleted"].append(sidecar["documentId"])
+                if apply:
+                    try:
+                        self._complete_move(directory, sidecar)
+                    except ArchiveError:
+                        actions["movesCompleted"].pop()
             report = self.verify()
             actions["reportedOnly"] = report["failures"]
             for directory in self.document_dirs():

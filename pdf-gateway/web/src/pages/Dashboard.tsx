@@ -5,6 +5,7 @@ import { Badge, Card, ErrorNote, STATUS_LABEL, formatDate } from "../components/
 export function DashboardPage() {
   const summary = useQuery({ queryKey: ["summary"], queryFn: api.summary, refetchInterval: 30_000 });
   const health = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 30_000 });
+  const ai = useQuery({ queryKey: ["ai"], queryFn: api.ai, refetchInterval: 60_000 });
   const s = summary.data;
   const h = health.data;
   return (
@@ -41,9 +42,26 @@ export function DashboardPage() {
         )}
         {h && <ul className="mt-2 list-disc pl-5 text-xs text-slate-500">{h.limitations.map((text) => <li key={text}>{text}</li>)}</ul>}
       </Card>
+      <Card title="OCR and AI (optional)">
+        <ErrorNote error={ai.error} />
+        {ai.data && (
+          <div className="space-y-1 text-sm" data-testid="ai">
+            <p><Badge tone={["READY", "AVAILABLE"].includes(ai.data.state) ? "good" : ai.data.state === "DISABLED" ? "muted" : "warn"}>{AI_LABEL[ai.data.state] ?? ai.data.state}</Badge></p>
+            {!["READY", "AVAILABLE", "DISABLED"].includes(ai.data.state) && <p className="text-slate-600">Scanning and archiving continue; enrichment waits until the AI laptop is back.</p>}
+            <p className="text-slate-600">Waiting {ai.data.queue.waiting} · running {ai.data.queue.running} · failed {ai.data.queue.failed}</p>
+            {ai.data.model && <p className="text-xs text-slate-500">Model {ai.data.model} · last seen {formatDate(ai.data.lastSeenAt)}{ai.data.reason ? ` · ${ai.data.reason}` : ""}</p>}
+          </div>
+        )}
+      </Card>
     </>
   );
 }
+
+const AI_LABEL: Record<string, string> = {
+  DISABLED: "Not configured", UNKNOWN: "No AI agent seen yet", OFFLINE: "AI offline — scanning continues",
+  SERVICE_DOWN: "AI service not responding", MODEL_MISSING: "Model not installed", AVAILABLE: "Available",
+  READY: "Ready", BUSY: "Busy", DEGRADED: "Paused after invalid results",
+};
 
 function Stat({ label, value }: { label: string; value: number }) {
   return <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200"><div className="text-2xl font-semibold">{value}</div><div className="text-xs text-slate-500">{label}</div></div>;

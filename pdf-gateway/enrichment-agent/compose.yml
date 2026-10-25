@@ -1,0 +1,19 @@
+# Runs on the AI laptop next to LM Studio. It only connects *out* to the gateway;
+# nothing listens. Put PDF_GATEWAY_URL / PDF_GATEWAY_AGENT_TOKEN in agent.env.
+name: pdf-gateway-enrichment-agent
+services:
+  agent:
+    build: .
+    env_file: agent.env
+    # Host network only to reach LM Studio on 127.0.0.1:1234; no ports are opened.
+    network_mode: host
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 2g
+    cpus: 4.0
+    cpu_shares: 256
+    restart: unless-stopped

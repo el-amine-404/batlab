@@ -138,6 +138,8 @@ try:
     driver.get(BASE + "/dashboard")
     text_present(driver, "Database")
     check("health shows database and broker up", driver.find_element(By.CSS_SELECTOR, "[data-testid=health]").text.count("UP") >= 2)
+    wait(driver, ec.presence_of_element_located((By.CSS_SELECTOR, "[data-testid=ai]")))
+    check("AI card shows enrichment is not configured", "Not configured" in driver.find_element(By.CSS_SELECTOR, "[data-testid=ai]").text)
     driver.save_screenshot(str(SHOTS / "desktop-status.png"))
 
     # The service worker never caches API data.

@@ -1,0 +1,9 @@
+# Enables optional enrichment on the M4 gate stack for test_m7_enrichment.sh.
+services:
+  api:
+    environment:
+      PDF_GATEWAY_ENRICHMENT_ENABLED: "true"
+  archive-worker:
+    environment:
+      PDF_GATEWAY_ENRICHMENT_ENABLED: "true"
+      PDF_GATEWAY_AI_BREAKER_FAILURES: "3"

@@ -28,7 +28,9 @@ public class SecurityConfig {
                         // ERROR dispatch without the bearer header masks a 500 as 401.
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/internal/**").denyAll()
-                        .anyRequest().authenticated())
+                        // The AI laptop's token may use the enrichment endpoints and nothing else.
+                        .requestMatchers("/api/v1/enrichment/**").hasRole("ENRICHMENT")
+                        .anyRequest().access(SecurityConfig::authenticatedNotEnrichment))
                 .exceptionHandling(errors -> errors.authenticationEntryPoint((request, response, failure) -> {
                     response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                     response.setContentType("application/problem+json");
@@ -36,5 +38,15 @@ public class SecurityConfig {
                 }))
                 .addFilterBefore(tokens, UsernamePasswordAuthenticationFilter.class)
                 .build();
+    }
+
+    private static org.springframework.security.authorization.AuthorizationDecision authenticatedNotEnrichment(
+            java.util.function.Supplier<? extends org.springframework.security.core.Authentication> authentication,
+            org.springframework.security.web.access.intercept.RequestAuthorizationContext context) {
+        var auth = authentication.get();
+        boolean allowed = auth != null && auth.isAuthenticated()
+                && !(auth instanceof org.springframework.security.authentication.AnonymousAuthenticationToken)
+                && auth.getAuthorities().stream().noneMatch(a -> "ROLE_ENRICHMENT".equals(a.getAuthority()));
+        return new org.springframework.security.authorization.AuthorizationDecision(allowed);
     }
 }
