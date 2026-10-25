@@ -167,6 +167,16 @@ appearance() {
 appearance signed signed.pdf
 appearance handwritten handwritten.pdf
 
+# Every API view uses only OpenAPI contract values; internal detail is in stage.
+api_view() {
+  curl -fsS -H "Authorization: Bearer $PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN" "$base/api/v1/scans/${SCAN[$1]}" \
+    | python3 -I "$root/pdf-gateway/tests/check_scan_contract.py" "$root/pdf-gateway/contracts/openapi.yaml"
+}
+for name in "${!SCAN[@]}"; do api_view "$name" >/dev/null; done
+eq "$(api_view signed)" '{"status": "ARCHIVING", "stage": "AWAITING_ARCHIVE", "detection": "NO_THREATS_DETECTED", "policy": "ALLOW_SANITIZED", "artifact": "FINAL_VALIDATED", "originalRetention": "SIGNED_RESTRICTED"}'
+eq "$(api_view modified)" '{"status": "REVIEW_REQUIRED", "stage": "REVIEW_REQUIRED", "detection": "NO_THREATS_DETECTED", "policy": "REVIEW_REQUIRED", "artifact": "ORIGINAL_QUARANTINED", "originalRetention": "SIGNED_RESTRICTED"}'
+eq "$(api_view eicar)" '{"status": "BLOCKED", "stage": "BLOCKED", "detection": "MALICIOUS", "policy": "BLOCK", "artifact": "ORIGINAL_QUARANTINED", "originalRetention": "STANDARD"}'
+
 # The API exposes no route that serves original or staged bytes.
 for path in "/api/v1/quarantine/${SCAN[signed]}" "/api/v1/artifacts/cdr-${SCAN[signed]:5}-1/download"; do
   code="$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN" "$base$path")"

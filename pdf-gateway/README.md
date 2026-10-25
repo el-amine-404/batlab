@@ -45,3 +45,36 @@ pdf-gateway/tests/test_m2_pipeline.sh
 These tests use generated PDFs and EICAR, never files from the personal source
 corpus. M2 still cannot release a document; `CDR_ELIGIBLE` transitions only to
 `AWAITING_POLICY`.
+
+## M3: signatures, CDR, and final validation
+
+The `scanning` profile adds the signature worker; the `cdr` profile adds the
+`cdr-worker` and `validation-worker`. A job moves through
+`ANALYSIS → SIGNATURE → CDR → VALIDATION`. It is releasable only after the
+validation worker passes the exact CDR output bytes. Database triggers (V004)
+enforce this independently of the workers.
+
+The CDR boundary is the host Dangerzone runtime, never a container. Install
+the provider as the rootless Dangerzone account on Lab2:
+
+```bash
+hosts/lab2/pdf-cdr-provider/install.sh   # installs files only; does not enable
+```
+
+The provider listens on a Unix socket that is bind-mounted into `cdr-worker`
+(`PDF_GATEWAY_CDR_SOCKET_DIR`). It accepts only the configured worker UID
+(10004). Staged CDR output is mode 0640, group 10010, readable only by the
+validation worker.
+
+Lab2 verification (needs Dangerzone, so not runnable on other hosts):
+
+```bash
+pdf-gateway/tests/test_m3_cdr.sh          # provider, isolation evidence, typed failures
+pdf-gateway/tests/test_m3_validation.sh   # final-byte validation and release guard
+pdf-gateway/tests/test_m3_e2e.sh          # production compose end to end via the API
+```
+
+Lab2's default Docker bridge has no DNS, so these tests build images with
+`docker build --network host` and run Compose with `--no-build`. Nothing here is
+deployed as a service; enabling the provider and the `cdr` profile is a separate
+deployment decision after the M3 gate.
