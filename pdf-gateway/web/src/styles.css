@@ -1,0 +1,4 @@
+@import "tailwindcss";
+
+/* Respect the iPhone home indicator in the fixed mobile navigation. */
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }

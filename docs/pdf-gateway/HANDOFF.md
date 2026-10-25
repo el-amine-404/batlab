@@ -33,12 +33,17 @@ Every agent that continues this project must update this file before stopping:
 
 The latest green checkpoint is the source of truth; chat summaries are advisory.
 
-## Verified state (2026-10-25 UTC, after M4)
+## Verified state (2026-10-25 UTC, after M5)
 
 - M0 VERIFIED, including the user's acceptance of the measured CDR approach (a VM was offered and declined).
 - M1, M2 VERIFIED. M3 VERIFIED (see `verification.md` gate table). M4 VERIFIED for its spec gate
   (PostgreSQL removed and catalog/tags/contents/index rebuilt from the archive; archive grows with
   Paperless absent; crash-safe publish under a real SIGKILL loop), with listed gaps below.
+- M5 VERIFIED locally: browser sessions with CSRF/Origin checks, UI read endpoints, and the `web/` React PWA
+  behind a same-origin Caddy container. Tested in headless Firefox (desktop) and Playwright Firefox (exact
+  390×844 phone viewport). Real iPhone Safari is NOT STARTED (needs deployment over HTTPS and your phone).
+- Real-document check: corpus profiled (703 PDFs, none cryptographically signed). The 2-document pipeline run
+  was stopped twice by the thermal guard and is BLOCKED; a lighter real-only run is still possible.
 - Nothing is deployed as a service. The provider unit and the `cdr`/`archive` profiles are installable only.
 
 ### Lab2 thermal rule (user requirement, 2026-10-25)
@@ -61,6 +66,8 @@ at 85 °C), one at a time, starting below 75 °C. Production CPU caps are config
 | `38f4f0f` | M4-4 allowlisted embedded metadata revalidated as a new version, V006 |
 | `f3718f0` | M4-5 archive API (read-only, RBAC, safe downloads, CAS edits), V007, `reindex-db`, DB-loss gate |
 | `501124a` | Budget/healthcheck changes, `lab2_test.sh`, `test_pipeline_e2e.sh` through the archive, docs |
+| `25ee7a4` | M5-1 sessions + CSRF, scan/quarantine lists, findings, SSE, safe delete, summary, health, V008 |
+| (this commit) | M5-2/3 web UI, web container, Firefox/Playwright UI tests |
 
 ### Pipeline as implemented
 
@@ -77,6 +84,9 @@ Local PC, all passed: `test_m1.sh`, `test_m2.sh`, `test_m2_pipeline.sh`, `test_m
 `test_m4_metadata.sh`, `test_m4_gate.sh`, `python3 pdf-gateway/tools/validate_contracts.py`, Maven
 (`docker run --rm -v "$PWD/pdf-gateway/api:/src" -w /src maven:3.9.11-eclipse-temurin-21@sha256:6fdc855a6ed81d288ca7ca37ac6ff5e9308b612485c0801d70b25a858c83d237 mvn -B -q test`, 4 tests;
 remove the root-owned `pdf-gateway/api/target` afterwards).
+
+Also local: `test_m5_api.sh`; `test_m5_ui.sh` needs `VENV` (selenium 4.38, playwright 1.56) and
+`PLAYWRIGHT_BROWSERS_PATH` with Playwright Firefox installed (`python -m playwright install firefox`, ~97 MB).
 
 Lab2 via `pdf-gateway/tools/lab2_test.sh`: `test_pipeline_e2e` PASSED (348 s, peak 82 °C).
 `test_m3_cdr` and `test_m3_validation` were aborted by the thermal guard with their old caps; caps are now
@@ -113,32 +123,16 @@ None after the checkpoint commit.
 
 ## Next implementation order
 
-1. M5 real mobile frontend/PWA: upload, jobs/SSE, scan details, quarantine list, archive browser + tag/title editor
-   (uses the queued CAS edit API), stats, health; no raw-original preview; CSP/CSRF/XSS/IDOR tests; desktop and
-   iPhone viewports. Cookie sessions require CSRF (SecurityConfig currently disables CSRF for bearer-only use).
-2. M6 exactly-once Paperless projection. 3. M7 optional OCR/AI. 4. M8 hardening, budget measurement, backup/restore.
-
-### M5 plan (written 2026-10-25, before implementation)
-
-1. Backend for a browser UI: `POST/DELETE /api/v1/session` exchanges an API token for an
-   HttpOnly, Secure, SameSite=Strict session cookie (hashed server-side, expiring) plus a CSRF
-   token required on every unsafe cookie-authenticated request. Also `GET /scans` (own, paginated),
-   `/scans/{id}/findings` (typed, no document content), `/scans/{id}/events` (SSE, poll fallback),
-   `GET /quarantine` + admin safe `DELETE`, `/dashboard/summary`, `/system/health`. Local curl tests.
-2. `web/`: React + TypeScript + Vite + Tailwind + TanStack Query + Zod. Hand-written shadcn-style
-   primitives (no extra codegen). Caddy `web` container serves the build same-origin, proxies `/api`,
-   and sends strict CSP/security headers. PWA manifest plus a service worker that caches only the
-   static shell (never `/api`).
-3. Headless-Firefox tests (Selenium; no large image pulls): login, upload, live progress, findings,
-   archive browse/edit, download attributes, XSS via hostile filename/title, at 1280×800 and 390×844.
-   CSRF and IDOR at the API. All local; Lab2 not needed.
-
-Not in M5 scope: quarantine override/rescan (NOT STARTED, needs a reviewed policy), OIDC/2FA.
+1. M6 exactly-once Paperless projection: a test Paperless instance (disposable, local), documented REST
+   upload and task API, idempotency by archive artifact hash, durable retry/backoff, reconciliation, outage
+   and resume without duplicates, metadata sync on sidecar edits, `pdf-archive resync-paperless`. Never
+   write the Paperless database or media. Document consume-folder/email/web bypass risks.
+2. M7 optional OCR/AI. 3. M8 hardening, budget measurement, backup/restore, real-iPhone check.
 
 ### First command for the next agent
 
 ```bash
-cd /home/bro/.codex-worktrees/pdf-security-gateway && git fetch origin && git status --short && git log --oneline -10 && pdf-gateway/tests/test_m4_gate.sh
+cd /home/bro/.codex-worktrees/pdf-security-gateway && git fetch origin && git status --short && git log --oneline -10 && pdf-gateway/tests/test_m5_api.sh
 ```
 
 ## M3 plan as written before implementation (completed; kept for history)
