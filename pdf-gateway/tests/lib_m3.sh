@@ -112,3 +112,24 @@ pump() {
   q "SELECT id,status FROM scan_jobs ORDER BY id" >&2
   return 1
 }
+
+# Lab2 runs live services; a test must never be what overheats it. Wait for a
+# cool start, then abort (running the cleanup trap) if the package runs hot.
+package_temp() {
+  local zone
+  for zone in /sys/class/thermal/thermal_zone*; do
+    [[ $(cat "$zone/type" 2>/dev/null) == x86_pkg_temp ]] && { echo $(( $(cat "$zone/temp") / 1000 )); return; }
+  done
+  echo 0
+}
+thermal_guard() {
+  local start_max=${THERMAL_START_MAX:-75} abort_at=${THERMAL_ABORT_AT:-85} parent=$$
+  for _ in $(seq 1 60); do (( $(package_temp) < start_max )) && break; sleep 10; done
+  (( $(package_temp) < start_max )) || { echo "Lab2 stayed above ${start_max}°C; not starting" >&2; return 1; }
+  trap 'echo "aborted: Lab2 package above ${THERMAL_ABORT_AT:-85}°C" >&2; exit 143' TERM
+  ( while kill -0 "$parent" 2>/dev/null; do
+      if (( $(package_temp) >= abort_at )); then kill -TERM "$parent"; exit; fi
+      sleep 5
+    done ) &
+  echo "thermal guard: start $(package_temp)°C, abort at ${abort_at}°C"
+}

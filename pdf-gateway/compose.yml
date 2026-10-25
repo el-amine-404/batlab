@@ -3,6 +3,8 @@ name: pdf-security-gateway
 services:
   postgres:
     image: postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
+    cpus: 0.5
+    mem_limit: 512m
     environment:
       POSTGRES_DB: pdf_gateway
       POSTGRES_USER: pdf_gateway
@@ -19,7 +21,11 @@ services:
 
   rabbitmq:
     image: rabbitmq:4.1-alpine@sha256:3dd4ce7606f9fbf2e2dbca90a02f29c19c5cdf66bf15cdf5237430e3614128ca
+    cpus: 0.5
+    mem_limit: 512m
     environment:
+      # Erlang schedulers busy-wait by default; that burns idle CPU on a shared host.
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: +sbwt none +sbwtdcpu none +sbwtdio none
       RABBITMQ_DEFAULT_USER: pdf_gateway
       RABBITMQ_DEFAULT_PASS: ${PDF_GATEWAY_RABBITMQ_PASSWORD:?set in the deployment environment}
     volumes:
@@ -78,7 +84,7 @@ services:
       start_period: 120s
     restart: unless-stopped
     mem_limit: 4g
-    cpus: 1.5
+    cpus: 1.0
     pids_limit: 128
     networks: [backend, updates]
 

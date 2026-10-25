@@ -24,6 +24,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
+thermal_guard
 prepare_storage
 # A real Dangerzone output produced by this account, used where a test must
 # show that only one property (hash, scanner availability) makes it fail.

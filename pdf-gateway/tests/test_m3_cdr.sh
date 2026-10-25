@@ -15,6 +15,9 @@ mkdir -p "$TEST_STORAGE"/{builder,fixtures,quarantine,cdr-output,cdr-socket} "$s
 chmod 0755 "$TEST_STORAGE" "$TEST_STORAGE/quarantine" "$TEST_STORAGE/cdr-socket"
 chmod 0777 "$TEST_STORAGE/builder" "$TEST_STORAGE/cdr-output"
 unit="pdf-cdr-provider-test-$$"
+# Shared thermal guard (Lab2 must stay healthy while this runs).
+eval "$(sed -n '/^package_temp()/,$p' "$root/pdf-gateway/tests/lib_m3.sh")"
+thermal_guard
 
 stop_provider() { systemctl --user stop "$unit" >/dev/null 2>&1 || true; }
 cleanup() {

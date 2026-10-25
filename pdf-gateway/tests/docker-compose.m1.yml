@@ -2,6 +2,8 @@ name: pdf-gateway-m1-test
 services:
   postgres:
     image: postgres:17-alpine
+    cpus: 0.5
+    mem_limit: 512m
     environment:
       POSTGRES_DB: pdf_gateway
       POSTGRES_USER: pdf_gateway
@@ -16,7 +18,11 @@ services:
     networks: [private]
   rabbitmq:
     image: rabbitmq:4.1-alpine
+    cpus: 0.5
+    mem_limit: 512m
     environment:
+      # Erlang schedulers busy-wait by default; that burns idle CPU on a shared host.
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: +sbwt none +sbwtdcpu none +sbwtdio none
       RABBITMQ_DEFAULT_USER: pdf_gateway
       RABBITMQ_DEFAULT_PASS: ${TEST_RABBIT_PASSWORD}
     healthcheck:
