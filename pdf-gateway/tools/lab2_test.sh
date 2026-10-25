@@ -9,7 +9,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 remote=${LAB2_HOST:-lab2}
 remote_dir=${LAB2_DIR:-/home/potato/pdf-gateway-test-work}
 
-declare -A contexts=([api]=api [analysis-worker]=analysis-worker [signature-worker]=signature-worker [cdr-worker]=cdr-worker)
+declare -A contexts=([api]=api [analysis-worker]=analysis-worker [signature-worker]=signature-worker [cdr-worker]=cdr-worker [paperless-adapter]=paperless-adapter)
 tags=()
 for service in "${!contexts[@]}"; do
   docker build -q -t "pdf-gateway-e2e-$service" -t "pdf-gateway-m3-test/$service:local" "$root/pdf-gateway/${contexts[$service]}" >/dev/null

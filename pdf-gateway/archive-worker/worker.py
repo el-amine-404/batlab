@@ -64,11 +64,11 @@ def audit(cursor, scan_id: str, action: str, outcome: str, details: dict) -> Non
 
 def claim(scan_id: str) -> dict | None:
     with database() as connection, connection.cursor() as cursor:
-        cursor.execute("SELECT status,policy,artifact_state,source_sha256,original_retention,quarantine_object,created_at FROM scan_jobs WHERE id=%s FOR UPDATE", (scan_id,))
+        cursor.execute("SELECT status,policy,artifact_state,source_sha256,original_retention,quarantine_object,created_at,intent FROM scan_jobs WHERE id=%s FOR UPDATE", (scan_id,))
         row = cursor.fetchone()
         if row is None or row[0] not in ("AWAITING_ARCHIVE", "ARCHIVING") or row[1] != "ALLOW_SANITIZED" or row[2] != "FINAL_VALIDATED":
             return None
-        _status, _policy, _state, source_hash, retention, quarantine_object, created_at = row
+        _status, _policy, _state, source_hash, retention, quarantine_object, created_at, intent = row
         cursor.execute("UPDATE job_steps SET status='FAILED',finished_at=now(),error_code='INTERRUPTED' WHERE scan_id=%s AND step_type='ARCHIVE' AND status='RUNNING'", (scan_id,))
         cursor.execute("""SELECT a.id,a.storage_object,a.sha256,a.bytes,f.policy_version,f.attempt,a.kind
                             FROM final_validations f JOIN artifacts a ON a.id=f.artifact_id
@@ -98,7 +98,7 @@ def claim(scan_id: str) -> dict | None:
         return {"scanId": scan_id, "attempt": attempt, "artifactId": artifact[0], "output": STORAGE / artifact[1],
                 "sha256": artifact[2], "bytes": artifact[3], "policyVersion": artifact[4],
                 "finalReportId": f"validation-{scan_id[5:]}-{artifact[5]}", "sourceSha256": source_hash,
-                "kind": artifact[6], "embedPhase": embedded,
+                "kind": artifact[6], "embedPhase": embedded, "intent": intent,
                 "signedOriginal": retention == "SIGNED_RESTRICTED" or (signature[1] or 0) > 0,
                 "signatureState": signature[0], "originalEvidenceId": quarantine_object,
                 "extraction": extraction if isinstance(extraction, dict) else None,
@@ -232,6 +232,13 @@ def commit(job: dict, directory: Path, sidecar: dict, evidence: dict) -> None:
         cursor.execute("UPDATE job_steps SET status='SUCCEEDED',finished_at=now(),engine_version=%s,details=%s::jsonb WHERE scan_id=%s AND step_type='ARCHIVE' AND attempt=%s",
                        (evidence.get("organizerVersion"), json.dumps({"documentId": sidecar["documentId"], "organisation": evidence}),
                         scan_id, job["attempt"]))
+        if job.get("intent") == "ARCHIVE_AND_IMPORT":
+            # Paperless is a projection: queue it only after the archive holds the document.
+            cursor.execute("INSERT INTO paperless_imports(document_id,artifact_sha256) VALUES (%s,%s) ON CONFLICT (document_id) DO NOTHING",
+                           (sidecar["documentId"], sidecar["integrity"]["sha256"]))
+            cursor.execute("UPDATE scan_jobs SET import_status='PENDING' WHERE id=%s", (scan_id,))
+            cursor.execute("INSERT INTO outbox_events(id,aggregate_type,aggregate_id,event_type,payload) VALUES (%s,'DOCUMENT',%s,'PAPERLESS_QUEUED',jsonb_build_object('documentId',%s::text))",
+                           (str(uuid.uuid4()), sidecar["documentId"], sidecar["documentId"]))
         audit(cursor, scan_id, "ARCHIVE_PUBLISHED", "SUCCESS",
               {"documentId": sidecar["documentId"], "category": sidecar["organization"]["category"],
                "reviewState": sidecar["organization"]["reviewState"]})
@@ -315,6 +322,11 @@ def handle_edit(channel, method, _properties, body: bytes) -> None:
             if status == "APPLIED":
                 cursor.execute("UPDATE archive_documents SET title=%s,metadata_revision=%s,sidecar=%s::jsonb,updated_at=now() WHERE document_id=%s",
                                (sidecar["title"], revision, json.dumps(sidecar), document_id))
+                # Keep the Paperless projection in step with the sidecar (title and tags).
+                cursor.execute("""INSERT INTO outbox_events(id,aggregate_type,aggregate_id,event_type,payload)
+                                  SELECT %s,'DOCUMENT',%s,'PAPERLESS_QUEUED',jsonb_build_object('documentId',%s::text)
+                                   WHERE EXISTS (SELECT 1 FROM paperless_imports WHERE document_id=%s AND status<>'FAILED_FINAL')""",
+                               (str(uuid.uuid4()), document_id, document_id, document_id))
             cursor.execute("UPDATE metadata_edits SET status=%s,result_revision=%s,error_code=%s,finished_at=now() WHERE id=%s",
                            (status, revision, code, edit_id))
             cursor.execute("INSERT INTO audit_events(actor_id,action,resource_type,resource_id,outcome,trace_id,details) VALUES (%s,'METADATA_EDIT_APPLIED','DOCUMENT',%s,%s,%s,%s::jsonb)",

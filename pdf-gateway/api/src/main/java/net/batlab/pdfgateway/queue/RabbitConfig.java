@@ -17,6 +17,7 @@ class RabbitConfig {
     // No consumer until M4; the durable queue holds validated jobs for the archive publisher.
     static final String ARCHIVE_QUEUE = "pdf.gateway.archive.v1";
     static final String METADATA_EDIT_QUEUE = "pdf.gateway.metadata-edit.v1";
+    static final String PAPERLESS_QUEUE = "pdf.gateway.paperless.v1";
     @Bean DirectExchange jobExchange() { return new DirectExchange(EXCHANGE, true, false); }
     @Bean Queue scanQueue() { return new Queue(QUEUE, true, false, false); }
     @Bean Binding scanBinding(Queue scanQueue, DirectExchange jobExchange) {
@@ -41,5 +42,9 @@ class RabbitConfig {
     @Bean Queue metadataEditQueue() { return new Queue(METADATA_EDIT_QUEUE, true, false, false); }
     @Bean Binding metadataEditBinding(Queue metadataEditQueue, DirectExchange jobExchange) {
         return BindingBuilder.bind(metadataEditQueue).to(jobExchange).with("METADATA_EDIT_QUEUED");
+    }
+    @Bean Queue paperlessQueue() { return new Queue(PAPERLESS_QUEUE, true, false, false); }
+    @Bean Binding paperlessBinding(Queue paperlessQueue, DirectExchange jobExchange) {
+        return BindingBuilder.bind(paperlessQueue).to(jobExchange).with("PAPERLESS_QUEUED");
     }
 }

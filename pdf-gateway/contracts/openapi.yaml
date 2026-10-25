@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Batlab PDF Security Gateway API
-  version: 0.4.0
+  version: 0.5.0
   description: Fail-closed contract. Quarantine artifacts are never browser-previewable.
 servers:
   - url: /api/v1
@@ -58,8 +58,8 @@ paths:
     post: {operationId: cancelScan, responses: {'202': {$ref: '#/components/responses/ScanAccepted'}, '409': {$ref: '#/components/responses/Problem'}}}
   /scans/{scanId}/paperless-import:
     parameters: [{$ref: '#/components/parameters/ScanId'}]
-    post: {operationId: requestPaperlessImport, parameters: [{$ref: '#/components/parameters/IdempotencyKey'}], responses: {'202': {description: Import queued}, '409': {$ref: '#/components/responses/Problem'}}}
-    get: {operationId: getPaperlessImport, responses: {'200': {description: Import status}, '404': {$ref: '#/components/responses/Problem'}}}
+    post: {operationId: requestPaperlessImport, description: 'Idempotent per archived document (repeat requests keep the existing state; a FAILED_FINAL import is reset to PENDING). Only READY scans; Paperless credentials are never exposed.', responses: {'202': {description: Import queued; body is the import status}, '404': {$ref: '#/components/responses/Problem'}, '409': {$ref: '#/components/responses/Problem'}}}
+    get: {operationId: getPaperlessImport, responses: {'200': {description: 'Import status: NOT_REQUESTED, PENDING, IMPORTING, IMPORTED, FAILED_RETRYABLE or FAILED_FINAL, with Paperless document ID, synced metadata revision, attempts and last error'}, '404': {$ref: '#/components/responses/Problem'}}}
   /artifacts/{artifactId}/download:
     parameters: [{$ref: '#/components/parameters/ArtifactId'}]
     get: {operationId: downloadApprovedArtifact, responses: {'200': {description: Approved artifact only, headers: {X-Content-Type-Options: {schema: {const: nosniff}}}, content: {application/pdf: {schema: {type: string, format: binary}}}}, '404': {$ref: '#/components/responses/Problem'}}}

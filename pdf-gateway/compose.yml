@@ -335,6 +335,45 @@ services:
     restart: unless-stopped
     networks: [backend]
 
+  # Optional Paperless projection. Holds the only Paperless token (server-side
+  # environment, never logged or returned). Reads the archive read-only and talks
+  # to Paperless only through its documented REST API.
+  paperless-adapter:
+    profiles: [paperless]
+    build:
+      context: paperless-adapter
+    environment:
+      PDF_GATEWAY_DATABASE_HOST: postgres
+      PDF_GATEWAY_DATABASE_NAME: pdf_gateway
+      PDF_GATEWAY_DATABASE_USER: pdf_gateway
+      PDF_GATEWAY_DATABASE_PASSWORD: ${PDF_GATEWAY_DATABASE_PASSWORD:?set in the deployment environment}
+      PDF_GATEWAY_RABBITMQ_HOST: rabbitmq
+      PDF_GATEWAY_RABBITMQ_USER: pdf_gateway
+      PDF_GATEWAY_RABBITMQ_PASSWORD: ${PDF_GATEWAY_RABBITMQ_PASSWORD:?set in the deployment environment}
+      PDF_GATEWAY_ARCHIVE_ROOT: /var/lib/pdf-archive
+      PDF_GATEWAY_PAPERLESS_URL: ${PDF_GATEWAY_PAPERLESS_URL:?bare origin, e.g. http://paperless:8000}
+      PDF_GATEWAY_PAPERLESS_TOKEN: ${PDF_GATEWAY_PAPERLESS_TOKEN:?a Paperless API token for a dedicated user}
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+    volumes:
+      - ${PDF_GATEWAY_ARCHIVE_ROOT:?set to the portable archive root}:/var/lib/pdf-archive:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 32
+    mem_limit: 256m
+    cpus: ${PDF_GATEWAY_CPUS_WORKER:-0.5}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+    networks: [backend, paperless]
+
 volumes:
   postgres-data: {}
   rabbitmq-data: {}
@@ -345,3 +384,7 @@ networks:
     internal: true
   edge: {}
   updates: {}
+  # The existing Paperless deployment's network (only the adapter joins it).
+  paperless:
+    external: true
+    name: ${PDF_GATEWAY_PAPERLESS_NETWORK:-home_server}

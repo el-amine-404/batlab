@@ -428,3 +428,35 @@ Selenium for desktop; Playwright Firefox 142 for the exact phone viewport).
 
 Commands: `VENV=<venv with selenium, playwright> PLAYWRIGHT_BROWSERS_PATH=<dir> pdf-gateway/tests/test_m5_ui.sh [SCREENSHOT_DIR]`,
 `pdf-gateway/tests/test_m5_api.sh`.
+
+## 2026-10-25 — M6: exactly-once Paperless projection
+
+Against a real, disposable **Paperless-ngx 3.3.2** on Lab2 (its own Valkey, SQLite and media; OCR off;
+1 CPU), via `pdf-gateway/tools/lab2_test.sh test_m6_paperless`. 485 s, thermal peak 81 °C. The
+production Paperless was never contacted.
+
+| Capability | Status | Evidence |
+|---|---|---|
+| API facts found first | VERIFIED | A probe of 3.3.2 showed duplicate uploads are **accepted** (only flagged), the API exposes **no checksum**, and `/api/tasks/` is paginated. The planned "Paperless rejects duplicates / look up by checksum" design would therefore not have been exactly-once and was replaced before implementation. |
+| Exactly-once design | VERIFIED | A marker custom field `gateway_document_id` is set at upload and looked up (and re-checked client-side) before any upload. `upload_started_at` is committed before the upload, then the task ID. A crashed attempt is resolved through the consume task found by the deterministic filename `<documentId>.pdf`. Uploads verify the archived SHA-256 first. V009 `paperless_imports` accepts only rows matching an archived artifact (trigger). |
+| Import | VERIFIED | Three documents with intent `ARCHIVE_AND_IMPORT` → `IMPORTED`: Paperless count 3, one marker each, title and document date as in the sidecar, taxonomy tags created with matching disabled. The Paperless document ID was written back into the sidecar by the archive's single writer. |
+| Replay | VERIFIED | Re-delivering every request created nothing (count stayed 3). |
+| Crash after upload | VERIFIED | An upload identical to the adapter's was made "by a dead attempt", with only `upload_started_at` recorded. The adapter linked the existing document: one marker, count 4. |
+| Outage and resume | VERIFIED | With Paperless stopped, a new document was still published to the archive (`READY`); its import went `FAILED_RETRYABLE` / `PAPERLESS_UNAVAILABLE` with a delayed durable retry. After restart, `adapter.py resync` → `IMPORTED`, one marker, count 5. |
+| Metadata sync | VERIFIED | A sidecar edit through the API (If-Match) propagated title and new tag to Paperless. Found in testing: a sync briefly showed an imported document as `IMPORTING`; syncs now keep `IMPORTED` and record failures as `last_error` with a retry. |
+| Reconciliation | VERIFIED | After a document was deleted in Paperless, `resync` reported exactly that one as missing and re-imported it; count back to 5, one marker. |
+| API | VERIFIED | `POST /api/v1/scans/{id}/paperless-import` (owner/admin, CSRF for cookies; idempotent; a final failure can be retried) and `GET` (status, Paperless ID, synced revision, attempts, last error). A document archived without import went `NOT_REQUESTED` → `PENDING` → `IMPORTED`. |
+| Secret handling | VERIFIED | The Paperless token was absent from API responses, all container logs, a full `pg_dump` of the gateway database, and every archive file. Redirects are refused (no token leak to another origin). The base URL comes only from configuration. |
+| Bypass risks | IMPLEMENTED | `paperless-bypass.md`: the consume folder, writable by five `arr` containers that mount `${DATA_ROOT}` read-write; Paperless web/mobile/API uploads; mail fetching. Not changed (deployment decision). |
+
+Regression after M6 (local): see the next entry.
+
+Regression after M6 (local PC, all passed): `test_m1.sh`, `test_m2_pipeline.sh`, `test_m3_pipeline.sh`,
+`test_m4_worker.sh`, `test_m4_metadata.sh`, `test_m4_gate.sh`, `test_m5_api.sh`, `test_m5_ui.sh`; Maven;
+contracts (OpenAPI 0.5.0). All test RabbitMQ health checks now use a TCP probe: the Erlang CLI
+probe made the API's dependency wait fail on a busy Lab2.
+
+Housekeeping note (2026-10-25): while removing the exploratory Paperless, `docker volume prune -f` was
+run on Lab2. On Docker 29 this removes only anonymous volumes referenced by no container (named
+volumes and stopped containers' volumes are kept). Earlier, `docker image prune -f` removed only
+untagged unused layers. Tooling never prunes; cleanup now removes exact names only.

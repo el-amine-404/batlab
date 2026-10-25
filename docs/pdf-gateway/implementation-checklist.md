@@ -71,9 +71,9 @@ mean verified behavior, not merely committed code.
 
 ## M6 — Paperless projection
 
-- [ ] Server-only credential injection and documented Paperless API adapter.
-- [ ] Durable retry, task reconciliation, deduplication, and metadata sync.
-- [ ] Real outage/resume test proves archive independence and exactly-once projection.
+- [x] Server-only credential injection and documented Paperless API adapter.
+- [x] Durable retry, task reconciliation, deduplication (marker field; Paperless 3 accepts duplicates), and metadata sync.
+- [x] Real outage/resume test proves archive independence and exactly-once projection (disposable Paperless 3.3.2 on Lab2).
 
 ## M7 — optional OCR and AI enrichment
 
