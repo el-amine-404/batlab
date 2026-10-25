@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -32,7 +33,9 @@ def main() -> int:
     with tempfile.TemporaryDirectory(dir=os.getenv("TMPDIR", "/tmp")) as directory:
         raw = Path(directory) / "text.txt"
         try:
-            result = subprocess.run(["pdftotext", "-q", "-enc", "UTF-8", "-l", str(MAX_PAGES), str(source), str(raw)],
+            # -layout keeps each label on the line of its value ("Date:   10-Jun-2026"),
+            # which plain reading order splits apart in two-column documents.
+            result = subprocess.run(["pdftotext", "-q", "-layout", "-enc", "UTF-8", "-l", str(MAX_PAGES), str(source), str(raw)],
                                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                     timeout=30, check=False, preexec_fn=scan.bounded_preexec,
                                     env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "HOME": "/nonexistent"})
@@ -49,6 +52,8 @@ def main() -> int:
             # Keep printable text and line structure; drop control and bidi characters.
             text = "".join(ch for ch in text if ch in "\n\t\f" or (ch.isprintable() and ch not in "‪‫‬‭‮⁦⁧⁨⁩"))
             summary["pages"] = min(text.count("\f") or (1 if text.strip() else 0), MAX_PAGES)
+            # Layout padding: keep column gaps visible but short, and drop trailing spaces.
+            text = "\n".join(re.sub(r" {4,}", "   ", line).rstrip() for line in text.split("\n"))
             text = text.replace("\f", "\n\f\n").strip()
             # The bound applies to what is stored, after formatting.
             text = text.encode("utf-8")[:MAX_TEXT_BYTES].decode("utf-8", "ignore")

@@ -16,6 +16,13 @@
     "documentDate": {"$ref": "#/$defs/datedValue"},
     "issuer": {"$ref": "#/$defs/sourcedText"},
     "author": {"$ref": "#/$defs/sourcedText"},
+    "reference": {"$ref": "#/$defs/sourcedText", "description": "The document's own number (invoice, contract, statement)"},
+    "amount": {
+      "type": "object", "additionalProperties": false, "required": ["value", "currency", "source"],
+      "description": "The total paid or due, as printed",
+      "properties": {"value": {"type": "string", "pattern": "^-?[0-9]{1,12}(\\.[0-9]{1,4})?$"}, "currency": {"type": "string", "pattern": "^[A-Z]{3}$"},
+                     "source": {"$ref": "#/$defs/provenance"}, "evidence": {"type": "string", "maxLength": 500}}
+    },
     "language": {"type": "array", "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z]{2,3}(-[A-Z]{2})?$"}},
     "tags": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"}},
     "organization": {
@@ -36,7 +43,8 @@
       "description": "Allowlisted values written into this unsigned PDF before its final validation",
       "properties": {
         "writer": {"type": "string", "maxLength": 80},
-        "fields": {"type": "array", "uniqueItems": true, "items": {"enum": ["Title", "Subject", "Keywords", "Producer"]}}
+        "fields": {"type": "array", "uniqueItems": true, "items": {"enum": ["Title", "Author", "Subject", "Keywords", "Producer"]}},
+        "linearized": {"type": "boolean"}
       }
     },
     "textExtraction": {

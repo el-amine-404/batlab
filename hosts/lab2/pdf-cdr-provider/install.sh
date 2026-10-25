@@ -19,9 +19,12 @@ if [[ ! -f $env_file ]]; then
   printf '%s\n' \
     'PDF_CDR_SOCKET=/mnt/docker-volumes/pdf-gateway/cdr-socket/cdr.sock' \
     'PDF_CDR_ALLOWED_UID=10004' \
-    'PDF_CDR_TIMEOUT_SECONDS=600' >"$env_file"
+    'PDF_CDR_TIMEOUT_SECONDS=600' \
+    'PDF_CDR_OCR_LANGUAGE=fra' >"$env_file"
   chmod 0600 "$env_file"
 fi
+# Added after the first install: a searchable text layer (one language).
+grep -q '^PDF_CDR_OCR_LANGUAGE=' "$env_file" || echo 'PDF_CDR_OCR_LANGUAGE=fra' >>"$env_file"
 systemctl --user daemon-reload
 echo "Installed. Not enabled. Review $env_file, then: systemctl --user enable --now pdf-cdr-provider"
 echo "A persistent user service also requires: loginctl enable-linger $USER"
