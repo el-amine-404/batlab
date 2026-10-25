@@ -33,66 +33,98 @@ Every agent that continues this project must update this file before stopping:
 
 The latest green checkpoint is the source of truth; chat summaries are advisory.
 
-## Verified state (2026-10-25 UTC)
+## Verified state (2026-10-25 UTC, after M3)
 
 - M0 contracts, architecture, threat model, schemas, and capacity plan are tracked.
-- M1 is verified: authenticated streaming upload, RBAC, immutable opaque quarantine, disk headroom, PostgreSQL, RabbitMQ transactional outbox, audit, idempotency, ownership, restart durability.
-- M2 is verified: live ClamAV definitions and INSTREAM, qpdf, pinned PDFiD/pdf-parser, YARA, typed deterministic outcomes, atomic restricted reports, one-at-a-time durable worker, replay idempotency. Safe fixtures cover clean, active action, EICAR, malformed, encrypted, attachment, stale/unavailable/timed-out ClamAV.
-- Commands that passed locally:
-  - `pdf-gateway/tests/test_m1.sh`
-  - `pdf-gateway/tests/test_m2.sh`
-  - `pdf-gateway/tests/test_m2_pipeline.sh`
-- Main on Lab2 currently includes the durable M3 signature-stage checkpoint `d7d001c`.
+  The M0 item "review and accept the measured CDR approach" still needs the user's acceptance.
+- M1 VERIFIED: authenticated streaming upload, RBAC, immutable opaque quarantine,
+  headroom guard, PostgreSQL, RabbitMQ transactional outbox, audit, idempotency,
+  ownership, restart durability.
+- M2 VERIFIED: live ClamAV, qpdf, pinned PDFiD/pdf-parser, YARA, typed fail-closed
+  policy, durable single-concurrency worker.
+- M3 VERIFIED (implementation gate; see the gate table at the end of
+  `verification.md`). Optional OCR/metadata writer is NOT STARTED, and nothing from
+  M3 is deployed as a service.
 
-## CDR gate — verified
+### M3 commits (all on `main`, Lab2 pulled)
 
-Dangerzone 0.11.1 and its signed image digest
-`sha256:b1e2ad0aa19c5b994c5c8e49d74d9c4ee99fba1795cf7162ac7aa103440b9f97`
-are installed on Lab2. Signature verification passed. The first installer revision
-incorrectly selected host `runsc` as Podman's outer runtime. Official Dangerzone
-architecture uses rootless Podman/crun as the networkless outer container and
-launches bundled gVisor/runsc inside it. Commit `e808050` corrects this.
+| Commit | Content |
+|---|---|
+| `2ce4e10`, `f3efc26` | (earlier agent) pyHanko inspector; durable signature stage |
+| `ee8b1e4` | Host Dangerzone provider (`hosts/lab2/pdf-cdr-provider/`), `cdr-worker`, V003 `cdr_results` + `original_retention` |
+| `c160831` | Final validator + `validation-worker`, V004 `final_validations` + release-guard triggers, archive queue |
+| `a8d3eef` | End-to-end test on the production compose via the API |
+| `26924eb` | API/OpenAPI 0.2.0 scan contract alignment (`ScanContract`) |
 
-The corrected installer was run on Lab2. This command passed:
+### Pipeline as implemented
 
-```bash
-ssh lab2 'cd /home/potato/batlab && pdf-gateway/tools/verify_cdr_runtime.sh'
-```
+`QUEUED → SCANNING (analysis) → AWAITING_POLICY → ANALYZING (signature) →
+AWAITING_CDR → SANITIZING (cdr-worker → host provider → Dangerzone) →
+VALIDATING_OUTPUT (validation-worker) → AWAITING_ARCHIVE` + durable
+`ARCHIVE_QUEUED` on `pdf.gateway.archive.v1`, which **has no consumer until M4**.
+The public API maps internal values to the contract (`AWAITING_ARCHIVE`→`ARCHIVING`).
+`READY`/`PUBLISHED` are unreachable without M4 and are trigger-guarded.
 
-It printed `CDR_READY dangerzone=0.11.1` with output SHA-256
-`b30f4e27459b601bf135e0d5927be06d4d8b50043356bb5cd246a7a5ef05fd66`.
-The verifier requires signed-image validation, outer crun, inner gVisor/runsc,
-`--network=none`, no host bind/volume mounts, and a non-empty PDF output.
+### Test commands and outcomes (all passed 2026-10-25)
+
+Local (any Docker host): `pdf-gateway/tests/test_m1.sh`, `test_m2.sh`,
+`test_m2_pipeline.sh`, `test_m3_signatures.sh`, `test_m3_pipeline.sh`,
+`python3 pdf-gateway/tools/validate_contracts.py`, and Maven:
+`docker run --rm -v "$PWD/pdf-gateway/api:/src" -w /src maven:3.9.11-eclipse-temurin-21@sha256:6fdc855a6ed81d288ca7ca37ac6ff5e9308b612485c0801d70b25a858c83d237 mvn -B -q test`
+(4 tests; delete the root-owned `pdf-gateway/api/target` afterwards, it is not ignored).
+
+Lab2 only (needs Dangerzone; run as `potato` in a checkout):
+`pdf-gateway/tools/verify_cdr_runtime.sh` (`CDR_READY`), `pdf-gateway/tests/test_m3_cdr.sh`
+(about 1.5 min), `test_m3_validation.sh` (about 2.5 min), `test_m3_e2e.sh` (about 4.5 min).
+`test_m3_cdr`, `test_m3_validation` and `test_m3_e2e` passed from Lab2's `main`
+checkout at `fc52569`. `test_m3_e2e` with the slice-4 contract checks passed from a
+synced copy of `26924eb`.
+
+### Operational facts learned
+
+- Lab2's default Docker bridge has no DNS: tests use `docker build --network host`
+  and `compose up --no-build`. Compose `build.network: host` triggers an
+  interactive bake prompt; do not use it.
+- Never put `RLIMIT_FSIZE` on `dangerzone-cli`: gVisor's sparse memory file crashes.
+  The provider bounds host files by polling.
+- Dangerzone runs its sandbox with `--cgroups=disabled`; the provider's systemd user
+  unit limits (3 GiB, 200% CPU, 256 tasks, idle I/O) contain `runsc`/`gvisor_sentry`.
+- Staged CDR output: 0640, UID 10004, group 10010 (validation worker `group_add`).
+
+### Partial / uncommitted work
+
+None. The worktree is clean at the handoff commit.
+
+### Blockers and user actions
+
+1. Accept (or reject) the measured CDR approach: the M0 gate checkbox.
+2. Before deploying the `cdr` profile: run `hosts/lab2/pdf-cdr-provider/install.sh`
+   as `potato`. Enable linger (`loginctl enable-linger potato`; may need sudo/polkit).
+   Choose host storage ownership (quarantine is written by UID 10001 with umask 022;
+   workers 10002–10004 read it). Deployment is deliberately not done; the archive
+   consumer (M4) does not exist yet.
+3. `potato` is in the `docker` group (root-equivalent). The provider's rootless
+   boundary does not protect against that account; this is a residual risk to record in M8.
 
 ## Next implementation order
 
-1. Continue M3 from durable signature-stage commit `f3efc26`. First inspect that commit and rerun `pdf-gateway/tests/test_m3_pipeline.sh`.
-2. Implement the Lab2 host Dangerzone adapter for `CDR_QUEUED`, keeping rootless Podman/crun + inner gVisor, stdin-only source transfer, bounded output, timeouts and typed failure state.
-3. Rescan the exact CDR output with ClamAV/qpdf/YARA before any release state; add safe graphical/handwritten appearance comparison without authenticity claims.
-4. M4 portable archive and database-less reconstruction before any Paperless integration.
-5. M5 real mobile frontend/PWA.
-6. M6 exactly-once Paperless projection and outage recovery.
-7. M7 optional OCR/AI with offline-safe behavior.
-8. M8 hardening, measured Lab2 impact, monitoring, encrypted backup and clean restore.
+1. M4 portable archive: consume `pdf.gateway.archive.v1`. Publish only artifacts in
+   `FINAL_VALIDATED` with a matching `final_validations` PASS. Any embedded-metadata
+   write produces a **new** artifact that must go back through the validation worker
+   (extend V004's guard to that artifact kind). Then taxonomy/paths, sidecars,
+   atomic publish, reindex without PostgreSQL.
+2. M5 real mobile frontend/PWA.
+3. M6 exactly-once Paperless projection and outage recovery.
+4. M7 optional OCR/AI with offline-safe behavior.
+5. M8 hardening, measured Lab2 impact, monitoring, encrypted backup and clean restore.
 
-### Latest green M3 slice
+### First command for the next agent
 
-- Commit: `2ce4e10` (`feat(pdf-gateway): add offline signature evidence inspector`).
-- Test: `pdf-gateway/tests/test_m3_signatures.sh` passed with real trusted,
-  untrusted, tampered, visible-only and malformed fixtures.
-- No partial or uncommitted implementation remains after this checkpoint.
-- M3 is not complete and nothing from M3 has been deployed as a production service.
+```bash
+cd /home/bro/.codex-worktrees/pdf-security-gateway && git fetch origin && git status --short && git log --oneline -8 && ssh lab2 'cd /home/potato/batlab && git log --oneline -1 && pdf-gateway/tools/verify_cdr_runtime.sh'
+```
 
-### Latest green durable-signature slice
-
-- Commit: `f3efc26` (`feat(pdf-gateway): persist durable signature verification stage`).
-- Tests passed: `test_m3_pipeline.sh`, `test_m3_signatures.sh`,
-  `test_m2_pipeline.sh`, API Maven unit/Flyway build, production Compose config.
-- No partial or uncommitted implementation remains after this checkpoint.
-- The next exact work item is the host CDR adapter; do not mark a document
-  released until the resulting exact bytes pass a new mandatory M3 rescan stage.
-
-## M3 remaining plan (written 2026-10-25, before implementation)
+## M3 plan as written before implementation (completed; kept for history)
 
 Baseline rechecked first: `verify_cdr_runtime.sh` on Lab2 printed `CDR_READY`;
 `test_m2.sh`, `test_m2_pipeline.sh`, `test_m3_signatures.sh` and
