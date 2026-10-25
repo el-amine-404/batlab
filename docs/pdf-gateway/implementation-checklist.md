@@ -47,8 +47,9 @@ mean verified behavior, not merely committed code.
 
 ## M3 — signatures, CDR, and final-byte verification
 
-- [ ] pyHanko signature evidence with immutable signed original handling.
+- [x] pyHanko signature evidence with immutable signed original handling.
 - [x] Offline typed pyHanko inspection separates integrity, trust, revocation uncertainty, modification state, and visible non-cryptographic marks.
+- [x] Durable signature queue, restricted report, signed-original state, transactional CDR outbox, and replay idempotency.
 - [ ] Verified Dangerzone adapter with bounded pixel-stream contract.
 - [ ] Optional bounded OCR and allowlisted metadata writer.
 - [ ] Final qpdf/structure/YARA/ClamAV checks and exact-byte SHA-256.

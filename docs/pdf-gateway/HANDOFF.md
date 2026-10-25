@@ -39,7 +39,7 @@ The latest green checkpoint is the source of truth; chat summaries are advisory.
   - `pdf-gateway/tests/test_m1.sh`
   - `pdf-gateway/tests/test_m2.sh`
   - `pdf-gateway/tests/test_m2_pipeline.sh`
-- Main on Lab2 was verified through merge `e4f7988` before the current M3 slice.
+- Main on Lab2 currently includes the first M3 signature-inspector checkpoint `52300c2`.
 
 ## CDR gate — verified
 
@@ -63,13 +63,14 @@ The verifier requires signed-image validation, outer crun, inner gVisor/runsc,
 
 ## Next implementation order
 
-1. Continue M3 from verified signature-inspector commit `2ce4e10`: connect typed signature evidence to durable job/database state, preserving the quarantine hash and signed-original retention state. First rerun `pdf-gateway/tests/test_m3_signatures.sh` and inspect that commit.
-2. Implement the Dangerzone adapter and exact final-byte rescan/revalidation; add safe graphical/handwritten appearance comparison without authenticity claims.
-3. M4 portable archive and database-less reconstruction before any Paperless integration.
-4. M5 real mobile frontend/PWA.
-5. M6 exactly-once Paperless projection and outage recovery.
-6. M7 optional OCR/AI with offline-safe behavior.
-7. M8 hardening, measured Lab2 impact, monitoring, encrypted backup and clean restore.
+1. Continue M3 from durable signature-stage commit `f3efc26`. First inspect that commit and rerun `pdf-gateway/tests/test_m3_pipeline.sh`.
+2. Implement the Lab2 host Dangerzone adapter for `CDR_QUEUED`, keeping rootless Podman/crun + inner gVisor, stdin-only source transfer, bounded output, timeouts and typed failure state.
+3. Rescan the exact CDR output with ClamAV/qpdf/YARA before any release state; add safe graphical/handwritten appearance comparison without authenticity claims.
+4. M4 portable archive and database-less reconstruction before any Paperless integration.
+5. M5 real mobile frontend/PWA.
+6. M6 exactly-once Paperless projection and outage recovery.
+7. M7 optional OCR/AI with offline-safe behavior.
+8. M8 hardening, measured Lab2 impact, monitoring, encrypted backup and clean restore.
 
 ### Latest green M3 slice
 
@@ -78,6 +79,15 @@ The verifier requires signed-image validation, outer crun, inner gVisor/runsc,
   untrusted, tampered, visible-only and malformed fixtures.
 - No partial or uncommitted implementation remains after this checkpoint.
 - M3 is not complete and nothing from M3 has been deployed as a production service.
+
+### Latest green durable-signature slice
+
+- Commit: `f3efc26` (`feat(pdf-gateway): persist durable signature verification stage`).
+- Tests passed: `test_m3_pipeline.sh`, `test_m3_signatures.sh`,
+  `test_m2_pipeline.sh`, API Maven unit/Flyway build, production Compose config.
+- No partial or uncommitted implementation remains after this checkpoint.
+- The next exact work item is the host CDR adapter; do not mark a document
+  released until the resulting exact bytes pass a new mandatory M3 rescan stage.
 
 Never skip a milestone gate or substitute mocked security verdicts for actual
 engine execution.

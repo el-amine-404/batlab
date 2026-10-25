@@ -91,3 +91,27 @@ pdf-gateway/tests/test_m3_signatures.sh
 
 Implementation commit: `2ce4e10`.
 
+## 2026-10-25 — M3 durable signature-stage slice
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Durable orchestration | VERIFIED | Flyway V002 stores versioned signature verification reports. Analysis completion emits `SIGNATURE_QUEUED` through the existing transactional outbox. A durable single-prefetch worker rechecks the quarantine SHA-256 before inspection and again before commit. |
+| Signed-original policy | VERIFIED | A trusted signed fixture advanced to `AWAITING_CDR` with `SIGNED_ORIGINAL_RESTRICTED`; its restricted signature report and typed database record were committed before broker acknowledgement. Original SHA-256 remained unchanged. |
+| Fail-closed tamper policy | VERIFIED | A mutated signed source stopped at `REVIEW_REQUIRED` and emitted no `CDR_QUEUED` event. It could not enter the sanitization path. |
+| Replay idempotency | VERIFIED | Replaying the signed source's durable broker message left exactly one verification record and one signature job step. |
+| Production constraints | IMPLEMENTED | The `scanning` profile includes a non-root/read-only/capability-dropped signature worker with no external network, bounded resources, read-only quarantine and trust store, and write access only to signature reports. Trust roots must be explicit; empty configuration yields untrusted rather than OS trust fallback. |
+| Regression checks | VERIFIED | API/Flyway unit build passed (2 tests); the M2 durable analysis pipeline passed after adding its signature outbox transition; standalone M3 signature tests passed after the dependency/inspector changes. |
+
+Commands used:
+
+```text
+pdf-gateway/tests/test_m3_pipeline.sh
+pdf-gateway/tests/test_m3_signatures.sh
+pdf-gateway/tests/test_m2_pipeline.sh
+docker run --rm -v "$PWD/pdf-gateway/api:/src" -w /src maven:3.9.11-eclipse-temurin-21@sha256:6fdc855a6ed81d288ca7ca37ac6ff5e9308b612485c0801d70b25a858c83d237 mvn -B test
+docker compose -f pdf-gateway/compose.yml --profile scanning config --quiet
+```
+
+Implementation commit: `f3efc26`. M3 remains incomplete until the isolated CDR
+adapter, exact-final-byte rescan, and visual preservation gates pass.
+
