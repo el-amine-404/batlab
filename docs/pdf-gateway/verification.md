@@ -72,3 +72,22 @@ docker compose -f pdf-gateway/compose.yml --profile scanning config --quiet
 All fixtures and service state were disposable. `/home/bro/Documents` was not
 mounted, read, moved, or modified by these tests.
 
+## 2026-10-25 — M3 signature-evidence slice
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Offline signature inspection | VERIFIED | Hash-locked pyHanko 0.38.0 ran in a digest-pinned, non-root, read-only, networkless container with CPU/RAM/PID/file limits. Reports separately record byte integrity, cryptographic validity, configured-root trust, revocation uncertainty, document coverage, modification level, DocMDP result, algorithms, and bounded certificate evidence. |
+| Real cryptographic fixtures | VERIFIED | A disposable CA and leaf certificate produced a real SHA-256 visible PDF signature. With the explicit root it returned `SIGNED_VALID_TRUSTED`; without it, `SIGNED_VALID_UNTRUSTED`. No OS trust fallback or certificate/revocation network fetching was allowed. |
+| Tamper and malformed handling | VERIFIED | A same-length mutation inside the signed byte range returned `SIGNED_INVALID` or typed `UNKNOWN`, always `REVIEW_REQUIRED`. Malformed input returned typed `UNKNOWN/REVIEW_REQUIRED` with exit status 2. |
+| Visible-mark distinction | VERIFIED | A PDF containing visible “Handwritten signature” text but no signature dictionary returned `UNSIGNED`; the report explicitly states that visible/handwritten marks are not cryptographic signatures. Authenticity is not claimed. |
+| Source immutability | VERIFIED | SHA-256 of the real signed fixture was identical before and after repeated inspection. The inspector has only a read-only fixture mount and never writes the source. Unknown parse state conservatively requires restricted original retention. |
+| Durable signature stage | NOT STARTED | The verified inspector is not yet connected to RabbitMQ/database orchestration. M3 as a whole remains incomplete. |
+
+Command used:
+
+```text
+pdf-gateway/tests/test_m3_signatures.sh
+```
+
+Implementation commit: `2ce4e10`.
+

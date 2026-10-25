@@ -39,7 +39,7 @@ The latest green checkpoint is the source of truth; chat summaries are advisory.
   - `pdf-gateway/tests/test_m1.sh`
   - `pdf-gateway/tests/test_m2.sh`
   - `pdf-gateway/tests/test_m2_pipeline.sh`
-- Main on Lab2 currently includes merge `1273e18`.
+- Main on Lab2 was verified through merge `e4f7988` before the current M3 slice.
 
 ## CDR gate — verified
 
@@ -63,12 +63,21 @@ The verifier requires signed-image validation, outer crun, inner gVisor/runsc,
 
 ## Next implementation order
 
-1. M3: pyHanko signature evidence, immutable signed originals, Dangerzone adapter, final-byte rescan/revalidation, safe visual/handwritten signature fixture checks.
-2. M4 portable archive and database-less reconstruction before any Paperless integration.
-3. M5 real mobile frontend/PWA.
-4. M6 exactly-once Paperless projection and outage recovery.
-5. M7 optional OCR/AI with offline-safe behavior.
-6. M8 hardening, measured Lab2 impact, monitoring, encrypted backup and clean restore.
+1. Continue M3 from verified signature-inspector commit `2ce4e10`: connect typed signature evidence to durable job/database state, preserving the quarantine hash and signed-original retention state. First rerun `pdf-gateway/tests/test_m3_signatures.sh` and inspect that commit.
+2. Implement the Dangerzone adapter and exact final-byte rescan/revalidation; add safe graphical/handwritten appearance comparison without authenticity claims.
+3. M4 portable archive and database-less reconstruction before any Paperless integration.
+4. M5 real mobile frontend/PWA.
+5. M6 exactly-once Paperless projection and outage recovery.
+6. M7 optional OCR/AI with offline-safe behavior.
+7. M8 hardening, measured Lab2 impact, monitoring, encrypted backup and clean restore.
+
+### Latest green M3 slice
+
+- Commit: `2ce4e10` (`feat(pdf-gateway): add offline signature evidence inspector`).
+- Test: `pdf-gateway/tests/test_m3_signatures.sh` passed with real trusted,
+  untrusted, tampered, visible-only and malformed fixtures.
+- No partial or uncommitted implementation remains after this checkpoint.
+- M3 is not complete and nothing from M3 has been deployed as a production service.
 
 Never skip a milestone gate or substitute mocked security verdicts for actual
 engine execution.
