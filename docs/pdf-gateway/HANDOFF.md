@@ -67,7 +67,7 @@ at 85 °C), one at a time, starting below 75 °C. Production CPU caps are config
 | `f3718f0` | M4-5 archive API (read-only, RBAC, safe downloads, CAS edits), V007, `reindex-db`, DB-loss gate |
 | `501124a` | Budget/healthcheck changes, `lab2_test.sh`, `test_pipeline_e2e.sh` through the archive, docs |
 | `25ee7a4` | M5-1 sessions + CSRF, scan/quarantine lists, findings, SSE, safe delete, summary, health, V008 |
-| (this commit) | M5-2/3 web UI, web container, Firefox/Playwright UI tests |
+| `b3dbb3c` | M5-2/3 web UI, web container, Firefox/Playwright UI tests |
 
 ### Pipeline as implemented
 
