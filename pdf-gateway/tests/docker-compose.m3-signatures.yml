@@ -1,0 +1,26 @@
+name: pdf-gateway-m3-signature-test
+services:
+  inspector:
+    build:
+      context: ../signature-worker
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 1g
+    cpus: 1.0
+    volumes:
+      - ${TEST_FIXTURES}:/fixtures:ro
+    network_mode: none
+
+  signer:
+    build:
+      context: ../signature-worker
+    entrypoint: ["python", "/test-tools/make_signed_fixture.py"]
+    volumes:
+      - ${TEST_FIXTURES}:/fixtures
+      - ./make_signed_fixture.py:/test-tools/make_signed_fixture.py:ro
+    working_dir: /fixtures
+    network_mode: none
