@@ -154,6 +154,11 @@ None after the checkpoint commit.
 - Lab2 `compose/.env`: gateway secrets generated on Lab2 (backup `compose/.env.bak-before-pdf-gateway`).
   The old unused keys `PDF_GATEWAY_HTTP_PORT`, `PDF_DB_PASSWORD` and `AI_LAPTOP_IP` were left in place.
 - Runbook: `docs/pdf-gateway/operations.md`.
+- Found on the first real `make up STACK=pdf-gateway` (user): builds on lab2's bridge have no DNS (apt-get
+  timed out). The fix is `build: network: host` (as stanzarr). `docker compose build` then asks to allow
+  `network.host` and fails without a terminal, so `make build-pdf-gateway` uses plain `docker build
+  --network host`, one image at a time, waiting above 75 °C. In a terminal, `make up` asks once to
+  allow it, as for stanzarr. Do not feed `yes` into `script` to answer it: that loaded lab2 for 10 minutes.
 
 ## Next implementation order
 

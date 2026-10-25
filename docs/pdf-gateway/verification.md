@@ -486,3 +486,15 @@ Ran on this PC, which is the AI laptop (Quadro T1000 4 GB, i7-10750H, 46 GB RAM)
 Command: `compose/pdf-gateway/app/tests/test_m7_enrichment.sh` (needs LM Studio with `qwen/qwen3-4b-2507`).
 Regression (local, all passed): `test_m1`, `test_m4_archive`, `test_m4_worker`, `test_m4_metadata`,
 `test_m4_gate`, `test_m5_api`, `test_m5_ui`, Maven, contracts.
+
+## 2026-10-25 — M8 (part 1): homelab stack and Lab2 deployment
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Repo-native stack | VERIFIED | `compose/pdf-gateway/docker-compose.yml` with image pins in `versions.env`, caps in `hosts/lab2/compose.env`, secrets in `compose/.env`, `pdf-gateway` in `hosts/lab2/stacks.txt`. `test_m8_stack.sh` passed locally: the Makefile's own `setup-pdf-gateway` lines, HTTPS through `pdf.caddy` with Caddy's local CA, Secure/HttpOnly cookie, CSRF and Origin on upload, per-stage uids (10001/10002/10003), fail-closed at `SANITIZING` without a provider, idle Paperless adapter without a token, READ_ONLY Homepage card, database unreachable from `home_server`. |
+| Lab2 build | VERIFIED | First `make up` (user) failed: no DNS on lab2's bridge for builders. Fixed with `build: network: host` and `make build-pdf-gateway` (plain `docker build --network host`, one image at a time, waits above 75 °C): 7 images, exit 0, CPU peak 70 °C. |
+| Lab2 deployment | VERIFIED | `make setup-pdf-gateway` and linger run by the user; the CDR provider is active (`provider_ready`); all 11 containers are healthy. Caddy is recreated with 443: `https://pdf.homelab.lan` returns 200 with the local CA, `http://` returns 308 to `https://`, `/ca.crt` serves "Caddy Local Authority - 2026 ECC Root". Paperless, Homepage and Jellyfin still answer. |
+| Real pipeline on Lab2 | VERIFIED | A generated invoice was uploaded via `https://pdf.homelab.lan` and went QUEUED → AWAITING_POLICY → ANALYZING → SANITIZING (Dangerzone/gVisor) → VALIDATING_OUTPUT → ARCHIVING → READY in 28 s, with a CPU peak of 66 °C. The file is at `/mnt/storage/data/documents/pdf-archive/archive/Unsorted/2026/…` (owner 10005, 0644); `pdf_archive.py verify` reports 1 valid, 0 failures. It is `Unsorted` because Lab2 has no filing rules yet. |
+| Homepage card | VERIFIED | `HOMEPAGE_VAR_PDF_GATEWAY_TOKEN` (READ_ONLY, only its SHA-256 is in the DB); Firefox shows Archived 1, Checking 0, To review 1, Held 0. |
+| restic | IMPLEMENTED | The archive is under `paths.txt`, the dump is in `dump-databases.sh`, and the restore test checks one archived PDF's SHA-256. Not yet run on Lab2: it needs sudo; the nightly 02:00 timer will include it. |
+| Paperless copy on Lab2 | NOT STARTED | The user created the dedicated user/token; no `ARCHIVE_AND_IMPORT` upload has been sent to the real Paperless yet. |
