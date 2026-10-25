@@ -5,8 +5,8 @@
 set -Eeuo pipefail
 trap 'echo "test_m5_api.sh: failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-compose="$root/pdf-gateway/tests/docker-compose.m4-gate.yml"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+compose="$root/compose/pdf-gateway/app/tests/docker-compose.m4-gate.yml"
 scratch="$(mktemp -d)"
 export TEST_STORAGE="$scratch/storage" TEST_ARCHIVE="$scratch/archive" TEST_ADMIN_TOKEN="$(openssl rand -hex 32)"
 dc=(docker compose -f "$compose")
@@ -40,10 +40,10 @@ login() { curl -sS -c "$scratch/$1.jar" -D "$scratch/$1.headers" -H 'Content-Typ
 
 mkdir -p "$TEST_STORAGE"/{fixtures,cdr-output,text-extracts,api/quarantine} "$TEST_ARCHIVE/manifests"
 chmod 0777 "$TEST_ARCHIVE" "$TEST_ARCHIVE/manifests" "$TEST_STORAGE/api" "$TEST_STORAGE/api/quarantine"
-docker build -q -t pdf-gateway-m4-test/api:local "$root/pdf-gateway/api" >/dev/null
-docker build -q -t pdf-gateway-m4-test/analysis-worker:local "$root/pdf-gateway/analysis-worker" >/dev/null
-docker build -q -f "$root/pdf-gateway/archive-worker/Dockerfile" -t pdf-gateway-m4-test/archive-worker:local "$root/pdf-gateway" >/dev/null
-python3 -I "$root/pdf-gateway/tests/make_fixtures.py" "$TEST_STORAGE/fixtures"
+docker build -q -t pdf-gateway-m4-test/api:local "$root/compose/pdf-gateway/app/api" >/dev/null
+docker build -q -t pdf-gateway-m4-test/analysis-worker:local "$root/compose/pdf-gateway/app/analysis-worker" >/dev/null
+docker build -q -f "$root/compose/pdf-gateway/app/archive-worker/Dockerfile" -t pdf-gateway-m4-test/archive-worker:local "$root/compose/pdf-gateway/app" >/dev/null
+python3 -I "$root/compose/pdf-gateway/app/tests/make_fixtures.py" "$TEST_STORAGE/fixtures"
 chmod 0755 "$TEST_STORAGE/fixtures" "$TEST_STORAGE/cdr-output" "$TEST_STORAGE/text-extracts"; chmod 0644 "$TEST_STORAGE/fixtures"/*
 "${dc[@]}" up -d --wait postgres rabbitmq api
 "${dc[@]}" up -d --wait archive-worker
@@ -51,7 +51,7 @@ admin="$(q "SELECT id FROM users WHERE username='admin'")"
 user_token="$(openssl rand -hex 32)"
 q "INSERT INTO users(id,username,role) VALUES ('00000000-0000-0000-0000-0000000000b2','other','USER')"
 q "INSERT INTO api_tokens(id,user_id,token_hash,label) VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000b2','$(printf %s "$user_token" | sha256sum | cut -d' ' -f1)','t')"
-. "$root/pdf-gateway/tests/lib_m4.sh"
+. "$root/compose/pdf-gateway/app/tests/lib_m4.sh"
 
 # Two released documents, one held, one held signed original (with real files in quarantine).
 seed 50 invoice-en.pdf; seed 51 unfamiliar.pdf
@@ -82,7 +82,7 @@ eq "$(code web -X DELETE -H "X-CSRF-Token: $csrf" -H 'Origin: https://evil.examp
 # --- Lists, contract, IDOR --------------------------------------------------
 eq "$(web "$base/api/v1/scans" | json 'len(v["items"])')" 4
 eq "$(web "$base/api/v1/scans?limit=1" | json 'v["nextCursor"]')" "$(scan_id 53)"
-web "$base/api/v1/scans/$(scan_id 52)" | python3 -I "$root/pdf-gateway/tests/check_scan_contract.py" "$root/pdf-gateway/contracts/openapi.yaml" >/dev/null
+web "$base/api/v1/scans/$(scan_id 52)" | python3 -I "$root/compose/pdf-gateway/app/tests/check_scan_contract.py" "$root/compose/pdf-gateway/app/contracts/openapi.yaml" >/dev/null
 eq "$(web "$base/api/v1/scans/$(scan_id 52)" | json 'v["displayName"]')" '<img src=x onerror=alert(1)>.pdf'
 eq "$(web "$base/api/v1/quarantine" | json '",".join(sorted(i["scanId"][-2:] for i in v["items"]))')" "52,53"
 eq "$(login other "$user_token")" 201

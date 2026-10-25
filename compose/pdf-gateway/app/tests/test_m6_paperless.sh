@@ -6,8 +6,8 @@
 set -Eeuo pipefail
 trap 'echo "test_m6_paperless.sh: failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-compose="$root/pdf-gateway/tests/docker-compose.m6-paperless.yml"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+compose="$root/compose/pdf-gateway/app/tests/docker-compose.m6-paperless.yml"
 scratch="$(mktemp -d)"
 export TEST_STORAGE="$scratch/storage" TEST_ARCHIVE="$scratch/archive" TEST_ADMIN_TOKEN="$(openssl rand -hex 32)"
 export TEST_PAPERLESS_SECRET="$(openssl rand -hex 32)" TEST_PAPERLESS_PASSWORD="$(openssl rand -hex 16)" TEST_PAPERLESS_TOKEN=unset
@@ -17,7 +17,7 @@ psql=("${dc[@]}" exec -T postgres psql -U pdf_gateway -d pdf_gateway -v ON_ERROR
 base=http://127.0.0.1:18389
 paperless=http://127.0.0.1:18300
 limits=(--network none --read-only --tmpfs /tmp:size=32m --cap-drop ALL --security-opt no-new-privileges --cpus 1 --memory 512m)
-. "$root/pdf-gateway/tests/lib_m3.sh"   # thermal_guard, package_temp
+. "$root/compose/pdf-gateway/app/tests/lib_m3.sh"   # thermal_guard, package_temp
 
 cleanup() {
   status=$?
@@ -52,7 +52,7 @@ thermal_guard
 mkdir -p "$TEST_STORAGE"/{fixtures,cdr-output,text-extracts,api/quarantine,api/multipart} "$TEST_ARCHIVE/manifests"
 chmod 0777 "$TEST_ARCHIVE" "$TEST_ARCHIVE/manifests" "$TEST_STORAGE/api" "$TEST_STORAGE/api/quarantine" "$TEST_STORAGE/api/multipart"
 for image in api archive-worker analysis-worker paperless-adapter; do docker image inspect "pdf-gateway-e2e-$image" >/dev/null; done
-python3 -I "$root/pdf-gateway/tests/make_fixtures.py" "$TEST_STORAGE/fixtures"
+python3 -I "$root/compose/pdf-gateway/app/tests/make_fixtures.py" "$TEST_STORAGE/fixtures"
 chmod 0755 "$TEST_STORAGE/fixtures" "$TEST_STORAGE/cdr-output" "$TEST_STORAGE/text-extracts"; chmod 0644 "$TEST_STORAGE/fixtures"/*
 cat >"$TEST_ARCHIVE/manifests/rules.json" <<'JSON'
 {"schemaVersion": "1.0.0", "revision": 1, "updatedAt": "2026-10-25T12:00:00Z", "rules": [
@@ -68,7 +68,7 @@ for _ in $(seq 1 120); do curl -fsS -o /dev/null "$paperless/api/" 2>/dev/null |
 export TEST_PAPERLESS_TOKEN="$(curl -sS -X POST -d "username=gateway-test&password=$TEST_PAPERLESS_PASSWORD" "$paperless/api/token/" | json 'v["token"]')"
 "${dc[@]}" up -d paperless-adapter
 admin="$(q "SELECT id FROM users WHERE username='admin'")"
-. "$root/pdf-gateway/tests/lib_m4.sh"
+. "$root/compose/pdf-gateway/app/tests/lib_m4.sh"
 
 # --- Import exactly once --------------------------------------------------------
 seed 70 invoice-en.pdf ARCHIVE_AND_IMPORT; seed 71 statement-fr.pdf ARCHIVE_AND_IMPORT; seed 72 unfamiliar.pdf ARCHIVE_AND_IMPORT

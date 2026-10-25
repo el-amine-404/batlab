@@ -4,11 +4,11 @@
 set -Eeuo pipefail
 trap 'echo "test_m3_validation.sh: failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-compose="$root/pdf-gateway/tests/docker-compose.m3-validation.yml"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+compose="$root/compose/pdf-gateway/app/tests/docker-compose.m3-validation.yml"
 scratch="$(mktemp -d)"
 export TEST_STORAGE="$scratch/storage"
-. "$root/pdf-gateway/tests/lib_m3.sh"
+. "$root/compose/pdf-gateway/app/tests/lib_m3.sh"
 
 cleanup() {
   status=$?

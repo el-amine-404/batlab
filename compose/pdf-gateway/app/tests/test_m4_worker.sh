@@ -6,8 +6,8 @@
 set -Eeuo pipefail
 trap 'echo "test_m4_worker.sh: failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-compose="$root/pdf-gateway/tests/docker-compose.m4-worker.yml"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+compose="$root/compose/pdf-gateway/app/tests/docker-compose.m4-worker.yml"
 scratch="$(mktemp -d)"
 export TEST_STORAGE="$scratch/storage" TEST_ARCHIVE="$scratch/archive"
 dc=(docker compose -f "$compose")
@@ -39,9 +39,9 @@ cli() { docker run --rm "${limits[@]}" --user 10005:10005 -v "$TEST_ARCHIVE:/arc
 mkdir -p "$TEST_STORAGE"/{fixtures,cdr-output,text-extracts} "$TEST_ARCHIVE/manifests" "$scratch/cli"
 chmod 0777 "$scratch/cli"
 chmod 0777 "$TEST_ARCHIVE" "$TEST_ARCHIVE/manifests"
-docker build -q -t pdf-gateway-m4-test/analysis-worker:local "$root/pdf-gateway/analysis-worker" >/dev/null
-docker build -q -f "$root/pdf-gateway/archive-worker/Dockerfile" -t pdf-gateway-m4-test/archive-worker:local "$root/pdf-gateway" >/dev/null
-python3 -I "$root/pdf-gateway/tests/make_fixtures.py" "$TEST_STORAGE/fixtures"
+docker build -q -t pdf-gateway-m4-test/analysis-worker:local "$root/compose/pdf-gateway/app/analysis-worker" >/dev/null
+docker build -q -f "$root/compose/pdf-gateway/app/archive-worker/Dockerfile" -t pdf-gateway-m4-test/archive-worker:local "$root/compose/pdf-gateway/app" >/dev/null
+python3 -I "$root/compose/pdf-gateway/app/tests/make_fixtures.py" "$TEST_STORAGE/fixtures"
 chmod 0755 "$TEST_STORAGE"/* && chmod 0644 "$TEST_STORAGE/fixtures"/*
 cat >"$TEST_ARCHIVE/manifests/rules.json" <<'JSON'
 {"schemaVersion": "1.0.0", "revision": 1, "updatedAt": "2026-10-25T12:00:00Z", "rules": [

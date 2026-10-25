@@ -3,7 +3,7 @@ FROM python:3.13-slim@sha256:d98cc29d3266e535dd9da1099688d9cb3ca4753813571e07176
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
-# Build context is pdf-gateway/ (see Dockerfile.dockerignore) so the contract schema is shared.
+# Build context is compose/pdf-gateway/app/ (see Dockerfile.dockerignore) so the contract schema is shared.
 COPY archive-worker/requirements.txt /tmp/requirements.txt
 RUN python -m pip install --no-cache-dir --require-hashes -r /tmp/requirements.txt \
  && rm /tmp/requirements.txt \

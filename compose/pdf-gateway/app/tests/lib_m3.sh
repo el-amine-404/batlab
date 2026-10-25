@@ -21,7 +21,7 @@ prepare_storage() {
   chmod 0755 "$TEST_STORAGE" "$TEST_STORAGE/quarantine" "$TEST_STORAGE/cdr-socket" "$TEST_STORAGE/fixtures"
   chmod 0777 "$TEST_STORAGE/cdr-output" "$TEST_STORAGE/validation-reports" "$TEST_STORAGE/signature-reports" \
     "$TEST_STORAGE/reports" "$TEST_STORAGE/multipart" "$TEST_STORAGE/builder"
-  python3 -I "$root/pdf-gateway/tests/make_fixtures.py" "$TEST_STORAGE/fixtures"
+  python3 -I "$root/compose/pdf-gateway/app/tests/make_fixtures.py" "$TEST_STORAGE/fixtures"
   chmod 0644 "$TEST_STORAGE/fixtures"/*
 }
 
@@ -30,7 +30,7 @@ prepare_storage() {
 # and loaded, because builds are not CPU-capped and must not heat Lab2.
 build_image() {
   [[ ${PDF_GATEWAY_PREBUILT:-} == 1 ]] && { docker image inspect "pdf-gateway-m3-test/$1:local" >/dev/null; return; }
-  docker build -q --network host -t "pdf-gateway-m3-test/$1:local" "$root/pdf-gateway/$1" >/dev/null
+  docker build -q --network host -t "pdf-gateway-m3-test/$1:local" "$root/compose/pdf-gateway/app/$1" >/dev/null
 }
 
 stop_provider() { systemctl --user stop "$unit" >/dev/null 2>&1 || true; }

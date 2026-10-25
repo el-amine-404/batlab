@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # M7: optional OCR/AI enrichment on the AI laptop (this PC), pulled by the real
 # agent with real Tesseract and the real LM Studio. The gateway stack is local.
-#   pdf-gateway/tests/test_m7_enrichment.sh        (LM Studio must be running)
+#   compose/pdf-gateway/app/tests/test_m7_enrichment.sh        (LM Studio must be running)
 set -Eeuo pipefail
 trap 'echo "test_m7_enrichment.sh: failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 scratch="$(mktemp -d)"
 export TEST_STORAGE="$scratch/storage" TEST_ARCHIVE="$scratch/archive" TEST_ADMIN_TOKEN="$(openssl rand -hex 32)"
-dc=(docker compose -f "$root/pdf-gateway/tests/docker-compose.m4-gate.yml" -f "$root/pdf-gateway/tests/docker-compose.m7-enrichment.override.yml")
+dc=(docker compose -f "$root/compose/pdf-gateway/app/tests/docker-compose.m4-gate.yml" -f "$root/compose/pdf-gateway/app/tests/docker-compose.m7-enrichment.override.yml")
 psql=("${dc[@]}" exec -T postgres psql -U pdf_gateway -d pdf_gateway -v ON_ERROR_STOP=1 -q)
 base=http://127.0.0.1:18289
 model="${PDF_GATEWAY_LLM_MODEL:-qwen/qwen3-4b-2507}"
@@ -47,10 +47,10 @@ jobs_done() { [[ "$(q "SELECT count(*) FROM enrichment_jobs WHERE status IN ('WA
 curl -fsS -m 3 http://127.0.0.1:1234/v1/models | json '[m["id"] for m in v["data"]]' | grep -q "$model" || { echo "LM Studio with $model is required" >&2; exit 1; }
 mkdir -p "$TEST_STORAGE"/{fixtures,cdr-output,text-extracts,api/quarantine,api/multipart} "$TEST_ARCHIVE/manifests"
 chmod 0777 "$TEST_ARCHIVE" "$TEST_ARCHIVE/manifests" "$TEST_STORAGE/api" "$TEST_STORAGE/api/quarantine" "$TEST_STORAGE/api/multipart"
-for image in api analysis-worker; do docker build -q -t "pdf-gateway-m4-test/$image:local" "$root/pdf-gateway/$image" >/dev/null; done
-docker build -q -f "$root/pdf-gateway/archive-worker/Dockerfile" -t pdf-gateway-m4-test/archive-worker:local "$root/pdf-gateway" >/dev/null
-docker build -q -t pdf-gateway-m7-test/enrichment-agent:local "$root/pdf-gateway/enrichment-agent" >/dev/null
-python3 -I "$root/pdf-gateway/tests/make_fixtures.py" "$TEST_STORAGE/fixtures"
+for image in api analysis-worker; do docker build -q -t "pdf-gateway-m4-test/$image:local" "$root/compose/pdf-gateway/app/$image" >/dev/null; done
+docker build -q -f "$root/compose/pdf-gateway/app/archive-worker/Dockerfile" -t pdf-gateway-m4-test/archive-worker:local "$root/compose/pdf-gateway/app" >/dev/null
+docker build -q -t pdf-gateway-m7-test/enrichment-agent:local "$root/compose/pdf-gateway/app/enrichment-agent" >/dev/null
+python3 -I "$root/compose/pdf-gateway/app/tests/make_fixtures.py" "$TEST_STORAGE/fixtures"
 chmod 0777 "$TEST_STORAGE/fixtures"
 # An image-only "scan" of the invoice: rendered to pixels, so no text layer survives.
 docker run --rm "${limits[@]}" --user "$(id -u):$(id -g)" -v "$TEST_STORAGE/fixtures:/f" --entrypoint sh pdf-gateway-m4-test/analysis-worker:local -c \
@@ -81,7 +81,7 @@ q "INSERT INTO users(id,username,role) VALUES ('00000000-0000-0000-0000-00000000
 q "INSERT INTO api_tokens(id,user_id,token_hash,label) VALUES
    (gen_random_uuid(),'00000000-0000-0000-0000-0000000000e1','$(printf %s "$agent_token" | sha256sum | cut -d' ' -f1)','agent'),
    (gen_random_uuid(),'00000000-0000-0000-0000-0000000000e2','$(printf %s "$user_token" | sha256sum | cut -d' ' -f1)','user')"
-. "$root/pdf-gateway/tests/lib_m4.sh"
+. "$root/compose/pdf-gateway/app/tests/lib_m4.sh"
 
 eq "$(ai_state)" UNKNOWN
 seed 80 scanned-invoice.pdf; seed 81 unfamiliar.pdf; seed 82 injection.pdf

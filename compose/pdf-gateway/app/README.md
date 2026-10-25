@@ -9,7 +9,7 @@ Capabilities must be promoted milestone by milestone in
 Run the dependency-free contract checks with:
 
 ```bash
-python3 pdf-gateway/tools/validate_contracts.py
+python3 compose/pdf-gateway/app/tools/validate_contracts.py
 ```
 
 Production deployment is intentionally absent until M1 passes its security gate.
@@ -20,7 +20,7 @@ is available. No service may report a document as released before then.
 Run the M1 disposable integration gate with:
 
 ```bash
-pdf-gateway/tests/test_m1.sh
+compose/pdf-gateway/app/tests/test_m1.sh
 ```
 
 M2 adds the `scanning` profile. It keeps one ClamAV daemon with persistent
@@ -38,8 +38,8 @@ database, RabbitMQ, and bootstrap secrets. Validate the engines and durable task
 path independently with:
 
 ```bash
-pdf-gateway/tests/test_m2.sh
-pdf-gateway/tests/test_m2_pipeline.sh
+compose/pdf-gateway/app/tests/test_m2.sh
+compose/pdf-gateway/app/tests/test_m2_pipeline.sh
 ```
 
 These tests use generated PDFs and EICAR, never files from the personal source
@@ -69,9 +69,9 @@ validation worker.
 Lab2 verification (needs Dangerzone, so not runnable on other hosts):
 
 ```bash
-pdf-gateway/tests/test_m3_cdr.sh          # provider, isolation evidence, typed failures
-pdf-gateway/tests/test_m3_validation.sh   # final-byte validation and release guard
-pdf-gateway/tests/test_pipeline_e2e.sh    # production compose end to end via the API, into the archive
+compose/pdf-gateway/app/tests/test_m3_cdr.sh          # provider, isolation evidence, typed failures
+compose/pdf-gateway/app/tests/test_m3_validation.sh   # final-byte validation and release guard
+compose/pdf-gateway/app/tests/test_pipeline_e2e.sh    # production compose end to end via the API, into the archive
 ```
 
 Lab2's default Docker bridge has no DNS, so these tests build images with
@@ -98,7 +98,7 @@ pdf-archive --root ARCHIVE verify | reindex --catalog c.sqlite | repair [--apply
 `test_m4_archive.sh`, `test_m4_organize.sh`, `test_m4_worker.sh`,
 `test_m4_metadata.sh`, `test_m4_gate.sh`.
 
-Lab2-only tests must go through `pdf-gateway/tools/lab2_test.sh <test>`. It
+Lab2-only tests must go through `compose/pdf-gateway/app/tools/lab2_test.sh <test>`. It
 builds images locally, samples temperature every second, and the tests abort
 themselves at 85 °C. Lab2 runs live services.
 
@@ -110,8 +110,8 @@ Sign in with an API token: it is exchanged for an HttpOnly session cookie and is
 stored. The app never previews originals; approved PDFs are downloads only.
 
 ```bash
-pdf-gateway/tests/test_m5_api.sh
-VENV=… PLAYWRIGHT_BROWSERS_PATH=… pdf-gateway/tests/test_m5_ui.sh [SCREENSHOT_DIR]
+compose/pdf-gateway/app/tests/test_m5_api.sh
+VENV=… PLAYWRIGHT_BROWSERS_PATH=… compose/pdf-gateway/app/tests/test_m5_ui.sh [SCREENSHOT_DIR]
 ```
 
 ## M7: optional OCR and AI (laptop agent)
@@ -125,7 +125,7 @@ the laptop exposes nothing and may be off at any time.
    `INSERT INTO users(id,username,role) VALUES (gen_random_uuid(),'t1000-agent','ENRICHMENT');`
    `INSERT INTO api_tokens(id,user_id,token_hash,label) SELECT gen_random_uuid(),id,'<sha256 of token>','agent' FROM users WHERE username='t1000-agent';`
 2. On the laptop: copy `agent.env.example` to `agent.env` (gateway URL, token, model), then
-   `docker compose -f pdf-gateway/enrichment-agent/compose.yml up -d --build`.
+   `docker compose -f compose/pdf-gateway/app/enrichment-agent/compose.yml up -d --build`.
 3. The agent loads `qwen/qwen3-4b-2507` in LM Studio at a 4096-token context, which
    fits a 4 GB GPU; OCR uses Tesseract (eng+fra+ara).
 

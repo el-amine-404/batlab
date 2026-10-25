@@ -4,8 +4,8 @@
 set -Eeuo pipefail
 trap 'echo "test_m3_cdr.sh: failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-compose="$root/pdf-gateway/tests/docker-compose.m3-cdr.yml"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+compose="$root/compose/pdf-gateway/app/tests/docker-compose.m3-cdr.yml"
 unit_file="$root/hosts/lab2/pdf-cdr-provider/pdf-cdr-provider.service"
 provider="$root/hosts/lab2/pdf-cdr-provider/provider.py"
 export CONTAINERS_CONF=/etc/batlab/pdf-cdr/containers.conf
@@ -16,7 +16,7 @@ chmod 0755 "$TEST_STORAGE" "$TEST_STORAGE/quarantine" "$TEST_STORAGE/cdr-socket"
 chmod 0777 "$TEST_STORAGE/builder" "$TEST_STORAGE/cdr-output"
 unit="pdf-cdr-provider-test-$$"
 # Shared thermal guard (Lab2 must stay healthy while this runs).
-eval "$(sed -n '/^package_temp()/,$p' "$root/pdf-gateway/tests/lib_m3.sh")"
+eval "$(sed -n '/^package_temp()/,$p' "$root/compose/pdf-gateway/app/tests/lib_m3.sh")"
 thermal_guard
 
 stop_provider() { systemctl --user stop "$unit" >/dev/null 2>&1 || true; }
@@ -47,7 +47,7 @@ start_provider() {
   echo "provider did not start" >&2; return 1
 }
 
-python3 -I "$root/pdf-gateway/tests/make_fixtures.py" "$TEST_STORAGE/fixtures"
+python3 -I "$root/compose/pdf-gateway/app/tests/make_fixtures.py" "$TEST_STORAGE/fixtures"
 cp "$TEST_STORAGE/fixtures/unsigned.pdf" "$TEST_STORAGE/builder/unsigned.pdf"
 openssl req -x509 -newkey rsa:2048 -nodes -days 2 -sha256 -subj '/CN=M3 CDR Root' \
   -keyout "$TEST_STORAGE/builder/root.key" -out "$TEST_STORAGE/builder/root.crt" \
@@ -60,8 +60,8 @@ openssl x509 -req -in "$TEST_STORAGE/builder/signer.csr" -CA "$TEST_STORAGE/buil
 chmod 0644 "$TEST_STORAGE/builder"/*
 # Lab2's default bridge has no DNS, so image builds use host networking.
 if [[ ${PDF_GATEWAY_PREBUILT:-} != 1 ]]; then  # tools/lab2_test.sh builds off-Lab2
-  docker build -q --network host -t pdf-gateway-m3-test/cdr-worker:local "$root/pdf-gateway/cdr-worker" >/dev/null
-  docker build -q --network host -t pdf-gateway-m3-test/signature-worker:local "$root/pdf-gateway/signature-worker" >/dev/null
+  docker build -q --network host -t pdf-gateway-m3-test/cdr-worker:local "$root/compose/pdf-gateway/app/cdr-worker" >/dev/null
+  docker build -q --network host -t pdf-gateway-m3-test/signature-worker:local "$root/compose/pdf-gateway/app/signature-worker" >/dev/null
 fi
 docker compose -f "$compose" run --rm --no-deps signer
 cp "$TEST_STORAGE/builder/signed.pdf" "$TEST_STORAGE/fixtures/signed.pdf"

@@ -7,13 +7,13 @@
 set -Eeuo pipefail
 trap 'echo "test_pipeline_e2e.sh: failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-compose="$root/pdf-gateway/compose.yml"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+compose="$root/compose/pdf-gateway/app/compose.yml"
 project=pdf-gateway-e2e
-dc=(docker compose -p "$project" -f "$compose" -f "$root/pdf-gateway/tests/docker-compose.pipeline-e2e.override.yml" --profile scanning --profile cdr --profile archive)
+dc=(docker compose -p "$project" -f "$compose" -f "$root/compose/pdf-gateway/app/tests/docker-compose.pipeline-e2e.override.yml" --profile scanning --profile cdr --profile archive)
 scratch="$(mktemp -d)"
 export TEST_STORAGE="$scratch/storage"
-. "$root/pdf-gateway/tests/lib_m3.sh"
+. "$root/compose/pdf-gateway/app/tests/lib_m3.sh"
 
 export PDF_GATEWAY_STORAGE_ROOT="$TEST_STORAGE"
 export PDF_GATEWAY_CDR_SOCKET_DIR="$TEST_STORAGE/cdr-socket"
@@ -65,9 +65,9 @@ if [[ ${PDF_GATEWAY_PREBUILT:-} == 1 ]]; then
   for service in "${images[@]}"; do docker image inspect "$project-$service" >/dev/null; done
 else
   for service in api analysis-worker signature-worker cdr-worker; do
-    docker build -q --network host -t "$project-$service" "$root/pdf-gateway/$service" >/dev/null
+    docker build -q --network host -t "$project-$service" "$root/compose/pdf-gateway/app/$service" >/dev/null
   done
-  docker build -q --network host -f "$root/pdf-gateway/archive-worker/Dockerfile" -t "$project-archive-worker" "$root/pdf-gateway" >/dev/null
+  docker build -q --network host -f "$root/compose/pdf-gateway/app/archive-worker/Dockerfile" -t "$project-archive-worker" "$root/compose/pdf-gateway/app" >/dev/null
 fi
 docker tag "$project-analysis-worker" "$project-validation-worker"
 
@@ -84,7 +84,7 @@ openssl x509 -req -in "$TEST_STORAGE/builder/signer.csr" -CA "$TEST_STORAGE/buil
 cp "$fx/unsigned.pdf" "$TEST_STORAGE/builder/unsigned.pdf"
 chmod 0644 "$TEST_STORAGE/builder"/*
 docker run --rm --network none -v "$TEST_STORAGE/builder:/fixtures" \
-  -v "$root/pdf-gateway/tests/make_signed_fixture.py:/t.py:ro" --entrypoint python "$project-signature-worker" /t.py 2>/dev/null
+  -v "$root/compose/pdf-gateway/app/tests/make_signed_fixture.py:/t.py:ro" --entrypoint python "$project-signature-worker" /t.py 2>/dev/null
 cp "$TEST_STORAGE/builder/signed.pdf" "$TEST_STORAGE/builder/signed-then-modified.pdf" "$fx/"
 cp "$TEST_STORAGE/builder/root.crt" "$TEST_STORAGE/trust/root.crt"
 python3 - "$fx/signed.pdf" "$fx/tampered.pdf" <<'PY'
@@ -200,7 +200,7 @@ docker run --rm --network none --group-add 10010 -v "$TEST_STORAGE:/s:ro" "$proj
 # (vector) and raster handwritten marks keep ink where the source had it.
 appearance() {
   docker run --rm --network none --group-add 10010 -v "$TEST_STORAGE:/s:ro" \
-    -v "$root/pdf-gateway/tests/compare_regions.py:/t.py:ro" --entrypoint python3 "$project-analysis-worker" \
+    -v "$root/compose/pdf-gateway/app/tests/compare_regions.py:/t.py:ro" --entrypoint python3 "$project-analysis-worker" \
     /t.py "/s/fixtures/$2" "$(output "$1")" /s/fixtures/regions.json "$2"
 }
 appearance signed signed.pdf
@@ -209,7 +209,7 @@ appearance handwritten handwritten.pdf
 # Every API view uses only OpenAPI contract values; internal detail is in stage.
 api_view() {
   curl -fsS -H "Authorization: Bearer $PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN" "$base/api/v1/scans/${SCAN[$1]}" \
-    | python3 -I "$root/pdf-gateway/tests/check_scan_contract.py" "$root/pdf-gateway/contracts/openapi.yaml"
+    | python3 -I "$root/compose/pdf-gateway/app/tests/check_scan_contract.py" "$root/compose/pdf-gateway/app/contracts/openapi.yaml"
 }
 for name in "${!SCAN[@]}"; do api_view "$name" >/dev/null; done
 eq "$(api_view signed)" '{"status": "READY", "stage": "READY", "detection": "NO_THREATS_DETECTED", "policy": "ALLOW_SANITIZED", "artifact": "PUBLISHED", "originalRetention": "SIGNED_RESTRICTED"}'

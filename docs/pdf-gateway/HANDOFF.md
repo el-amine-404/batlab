@@ -56,7 +56,7 @@ The latest green checkpoint is the source of truth; chat summaries are advisory.
 
 Lab2 runs live services and reached 95.5 °C from uncapped test stacks. Rules now in force:
 run tests on the local PC unless they need Dangerzone; run Lab2-only tests **only** through
-`pdf-gateway/tools/lab2_test.sh <test>` (local image builds, 1 s temperature sampling, guard aborts
+`compose/pdf-gateway/app/tools/lab2_test.sh <test>` (local image builds, 1 s temperature sampling, guard aborts
 at 85 °C), one at a time, starting below 75 °C. Production CPU caps are configurable
 (`PDF_GATEWAY_CPUS_*`, defaults about 4 cores worst case) and the provider is `CPUQuota=100%`.
 
@@ -89,16 +89,16 @@ refuse every release state without a PASS for the exact published bytes and an a
 
 Local PC, all passed: `test_m1.sh`, `test_m2.sh`, `test_m2_pipeline.sh`, `test_m3_signatures.sh`,
 `test_m3_pipeline.sh`, `test_m4_archive.sh`, `test_m4_organize.sh`, `test_m4_worker.sh`,
-`test_m4_metadata.sh`, `test_m4_gate.sh`, `python3 pdf-gateway/tools/validate_contracts.py`, Maven
+`test_m4_metadata.sh`, `test_m4_gate.sh`, `python3 compose/pdf-gateway/app/tools/validate_contracts.py`, Maven
 (`docker run --rm -v "$PWD/pdf-gateway/api:/src" -w /src maven:3.9.11-eclipse-temurin-21@sha256:6fdc855a6ed81d288ca7ca37ac6ff5e9308b612485c0801d70b25a858c83d237 mvn -B -q test`, 4 tests;
-remove the root-owned `pdf-gateway/api/target` afterwards).
+remove the root-owned `compose/pdf-gateway/app/api/target` afterwards).
 
 Also local: `test_m5_api.sh`; `test_m5_ui.sh` needs `VENV` (selenium 4.38, playwright 1.56) and
 `PLAYWRIGHT_BROWSERS_PATH` with Playwright Firefox installed (`python -m playwright install firefox`, ~97 MB).
 
-Lab2 via `pdf-gateway/tools/lab2_test.sh test_m6_paperless`: PASSED (485 s, peak 81 °C).
+Lab2 via `compose/pdf-gateway/app/tools/lab2_test.sh test_m6_paperless`: PASSED (485 s, peak 81 °C).
 
-Lab2 via `pdf-gateway/tools/lab2_test.sh`: `test_pipeline_e2e` PASSED (348 s, peak 82 °C).
+Lab2 via `compose/pdf-gateway/app/tools/lab2_test.sh`: `test_pipeline_e2e` PASSED (348 s, peak 82 °C).
 `test_m3_cdr` and `test_m3_validation` were aborted by the thermal guard with their old caps; caps are now
 lowered but they have **not been rerun** (pending, run one at a time when Lab2 is cool).
 
@@ -131,6 +131,31 @@ None after the checkpoint commit.
    and host ownership for UIDs 10001–10005 and groups 10002/10010.
 2. `potato` is in the `docker` group (root-equivalent): residual risk for M8 (dedicated Dangerzone account recommended).
 
+## M8 in progress (2026-10-25, stopped at usage limit)
+
+- DONE, committed on the feature branch only (not merged): the gateway moved from `pdf-gateway/` to
+  `compose/pdf-gateway/app/` to match the repo's stack layout (like stanzarr). All paths in tests,
+  tools, docs and `hosts/lab2/pdf-cdr-provider` were rewritten. Re-verified after the move:
+  `test_m4_archive`, `test_m4_organize`, `test_m1` passed. Other tests were not rerun yet.
+- UNCOMMITTED, NOT COMPILED: `GET /api/v1/system/status` (aggregate counts for the Homepage tile) in
+  `UiController.java` and `InsightService.java`.
+- User decisions: serve the web app over HTTPS at `https://pdf.homelab.lan` with Caddy `tls internal`
+  (open 443 on Caddy for this one site; serve the root CA at `http://pdf.homelab.lan/ca.crt` for the iPhone).
+- Next steps, in order:
+  1. `compose/pdf-gateway/docker-compose.yml` in repo conventions: `name: ${PDF_GATEWAY_PROJECT_NAME}`,
+     container_name `pdf-gateway-*`, images in `compose/versions.env` (IMAGE_/TAG_ pairs for Renovate),
+     limits in `hosts/<profile>/compose.env`, binds under `${VOLUMES_ROOT}/pdf-gateway/` and the archive at
+     `${DATA_ROOT}/documents/pdf-archive`; web on `home_server` for Caddy; adapter on `home_server`; add to
+     `hosts/lab2/stacks.txt`; secrets in `compose/.env.example`. Decide what to do with the profiles,
+     because `make up` passes none.
+  2. Makefile `setup`: create those dirs and set ownership to the container uids/groups (10010, 10002, …).
+  3. Homepage: a `customapi` tile on `http://pdf-gateway-web:8080/api/v1/system/status` with a READ_ONLY token
+     (`HOMEPAGE_VAR_PDF_GATEWAY_TOKEN`).
+  4. restic: the archive under `/mnt/storage/data/documents` is already in `paths.txt`. Add the
+     `pdf-gateway-db` dump to `dump-databases.sh` and to `restore-test.sh`, plus an archive PDF check.
+     Exclude the ClamAV definitions and multipart temp files.
+  5. Then the rest of the M8 list below.
+
 ## Next implementation order
 
 1. M8 hardening and operations: adversarial/fuzz/load/disk-full tests; measured host budget (Paperless,
@@ -143,7 +168,7 @@ None after the checkpoint commit.
 ### First command for the next agent
 
 ```bash
-cd /home/bro/.codex-worktrees/pdf-security-gateway && git fetch origin && git status --short && git log --oneline -10 && pdf-gateway/tests/test_m7_enrichment.sh
+cd /home/bro/.codex-worktrees/pdf-security-gateway && git fetch origin && git status --short && git log --oneline -10 && compose/pdf-gateway/app/tests/test_m7_enrichment.sh
 ```
 
 ## M3 plan as written before implementation (completed; kept for history)

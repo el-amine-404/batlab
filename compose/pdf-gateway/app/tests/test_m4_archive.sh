@@ -4,14 +4,14 @@
 set -Eeuo pipefail
 trap 'echo "test_m4_archive.sh: failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 scratch="$(mktemp -d)"
 image=pdf-gateway-m4-test/archive-worker:local
 cleanup() { status=$?; rm -rf -- "$scratch"; exit "$status"; }
 trap cleanup EXIT
 
-docker build -q -f "$root/pdf-gateway/archive-worker/Dockerfile" -t "$image" "$root/pdf-gateway" >/dev/null
+docker build -q -f "$root/compose/pdf-gateway/app/archive-worker/Dockerfile" -t "$image" "$root/compose/pdf-gateway/app" >/dev/null
 docker run --rm --network none --read-only --tmpfs /tmp:size=16m --cap-drop ALL --security-opt no-new-privileges \
   --cpus 1 --memory 512m --pids-limit 64 --user "$(id -u):$(id -g)" \
-  -v "$scratch:/data" -v "$root/pdf-gateway/tests/archive_test.py:/tests/archive_test.py:ro" \
+  -v "$scratch:/data" -v "$root/compose/pdf-gateway/app/tests/archive_test.py:/tests/archive_test.py:ro" \
   --entrypoint python "$image" /tests/archive_test.py /data

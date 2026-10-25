@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-compose="$root/pdf-gateway/tests/docker-compose.m3-pipeline.yml"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+compose="$root/compose/pdf-gateway/app/tests/docker-compose.m3-pipeline.yml"
 scratch="$(mktemp -d)"
 export TEST_STORAGE="$scratch/storage"
 mkdir -p "$TEST_STORAGE"/{builder,quarantine,signature-reports,trust}
