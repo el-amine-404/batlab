@@ -35,8 +35,8 @@ export function DocumentPage({ session }: { session: Session }) {
   });
   const ai = useQuery({ queryKey: ["ai"], queryFn: api.ai, staleTime: 30_000 });
   const jobs = useQuery({
-    queryKey: ["enrichment", documentId], queryFn: () => api.enrichment(documentId!), enabled: ready,
-    refetchInterval: (query) => query.state.data?.some((job) => MOVING.has(job.status)) ? 5_000 : false,
+    queryKey: ["enrichment", scanId], queryFn: () => api.scanEnrichment(scanId), enabled: !!scan.data,
+    refetchInterval: (query) => query.state.data?.some((job) => MOVING.has(job.status)) || !TERMINAL.has(status ?? "") ? 5_000 : false,
   });
   const suggestions = useQuery({ queryKey: ["suggestions", documentId, jobs.data?.map((job) => job.status).join()], queryFn: () => api.suggestions(documentId!), enabled: ready });
 
@@ -58,11 +58,14 @@ export function DocumentPage({ session }: { session: Session }) {
   const v = verdict(view);
   const reload = () => Promise.all(["sidecar", "document", "documents", "suggestions", "enrichment", "paperless"].map((key) => client.invalidateQueries({ queryKey: [key] })));
 
+  const safety = safetySteps(view, findings.data).map((step) => step.key === "archive" && ready && doc.data
+    ? { ...step, detail: `In ${folderOf(doc.data.archivePath)}.` } : step);
   const steps = [
-    ...safetySteps(view, findings.data).map((step) => step.key === "archive" && ready && doc.data
-      ? { ...step, detail: `In ${folderOf(doc.data.archivePath)}.` } : step),
-    paperlessStep(view, paperless.data, canEdit, async () => { await api.sendToPaperless(scanId); await client.invalidateQueries({ queryKey: ["paperless", scanId] }); }),
+    ...safety.slice(0, -1),
+    // The AI files the document before it is saved, so its step comes first.
     ...aiStep(view, ai.data?.state, ai.data?.enabled, sidecar?.organization.reviewState, jobs.data, suggestions.data),
+    safety[safety.length - 1],
+    paperlessStep(view, paperless.data, canEdit, async () => { await api.sendToPaperless(scanId); await client.invalidateQueries({ queryKey: ["paperless", scanId] }); }),
   ];
 
   return (
@@ -117,13 +120,26 @@ function CopyCard({ documentId, doc, sidecar, etag, paperless, canEdit, onSaved 
   const rows: [string, ReactNode][] = [
     ["Title", sidecar.title],
     ["From", sidecar.issuer?.value],
+    ["Type", sidecar.documentType ? TYPE_LABEL[sidecar.documentType] ?? sidecar.documentType : undefined],
     ["Date", sidecar.documentDate?.value],
-    ["Type", sidecar.documentType],
+    ["Number", sidecar.reference?.value],
+    ["Amount", sidecar.amount ? `${sidecar.amount.value} ${sidecar.amount.currency}` : undefined],
     ["Folder", folderOf(doc.archivePath)],
     ["Tags", sidecar.tags?.length ? sidecar.tags.map((tag) => <Badge key={tag}>{tag}</Badge>) : undefined],
   ];
+  const byAi = sidecar.organization.reviewState === "AI" || sidecar.titleSource === "ai";
+  const byRule = sidecar.organization.reviewState === "RULE";
   return (
     <Card title="Your clean copy" actions={canEdit && !editing && <Button variant="ghost" onClick={() => setEditing(true)}>Edit</Button>}>
+      {!editing && (byAi || byRule || sidecar.organization.reviewState === "FALLBACK") && (
+        <p className="mb-3 text-xs" data-testid="filed-by">
+          {byAi ? <Badge tone="info">Filled in by the AI</Badge> : byRule ? <Badge tone="good">Filed by your rules</Badge> : <Badge tone="warn">Not filed yet</Badge>}
+          <span className="ml-2 text-slate-500 dark:text-slate-400">
+            {byAi ? "Every value was checked against the document's text; correct anything that's off with Edit."
+              : byRule ? "A filing rule recognised it." : "Neither your rules nor the AI could file it; give it a title with Edit."}
+          </span>
+        </p>
+      )}
       {editing ? <EditForm documentId={documentId} sidecar={sidecar} etag={etag} onDone={async (saved) => { setEditing(false); if (saved) await onSaved(); }} /> : (
         <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-2 text-sm" data-testid="copy-fields">
           {rows.filter(([, value]) => value !== undefined && value !== "").map(([label, value]) => (
@@ -139,8 +155,8 @@ function CopyCard({ documentId, doc, sidecar, etag, paperless, canEdit, onSaved 
         )}
       </div>
       <Muted className="mt-3 text-xs">
-        The clean copy looks like your original, but each page is now a picture: text can't be selected in it.
-        Paperless reads it again (OCR), so search still works there. {formatBytes(doc.bytes)}.
+        The clean copy looks like your original: each page was redrawn as a lossless image, with an invisible text layer
+        so you can search and copy text. Title, author, subject and keywords are set inside the PDF. {formatBytes(doc.bytes)}.
       </Muted>
     </Card>
   );
@@ -244,29 +260,39 @@ function paperlessStep(scan: Scan, item: PaperlessImport | undefined, canEdit: b
 function aiStep(scan: Scan, state: string | undefined, enabled: boolean | undefined, reviewState: string | undefined,
                 jobs: EnrichmentJob[] | undefined, suggestions: Suggestion[] | undefined): Step[] {
   if (enabled === false) return [];
-  const label = "AI suggestions (on your laptop)";
-  if (scan.status !== "READY") return [{ key: "ai", label, state: TERMINAL.has(scan.status) ? "skipped" : "waiting", detail: TERMINAL.has(scan.status) ? undefined : "After the checks, if your filing rules don't recognise it." }];
-  if (!jobs) return [{ key: "ai", label, state: "waiting" }];
-  if (jobs.length === 0) {
-    return [{ key: "ai", label, state: "skipped", detail: reviewState === "RULE" ? "Not needed: your filing rules recognised it." : "Not asked for this document." }];
+  const label = "Filed by the AI (on your laptop)";
+  const job = jobs?.find((item) => item.kind === "SUGGEST");
+  const away = state && !["READY", "AVAILABLE", "BUSY"].includes(state) ? ` ${AI_STATE[state] ?? state}.` : "";
+  if (["REVIEW_REQUIRED", "BLOCKED", "FAILED", "CANCELLED"].includes(scan.status)) return [{ key: "ai", label, state: "skipped" }];
+  if (!job) {
+    if (scan.status === "READY") {
+      return [{ key: "ai", label, state: "skipped", detail: reviewState === "RULE" ? "Not needed: your filing rules recognised it." : "Not asked for this document." }];
+    }
+    return [{ key: "ai", label, state: "waiting", detail: "If your filing rules don't recognise it." }];
   }
-  const ocr = jobs.find((job) => job.kind === "OCR");
-  const suggest = jobs.find((job) => job.kind === "SUGGEST");
-  const current = suggest ?? ocr!;
-  const away = state && !["READY", "AVAILABLE", "BUSY"].includes(state) ? `${AI_STATE[state] ?? state}; it carries on when the laptop is back.` : "";
-  const read = ocr?.status === "COMPLETED" ? "Read the text of the scan (OCR). " : "";
+  const applied = job.applied ? Object.keys(job.applied).length : 0;
   const proposed = suggestions?.filter((item) => item.status === "PROPOSED").length ?? 0;
-  const used = suggestions?.filter((item) => item.status === "APPLIED").length ?? 0;
-  switch (current.status) {
-    case "WAITING_FOR_AI": return [{ key: "ai", label, state: "waiting", detail: `${read}Waiting for the AI laptop. ${away}`.trim() }];
-    case "LEASED": case "SUBMITTED": return [{ key: "ai", label, state: "running", detail: `${read}The AI is reading it…` }];
+  switch (job.status) {
+    case "WAITING_FOR_AI":
+      return [{ key: "ai", label, state: scan.status === "READY" ? "waiting" : "running",
+        detail: scan.status === "READY" ? `Saved without it; the AI files it when the laptop is back.${away}`
+          : `Waiting for the AI laptop (up to 10 min, then it's saved as it is).${away}` }];
+    case "LEASED": case "SUBMITTED":
+      return [{ key: "ai", label, state: "running", detail: "The AI is reading it (about a minute)…" }];
     case "COMPLETED":
-      return [{ key: "ai", label, state: "done", detail: read + (proposed ? `${proposed} suggestion${proposed > 1 ? "s" : ""} to review (above).`
-        : used ? "You used its suggestion." : "Nothing in the text was certain enough to suggest.") }];
-    case "FAILED": return [{ key: "ai", label, state: "failed", detail: `${read}The AI's answer couldn't be used${current.errorCode ? ` (${current.errorCode})` : ""}.` }];
-    default: return [{ key: "ai", label, state: "skipped", detail: `${read}Gave up waiting for the laptop.` }];
+      return [{ key: "ai", label, state: "done", detail: proposed ? "You had filed it already; its answer is a suggestion (above)."
+        : applied ? "Title, correspondent, type, date and folder filled in from the document's text." : "Nothing in the text was certain enough to use." }];
+    case "FAILED": return [{ key: "ai", label, state: "failed", detail: `The AI's answer couldn't be used${job.errorCode ? ` (${job.errorCode})` : ""}; saved without it.` }];
+    default: return [{ key: "ai", label, state: "skipped", detail: "Gave up waiting for the laptop." }];
   }
 }
+
+const TYPE_LABEL: Record<string, string> = {
+  invoice: "Invoice", receipt: "Receipt", bank_statement: "Bank statement", payslip: "Payslip", contract: "Contract",
+  tax_document: "Tax document", insurance: "Insurance", medical: "Medical", identity_document: "Identity document",
+  certificate: "Certificate", letter: "Letter", school_document: "School document", presentation: "Presentation",
+  report: "Report", manual: "Manual", other: "Document",
+};
 
 function HeldActions({ scan }: { scan: Scan }) {
   const navigate = useNavigate();

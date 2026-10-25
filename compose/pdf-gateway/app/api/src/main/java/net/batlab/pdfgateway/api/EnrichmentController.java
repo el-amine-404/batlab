@@ -94,7 +94,8 @@ public class EnrichmentController {
                 UPDATE enrichment_jobs j SET status='LEASED', lease_agent=?, lease_until=now()+interval '10 minutes', attempts=attempts+1
                   FROM next WHERE j.id=next.id
                 RETURNING jsonb_build_object('jobId', j.id, 'kind', j.kind, 'documentId', j.document_id, 'sha256', j.artifact_sha256,
-                          'leaseUntil', j.lease_until, 'documentUrl', '/api/v1/enrichment/jobs/' || j.id || '/document',
+                          'leaseUntil', j.lease_until,
+                          'documentUrl', CASE WHEN j.document_id IS NOT NULL THEN '/api/v1/enrichment/jobs/' || j.id || '/document' END,
                           'contextUrl', '/api/v1/enrichment/jobs/' || j.id || '/context',
                           'resultUrl', '/api/v1/enrichment/jobs/' || j.id || '/result')::text""",
                 (rs, row) -> rs.getString(1), wanted.toArray(String[]::new), agentId);
@@ -114,6 +115,13 @@ public class EnrichmentController {
     @PreAuthorize("hasRole('ENRICHMENT')")
     public ResponseEntity<String> context(@AuthenticationPrincipal GatewayPrincipal principal, @PathVariable String jobId,
                                           @RequestHeader("X-Agent-Id") String agentId) throws IOException {
+        ownAgent(principal, agentId);
+        // A job made before publication carries the text it may read (written by the archive worker).
+        List<String> carried = jdbc.query("""
+                SELECT context::text FROM enrichment_jobs
+                 WHERE id=? AND status='LEASED' AND lease_agent=? AND lease_until > now() AND context IS NOT NULL""",
+                (rs, row) -> rs.getString(1), parseJob(jobId), agentId);
+        if (!carried.isEmpty()) return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store").body(carried.getFirst());
         Path pdf = leasedDocument(principal, jobId, agentId);
         Path text = pdf.getParent().resolve("content.txt");
         String content = Files.isRegularFile(text, LinkOption.NOFOLLOW_LINKS) ? Files.readString(text, StandardCharsets.UTF_8) : "";
@@ -196,6 +204,20 @@ public class EnrichmentController {
                 SELECT COALESCE(jsonb_agg(jsonb_build_object('id', id, 'model', model, 'promptVersion', prompt_version,
                          'fields', fields, 'status', status, 'createdAt', created_at) ORDER BY created_at DESC), '[]'::jsonb)::text
                   FROM ai_suggestions WHERE document_id=?""", String.class, documentId));
+    }
+
+    /** A scan's AI job before (and after) its document is published, for its page. */
+    @GetMapping(path = "/api/v1/scans/{scanId}/enrichment", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> scanEnrichment(@AuthenticationPrincipal GatewayPrincipal principal, @PathVariable String scanId) {
+        Boolean visible = jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM scan_jobs WHERE id=? AND (owner_id=? OR ?))",
+                Boolean.class, scanId, principal.userId(), principal.admin());
+        if (!Boolean.TRUE.equals(visible)) throw new ApiException(404, "SCAN_NOT_FOUND", "Scan not found");
+        return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "private, no-store").body(jdbc.queryForObject("""
+                SELECT COALESCE(jsonb_agg(jsonb_build_object('kind', j.kind, 'status', j.status, 'errorCode', j.error_code,
+                         'createdAt', j.created_at, 'completedAt', j.completed_at, 'deadlineAt', j.deadline_at,
+                         'applied', j.applied) ORDER BY j.created_at), '[]'::jsonb)::text
+                  FROM enrichment_jobs j LEFT JOIN archive_documents d ON d.document_id=j.document_id
+                 WHERE j.scan_id=? OR d.scan_id=?""", String.class, scanId, scanId));
     }
 
     /** The document's OCR/AI jobs, so its page can say what the AI laptop is doing with it. */

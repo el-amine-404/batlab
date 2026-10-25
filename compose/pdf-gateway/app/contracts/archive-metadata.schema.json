@@ -30,7 +30,7 @@
       "required": ["category", "reviewState"],
       "properties": {
         "category": {"enum": ["Finance", "Employment", "Identity", "Medical", "Education", "Contracts", "Property", "Vehicles", "Taxes", "Personal", "Other", "Unsorted"]},
-        "reviewState": {"enum": ["VERIFIED", "RULE", "REVIEW_REQUIRED", "FALLBACK"]},
+        "reviewState": {"enum": ["VERIFIED", "RULE", "AI", "REVIEW_REQUIRED", "FALLBACK"], "description": "AI: filed by the local AI from checked answers, not yet confirmed by a person"},
         "reason": {"type": "string", "maxLength": 500},
         "folder": {"type": "string", "minLength": 1, "maxLength": 40, "pattern": "^[A-Za-z0-9][A-Za-z0-9 &()_-]{0,39}$", "description": "Document-type folder under category/year, e.g. Invoices"}
       }

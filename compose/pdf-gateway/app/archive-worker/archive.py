@@ -88,7 +88,10 @@ def document_paths(sidecar: dict) -> tuple[str, str]:
         stem = " - ".join(parts)
     else:
         folder = f"{category}/{date[:4]}/{folder_type}"
-        stem = f"{date} - {safe_component(issuer, 'Unknown issuer', 40)} - {safe_component(sidecar['title'], 'Document', 60)}"
+        title = safe_component(sidecar["title"], "Document", 60)
+        # "2026-06-10 - beIN Sports - Facture" but not "beIN Sports - Facture beIN Sports …".
+        named = not issuer or issuer.casefold() in sidecar["title"].casefold()
+        stem = f"{date} - {title}" if named else f"{date} - {safe_component(issuer, '', 40)} - {title}"
     stem = safe_component(stem, doc_id, 120)
     archive_path = f"{folder}/{stem} [{doc_id}]"
     if len(archive_path) > MAX_ARCHIVE_PATH:
@@ -318,7 +321,8 @@ class Archive:
 
     # ------------------------------------------------------------ re-filing
 
-    REORGANISE_FIELDS = {"title", "titleSource", "organization", "documentType", "documentDate", "issuer", "tags"}
+    REORGANISE_FIELDS = {"title", "titleSource", "organization", "documentType", "documentDate", "issuer", "tags",
+                         "reference", "amount", "language"}
 
     def reorganise(self, document_id: str, expected_revision: int, changes: dict,
                    text: str | None = None, text_extraction: dict | None = None) -> dict:

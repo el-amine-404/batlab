@@ -5,7 +5,11 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONUNBUFFERED=1
 # Build context is compose/pdf-gateway/app/ (see Dockerfile.dockerignore) so the contract schema is shared.
 COPY archive-worker/requirements.txt /tmp/requirements.txt
-RUN python -m pip install --no-cache-dir --require-hashes -r /tmp/requirements.txt \
+# poppler-utils: pdftotext reads the clean copy's OCR text layer (image-only originals).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends poppler-utils \
+ && rm -rf /var/lib/apt/lists/* \
+ && python -m pip install --no-cache-dir --require-hashes -r /tmp/requirements.txt \
  && rm /tmp/requirements.txt \
  && groupadd --gid 10005 archive \
  && useradd --uid 10005 --gid 10005 --no-create-home --shell /usr/sbin/nologin archive

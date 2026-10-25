@@ -111,17 +111,35 @@ class Paperless:
         return sorted(int(r["id"]) for r in results
                       if any(f.get("field") == self._field_id and f.get("value") == document_id for f in r.get("custom_fields", [])))
 
-    def tag_ids(self, names: list[str]) -> list[int]:
+    def named_ids(self, endpoint: str, names: list[str]) -> list[int]:
+        """IDs of tags, correspondents or document types by name, created when missing."""
         ids = []
         for name in names:
-            found = self.call("GET", "/api/tags/", query={"name__iexact": name})["results"]
+            found = self.call("GET", f"/api/{endpoint}/", query={"name__iexact": name})["results"]
             if not found:
-                # matching_algorithm 0: never auto-assign this tag to other documents.
-                found = [self.call("POST", "/api/tags/", body={"name": name, "matching_algorithm": 0})]
+                # matching_algorithm 0: Paperless never assigns it to other documents by itself.
+                found = [self.call("POST", f"/api/{endpoint}/", body={"name": name, "matching_algorithm": 0})]
             ids.append(int(found[0]["id"]))
         return ids
 
-    def upload(self, pdf: bytes, document_id: str, title: str, created: str | None, tags: list[int]) -> str:
+    def tag_ids(self, names: list[str]) -> list[int]:
+        return self.named_ids("tags", names)
+
+    def filing(self, sidecar: dict) -> dict:
+        """Paperless fields from the sidecar: tags, correspondent, document type, date."""
+        fields = {"tags": self.tag_ids(sidecar.get("tags", []))}
+        issuer = (sidecar.get("issuer") or {}).get("value")
+        if issuer:
+            fields["correspondent"] = self.named_ids("correspondents", [issuer[:120]])[0]
+        kind = sidecar.get("documentType")
+        if kind:
+            fields["document_type"] = self.named_ids("document_types", [TYPE_LABEL.get(kind, kind.replace("_", " ").capitalize())])[0]
+        created = (sidecar.get("documentDate") or {}).get("value")
+        if created:
+            fields["created"] = created
+        return fields
+
+    def upload(self, pdf: bytes, document_id: str, title: str, filing: dict) -> str:
         boundary = uuid.uuid4().hex
         parts = []
 
@@ -129,9 +147,10 @@ class Paperless:
             parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode())
 
         field("title", title)
-        if created:
-            field("created", created)
-        for tag in tags:
+        for name in ("created", "correspondent", "document_type"):
+            if filing.get(name) is not None:
+                field(name, str(filing[name]))
+        for tag in filing.get("tags", []):
             field("tags", str(tag))
         field("custom_fields", json.dumps({str(self.field_id()): document_id}))
         parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="document"; filename="{document_id}.pdf"\r\n'
@@ -160,8 +179,15 @@ class Paperless:
             raise
         return any(f.get("field") == self.field_id() and f.get("value") == document_id for f in doc.get("custom_fields", []))
 
-    def update(self, paperless_id: int, title: str, tags: list[int]) -> None:
-        self.call("PATCH", f"/api/documents/{int(paperless_id)}/", body={"title": title, "tags": tags})
+    def update(self, paperless_id: int, title: str, filing: dict) -> None:
+        self.call("PATCH", f"/api/documents/{int(paperless_id)}/", body={"title": title, **filing})
+
+
+TYPE_LABEL = {"invoice": "Invoice", "receipt": "Receipt", "bank_statement": "Bank statement", "payslip": "Payslip",
+              "contract": "Contract", "tax_document": "Tax document", "insurance": "Insurance", "medical": "Medical",
+              "identity_document": "Identity document", "certificate": "Certificate", "letter": "Letter",
+              "school_document": "School document", "presentation": "Presentation", "report": "Report",
+              "manual": "Manual", "other": "Document"}
 
 
 def database():
@@ -247,9 +273,7 @@ def project(document_id: str, client: Paperless) -> None:
                 raise PaperlessError("ARCHIVE_INTEGRITY", False, "archived bytes do not match the index")
             with database() as connection, connection.cursor() as cursor:
                 cursor.execute("UPDATE paperless_imports SET upload_started_at=now(), task_id=NULL WHERE document_id=%s", (document_id,))
-            tags = client.tag_ids(sidecar.get("tags", []))
-            created = (sidecar.get("documentDate") or {}).get("value")
-            task_id = client.upload(data, document_id, sidecar["title"], created, tags)
+            task_id = client.upload(data, document_id, sidecar["title"], client.filing(sidecar))
             with database() as connection, connection.cursor() as cursor:
                 cursor.execute("UPDATE paperless_imports SET task_id=%s WHERE document_id=%s", (task_id, document_id))
             paperless_id = wait_for_task(client, task_id)
@@ -257,8 +281,8 @@ def project(document_id: str, client: Paperless) -> None:
                 raise PaperlessError("PAPERLESS_TASK_PENDING", True)
             synced_now = revision  # uploaded with the current title and tags
         else:
-            # Existing Paperless document: bring title and tags up to the sidecar revision.
-            client.update(paperless_id, sidecar["title"], client.tag_ids(sidecar.get("tags", [])))
+            # Existing Paperless document: bring its fields up to the sidecar revision.
+            client.update(paperless_id, sidecar["title"], client.filing(sidecar))
             synced_now = revision
         with database() as connection, connection.cursor() as cursor:
             set_state(cursor, document_id, "IMPORTED", paperless_document_id=paperless_id, synced_revision=synced_now,

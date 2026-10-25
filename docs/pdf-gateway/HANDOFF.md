@@ -160,6 +160,29 @@ None after the checkpoint commit.
   --network host`, one image at a time, waiting above 75 °C. In a terminal, `make up` asks once to
   allow it, as for stanzarr. Do not feed `yes` into `script` to answer it: that loaded lab2 for 10 minutes.
 
+## AI filing and PDF quality (2026-10-25, user feedback round)
+
+User decisions: the AI's answers apply automatically; a new file waits up to 10 min for the AI; model
+`qwen/qwen3-30b-a3b-2507`; Paperless keeps our file (no Paperless setting needed: Paperless 3's
+`ARCHIVE_FILE_GENERATION=auto` keeps born-digital PDFs, which the OCR text layer makes ours).
+- The file name is never a metadata source (it can be anything).
+- Text extraction uses `pdftotext -layout`; dates like `10-Jun-2026` are recognised.
+- Dangerzone adds an invisible OCR layer (`PDF_CDR_OCR_LANGUAGE`, one language, default `fra`). Final
+  validation admits only Tesseract's GlyphLessFont (pinned FontFile2 SHA-256 `c7845420…`) drawn in
+  render mode 3 (`tests/final_validate_font_test.py` with `tests/fixtures/dangerzone-ocr-fra.pdf`).
+- The embedded metadata is Title, Author (correspondent), Subject, Keywords, Producer "PDF Gateway"; it's
+  linearized, with streams copied unchanged (`test_m4_metadata` asserts `is_linearized`).
+- V011: SUGGEST jobs exist before publication (scan_id, context, deadline_at, applied). The archive
+  worker defers (no attempt counted) while the agent is ready and the deadline is open. Checked fields
+  (`enrichment.validate_filing`, `tests/filing_test.py`) are applied, with review state `AI`. Late answers
+  re-file via `reorganise`. Tags come from the vocabulary only (now 64 everyday topics, merged once into
+  existing archives).
+- The Paperless adapter sends the correspondent, document type, date and tags. Its Paperless user needs
+  view/add for correspondents and document types (operations.md step 4; the user must grant them).
+- Model evaluation on the user's beIN invoice: old prompt (4B) date "1062-20-20", tag "internet";
+  new prompt with layout text: 4B ≈17 s, all fields right; 30B ≈61 s, best; qwen2.5-vl-3b with the page
+  image was worse (wrong date and amount), so no vision model is used.
+
 ## Next implementation order
 
 1. M8 hardening and operations: adversarial/fuzz/load/disk-full tests; measured host budget (Paperless,
