@@ -50,6 +50,11 @@ export function DocumentPage({ session }: { session: Session }) {
   const doc = useQuery({ queryKey: ["document", documentId], queryFn: () => api.document(documentId) });
   const meta = useQuery({ queryKey: ["sidecar", documentId], queryFn: () => api.sidecar(documentId) });
   const suggestions = useQuery({ queryKey: ["suggestions", documentId], queryFn: () => api.suggestions(documentId) });
+  const scanId = doc.data?.scanId ?? null;
+  const paperless = useQuery({
+    queryKey: ["paperless", scanId], queryFn: () => api.paperless(scanId!), enabled: !!scanId,
+    refetchInterval: (query) => (["PENDING", "IMPORTING", "FAILED_RETRYABLE"].includes(query.state.data?.status ?? "") ? 3000 : false),
+  });
   const [title, setTitle] = useState<string | null>(null);
   const [tags, setTags] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -110,7 +115,21 @@ export function DocumentPage({ session }: { session: Session }) {
           {/* Downloads only: the API serves these as sandboxed attachments, never inline. */}
           <a className="inline-flex min-h-11 items-center rounded-lg bg-slate-900 px-4 text-sm font-medium text-white" href={`/api/v1/archive/${encodeURIComponent(documentId)}/file`} download data-testid="download-pdf">Download PDF</a>
           <a className="inline-flex min-h-11 items-center rounded-lg px-4 text-sm font-medium ring-1 ring-slate-300" href={`/api/v1/archive/${encodeURIComponent(documentId)}/sidecar`} download>Download metadata</a>
+          {canEdit && scanId && paperless.data && ["NOT_REQUESTED", "FAILED_FINAL"].includes(paperless.data.status) && (
+            <Button variant="secondary" data-testid="send-to-paperless" onClick={async () => {
+              setError(null);
+              try { await api.sendToPaperless(scanId); client.invalidateQueries({ queryKey: ["paperless", scanId] }); }
+              catch (failure) { setError(failure); }
+            }}>{paperless.data.status === "FAILED_FINAL" ? "Retry sending to Paperless" : "Send to Paperless"}</Button>
+          )}
         </div>
+        {paperless.data && paperless.data.status !== "NOT_REQUESTED" && (
+          <p className="mt-3 text-sm text-slate-600" data-testid="paperless-status">
+            Paperless: {PAPERLESS_LABEL[paperless.data.status] ?? paperless.data.status}
+            {paperless.data.paperlessDocumentId != null && <> · document #{paperless.data.paperlessDocumentId}</>}
+            {paperless.data.lastError && <> · {paperless.data.lastError}</>}
+          </p>
+        )}
       </Card>
       {suggestions.data?.some((item) => item.status === "PROPOSED") && (
         <Card title="AI suggestions">
@@ -140,6 +159,10 @@ export function DocumentPage({ session }: { session: Session }) {
     </>
   );
 }
+
+const PAPERLESS_LABEL: Record<string, string> = {
+  PENDING: "waiting to be sent", IMPORTING: "sending…", IMPORTED: "copied", FAILED_RETRYABLE: "failed, retrying", FAILED_FINAL: "failed",
+};
 
 function SuggestionCard({ item, canEdit, onApply, onDismiss }: { item: Suggestion; canEdit: boolean; onApply: () => void; onDismiss: () => void }) {
   const rows: [string, string, string][] = [];

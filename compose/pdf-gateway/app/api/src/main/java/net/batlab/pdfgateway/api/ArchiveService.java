@@ -40,7 +40,7 @@ public class ArchiveService {
 
     public record DocumentView(String documentId, String title, String category, String reviewState, String archivePath,
                                int currentVersion, int metadataRevision, String sha256, long bytes,
-                               OffsetDateTime publishedAt, OffsetDateTime updatedAt) {}
+                               OffsetDateTime publishedAt, OffsetDateTime updatedAt, String scanId) {}
     public record DocumentPage(List<DocumentView> items, String nextCursor) {}
     public record EditView(String editId, String documentId, String status, int expectedRevision, Integer resultRevision,
                            String errorCode, String statusUrl) {}
@@ -49,7 +49,7 @@ public class ArchiveService {
 
     private static final String COLUMNS = """
             d.document_id,d.title,d.category,d.review_state,d.archive_path,d.current_version,d.metadata_revision,
-            d.sha256,d.bytes,d.published_at,d.updated_at,d.pdf_file""";
+            d.sha256,d.bytes,d.published_at,d.updated_at,d.pdf_file,d.scan_id""";
     private final JdbcTemplate jdbc;
     private final GatewayProperties properties;
 
@@ -61,7 +61,7 @@ public class ArchiveService {
     private static DocumentView view(java.sql.ResultSet rs) throws java.sql.SQLException {
         return new DocumentView(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5),
                 rs.getInt(6), rs.getInt(7), rs.getString(8), rs.getLong(9),
-                rs.getObject(10, OffsetDateTime.class), rs.getObject(11, OffsetDateTime.class));
+                rs.getObject(10, OffsetDateTime.class), rs.getObject(11, OffsetDateTime.class), rs.getString(13));
     }
 
     public DocumentPage list(GatewayPrincipal principal, int limit, String after) {
