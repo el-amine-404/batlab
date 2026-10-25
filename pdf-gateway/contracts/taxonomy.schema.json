@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://batlab.invalid/schemas/taxonomy-1.0.0.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "revision", "categories", "tags", "updatedAt"],
+  "properties": {
+    "schemaVersion": {"const": "1.0.0"},
+    "revision": {"type": "integer", "minimum": 1},
+    "categories": {"type": "array", "minItems": 12, "uniqueItems": true, "items": {"enum": ["Finance", "Employment", "Identity", "Medical", "Education", "Contracts", "Property", "Vehicles", "Taxes", "Personal", "Other", "Unsorted"]}},
+    "tags": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/tag"}},
+    "updatedAt": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "tag": {
+      "type": "object", "additionalProperties": false, "required": ["id", "label", "aliases", "private", "blocked"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"},
+        "label": {"type": "string", "minLength": 1, "maxLength": 80},
+        "aliases": {"type": "array", "maxItems": 32, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 80}},
+        "private": {"type": "boolean"},
+        "blocked": {"type": "boolean"}
+      }
+    }
+  }
+}
