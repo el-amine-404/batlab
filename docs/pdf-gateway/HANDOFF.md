@@ -75,6 +75,7 @@ at 85 °C), one at a time, starting below 75 °C. Production CPU caps are config
 | `25ee7a4` | M5-1 sessions + CSRF, scan/quarantine lists, findings, SSE, safe delete, summary, health, V008 |
 | `b3dbb3c` | M5-2/3 web UI, web container, Firefox/Playwright UI tests |
 | `5a01bc2` | Paperless adapter, V009, import API, archive-worker hooks, bypass doc, TCP RabbitMQ probes |
+| `0d6276d` | M7 enrichment: pull agent, OCR re-filing, AI proposals, V010, UI |
 
 ### Pipeline as implemented
 
