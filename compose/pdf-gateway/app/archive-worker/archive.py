@@ -84,7 +84,8 @@ def document_paths(sidecar: dict) -> tuple[str, str]:
     if category == "Unsorted" or not date:
         year = (date or sidecar["createdAt"])[:4]
         folder = f"Unsorted/{year}"
-        stem = f"{date or 'undated'} - {safe_component(issuer, 'Unclassified', 40)} - {safe_component(sidecar['title'], doc_id, 60)}"
+        parts = [date or "undated"] + ([safe_component(issuer, "", 40)] if issuer else []) + [safe_component(sidecar["title"], doc_id, 60)]
+        stem = " - ".join(parts)
     else:
         folder = f"{category}/{date[:4]}/{folder_type}"
         stem = f"{date} - {safe_component(issuer, 'Unknown issuer', 40)} - {safe_component(sidecar['title'], 'Document', 60)}"

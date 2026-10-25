@@ -101,6 +101,8 @@ services:
       PDF_GATEWAY_MULTIPART_DIR: /var/lib/pdf-gateway/multipart
       # OCR and AI from the laptop agent (app/enrichment-agent); off until it is set up.
       PDF_GATEWAY_ENRICHMENT_ENABLED: ${PDF_GATEWAY_ENRICHMENT_ENABLED:-false}
+      # Links from a document's page to its Paperless copy.
+      PDF_GATEWAY_PAPERLESS_PUBLIC_URL: ${PAPERLESS_URL:-}
     depends_on:
       postgres: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}

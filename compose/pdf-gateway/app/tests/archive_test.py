@@ -136,7 +136,7 @@ fallback = doc_id()
 path = archive.publish(*put("u.pdf", pdf_bytes("scan")), sidecar(fallback, title="Scanned document", issuer=None,
                                                                    date=None, category="Unsorted", tags=()))
 check("fallback location", path.relative_to(archive.archive).as_posix()
-      == f"Unsorted/2026/undated - Unclassified - Scanned document [{fallback}]", path)
+      == f"Unsorted/2026/undated - Scanned document [{fallback}]", path)
 
 # 8. Sidecar compare-and-swap edits never touch the PDF.
 pdf_hash = hashlib.sha256((published / "2026-10-15 - Example Telecom - Internet Invoice.pdf").read_bytes()).hexdigest()

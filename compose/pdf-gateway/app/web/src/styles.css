@@ -1,4 +1,10 @@
 @import "tailwindcss";
 
+/* Dark mode follows the `dark` class that /theme.js sets from the system or the person's choice. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root { color-scheme: light; }
+:root.dark { color-scheme: dark; }
+
 /* Respect the iPhone home indicator in the fixed mobile navigation. */
 .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }

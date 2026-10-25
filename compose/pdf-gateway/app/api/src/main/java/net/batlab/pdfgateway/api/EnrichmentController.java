@@ -198,6 +198,16 @@ public class EnrichmentController {
                   FROM ai_suggestions WHERE document_id=?""", String.class, documentId));
     }
 
+    /** The document's OCR/AI jobs, so its page can say what the AI laptop is doing with it. */
+    @GetMapping(path = "/api/v1/archive/{documentId}/enrichment", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> enrichment(@AuthenticationPrincipal GatewayPrincipal principal, @PathVariable String documentId) {
+        archive.locate(principal, documentId);
+        return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "private, no-store").body(jdbc.queryForObject("""
+                SELECT COALESCE(jsonb_agg(jsonb_build_object('kind', kind, 'status', status, 'errorCode', error_code,
+                         'createdAt', created_at, 'completedAt', completed_at) ORDER BY created_at), '[]'::jsonb)::text
+                  FROM enrichment_jobs WHERE document_id=?""", String.class, documentId));
+    }
+
     /** Apply a proposal's title and tags as an ordinary, user-authorised CAS sidecar edit. */
     @PostMapping(path = "/api/v1/archive/{documentId}/suggestions/{suggestionId}/apply")
     @PreAuthorize("hasAnyRole('ADMIN','USER')")

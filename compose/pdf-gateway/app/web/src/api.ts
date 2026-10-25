@@ -66,8 +66,12 @@ export const Document = z.object({
 export type Document = z.infer<typeof Document>;
 export const PaperlessImport = z.object({
   status: z.string(), paperlessDocumentId: z.number().nullable(), syncedRevision: z.number().nullable(),
-  metadataRevision: z.number().nullable(), lastError: z.string().nullable(),
+  metadataRevision: z.number().nullable(), lastError: z.string().nullable(), paperlessUrl: z.string().nullish(),
 });
+export type PaperlessImport = z.infer<typeof PaperlessImport>;
+export const EnrichmentJob = z.object({ kind: z.enum(["OCR", "SUGGEST"]), status: z.string(), errorCode: z.string().nullable(),
+  createdAt: z.string(), completedAt: z.string().nullable() });
+export type EnrichmentJob = z.infer<typeof EnrichmentJob>;
 export const DocumentPage = z.object({ items: z.array(Document), nextCursor: z.string().nullable() });
 export const Sidecar = z.object({
   documentId: z.string(), title: z.string(), metadataRevision: z.number(), tags: z.array(z.string()).optional(),
@@ -165,6 +169,7 @@ export const api = {
   health: () => request(Health, "/api/v1/system/health"),
   ai: () => request(Ai, "/api/v1/system/ai"),
   suggestions: (id: string) => request(z.array(Suggestion), `/api/v1/archive/${encodeURIComponent(id)}/suggestions`),
+  enrichment: (id: string) => request(z.array(EnrichmentJob), `/api/v1/archive/${encodeURIComponent(id)}/enrichment`),
   applySuggestion: (id: string, suggestion: string, etag: string) =>
     request(Edit, `/api/v1/archive/${encodeURIComponent(id)}/suggestions/${encodeURIComponent(suggestion)}/apply`, { method: "POST", headers: { "If-Match": etag } }),
   dismissSuggestion: (id: string, suggestion: string) =>
