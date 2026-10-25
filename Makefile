@@ -39,7 +39,7 @@ SITES_ROOT   ?= /srv/sites
 PUID := $(shell id -u)
 PGID := $(shell id -g)
 
-.PHONY: help list setup network up down restart pull config logs ps check-stack check-all-confirm
+.PHONY: help list setup setup-pdf-gateway network up down restart pull config logs ps check-stack check-all-confirm
 
 define compose-loop
 @for s in $(TARGETS); do \
@@ -65,6 +65,7 @@ help:
 	@echo ""
 	@echo "  make list       - List all discovered stacks"
 	@echo "  make setup      - Create base directories and symlinks"
+	@echo "  make setup-pdf-gateway - Create only the PDF gateway's directories"
 	@echo "  make up         - Start stacks (STACK=<name> [SERVICE=<name>])"
 	@echo "  make down       - Stop and remove stacks (STACK=<name> [SERVICE=<name>])"
 	@echo "  make restart    - Restart stacks (STACK=<name> [SERVICE=<name>])"
@@ -305,6 +306,20 @@ setup: check-env
 	# carwatch runs as 10001 (compose/frigate).
 	sudo chown 10001:10001 $(VOLUMES_ROOT)/frigate/carwatch
 
+	$(MAKE) --no-print-directory setup-pdf-gateway
+
+	@echo "==> Symlinking .env to all stacks..."
+	@for d in compose/*; do \
+		if [ -d "$$d" ]; then \
+			ln -sf ../.env "$$d/.env"; \
+		fi; \
+	done
+
+	@echo
+	@echo "Setup complete."
+
+# Only the gateway's folders (also part of setup).
+setup-pdf-gateway:
 	@echo "==> Creating pdf-gateway directories..."
 	# Each stage runs as its own uid and sees only these (compose/pdf-gateway):
 	# api 10001, analysis/validation 10002, signature 10003, cdr 10004 (group
@@ -326,16 +341,6 @@ setup: check-env
 	sudo install -d -m 0755 -o $(PUID) -g $(PGID) $(VOLUMES_ROOT)/pdf-gateway/cdr-socket
 	# The portable archive: plain folders of PDFs, readable without the gateway.
 	sudo install -d -m 0755 -o 10005 -g 10005 $(DATA_ROOT)/documents/pdf-archive
-
-	@echo "==> Symlinking .env to all stacks..."
-	@for d in compose/*; do \
-		if [ -d "$$d" ]; then \
-			ln -sf ../.env "$$d/.env"; \
-		fi; \
-	done
-
-	@echo
-	@echo "Setup complete."
 
 status:
 ifeq ($(STACK),)

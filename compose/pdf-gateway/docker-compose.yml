@@ -304,7 +304,9 @@ services:
     networks: [backend]
 
   # Copies a document into Paperless when its upload asked for it, through the
-  # REST API with a token of its own (a dedicated Paperless user).
+  # REST API with a token of its own (a dedicated Paperless user,
+  # docs/pdf-gateway/operations.md). Without the token it takes nothing and the
+  # copies wait in the queue.
   paperless-adapter:
     <<: *worker
     image: local/pdf-gateway-paperless
@@ -314,7 +316,7 @@ services:
     environment:
       <<: *database
       PDF_GATEWAY_PAPERLESS_URL: http://paperless:8000
-      PDF_GATEWAY_PAPERLESS_TOKEN: ${PDF_GATEWAY_PAPERLESS_TOKEN:?set PDF_GATEWAY_PAPERLESS_TOKEN in compose/.env}
+      PDF_GATEWAY_PAPERLESS_TOKEN: ${PDF_GATEWAY_PAPERLESS_TOKEN:-}
     volumes:
       - ${DATA_ROOT}/documents/pdf-archive:/var/lib/pdf-archive:ro
     tmpfs:

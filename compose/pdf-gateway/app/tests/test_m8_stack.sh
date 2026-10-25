@@ -41,12 +41,12 @@ DATA_ROOT=$scratch/data
 PDF_GATEWAY_DATABASE_PASSWORD=$(openssl rand -hex 16)
 PDF_GATEWAY_RABBITMQ_PASSWORD=$(openssl rand -hex 16)
 PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN=$admin
-PDF_GATEWAY_PAPERLESS_TOKEN=unused-in-this-test
+PDF_GATEWAY_PAPERLESS_TOKEN=
 EOF
 
 # The Makefile's pdf-gateway setup lines, run as root in a container (no sudo).
-awk '/Creating pdf-gateway directories/{on=1; next} on && /^$/{exit} on' "$root/Makefile" \
-  | sed -e 's/^\t//' -e '/^#/d' -e 's/^sudo //' | sed -e ':a' -e '/\\$/N; s/\\\n//; ta' \
+awk '/^setup-pdf-gateway:/{on=1; next} on && /^$/{exit} on' "$root/Makefile" \
+  | sed -e 's/^\t//' -e '/^#/d' -e '/^@echo/d' -e 's/^sudo //' | sed -e ':a' -e '/\\$/N; s/\\\n//; ta' \
   | sed -e "s#\$(VOLUMES_ROOT)#$scratch/volumes#g" -e "s#\$(DATA_ROOT)#$scratch/data#g" \
         -e "s#\$(PUID)#$(id -u)#g" -e "s#\$(PGID)#$(id -g)#g" >"$scratch/setup.sh"
 grep -q "pdf-archive" "$scratch/setup.sh"
@@ -124,7 +124,10 @@ eq "$(docker run --rm --network home_server "$IMAGE" sh -c 'wget -qO- http://pdf
 eq "$(curl -sS "${tls[@]}" -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $ro" -H 'Idempotency-Key: m8-read-only-upload-0001' \
       -F intent=ARCHIVE -F "file=@$scratch/fx/invoice-en.pdf;type=application/pdf" "$base/api/v1/scans")" 403
 
+# Without a Paperless token the adapter takes nothing (copies wait in the queue).
+docker logs pdf-gateway-paperless 2>&1 | grep -q '"paperless_not_configured"'
+
 # Database and broker are unreachable from home_server (internal network).
 eq "$(docker run --rm --network home_server "$IMAGE" sh -c 'nc -z -w 3 pdf-gateway-db 5432 2>/dev/null; echo $?')" 1
 
-echo "M8 stack: Makefile folders, HTTPS via Caddy's local CA, Secure session, CSRF/Origin upload, per-stage uids, fail-closed without CDR, Homepage READ_ONLY card passed"
+echo "M8 stack: Makefile folders, HTTPS via Caddy's local CA, Secure session, CSRF/Origin upload, per-stage uids, fail-closed without CDR, idle Paperless adapter without a token, Homepage READ_ONLY card passed"

@@ -352,6 +352,12 @@ def handle(channel, method, _properties, body: bytes, client: Paperless) -> None
 
 
 def main() -> None:
+    if not os.getenv("PDF_GATEWAY_PAPERLESS_TOKEN"):
+        # Not set up yet: take nothing, so requested copies wait (PENDING) in the
+        # durable queue and go to Paperless once a token is configured.
+        print(json.dumps({"event": "paperless_not_configured"}), flush=True)
+        while True:
+            time.sleep(3600)
     client = paperless()
     if sys.argv[1:] == ["resync"]:
         print(json.dumps(resync(client), sort_keys=True))

@@ -131,30 +131,29 @@ None after the checkpoint commit.
    and host ownership for UIDs 10001–10005 and groups 10002/10010.
 2. `potato` is in the `docker` group (root-equivalent): residual risk for M8 (dedicated Dangerzone account recommended).
 
-## M8 in progress (2026-10-25, stopped at usage limit)
+## M8 in progress (2026-10-25)
 
-- DONE, committed on the feature branch only (not merged): the gateway moved from `pdf-gateway/` to
-  `compose/pdf-gateway/app/` to match the repo's stack layout (like stanzarr). All paths in tests,
-  tools, docs and `hosts/lab2/pdf-cdr-provider` were rewritten. Re-verified after the move:
-  `test_m4_archive`, `test_m4_organize`, `test_m1` passed. Other tests were not rerun yet.
-- UNCOMMITTED, NOT COMPILED: `GET /api/v1/system/status` (aggregate counts for the Homepage tile) in
-  `UiController.java` and `InsightService.java`.
-- User decisions: serve the web app over HTTPS at `https://pdf.homelab.lan` with Caddy `tls internal`
-  (open 443 on Caddy for this one site; serve the root CA at `http://pdf.homelab.lan/ca.crt` for the iPhone).
-- Next steps, in order:
-  1. `compose/pdf-gateway/docker-compose.yml` in repo conventions: `name: ${PDF_GATEWAY_PROJECT_NAME}`,
-     container_name `pdf-gateway-*`, images in `compose/versions.env` (IMAGE_/TAG_ pairs for Renovate),
-     limits in `hosts/<profile>/compose.env`, binds under `${VOLUMES_ROOT}/pdf-gateway/` and the archive at
-     `${DATA_ROOT}/documents/pdf-archive`; web on `home_server` for Caddy; adapter on `home_server`; add to
-     `hosts/lab2/stacks.txt`; secrets in `compose/.env.example`. Decide what to do with the profiles,
-     because `make up` passes none.
-  2. Makefile `setup`: create those dirs and set ownership to the container uids/groups (10010, 10002, …).
-  3. Homepage: a `customapi` tile on `http://pdf-gateway-web:8080/api/v1/system/status` with a READ_ONLY token
-     (`HOMEPAGE_VAR_PDF_GATEWAY_TOKEN`).
-  4. restic: the archive under `/mnt/storage/data/documents` is already in `paths.txt`. Add the
-     `pdf-gateway-db` dump to `dump-databases.sh` and to `restore-test.sh`, plus an archive PDF check.
-     Exclude the ClamAV definitions and multipart temp files.
-  5. Then the rest of the M8 list below.
+- VERIFIED: the gateway lives in `compose/pdf-gateway/app` (commit `0f927bf`), and runs as a homelab stack,
+  `compose/pdf-gateway/docker-compose.yml` (commit `a703f16`, plus follow-ups). It uses the repo's
+  conventions: image pins in `compose/versions.env`, CPU caps in `hosts/lab2/compose.env`, secrets in
+  `compose/.env`, `make setup-pdf-gateway` (also run by `make setup`) for folders and per-stage owners, the
+  archive at `${DATA_ROOT}/documents/pdf-archive` (inside restic's `paths.txt`), `pdf-gateway` in
+  `hosts/lab2/stacks.txt`, and `docs/services.md`.
+  `compose/pdf-gateway/app/tests/test_m8_stack.sh` passed locally: Makefile folders, HTTPS through
+  `compose/caddy/conf/pdf.caddy` with Caddy's local CA (`http://pdf.homelab.lan/ca.crt`), Secure/HttpOnly
+  cookie, CSRF plus https Origin upload, per-stage uids, fail-closed without CDR, idle Paperless adapter
+  without a token, Homepage READ_ONLY card through the web container, and DB unreachable from home_server.
+- VERIFIED: `GET /api/v1/system/status` (counts only; `test_m5_api`) and the Homepage `customapi` card.
+- IMPLEMENTED, not yet run on Lab2: restic dumps `pdf-gateway-db`; the restore test checks that dump
+  and one random archived PDF's SHA-256; the ClamAV signatures, multipart uploads and the socket are excluded.
+- User decision: HTTPS for this app only (Caddy `tls internal`, port 443).
+- BLOCKED on the user (sudo / access grants): `make setup-pdf-gateway` and `sudo loginctl enable-linger potato`
+  on Lab2. The Paperless user/token for the adapter (operations.md step 4) was refused by the
+  permission classifier as an access grant, so the user must run it. The first restic backup and
+  restore test after deployment also need sudo.
+- Lab2 `compose/.env`: gateway secrets generated on Lab2 (backup `compose/.env.bak-before-pdf-gateway`).
+  The old unused keys `PDF_GATEWAY_HTTP_PORT`, `PDF_DB_PASSWORD` and `AI_LAPTOP_IP` were left in place.
+- Runbook: `docs/pdf-gateway/operations.md`.
 
 ## Next implementation order
 
