@@ -319,3 +319,25 @@ Command: `pdf-gateway/tests/test_m4_worker.sh` (local).
 Not yet: the real CDR chain into the archive (Lab2, final M4 slice); text
 extraction inside the durable analysis worker with a writable `text-extracts`
 mount (covered by that run).
+
+## 2026-10-25 — M4 slice 4: allowlisted embedded metadata
+
+Ran on the local PC with the real validation worker (ClamAV 1 CPU, live
+definitions, qpdf, YARA, poppler) and the archive worker.
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Embed → revalidate → publish | VERIFIED | The archive worker organises, then writes metadata into a *copy* of the validated CDR output (pikepdf, full rewrite, no object streams, no incremental update, 0640 in the validation-only group). It records that copy as an `EMBEDDED_METADATA` child artifact and sends it back to `VALIDATING_OUTPUT`. The validation worker passed it, then the archive worker published *that* version. Per scan: 2 PASS records; published bytes ≠ CDR bytes; CDR parent stays `FINAL_VALIDATED`. |
+| Allowlist | VERIFIED | Embedded values were exactly Title, Subject (document type), Keywords (tags) and a fixed Producer, matching the sidecar, which records `embeddedMetadata.fields`. Author is never written automatically (issuer ≠ author). Invoice: `Internet Invoice - October 2026` / `invoice` / `finance, internet, invoice`; fallback: Title + Producer only. |
+| Stripping untrusted carriers | VERIFIED | A well-formed input with XMP, a spoofed Author/Title, a custom key and MuPDF's catalog `/Info` → the output held only the given values. The strings `Spoofed`, `EvilKey` and `MuPDF` were absent from the output bytes (nothing survives in an old revision). |
+| Validator independence | VERIFIED | Final validation now forbids XMP (`/Metadata`) and allows only standard info keys with string values. The dirty file was refused (`FORBIDDEN_STRUCTURE`, `INFO_NOT_ALLOWLISTED`); a MuPDF-style inline catalog `/Info` with a string Producer passes. |
+| Signed originals untouched | VERIFIED | For a `SIGNED_RESTRICTED` scan the quarantine original's SHA-256 was unchanged; metadata goes only into the unsigned viewing copy. |
+| Database guard (V006) | VERIFIED | A metadata artifact needs a parent (CHECK). A PASS for a metadata version whose parent never passed was refused. Metadata-version hash, path and parent are immutable. |
+| Bugs found and fixed | VERIFIED | (1) The new info check crashed on an inline `/Info` dictionary, the form real Dangerzone output uses. It would have failed closed, but nothing would have been released. (2) The slice-2 validator crashed (`TypeError`) when qpdf's JSON step itself failed, so the typed reason was lost. The worker still failed closed as `VALIDATOR_NO_REPORT`. Both fixed and covered. |
+| Disabled mode | VERIFIED | `PDF_GATEWAY_EMBED_METADATA=false` publishes the validated CDR output directly (`test_m4_worker.sh`). |
+| Regression | VERIFIED | `test_m1.sh` (V006 via Flyway), `test_m4_archive.sh`, `test_m4_organize.sh`, `test_m4_worker.sh`, contracts, production compose config. |
+
+Command: `pdf-gateway/tests/test_m4_metadata.sh` (local).
+
+Pending on Lab2 (final M4 run): the updated validator against real Dangerzone
+output end to end; the earlier M3 Lab2 runs predate the info-key check.

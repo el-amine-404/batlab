@@ -126,6 +126,15 @@ def main() -> int:
     long_page = b"".join(text("Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor " + str(n), 195 - n)
                          for n in range(190))
     fixtures["large-text.pdf"] = page_pdf(long_page, pages=20)
+    # Image-only page shaped like Dangerzone output (MuPDF puts /Info in the catalog).
+    ink = zlib.compress(bytes((0 if (x // 4 + y // 3) % 5 == 0 else 255) for y in range(48) for x in range(96)))
+    fixtures["raster-only.pdf"] = pdf([
+        b"<< /Type /Catalog /Pages 2 0 R /Info << /Producer (MuPDF 1.28.2) >> >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {PAGE[0]} {PAGE[1]}] /Resources << /XObject << /Img3 5 0 R >> >> /Contents 4 0 R >>".encode(),
+        stream(f"q {PAGE[0]} 0 0 {PAGE[1]} 0 0 cm /Img3 Do Q".encode()),
+        stream(ink, b"/Type /XObject /Subtype /Image /Width 96 /Height 48 /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode "),
+    ])
     hand, regions = handwritten()
     fixtures["handwritten.pdf"] = hand
     for name, data in fixtures.items():

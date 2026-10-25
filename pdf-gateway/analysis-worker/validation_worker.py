@@ -56,11 +56,18 @@ def claim(scan_id: str) -> dict | None:
             return None
         _status, _state, quarantine_object, source_hash = row
         cursor.execute("UPDATE job_steps SET status='FAILED',finished_at=now(),error_code='INTERRUPTED' WHERE scan_id=%s AND step_type='VALIDATION' AND status='RUNNING'", (scan_id,))
-        # The artifact must be the output of a successful CDR of this exact source.
-        cursor.execute("""SELECT a.id,a.storage_object,a.sha256 FROM cdr_results c JOIN artifacts a ON a.id=c.output_artifact_id
-                           WHERE c.scan_id=%s AND c.status='SUCCEEDED' AND c.source_sha256=%s AND a.kind='CDR_OUTPUT'
-                             AND a.state='SANITIZED_STAGED' AND a.sha256=c.output_sha256
-                           ORDER BY c.attempt DESC LIMIT 1""", (scan_id, source_hash))
+        # The artifact must be the output of a successful CDR of this exact source,
+        # or an embedded-metadata version written from such an output after it passed.
+        cursor.execute("""SELECT id,storage_object,sha256 FROM (
+                            SELECT a.id,a.storage_object,a.sha256,a.created_at FROM cdr_results c JOIN artifacts a ON a.id=c.output_artifact_id
+                             WHERE c.scan_id=%s AND c.status='SUCCEEDED' AND c.source_sha256=%s AND a.kind='CDR_OUTPUT'
+                               AND a.state='SANITIZED_STAGED' AND a.sha256=c.output_sha256
+                            UNION ALL
+                            SELECT a.id,a.storage_object,a.sha256,a.created_at FROM artifacts a JOIN artifacts p ON p.id=a.parent_artifact_id
+                              JOIN final_validations f ON f.artifact_id=p.id AND f.verdict='PASS' AND f.output_sha256=p.sha256
+                             WHERE a.scan_id=%s AND a.kind='EMBEDDED_METADATA' AND a.state='SANITIZED_STAGED'
+                               AND p.kind='CDR_OUTPUT' AND p.state='FINAL_VALIDATED' AND f.source_sha256=%s
+                          ) candidates ORDER BY created_at DESC LIMIT 1""", (scan_id, source_hash, scan_id, source_hash))
         artifact = cursor.fetchone()
         cursor.execute("SELECT COALESCE(MAX(attempt),0)+1 FROM job_steps WHERE scan_id=%s AND step_type='VALIDATION'", (scan_id,))
         attempt = cursor.fetchone()[0]

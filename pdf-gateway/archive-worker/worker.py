@@ -21,6 +21,7 @@ from pathlib import Path
 import pika
 import psycopg2
 
+import metadata
 from archive import Archive, ArchiveError, SIDECAR, sha256_file
 from organize import default_taxonomy, organise, validated
 
@@ -29,6 +30,8 @@ STORAGE = Path(os.getenv("PDF_GATEWAY_STORAGE_ROOT", "/var/lib/pdf-gateway"))
 ARCHIVE = Archive(Path(os.getenv("PDF_GATEWAY_ARCHIVE_ROOT", "/var/lib/pdf-archive")))
 MAX_ATTEMPTS = int(os.getenv("PDF_GATEWAY_ARCHIVE_MAX_ATTEMPTS", "5"))
 RETRY_SECONDS = int(os.getenv("PDF_GATEWAY_ARCHIVE_RETRY_SECONDS", "60"))
+# Embed allowlisted metadata into a new version that must pass validation again.
+EMBED_METADATA = os.getenv("PDF_GATEWAY_EMBED_METADATA", "true") == "true"
 # Storage or configuration trouble is retried; changed bytes or invalid evidence are not.
 RETRYABLE = {"ARCHIVE_CONFIG_INVALID", "STORAGE_ERROR"}
 
@@ -66,12 +69,17 @@ def claim(scan_id: str) -> dict | None:
             return None
         _status, _policy, _state, source_hash, retention, quarantine_object, created_at = row
         cursor.execute("UPDATE job_steps SET status='FAILED',finished_at=now(),error_code='INTERRUPTED' WHERE scan_id=%s AND step_type='ARCHIVE' AND status='RUNNING'", (scan_id,))
-        cursor.execute("""SELECT a.id,a.storage_object,a.sha256,a.bytes,f.policy_version,f.attempt
+        cursor.execute("""SELECT a.id,a.storage_object,a.sha256,a.bytes,f.policy_version,f.attempt,a.kind
                             FROM final_validations f JOIN artifacts a ON a.id=f.artifact_id
                            WHERE f.scan_id=%s AND f.verdict='PASS' AND f.source_sha256=%s AND a.state='FINAL_VALIDATED'
-                             AND a.kind='CDR_OUTPUT' AND a.sha256=f.output_sha256
+                             AND a.kind IN ('CDR_OUTPUT','EMBEDDED_METADATA') AND a.sha256=f.output_sha256
                            ORDER BY f.attempt DESC LIMIT 1""", (scan_id, source_hash))
         artifact = cursor.fetchone()
+        cursor.execute("""SELECT details FROM job_steps WHERE scan_id=%s AND step_type='ARCHIVE' AND status='SUCCEEDED'
+                           AND details->>'phase'='EMBED' ORDER BY attempt DESC LIMIT 1""", (scan_id,))
+        embedded = (cursor.fetchone() or [None])[0]
+        if artifact is not None and artifact[6] == "EMBEDDED_METADATA" and not embedded:
+            artifact = None  # a metadata version without its recorded organisation is not trusted
         cursor.execute("SELECT state,signature_count FROM signature_verifications WHERE scan_id=%s ORDER BY attempt DESC LIMIT 1", (scan_id,))
         signature = cursor.fetchone()
         cursor.execute("SELECT details->'textExtraction' FROM job_steps WHERE scan_id=%s AND step_type='ANALYSIS' AND status='SUCCEEDED' ORDER BY attempt DESC LIMIT 1", (scan_id,))
@@ -89,6 +97,7 @@ def claim(scan_id: str) -> dict | None:
         return {"scanId": scan_id, "attempt": attempt, "artifactId": artifact[0], "output": STORAGE / artifact[1],
                 "sha256": artifact[2], "bytes": artifact[3], "policyVersion": artifact[4],
                 "finalReportId": f"validation-{scan_id[5:]}-{artifact[5]}", "sourceSha256": source_hash,
+                "kind": artifact[6], "embedPhase": embedded,
                 "signedOriginal": retention == "SIGNED_RESTRICTED" or (signature[1] or 0) > 0,
                 "signatureState": signature[0], "originalEvidenceId": quarantine_object,
                 "extraction": extraction if isinstance(extraction, dict) else None,
@@ -121,18 +130,70 @@ def build_sidecar(job: dict, text: str) -> tuple[dict, dict]:
     return sidecar, organisation.evidence
 
 
-def publish(job: dict) -> tuple[Path, dict, dict]:
+def verified_inputs(job: dict) -> str:
+    """Recheck the validated bytes; return the untrusted text used for filing."""
     output = job["output"]
     try:
         if not output.is_file() or sha256_file(output) != job["sha256"]:
-            raise ArchiveStageError("VALIDATED_BYTES_CHANGED", "CDR output no longer matches the validated hash")
+            raise ArchiveStageError("VALIDATED_BYTES_CHANGED", "artifact no longer matches the validated hash")
         text_path = STORAGE / "text-extracts" / f"{job['scanId']}.txt"
         text = text_path.read_text(encoding="utf-8", errors="replace") if text_path.is_file() else ""
         if text and (job["extraction"] or {}).get("sha256") not in (None, sha256_file(text_path)):
             text = ""  # an extract that changed since analysis is not trusted for filing
     except OSError as error:
         raise ArchiveStageError("STORAGE_ERROR", type(error).__name__) from error
+    return text
+
+
+def embed(job: dict) -> tuple[Path, dict, dict, dict]:
+    """Phase 1: organise and write allowlisted metadata into a new PDF version."""
+    text = verified_inputs(job)
     sidecar, evidence = build_sidecar(job, text)
+    values = metadata.fields_for(sidecar)
+    directory = STORAGE / "metadata-versions"
+    target = directory / f"{job['scanId']}-1.pdf"
+    try:
+        directory.mkdir(mode=0o750, exist_ok=True)
+        metadata.write(job["output"], target, values)
+    except OSError as error:
+        raise ArchiveStageError("STORAGE_ERROR", type(error).__name__) from error
+    except Exception as error:  # pikepdf refusing a validated output is not retryable
+        raise ArchiveStageError("METADATA_WRITE_FAILED", type(error).__name__) from error
+    return target, sidecar, evidence, values
+
+
+def commit_embed(job: dict, target: Path, sidecar: dict, evidence: dict, values: dict) -> None:
+    scan_id = job["scanId"]
+    artifact_id = f"meta-{scan_id[5:]}-1"
+    with database() as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT status FROM scan_jobs WHERE id=%s FOR UPDATE", (scan_id,))
+        row = cursor.fetchone()
+        if row is None or row[0] != "ARCHIVING":
+            raise RuntimeError("scan state changed before metadata commit")
+        cursor.execute("""INSERT INTO artifacts(id,scan_id,kind,storage_object,sha256,bytes,state,parent_artifact_id)
+                          VALUES (%s,%s,'EMBEDDED_METADATA',%s,%s,%s,'SANITIZED_STAGED',%s)""",
+                       (artifact_id, scan_id, f"metadata-versions/{target.name}", sha256_file(target), target.stat().st_size, job["artifactId"]))
+        # Different bytes: back through final validation before anything is released.
+        cursor.execute("UPDATE scan_jobs SET status='VALIDATING_OUTPUT',policy='CDR_ELIGIBLE',artifact_state='SANITIZED_STAGED',updated_at=now(),version=version+1 WHERE id=%s", (scan_id,))
+        cursor.execute("UPDATE job_steps SET status='SUCCEEDED',finished_at=now(),engine_version=%s,details=%s::jsonb WHERE scan_id=%s AND step_type='ARCHIVE' AND attempt=%s",
+                       (metadata.WRITER_VERSION, json.dumps({"phase": "EMBED", "sidecar": sidecar, "organisation": evidence,
+                                                             "embedded": values, "artifactId": artifact_id}), scan_id, job["attempt"]))
+        cursor.execute("INSERT INTO outbox_events(id,aggregate_type,aggregate_id,event_type,payload) VALUES (%s,'SCAN',%s,'VALIDATION_QUEUED',jsonb_build_object('scanId',%s,'artifactId',%s))",
+                       (str(uuid.uuid4()), scan_id, scan_id, artifact_id))
+        audit(cursor, scan_id, "METADATA_EMBEDDED", "SUCCESS", {"artifactId": artifact_id, "fields": sorted(values)})
+
+
+def publish(job: dict) -> tuple[Path, dict, dict]:
+    text = verified_inputs(job)
+    if job["kind"] == "EMBEDDED_METADATA":
+        # Publish the organisation recorded when the metadata was written, so the
+        # sidecar and the embedded values cannot disagree.
+        sidecar = dict(job["embedPhase"]["sidecar"], updatedAt=now())
+        sidecar["embeddedMetadata"] = {"writer": metadata.WRITER_VERSION,
+                                       "fields": sorted(key.lstrip("/") for key in job["embedPhase"]["embedded"])}
+        evidence = dict(job["embedPhase"]["organisation"], publishedVersion="EMBEDDED_METADATA")
+    else:
+        sidecar, evidence = build_sidecar(job, text)
     existing = ARCHIVE.find(sidecar["documentId"])
     if existing is not None:
         # Published by an earlier attempt that died before committing the index.
@@ -142,7 +203,7 @@ def publish(job: dict) -> tuple[Path, dict, dict]:
         evidence["recoveredExistingPublication"] = True
         return existing, current, evidence
     try:
-        directory = ARCHIVE.publish(output, job["sha256"], sidecar, text or None)
+        directory = ARCHIVE.publish(job["output"], job["sha256"], sidecar, text or None)
     except ArchiveError as error:
         raise ArchiveStageError("STORAGE_ERROR" if error.code == "STAGING_NOT_SAME_FILESYSTEM" else error.code, error.detail) from error
     except OSError as error:
@@ -210,8 +271,11 @@ def handle(channel, method, _properties, body: bytes) -> None:
             channel.basic_ack(method.delivery_tag)
             return
         try:
-            directory, sidecar, evidence = publish(job)
-            commit(job, directory, sidecar, evidence)
+            if job["kind"] == "CDR_OUTPUT" and EMBED_METADATA:
+                commit_embed(job, *embed(job))
+            else:
+                directory, sidecar, evidence = publish(job)
+                commit(job, directory, sidecar, evidence)
         except ArchiveStageError as error:
             fail(job, error)
         channel.basic_ack(method.delivery_tag)
