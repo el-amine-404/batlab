@@ -98,6 +98,18 @@ def main() -> int:
         "malformed.pdf": b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 9 0 R >>\nthis is not a valid PDF body\n%%EOF\n",
         "not-pdf.bin": b"not a PDF at all\n",
     }
+    # EICAR test string (not malware) inside an uncompressed stream.
+    eicar = b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+    fixtures["eicar-in-stream.pdf"] = page_pdf(text("M3 EICAR fixture"), extra_objects=[stream(eicar)])
+    # Structurally valid raster page whose only image is white: renders blank.
+    white = zlib.compress(b"\xff" * 32 * 16)
+    fixtures["blank-image.pdf"] = pdf([
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {PAGE[0]} {PAGE[1]}] /Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>".encode(),
+        stream(f"q {PAGE[0]} 0 0 {PAGE[1]} 0 0 cm /Im0 Do Q".encode()),
+        stream(white, b"/Type /XObject /Subtype /Image /Width 32 /Height 16 /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode "),
+    ])
     hand, regions = handwritten()
     fixtures["handwritten.pdf"] = hand
     for name, data in fixtures.items():

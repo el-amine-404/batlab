@@ -1,0 +1,8 @@
+# Test-only override for running the production compose.yml end to end on Lab2.
+services:
+  signature-worker:
+    environment:
+      PDF_GATEWAY_SIGNATURE_TRUST_ROOTS: /trust/root.crt
+    volumes:
+      # Disposable test CA instead of the tracked (empty) production trust store.
+      - ${TEST_STORAGE}/trust:/trust:ro

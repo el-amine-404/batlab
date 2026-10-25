@@ -176,7 +176,7 @@ def convert(scan_id: str, source: Path, source_hash: str, attempt: int) -> tuple
         with tempfile.NamedTemporaryFile(dir=staging, prefix=f".{scan_id}.", delete=False) as temporary:
             temporary_path = Path(temporary.name)
             try:
-                os.fchmod(temporary.fileno(), 0o600)
+                os.fchmod(temporary.fileno(), 0o640)
 
                 def sink(chunk: bytes) -> None:
                     received.update(chunk)
