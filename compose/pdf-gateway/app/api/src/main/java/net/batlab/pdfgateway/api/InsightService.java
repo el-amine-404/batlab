@@ -100,6 +100,18 @@ public class InsightService {
                     FROM mine WHERE status='READY'))::text""", String.class, principal.userId(), principal.admin());
     }
 
+    public String status() {
+        return jdbc.queryForObject("""
+                SELECT jsonb_build_object(
+                  'archived', (SELECT count(*) FROM archive_documents),
+                  'uploads24h', (SELECT count(*) FROM scan_jobs WHERE created_at > now() - interval '24 hours'),
+                  'inProgress', (SELECT count(*) FROM scan_jobs WHERE status NOT IN ('READY','REVIEW_REQUIRED','BLOCKED','FAILED','CANCELLED')),
+                  'held', (SELECT count(*) FROM scan_jobs WHERE status IN ('REVIEW_REQUIRED','FAILED')),
+                  'blocked', (SELECT count(*) FROM scan_jobs WHERE status='BLOCKED'),
+                  'toReview', (SELECT count(*) FROM archive_documents WHERE review_state IN ('FALLBACK','REVIEW_REQUIRED')),
+                  'outboxBacklog', (SELECT count(*) FROM outbox_events WHERE published_at IS NULL AND available_at <= now()))::text""", String.class);
+    }
+
     public String health() {
         String broker;
         try {

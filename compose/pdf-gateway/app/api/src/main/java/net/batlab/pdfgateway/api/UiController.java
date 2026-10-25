@@ -90,6 +90,12 @@ public class UiController {
         return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "private, no-store").body(insights.summary(principal));
     }
 
+    /** System-wide counts only (no names, titles or IDs), for dashboards such as Homepage. */
+    @GetMapping(path = "/api/v1/system/status", produces = MediaType.APPLICATION_JSON_VALUE)
+    ResponseEntity<String> status() {
+        return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store").body(insights.status());
+    }
+
     @GetMapping(path = "/api/v1/system/health", produces = MediaType.APPLICATION_JSON_VALUE)
     ResponseEntity<String> health() {
         return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store").body(insights.health());

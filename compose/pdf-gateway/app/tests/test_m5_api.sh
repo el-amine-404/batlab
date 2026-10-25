@@ -126,6 +126,13 @@ eq "$(q "SELECT count(*) FROM audit_events WHERE action='QUARANTINE_DELETED'")" 
 
 # --- Summary and health --------------------------------------------------------
 web "$base/api/v1/dashboard/summary" | json 'str(v["scans"])+"|"+str(v["archived"])+"|"+str(v["byStatus"].get("READY"))' | grep -qx "4|2|2"
+# Homepage tile: system-wide counts with a READ_ONLY bearer token, nothing identifying.
+ro_token="$(openssl rand -hex 32)"
+q "INSERT INTO users(id,username,role) VALUES ('00000000-0000-0000-0000-0000000000b3','homepage','READ_ONLY')"
+q "INSERT INTO api_tokens(id,user_id,token_hash,label) VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000b3','$(printf %s "$ro_token" | sha256sum | cut -d' ' -f1)','homepage')"
+curl -sS -H "Authorization: Bearer $ro_token" "$base/api/v1/system/status" | json 'str(v["archived"])+"|"+str(v["blocked"]>=0)+"|"+",".join(sorted(v))' \
+  | grep -qx "2|True|archived,blocked,held,inProgress,outboxBacklog,toReview,uploads24h"
+[[ $(code curl -sS "$base/api/v1/system/status") == 401 ]]
 web "$base/api/v1/system/health" | json 'v["database"]+"|"+v["broker"]+"|"+str(v["archiveReadable"])' | grep -qx "UP|UP|True"
 
 # --- Expiry and logout ---------------------------------------------------------
