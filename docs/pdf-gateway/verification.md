@@ -145,3 +145,28 @@ Limits: this stage test seeds the committed M2/signature evidence rows directly,
 to isolate the CDR stage. The end-to-end chain through the real analysis and
 signature engines is slice 3. The provider is installed only as files; it is not
 enabled as a persistent service, and Lab2 linger is off.
+
+## 2026-10-25 — M3 slice 2: exact-final-byte validation and release guard
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Final validator | VERIFIED | `final_validate.py` (policy `final-policy-1`) runs on the exact staged bytes: hash equals the CDR record at start and end; ClamAV `INSTREAM` must be `CLEAN` with definitions ≤48 h old; qpdf check; not encrypted; zero raw PDF security keywords; zero YARA matches; decoded qpdf JSON object graph has no actions/JavaScript/forms/annotations/attachments/fonts/names/non-image XObjects; page resources are images only; output page count equals the source. Any finding denies release; only an empty failure list yields `ALLOW_SANITIZED`. |
+| Visual checks | VERIFIED | The sanitized output (never the original) is rendered at 12 DPI with poppler. An all-white output gave `OUTPUT_ALL_PAGES_BLANK` → `REVIEW_REQUIRED`. Individual blank pages are recorded as INFO. This flags blank/missing pages; it does not certify fidelity. |
+| Real CDR output passes | VERIFIED | Unsigned, 3-page and handwritten/graphical fixtures went through the real provider → Dangerzone → cdr-worker → validation-worker. Each reached `AWAITING_ARCHIVE`, `ALLOW_SANITIZED`, `FINAL_VALIDATED`, `NO_THREATS_DETECTED`. Each has a `PASS` record with ClamAV/qpdf/YARA/poppler versions, a restricted report artifact, and one durable `ARCHIVE_QUEUED` event (queue declared, consumer arrives in M4). |
+| Final-rescan failures | VERIFIED | Seeded "CDR outputs" a compromised converter could emit. EICAR in a stream: `MALWARE_DETECTED` → `BLOCKED`. JavaScript/OpenAction: keywords, YARA, `FORBIDDEN_STRUCTURE` → `REVIEW_REQUIRED`. Wrong page count: `PAGE_COUNT_MISMATCH`. Bytes changed after staging: `OUTPUT_HASH_MISMATCH`. Blank output: `OUTPUT_ALL_PAGES_BLANK`. Each artifact was set `REJECTED`, with no archive event. |
+| Scanner unavailable | VERIFIED | With ClamAV stopped, a real Dangerzone output got `UNKNOWN`/`CLAMAV_UNAVAILABLE`. It stayed `VALIDATING_OUTPUT`/`SANITIZED_STAGED` with a delayed durable retry; no release. An unreadable output is likewise a typed `UNKNOWN` (`OUTPUT_UNREADABLE`), never an exception loop. |
+| Database release guard | VERIFIED | Migration V004 triggers rejected every attempt: an initial-`CLEAN` job set to `READY`, `AWAITING_ARCHIVE`, `ALLOW_SANITIZED` or `PUBLISHED`; inserting a job directly as `READY`; promoting a rejected artifact; forging a `PASS` for a non-matching artifact; editing a validation record (append-only); changing a CDR artifact's hash or storage path. The release query returned exactly the four passing jobs. |
+| Staged-output permissions | VERIFIED | CDR output is 0640, owner UID 10004, group 10010. Only the validation worker (`group_add: 10010`) can read it; the host account cannot. Found by the test: with 0600 files, validation failed closed and could not proceed. |
+| Replay | VERIFIED | Republishing a validated job's message created no second validation record. |
+
+Command used:
+
+```text
+ssh lab2 'cd <checkout> && pdf-gateway/tests/test_m3_validation.sh'   # Lab2 only
+```
+
+Limits: final-failure outputs were seeded directly as CDR results (the real
+converter does not emit them). Real-converter outputs were validated end to end
+within this stage. Page boxes are not compared with the source, to avoid parsing
+the hostile original further; page count is.
+

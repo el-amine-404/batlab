@@ -128,13 +128,13 @@ for n in 20 21 22; do
   eq "$(col $n "concat_ws(',',status,image_digest,coalesce(evidence->'isolation'->>'innerNetwork','null'),coalesce(evidence->'isolation'->>'hostMounts','null'))" cdr_results)" "SUCCEEDED,$expected_digest,none,none"
   eq "$(q "SELECT artifact_state FROM scan_jobs WHERE id='scan-01J000000000000000000000$n'")" SANITIZED_STAGED
   object="$(col $n storage_object artifacts "AND kind='CDR_OUTPUT'")"
-  # The staged output is 0600 and owned by the worker UID; the host account
-  # cannot read it, so inspect it from inside the worker.
+  # The staged output is 0640 (worker UID, validation group 10010); the host
+  # account cannot read it, so inspect it from inside the worker.
   read -r out_hash out_mode out_head < <(docker compose -f "$compose" exec -T cdr-worker python3 -c \
     "import hashlib,os,sys;p='/var/lib/pdf-gateway/'+sys.argv[1];d=open(p,'rb').read();print(hashlib.sha256(d).hexdigest(),oct(os.stat(p).st_mode&0o777)[2:],d[:5].decode())" "$object")
   eq "$out_hash" "$(col $n sha256 artifacts "AND kind='CDR_OUTPUT'")"
   [[ $out_hash != "${HASH[$n]}" ]]
-  eq "$out_mode" 600
+  eq "$out_mode" 640
   eq "$out_head" "%PDF-"
   eq "$(col $n "count(*)" job_steps "AND step_type='CDR' AND status='SUCCEEDED'")" 1
   eq "$(q "SELECT count(*) FROM outbox_events WHERE aggregate_id='scan-01J000000000000000000000$n' AND event_type='VALIDATION_QUEUED'")" 1

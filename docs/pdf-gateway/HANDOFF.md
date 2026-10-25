@@ -117,9 +117,9 @@ Design decisions (safe, reversible):
 - **validation-worker** (analysis image): exact-final-byte ClamAV + qpdf + YARA +
   decoded-structure postconditions (no actions/JS/forms/attachments/annotations),
   page-count and blank-page checks, hash recheck at start and commit. Pass →
-  `FINAL_VALIDATED`/`ALLOW_SANITIZED`, status `ARCHIVING` waiting on a durable
-  `ARCHIVE_QUEUED` message for M4. Anything else → `REVIEW_REQUIRED`/`BLOCKED`.
-- **Database guard**: a trigger rejects any `ARCHIVING`/`READY`/`ALLOW_SANITIZED`/
+  `FINAL_VALIDATED`/`ALLOW_SANITIZED`, status `AWAITING_ARCHIVE` with a durable
+  `ARCHIVE_QUEUED` message held for M4. Anything else → `REVIEW_REQUIRED`/`BLOCKED`.
+- **Database guard**: a trigger rejects any `AWAITING_ARCHIVE`/`ARCHIVING`/`READY`/`ALLOW_SANITIZED`/
   `FINAL_VALIDATED`/`PUBLISHED` state without a passing final validation of a
   CDR output whose hash matches. A direct SQL shortcut from `CLEAN` is tested.
 - Optional OCR and allowlisted metadata writing are deferred (NOT STARTED). Any

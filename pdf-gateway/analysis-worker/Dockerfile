@@ -9,7 +9,7 @@ RUN apt-get update \
 
 FROM debian:13.1-slim@sha256:a347fd7510ee31a84387619a492ad6c8eb0af2f2682b916ff3e643eb076f925a
 RUN apt-get update \
- && apt-get install -y --no-install-recommends python3 python3-pika python3-psycopg2 qpdf yara \
+ && apt-get install -y --no-install-recommends python3 python3-pika python3-psycopg2 qpdf yara poppler-utils \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --gid 10002 analyzer \
  && useradd --uid 10002 --gid 10002 --no-create-home --shell /usr/sbin/nologin analyzer
@@ -17,6 +17,9 @@ COPY --from=tools /suite/pdfid.py /opt/pdf-tools/pdfid.py
 COPY --from=tools /suite/pdf-parser.py /opt/pdf-tools/pdf-parser.py
 COPY --chown=10002:10002 scan.py /opt/pdf-gateway/scan.py
 COPY --chown=10002:10002 worker.py /opt/pdf-gateway/worker.py
+# poppler renders only sanitized CDR output (blank-page checks), never originals.
+COPY --chown=10002:10002 final_validate.py /opt/pdf-gateway/final_validate.py
+COPY --chown=10002:10002 validation_worker.py /opt/pdf-gateway/validation_worker.py
 COPY rules /opt/pdf-gateway/rules
 USER 10002:10002
 WORKDIR /work

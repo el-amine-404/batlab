@@ -200,6 +200,50 @@ services:
     restart: unless-stopped
     networks: [backend]
 
+  # Final validation of exact CDR output bytes; the only path to ALLOW_SANITIZED.
+  # Requires the scanning profile's ClamAV.
+  validation-worker:
+    profiles: [cdr]
+    build:
+      context: analysis-worker
+    entrypoint: ["python3", "/opt/pdf-gateway/validation_worker.py"]
+    # Read access to staged CDR output (files 0640, group 10010).
+    group_add: ["10010"]
+    environment:
+      PDF_GATEWAY_DATABASE_HOST: postgres
+      PDF_GATEWAY_DATABASE_NAME: pdf_gateway
+      PDF_GATEWAY_DATABASE_USER: pdf_gateway
+      PDF_GATEWAY_DATABASE_PASSWORD: ${PDF_GATEWAY_DATABASE_PASSWORD:?set in the deployment environment}
+      PDF_GATEWAY_RABBITMQ_HOST: rabbitmq
+      PDF_GATEWAY_RABBITMQ_USER: pdf_gateway
+      PDF_GATEWAY_RABBITMQ_PASSWORD: ${PDF_GATEWAY_RABBITMQ_PASSWORD:?set in the deployment environment}
+      PDF_GATEWAY_CLAMD_HOST: clamav
+      PDF_GATEWAY_STORAGE_ROOT: /var/lib/pdf-gateway
+      PDF_GATEWAY_VALIDATION_MAX_ATTEMPTS: ${PDF_GATEWAY_VALIDATION_MAX_ATTEMPTS:-3}
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+      clamav: {condition: service_healthy}
+    volumes:
+      - ${PDF_GATEWAY_STORAGE_ROOT:?set to a private host directory}/quarantine:/var/lib/pdf-gateway/quarantine:ro
+      - ${PDF_GATEWAY_STORAGE_ROOT:?set to a private host directory}/cdr-output:/var/lib/pdf-gateway/cdr-output:ro
+      - ${PDF_GATEWAY_STORAGE_ROOT:?set to a private host directory}/validation-reports:/var/lib/pdf-gateway/validation-reports
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 768m
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import os; os.kill(1, 0)"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+    networks: [backend]
+
 volumes:
   postgres-data: {}
   rabbitmq-data: {}
