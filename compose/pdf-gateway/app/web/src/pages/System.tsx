@@ -50,8 +50,8 @@ export function SystemPage() {
               <Stat label="Dangerous" value={s.malicious} />
             </div>
             <Muted className="mt-3">
-              A file usually takes {seconds(s.readyLatencySeconds.p50)} (at most {seconds(s.readyLatencySeconds.p95)} for 19 in 20) · {s.scans} files in total
-              {s.cdrFailures > 0 && ` · ${s.cdrFailures} failed rebuilds`}
+              {s.readyLatencySeconds.p50 !== null && <>Files are usually ready in {seconds(s.readyLatencySeconds.p50)}. </>}
+              {s.scans} {s.scans === 1 ? "file" : "files"} in total{s.cdrFailures > 0 && `, ${s.cdrFailures} failed ${s.cdrFailures === 1 ? "rebuild" : "rebuilds"}`}.
             </Muted>
           </>
         )}
