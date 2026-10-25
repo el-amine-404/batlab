@@ -115,3 +115,33 @@ docker compose -f pdf-gateway/compose.yml --profile scanning config --quiet
 Implementation commit: `f3efc26`. M3 remains incomplete until the isolated CDR
 adapter, exact-final-byte rescan, and visual preservation gates pass.
 
+
+## 2026-10-25 — M3 slice 1: host CDR provider and durable CDR stage
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Baseline recheck | VERIFIED | Before changes, `verify_cdr_runtime.sh` on Lab2 printed `CDR_READY dangerzone=0.11.1`; `test_m2.sh`, `test_m2_pipeline.sh`, `test_m3_signatures.sh`, `test_m3_pipeline.sh` passed. |
+| Host CDR provider | VERIFIED | `hosts/lab2/pdf-cdr-provider/provider.py` (stdlib only) ran as a transient systemd user unit for the rootless account with the tracked unit's limits. It holds no database/broker credentials and has no quarantine access; bytes arrive over a Unix socket with a length and SHA-256 header. A host-account connection was rejected with `PEER_NOT_ALLOWED` (SO_PEERCRED allowlist). |
+| Per-conversion isolation evidence | VERIFIED | Each success requires Dangerzone's own launch command to use the verified image digest, `--network=none`, `--cap-drop all`, `no-new-privileges`, `--userns nomap`, user `dangerzone`, no host bind/volume mount, plus an inner `runsc --network=none` launch. Otherwise output is discarded as `ISOLATION_EVIDENCE_MISSING`. Stored evidence: image `sha256:b1e2ad0aa19c…9f97`, inner/outer network `none`, host mounts `none`. |
+| Resource containment | VERIFIED | During a 250-page conversion, `runsc` and `gvisor_sentry` were observed inside the provider unit's cgroup with `memory.max` = 3 GiB. Dangerzone's `--cgroups=disabled` keeps the sandbox in the caller's cgroup. Finding: `RLIMIT_FSIZE` on the CLI crashes gVisor's sparse memory file, so host files are bounded by polling instead. |
+| Durable CDR stage | VERIFIED | `cdr-worker` (UID 10004, read-only, no capabilities, 256 MiB, no external network) re-derives eligibility from committed `ANALYSIS` and signature evidence for the exact source hash, rechecks the quarantine hash, stages output at mode 0600, and records `cdr_results` lineage (provider/Dangerzone versions, image digest, isolation evidence, duration, output hash). It emits `VALIDATION_QUEUED`; status becomes `VALIDATING_OUTPUT`, never releasable. |
+| Real conversions | VERIFIED | Unsigned, active JavaScript/OpenAction, and pyHanko-signed fixtures converted in about 4.8 s each. Output SHA-256 differed from the source and matched the artifact row; quarantine sources were unchanged. |
+| Typed CDR failures | VERIFIED | Malformed input: `CONVERSION_FAILED` → `REVIEW_REQUIRED`, no artifact, no outbox event. Missing signature evidence: `REVIEW_REQUIRED` without a conversion. 5 s provider timeout on 250 pages: `TIMEOUT`; the named sandbox container was killed and none remained. Provider stopped: `PROVIDER_UNAVAILABLE` (retryable); job back to `AWAITING_CDR` with a delayed durable `CDR_QUEUED` retry. |
+| Replay idempotency | VERIFIED | Replaying a completed job's message created no second result or artifact. |
+| Signed-original retention | VERIFIED | Migration V003 moves the signed-original flag from `artifact_state` into `original_retention`, so staging a sanitized copy cannot erase it. A trigger rejected an attempt to lower `SIGNED_RESTRICTED`. |
+| Regression | VERIFIED | `test_m3_pipeline.sh` (updated retention assertion), `test_m1.sh` (V003 applied through the API's Flyway), and the Maven build passed. |
+
+Commands used:
+
+```text
+ssh lab2 'cd /home/potato/batlab && pdf-gateway/tools/verify_cdr_runtime.sh'
+ssh lab2 'cd <checkout> && pdf-gateway/tests/test_m3_cdr.sh'      # Lab2 only: needs Dangerzone
+pdf-gateway/tests/test_m3_pipeline.sh
+pdf-gateway/tests/test_m1.sh
+docker run --rm -v "$PWD/pdf-gateway/api:/src" -w /src maven:3.9.11-eclipse-temurin-21@sha256:6fdc855a… mvn -B -q test
+```
+
+Limits: this stage test seeds the committed M2/signature evidence rows directly,
+to isolate the CDR stage. The end-to-end chain through the real analysis and
+signature engines is slice 3. The provider is installed only as files; it is not
+enabled as a persistent service, and Lab2 linger is off.

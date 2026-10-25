@@ -9,6 +9,7 @@ services:
     volumes:
       - ../api/src/main/resources/db/migration/V001__m1_core.sql:/docker-entrypoint-initdb.d/001.sql:ro
       - ../api/src/main/resources/db/migration/V002__m3_signatures.sql:/docker-entrypoint-initdb.d/002.sql:ro
+      - ../api/src/main/resources/db/migration/V003__m3_cdr.sql:/docker-entrypoint-initdb.d/003.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pdf_gateway -d pdf_gateway"]
       interval: 2s

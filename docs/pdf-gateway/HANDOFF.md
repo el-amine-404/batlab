@@ -92,5 +92,52 @@ The verifier requires signed-image validation, outer crun, inner gVisor/runsc,
 - The next exact work item is the host CDR adapter; do not mark a document
   released until the resulting exact bytes pass a new mandatory M3 rescan stage.
 
+## M3 remaining plan (written 2026-10-25, before implementation)
+
+Baseline rechecked first: `verify_cdr_runtime.sh` on Lab2 printed `CDR_READY`;
+`test_m2.sh`, `test_m2_pipeline.sh`, `test_m3_signatures.sh` and
+`test_m3_pipeline.sh` all passed locally.
+
+Design decisions (safe, reversible):
+
+- **Host CDR provider** (`hosts/lab2/pdf-cdr-provider/`): stdlib-only Python,
+  systemd *user* service for the rootless Dangerzone account. It holds no
+  database/broker credentials and cannot read quarantine. It accepts one job at a
+  time over a Unix socket (SO_PEERCRED UID allowlist), receives length/SHA-256
+  framed bytes (≤50 MiB), runs `dangerzone-cli --debug`, requires per-conversion
+  evidence (signed image digest, `--network=none`, runsc, no bind/volume mount),
+  bounds output size and time, kills exactly the named sandbox container on
+  timeout, and returns typed `FAILED` codes. Dangerzone uses
+  `--cgroups=disabled`, so the unit's CPU/memory/task limits contain it.
+- **cdr-worker** container: consumes `pdf.gateway.cdr.v1`, re-derives
+  eligibility from committed analysis + signature evidence (not from the message),
+  rechecks the quarantine hash, streams to the provider, stores the output
+  privately as `SANITIZED_STAGED`, records `cdr_results` lineage, emits
+  `VALIDATION_QUEUED`.
+- **validation-worker** (analysis image): exact-final-byte ClamAV + qpdf + YARA +
+  decoded-structure postconditions (no actions/JS/forms/attachments/annotations),
+  page-count and blank-page checks, hash recheck at start and commit. Pass →
+  `FINAL_VALIDATED`/`ALLOW_SANITIZED`, status `ARCHIVING` waiting on a durable
+  `ARCHIVE_QUEUED` message for M4. Anything else → `REVIEW_REQUIRED`/`BLOCKED`.
+- **Database guard**: a trigger rejects any `ARCHIVING`/`READY`/`ALLOW_SANITIZED`/
+  `FINAL_VALIDATED`/`PUBLISHED` state without a passing final validation of a
+  CDR output whose hash matches. A direct SQL shortcut from `CLEAN` is tested.
+- Optional OCR and allowlisted metadata writing are deferred (NOT STARTED). Any
+  later PDF-producing step must create a new artifact and rerun final validation.
+
+Slices, each tested on Lab2 with real engines, committed, merged:
+
+1. Provider + cdr-worker + V003 `cdr_results`: unsigned, signed, active-content,
+   CDR failure, timeout, provider unavailable, replay, source immutability.
+2. Final validator + validation-worker + V004 guard: pass on real CDR output;
+   EICAR/JavaScript-in-output, hash swap, ClamAV unavailable/stale, page-count
+   mismatch and direct SQL bypass all fail closed.
+3. End-to-end chain from the analysis queue: unsigned, validly signed, tampered,
+   visible signature, handwritten/graphical appearance (rendered comparison),
+   malformed, encrypted, active content.
+4. Public contract alignment: the API currently returns internal values
+   (`CLEAN`, `CDR_ELIGIBLE`, `AWAITING_CDR`, `SIGNED_ORIGINAL_RESTRICTED`) that
+   the OpenAPI enums do not allow; fix with a migration and mapping.
+
 Never skip a milestone gate or substitute mocked security verdicts for actual
 engine execution.

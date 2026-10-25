@@ -79,7 +79,7 @@ done
 [[ ${states:-} == AWAITING_CDR,REVIEW_REQUIRED ]]
 
 [[ "$("${psql[@]}" -Atc "SELECT state FROM signature_verifications WHERE scan_id='$signed_scan'")" == SIGNED_VALID_TRUSTED ]]
-[[ "$("${psql[@]}" -Atc "SELECT artifact_state FROM scan_jobs WHERE id='$signed_scan'")" == SIGNED_ORIGINAL_RESTRICTED ]]
+[[ "$("${psql[@]}" -Atc "SELECT artifact_state||','||original_retention FROM scan_jobs WHERE id='$signed_scan'")" == ORIGINAL_QUARANTINED,SIGNED_RESTRICTED ]]
 [[ "$("${psql[@]}" -Atc "SELECT policy_decision FROM signature_verifications WHERE scan_id='$tampered_scan'")" == REVIEW_REQUIRED ]]
 [[ "$("${psql[@]}" -Atc "SELECT count(*) FROM outbox_events WHERE aggregate_id='$signed_scan' AND event_type='CDR_QUEUED'")" == 1 ]]
 [[ "$("${psql[@]}" -Atc "SELECT count(*) FROM outbox_events WHERE aggregate_id='$tampered_scan' AND event_type='CDR_QUEUED'")" == 0 ]]
