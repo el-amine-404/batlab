@@ -5,6 +5,12 @@ services:
   agent:
     build: .
     env_file: agent.env
+    environment:
+      # The gateway's HTTPS certificate comes from the homelab Caddy's local CA:
+      # curl -o caddy-local-ca.crt http://pdf.homelab.lan/ca.crt (public, not a secret).
+      SSL_CERT_FILE: /etc/pdf-gateway/ca.crt
+    volumes:
+      - ./caddy-local-ca.crt:/etc/pdf-gateway/ca.crt:ro
     # Host network only to reach LM Studio on 127.0.0.1:1234; no ports are opened.
     network_mode: host
     read_only: true

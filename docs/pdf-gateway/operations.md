@@ -75,6 +75,32 @@ The site is `https://pdf.homelab.lan`, with a certificate from Caddy's own CA
 The CA lives in `/mnt/docker-volumes/caddy/data/caddy/pki` (backed up). If it is
 lost, Caddy makes a new one and every device must trust the new one.
 
+## OCR and AI from the laptop (optional)
+
+The T1000 laptop's agent (`compose/pdf-gateway/app/enrichment-agent`) pulls work
+from the gateway: Tesseract OCR (English, French, Arabic) for scans without text,
+and the LM Studio model `qwen/qwen3-4b-2507` for proposed title, issuer, type,
+date and tags. Proposals carry a quote from the document and change nothing until
+someone applies them on the document's page. With the laptop off, documents are
+archived as usual and the jobs wait (the Status page says so).
+
+1. On lab2: `PDF_GATEWAY_ENRICHMENT_ENABLED=true` in `compose/.env`, then recreate
+   `api` and `archive-worker`.
+2. An `ENRICHMENT` token (it can only lease jobs and read released copies): make
+   it on the laptop, store its SHA-256 on lab2 as in step 6 above, with the role
+   `ENRICHMENT` and the user `t1000-agent`.
+3. On the laptop, in `compose/pdf-gateway/app/enrichment-agent`:
+   `agent.env` (from `agent.env.example`, mode 600, the token), and the CA:
+   `curl -o caddy-local-ca.crt http://pdf.homelab.lan/ca.crt` (compare it with
+   `/mnt/docker-volumes/caddy/data/caddy/pki/authorities/local/root.crt` on lab2).
+   Then `docker compose up -d --build`. It restarts with Docker.
+4. LM Studio's server must run on 127.0.0.1:1234. The agent loads the model at
+   a 4096-token context (≈3.2 GB of the T1000's 4 GB) when it has work. LM Studio
+   keeps it loaded afterwards; unload it there (or `lms unload --all`) to free the GPU.
+
+Only documents filed for review (no rule matched) get these jobs. Lab2 has no
+filing rules yet, so that is every document for now.
+
 ## Signing in
 
 Sign in with `PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN` (the first ADMIN's API token).
