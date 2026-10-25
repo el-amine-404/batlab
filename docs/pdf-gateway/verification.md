@@ -252,3 +252,24 @@ Regression after the caps (local): `test_m1.sh`, `test_m2.sh`, `test_m2_pipeline
 `docker compose config`. Not yet rerun on Lab2 after the cap change:
 `test_m3_cdr.sh`, `test_m3_validation.sh`, `test_m3_e2e.sh`. They run once,
 under the thermal guard, at the M4 integration step.
+
+## 2026-10-25 — M4 slice 1: portable archive library and CLI
+
+Ran on the local PC (not Lab2), inside the archive image: no network, read-only
+root, all capabilities dropped, 1 CPU, 512 MiB.
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Atomic publish | VERIFIED | Staged in a private same-filesystem `staging/` (checked by `st_dev`). The PDF is copied and hashed and must equal the validated SHA-256. The sidecar is schema-validated (Draft 2020-12, formats checked). Files and directories are fsynced, then a single `rename` makes the document visible and the parent is fsynced. Published layout: `Finance/2026/Invoices/2026-10-15 - Example Telecom - Internet Invoice [doc-…]/` with the human-named PDF, `metadata.json` and `content.txt`; directories 0755, files 0644 (shareable read-only). Manifest line appended after the rename. |
+| Never overwrite / collisions | VERIFIED | Identical human names produced distinct directories by stable ID; re-publishing an existing ID was refused with `DOCUMENT_EXISTS`. Found by the test: the ID lookup used a glob, where `[…]` is a character class, so existing IDs were never found; fixed with literal matching. |
+| Hostile names | VERIFIED | Traversal (`../`, `..\`), Windows reserved names (`CON` → `CON_`), separators and `:*?"<>\|`, control/NUL, bidi override, zero-width, 380-byte and CJK names, and dot/space-only names all stayed inside `archive/` as exactly four portable components of ≤160 bytes. |
+| Refusals publish nothing | VERIFIED | Wrong hash (`SOURCE_HASH_MISMATCH`), missing approval and a signed viewing copy (`SIDECAR_INVALID`) left no visible document and no staging. |
+| Fallback | VERIFIED | Undated, issuer-less document → `Unsorted/2026/undated - Unclassified - Scanned document [doc-…]`. |
+| Sidecar edits | VERIFIED | Compare-and-swap on `metadataRevision`: stale revision → `REVISION_CONFLICT`; integrity/path/approval fields → `IMMUTABLE_FIELD`; invalid tag → `SIDECAR_INVALID`. The PDF hash was unchanged after edits. |
+| Verify | VERIFIED | A flipped PDF byte gave `PDF_HASH_MISMATCH`; a dropped `.exe` gave `UNEXPECTED_ENTRY`. CLI exits 0 when clean, 1 when damaged. |
+| Reindex without a database | VERIFIED | A standalone SQLite catalog was rebuilt from files only (documents, tags, `content.txt` text, revisions). Damaged documents were listed in `rejected` instead of being indexed. |
+| Export / import | VERIFIED | Checksummed tar bundle; import into a fresh root verified and byte-identical; re-import idempotent. A tampered PDF (`BUNDLE_HASH_MISMATCH`) and a `../` member (`BUNDLE_UNSAFE_MEMBER`) imported nothing. Export from a damaged archive was refused. |
+| Crash safety (real SIGKILL) | VERIFIED | 25 random SIGKILLs during 24 MB publishes, window calibrated to the measured 0.7 s publish, 3 runs. Every visible document was always complete and valid; 2–5 kills per run left only invisible staging, which `repair --apply` removed. The rename→manifest window was created deterministically: dry-run reported it without changes and apply re-recorded it. Found by the test: an append after a torn final manifest line was glued onto it; fixed. |
+| Paperless resync CLI | NOT STARTED | M6. |
+
+Command: `pdf-gateway/tests/test_m4_archive.sh` (local, about 1 min).

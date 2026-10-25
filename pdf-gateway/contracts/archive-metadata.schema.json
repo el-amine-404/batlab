@@ -24,11 +24,24 @@
       "properties": {
         "category": {"enum": ["Finance", "Employment", "Identity", "Medical", "Education", "Contracts", "Property", "Vehicles", "Taxes", "Personal", "Other", "Unsorted"]},
         "reviewState": {"enum": ["VERIFIED", "RULE", "REVIEW_REQUIRED", "FALLBACK"]},
-        "reason": {"type": "string", "maxLength": 500}
+        "reason": {"type": "string", "maxLength": 500},
+        "folder": {"type": "string", "minLength": 1, "maxLength": 40, "pattern": "^[A-Za-z0-9][A-Za-z0-9 &()_-]{0,39}$", "description": "Document-type folder under category/year, e.g. Invoices"}
       }
     },
     "relativePdfPath": {"$ref": "#/$defs/relativePath"},
     "relativeTextPath": {"$ref": "#/$defs/relativePath"},
+    "archivePath": {"type": "string", "minLength": 1, "maxLength": 240, "description": "Canonical document directory relative to archive/; must match the sidecar's actual location", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*[\\\\\\x00-\\x1f]).+$"},
+    "textExtraction": {
+      "type": "object", "additionalProperties": false, "required": ["method", "source", "pages", "characters", "truncated"],
+      "properties": {
+        "method": {"enum": ["native_text", "ocr"]},
+        "source": {"enum": ["original", "viewing_copy"], "description": "original means text came from the untrusted source, not the reconstructed PDF"},
+        "engine": {"type": "string", "maxLength": 80},
+        "pages": {"type": "integer", "minimum": 0},
+        "characters": {"type": "integer", "minimum": 0},
+        "truncated": {"type": "boolean"}
+      }
+    },
     "integrity": {
       "type": "object", "additionalProperties": false, "required": ["sha256", "bytes"],
       "properties": {"sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "bytes": {"type": "integer", "minimum": 1}}
