@@ -4,6 +4,14 @@
 # sufficient: debug evidence must show the expected networkless Podman/gVisor path.
 set -Eeuo pipefail
 
+readonly CONTAINERS_CONF="${PDF_CDR_CONTAINERS_CONF:-/etc/batlab/pdf-cdr/containers.conf}"
+
+if [[ ! -r $CONTAINERS_CONF ]]; then
+  echo "CDR_UNAVAILABLE: missing dedicated Podman config $CONTAINERS_CONF" >&2
+  exit 1
+fi
+export CONTAINERS_CONF
+
 for command in podman dangerzone-cli dangerzone-image; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "CDR_UNAVAILABLE: missing $command" >&2
@@ -11,12 +19,23 @@ for command in podman dangerzone-cli dangerzone-image; do
   }
 done
 
+command -v runsc >/dev/null 2>&1 || {
+  echo "CDR_UNAVAILABLE: missing gVisor runsc runtime" >&2
+  exit 1
+}
+
 if [[ ${EUID} -eq 0 ]]; then
   echo "CDR_UNAVAILABLE: Dangerzone must run rootless" >&2
   exit 1
 fi
 
 dangerzone-image verify-local >/dev/null
+
+configured_runtime="$(podman info --format '{{.Host.OCIRuntime.Name}}')"
+if [[ $configured_runtime != runsc ]]; then
+  echo "CDR_UNAVAILABLE: Podman selected '$configured_runtime', expected 'runsc'" >&2
+  exit 1
+fi
 
 scratch="$(mktemp -d)"
 cleanup() { rm -rf -- "$scratch"; }

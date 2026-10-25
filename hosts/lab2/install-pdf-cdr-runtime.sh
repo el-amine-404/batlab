@@ -8,6 +8,8 @@ set -Eeuo pipefail
 readonly EXPECTED_FINGERPRINT="DE28AB241FA48260FAC9B8BAA7C9B38522604281"
 readonly KEYRING="/etc/apt/keyrings/fpf-apt-tools-archive-keyring.gpg"
 readonly SOURCE="/etc/apt/sources.list.d/fpf-apt-tools.list"
+readonly CDR_CONFIG_DIR="/etc/batlab/pdf-cdr"
+readonly CONTAINERS_CONF="$CDR_CONFIG_DIR/containers.conf"
 
 if [[ ${EUID} -ne 0 ]]; then
   echo "Run with sudo: sudo hosts/lab2/install-pdf-cdr-runtime.sh" >&2
@@ -53,11 +55,42 @@ if [[ ! -f $SOURCE ]] || [[ $(<"$SOURCE") != "$source_line" ]]; then
 fi
 
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y dangerzone-full
+DEBIAN_FRONTEND=noninteractive apt-get install -y dangerzone-full runsc
+
+# Keep the gVisor selection scoped to the PDF gateway. Dangerzone disables
+# cgroups for rootless conversions, so Podman must also know that runsc supports
+# that mode; otherwise it rejects the conversion before the sandbox starts.
+install -d -o root -g root -m 0755 "$CDR_CONFIG_DIR"
+config_tmp="$(mktemp)"
+cleanup_config() { rm -f -- "$config_tmp"; }
+trap 'cleanup; cleanup_config' EXIT
+cat >"$config_tmp" <<'EOF'
+[engine]
+runtime = "runsc"
+runtime_supports_nocgroups = ["runsc"]
+
+[engine.runtimes]
+runsc = ["/usr/bin/runsc"]
+EOF
+install -o root -g root -m 0644 "$config_tmp" "$CONTAINERS_CONF"
 
 # Rootless execution is part of the boundary. Never initialize or convert as root.
-runuser -u "$runtime_user" -- dangerzone-cli --version
-runuser -u "$runtime_user" -- dangerzone-image verify-local
+run_as_runtime_user() {
+  runuser -u "$runtime_user" -- env CONTAINERS_CONF="$CONTAINERS_CONF" "$@"
+}
 
-echo "Dangerzone CDR runtime installed; run the tracked isolation verification next."
+run_as_runtime_user dangerzone-cli --version
+# The Debian package contains the verifier and signing key, but not necessarily
+# the sandbox image. `upgrade` retrieves the signed transparency-log metadata
+# and imports the current upstream image; verification must happen afterwards.
+run_as_runtime_user dangerzone-image upgrade
+run_as_runtime_user dangerzone-image verify-local
+
+configured_runtime="$(run_as_runtime_user podman info --format '{{.Host.OCIRuntime.Name}}')"
+if [[ $configured_runtime != runsc ]]; then
+  echo "Dangerzone Podman configuration selected '$configured_runtime', expected 'runsc'" >&2
+  exit 1
+fi
+
+echo "Dangerzone CDR runtime and signed image installed with gVisor; run the tracked isolation verification next."
 
