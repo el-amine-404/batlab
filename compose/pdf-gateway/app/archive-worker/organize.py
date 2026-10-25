@@ -31,8 +31,9 @@ MONTHS = {name: number for number, names in enumerate([
     ("november", "novembre", "nov"), ("december", "decembre", "décembre", "dec", "déc")], 1) for name in names}
 DATE_PATTERNS = [
     (re.compile(r"\b(20\d\d|19\d\d)-(\d\d)-(\d\d)\b"), ("y", "m", "d")),
-    (re.compile(r"\b(\d{1,2})[/.](\d{1,2})[/.](20\d\d|19\d\d)\b"), ("d", "m", "y")),
-    (re.compile(r"\b(\d{1,2})(?:er)?\s+([A-Za-zÀ-ÿ]{3,9})\.?\s+(20\d\d|19\d\d)\b"), ("d", "mon", "y")),
+    (re.compile(r"\b(\d{1,2})[/.-](\d{1,2})[/.-](20\d\d|19\d\d)\b"), ("d", "m", "y")),
+    # "15 October 2026", "1er mars 2026", "10-Jun-2026"
+    (re.compile(r"\b(\d{1,2})(?:er)?(?:\s+|-)([A-Za-zÀ-ÿ]{3,9})\.?(?:\s+|-)(20\d\d|19\d\d)\b"), ("d", "mon", "y")),
     (re.compile(r"\b([A-Za-zÀ-ÿ]{3,9})\.?\s+(\d{1,2}),\s+(20\d\d|19\d\d)\b"), ("mon", "d", "y")),
 ]
 DATE_LABELS = re.compile(r"(invoice date|date of issue|issue date|date de facture|date d'émission|date d.emission|"
@@ -45,11 +46,23 @@ class Organisation:
     evidence: dict        # restricted: matched rule, evidence snippets, decisions
 
 
+# The archive's default vocabulary (manifests/taxonomy.json holds the live one, which
+# people may extend). Revision 2 added everyday topics, so tags help find things.
+DEFAULT_TAGS_REVISION = 2
+DEFAULT_TAGS = (
+    "finance", "invoice", "receipt", "bank", "statement", "tax", "salary", "payslip", "loan", "insurance",
+    "subscription", "internet", "phone", "mobile", "tv", "streaming", "sport", "football", "electricity", "water",
+    "gas", "utilities", "rent", "housing", "property", "car", "vehicle", "fuel", "transport", "travel", "flight",
+    "hotel", "health", "medical", "pharmacy", "doctor", "hospital", "education", "school", "university", "course",
+    "exam", "certificate", "diploma", "identity", "passport", "visa", "residence", "employment", "contract", "work",
+    "administration", "government", "legal", "family", "personal", "shopping", "online", "warranty", "repair",
+    "membership", "donation", "refund", "payment")
+
+
 def default_taxonomy(updated_at: str) -> dict:
-    return {"schemaVersion": "1.0.0", "revision": 1, "categories": CATEGORIES, "updatedAt": updated_at, "tags": [
-        {"id": tag, "label": tag.capitalize(), "aliases": [], "private": False, "blocked": False}
-        for tag in ("finance", "invoice", "internet", "utilities", "bank", "statement", "tax", "medical",
-                    "employment", "payslip", "contract", "insurance", "identity", "vehicle", "property", "education")]}
+    return {"schemaVersion": "1.0.0", "revision": DEFAULT_TAGS_REVISION, "categories": CATEGORIES, "updatedAt": updated_at, "tags": [
+        {"id": tag, "label": tag.replace("-", " ").capitalize(), "aliases": [], "private": False, "blocked": False}
+        for tag in DEFAULT_TAGS]}
 
 
 SCHEMAS = Path(os.getenv("PDF_ARCHIVE_SCHEMA_DIR", Path(__file__).parent))
@@ -111,28 +124,6 @@ def rule_matches(rule: dict, lowered: str) -> list[int] | None:
         if needle.lower() in lowered:
             return None
     return offsets if offsets else None
-
-
-def from_filename(name: str | None) -> tuple[str | None, str | None]:
-    """A title and an ISO date from an upload's file name (untrusted; used only when no rule filed it).
-
-    "2026-06-10_facture_beinsport.pdf" -> ("Facture beinsport", "2026-06-10").
-    """
-    stem = re.sub(r"\.pdf$", "", (name or "").strip(), flags=re.IGNORECASE)
-    stem = re.sub(r"[\x00-\x1f\x7f]", "", stem)
-    day = None
-    match = re.match(r"^(\d{4})-(\d{2})-(\d{2})(?!\d)", stem)
-    if match:
-        try:
-            day = date(int(match.group(1)), int(match.group(2)), int(match.group(3))).isoformat()
-            stem = stem[match.end():]
-        except ValueError:
-            day = None
-    title = re.sub(r"[_\s]+", " ", stem).strip(" -_./")
-    if title.lower() == "upload" or not re.search(r"[^\W\d_]", title):  # the API's name for a nameless upload, or no letters
-        title = ""
-    title = title[:1].upper() + title[1:200] if title else None
-    return title, day
 
 
 def organise(text: str, rules: dict, taxonomy: dict) -> Organisation:

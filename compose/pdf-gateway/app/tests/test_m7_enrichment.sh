@@ -11,7 +11,7 @@ export TEST_STORAGE="$scratch/storage" TEST_ARCHIVE="$scratch/archive" TEST_ADMI
 dc=(docker compose -f "$root/compose/pdf-gateway/app/tests/docker-compose.m4-gate.yml" -f "$root/compose/pdf-gateway/app/tests/docker-compose.m7-enrichment.override.yml")
 psql=("${dc[@]}" exec -T postgres psql -U pdf_gateway -d pdf_gateway -v ON_ERROR_STOP=1 -q)
 base=http://127.0.0.1:18289
-model="${PDF_GATEWAY_LLM_MODEL:-qwen/qwen3-4b-2507}"
+model="${PDF_GATEWAY_LLM_MODEL:-qwen/qwen3-30b-a3b-2507}"
 limits=(--network none --read-only --tmpfs /tmp:size=32m --cap-drop ALL --security-opt no-new-privileges --cpus 1 --memory 512m)
 agent_token="$(openssl rand -hex 32)"; user_token="$(openssl rand -hex 32)"
 
@@ -43,6 +43,14 @@ agent() {  # agent NAME [env...] -- run the real agent container on the host net
     pdf-gateway-m7-test/enrichment-agent:local "${AGENT_ARGS[@]}"
 }
 jobs_done() { [[ "$(q "SELECT count(*) FROM enrichment_jobs WHERE status IN ('WAITING_FOR_AI','LEASED','SUBMITTED')")" == 0 ]]; }
+vocabulary_only() {  # vocabulary_only DOC: its tags all come from the archive's vocabulary, none injected
+  python3 -c '
+import json, sys
+tags = json.loads(sys.argv[1] or "[]") or []
+known = {tag["id"] for tag in json.load(open(sys.argv[2]))["tags"]}
+assert set(tags) <= known and "hacked" not in tags, tags
+' "$(q "SELECT sidecar->'tags' FROM archive_documents WHERE document_id='$1'")" "$TEST_ARCHIVE/manifests/taxonomy.json"
+}
 
 curl -fsS -m 3 http://127.0.0.1:1234/v1/models | json '[m["id"] for m in v["data"]]' | grep -q "$model" || { echo "LM Studio with $model is required" >&2; exit 1; }
 mkdir -p "$TEST_STORAGE"/{fixtures,cdr-output,text-extracts,api/quarantine,api/multipart} "$TEST_ARCHIVE/manifests"
@@ -101,9 +109,9 @@ for path in /api/v1/scans /api/v1/archive /api/v1/quarantine /api/v1/dashboard/s
 done
 eq "$(code -H "Authorization: Bearer $agent_token" -H "X-Agent-Id: t1000-laptop" "$base/api/v1/enrichment/jobs/$(q "SELECT id FROM enrichment_jobs LIMIT 1")/document")" 403  # not registered yet
 
-# --- The real agent: OCR with Tesseract, suggestions with LM Studio -------------------
+# --- The real agent: OCR with Tesseract, filing with LM Studio ------------------------------
 AGENT_ARGS=(); agent pgw-m7-agent -d -e PDF_GATEWAY_AGENT_ID=t1000-laptop -e PDF_GATEWAY_LLM_MODEL="$model" >/dev/null
-for _ in $(seq 1 150); do jobs_done && break; sleep 2; done
+for _ in $(seq 1 200); do jobs_done && break; sleep 3; done
 jobs_done
 q "SELECT kind, status, COALESCE(error_code,'-'), attempts FROM enrichment_jobs ORDER BY document_id"
 eq "$(q "SELECT string_agg(status,',' ORDER BY document_id) FROM enrichment_jobs")" "COMPLETED,COMPLETED,COMPLETED"
@@ -113,21 +121,28 @@ path80="$TEST_ARCHIVE/archive/$(q "SELECT archive_path FROM archive_documents WH
 [[ $path80 == *"Finance/2026/Invoices/2026-10-15 - Example Telecom"* ]]
 grep -qi "example telecom" "$path80/content.txt"
 eq "$(sha256sum "$path80/$(q "SELECT pdf_file FROM archive_documents WHERE document_id='$(doc_id 80)'")" | cut -d' ' -f1)" "$sha80"   # PDF unchanged
-docker run --rm "${limits[@]}" --user 10005:10005 -v "$TEST_ARCHIVE:/archive:ro" pdf-gateway-m4-test/archive-worker:local --root /archive verify | json 'v["ok"]' | grep -qx True
-# AI proposals: evidence-backed, controlled vocabulary, never applied by themselves.
-q "SELECT right(document_id,2), fields::text FROM ai_suggestions ORDER BY document_id" | cut -c1-400
-python3 - "$(q "SELECT COALESCE(jsonb_agg(jsonb_build_object('doc',document_id,'fields',fields,'status',status)),'[]') FROM ai_suggestions")" <<'PY'
-import json,sys
-rows=json.loads(sys.argv[1])
-for row in rows:
-    f=row["fields"]; assert row["status"]=="PROPOSED", row
-    assert all(t in {"finance","invoice","internet","utilities","bank","statement","tax","medical","employment","payslip","contract","insurance","identity","vehicle","property","education"} for t in f.get("tags",[])), f
-    assert "hacked" not in json.dumps(f.get("tags",[])), f
-print("proposals:", len(rows), "all evidence-validated, vocabulary-only, unapplied")
-PY
-eq "$(q "SELECT archive_path||'|'||metadata_revision FROM archive_documents WHERE document_id='$(doc_id 82)'")" "$before82"   # injection changed nothing
+# Published before the laptop was there: the AI's checked answer filed them afterwards.
+q "SELECT right(document_id,2), review_state, archive_path, sidecar->>'title', sidecar->'tags' FROM archive_documents WHERE document_id IN ('$(doc_id 81)','$(doc_id 82)') ORDER BY 1"
+q "SELECT right(document_id,2), applied::text FROM enrichment_jobs WHERE kind='SUGGEST' ORDER BY document_id" | cut -c1-400
+for n in 81 82; do vocabulary_only "$(doc_id $n)"; done
+eq "$(q "SELECT count(*) FROM archive_documents WHERE document_id='$(doc_id 82)' AND (sidecar->'tags') ? 'hacked'")" 0
 eq "$(q "SELECT string_agg(status||policy||detection,',' ORDER BY id) FROM scan_jobs")" "$scans_before"                       # no verdict moved
+docker run --rm "${limits[@]}" --user 10005:10005 -v "$TEST_ARCHIVE:/archive:ro" pdf-gateway-m4-test/archive-worker:local --root /archive verify | json 'v["ok"]' | grep -qx True
 eq "$(ai_state)" READY
+
+# --- With the laptop there, a new document waits for the AI and is saved already filed -----
+seed 84 streamco-invoice.pdf
+for _ in $(seq 1 60); do [[ -n "$(q "SELECT id FROM enrichment_jobs WHERE scan_id='$(scan_id 84)'")" ]] && break; sleep 1; done
+eq "$(q "SELECT (deadline_at > now() + interval '5 minutes')::text FROM enrichment_jobs WHERE scan_id='$(scan_id 84)'")" true   # it waits (up to 10 min)
+[[ "$(q "SELECT status FROM scan_jobs WHERE id='$(scan_id 84)'")" != READY ]]
+for _ in $(seq 1 150); do [[ "$(q "SELECT status FROM scan_jobs WHERE id='$(scan_id 84)'")" == READY ]] && break; sleep 2; done
+q "SELECT archive_path, sidecar::text FROM archive_documents WHERE document_id='$(doc_id 84)'" | cut -c1-600
+eq "$(q "SELECT category||'|'||review_state FROM archive_documents WHERE document_id='$(doc_id 84)'")" "Finance|AI"
+[[ "$(q "SELECT archive_path FROM archive_documents WHERE document_id='$(doc_id 84)'")" == "Finance/2026/Invoices/2026-03-12 - "* ]]
+q "SELECT sidecar->'issuer'->>'value' FROM archive_documents WHERE document_id='$(doc_id 84)'" | grep -qi streamco
+eq "$(q "SELECT (sidecar->'reference'->>'value')||'|'||(sidecar->'amount'->>'value')||' '||(sidecar->'amount'->>'currency')||'|'||(sidecar->>'documentType') FROM archive_documents WHERE document_id='$(doc_id 84)'")" "88123|499.00 MAD|invoice"
+vocabulary_only "$(doc_id 84)"
+eq "$(q "SELECT status||'|'||(document_id IS NOT NULL) FROM enrichment_jobs WHERE scan_id='$(scan_id 84)'")" "COMPLETED|true"
 
 # --- Applying a proposal is an explicit, CAS-protected user edit ------------------------
 sid="$(q "SELECT id FROM ai_suggestions WHERE document_id='$(doc_id 81)' AND (fields ? 'title' OR fields ? 'tags') LIMIT 1")"
@@ -174,10 +189,15 @@ eq "$(ai_state)" SERVICE_DOWN
 q "UPDATE ai_agents SET last_seen_at = now() - interval '6 hours'"
 eq "$(ai_state)" OFFLINE
 seed 83 scanned-invoice.pdf                                       # published while the laptop is "away"
-for _ in $(seq 1 60); do [[ "$(q "SELECT status FROM enrichment_jobs WHERE document_id='$(doc_id 83)'")" == WAITING_FOR_AI ]] && break; sleep 1; done
+seed 85 streamco-invoice.pdf                                       # a text document doesn't wait for an absent laptop
+for _ in $(seq 1 60); do [[ "$(q "SELECT count(*) FROM scan_jobs WHERE id IN ('$(scan_id 83)','$(scan_id 85)') AND status='READY'")" == 2 ]] && break; sleep 1; done
 eq "$(q "SELECT status FROM scan_jobs WHERE id='scan-01J00000000000000000000083'")" READY
+eq "$(q "SELECT category||'|'||review_state FROM archive_documents WHERE document_id='$(doc_id 85)'")" "Unsorted|FALLBACK"
 AGENT_ARGS=(); agent pgw-m7-agent -d -e PDF_GATEWAY_AGENT_ID=t1000-laptop -e PDF_GATEWAY_LLM_MODEL="$model" >/dev/null
 for _ in $(seq 1 90); do [[ "$(q "SELECT status FROM enrichment_jobs WHERE document_id='$(doc_id 83)' AND kind='OCR'")" == COMPLETED ]] && break; sleep 2; done
 eq "$(q "SELECT category FROM archive_documents WHERE document_id='$(doc_id 83)'")" Finance
+for _ in $(seq 1 120); do [[ "$(q "SELECT review_state FROM archive_documents WHERE document_id='$(doc_id 85)'")" == AI ]] && break; sleep 2; done
+eq "$(q "SELECT category||'|'||review_state FROM archive_documents WHERE document_id='$(doc_id 85)'")" "Finance|AI"   # filed once it was back
+docker run --rm "${limits[@]}" --user 10005:10005 -v "$TEST_ARCHIVE:/archive:ro" pdf-gateway-m4-test/archive-worker:local --root /archive verify | json 'v["ok"]' | grep -qx True
 docker rm -f -v pgw-m7-agent >/dev/null
-echo "M7 enrichment: scope, OCR re-filing, evidence-checked AI proposals, injection, breaker, availability states and resume passed"
+echo "M7/M8 enrichment: scope, OCR re-filing, AI filing before saving (and after, when the laptop was away), checked fields, injection, breaker, availability states and resume passed"

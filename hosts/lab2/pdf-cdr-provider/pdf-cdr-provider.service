@@ -8,7 +8,7 @@ After=default.target
 Type=simple
 Environment=CONTAINERS_CONF=/etc/batlab/pdf-cdr/containers.conf
 EnvironmentFile=%h/.config/pdf-cdr-provider/provider.env
-ExecStart=/usr/bin/python3 -I %h/.local/lib/pdf-cdr-provider/provider.py --socket ${PDF_CDR_SOCKET} --allowed-uid ${PDF_CDR_ALLOWED_UID} --scratch %t/pdf-cdr-provider --timeout ${PDF_CDR_TIMEOUT_SECONDS}
+ExecStart=/usr/bin/python3 -I %h/.local/lib/pdf-cdr-provider/provider.py --socket ${PDF_CDR_SOCKET} --allowed-uid ${PDF_CDR_ALLOWED_UID} --scratch %t/pdf-cdr-provider --timeout ${PDF_CDR_TIMEOUT_SECONDS} --ocr-language ${PDF_CDR_OCR_LANGUAGE}
 Restart=on-failure
 RestartSec=10
 # Exit 3 means a sandbox survived termination; stay down until an operator looks.

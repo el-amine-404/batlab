@@ -166,7 +166,10 @@ def convert(source: Path, workdir: Path, args: argparse.Namespace, image_digest:
     # files are bounded by polling instead.
     started = time.monotonic()
     with debug_log.open("wb") as log_handle:
-        process = subprocess.Popen(["/usr/bin/dangerzone-cli", "--debug", "-o", str(output), str(source)],
+        # --ocr-lang adds an invisible, searchable text layer (Tesseract's GlyphLessFont) to the
+        # rebuilt pages; final validation admits exactly that font and only invisible text.
+        ocr = ["--ocr-lang", args.ocr_language] if args.ocr_language else []
+        process = subprocess.Popen(["/usr/bin/dangerzone-cli", "--debug", *ocr, "-o", str(output), str(source)],
                                    stdin=subprocess.DEVNULL, stdout=log_handle, stderr=subprocess.STDOUT,
                                    cwd=workdir, env=tool_env(), start_new_session=True)
         failure = None
@@ -302,7 +305,11 @@ def main() -> int:
     parser.add_argument("--io-timeout", type=int, default=60)
     parser.add_argument("--max-output-bytes", type=int, default=256 * 1024 * 1024)
     parser.add_argument("--expected-image-digest", default=None)
+    # One Tesseract language (Dangerzone takes one); empty for image-only output.
+    parser.add_argument("--ocr-language", default="")
     args = parser.parse_args()
+    if args.ocr_language and not re.fullmatch(r"[a-z]{3}(_[a-z]{2,4})?", args.ocr_language):
+        parser.error("--ocr-language must be one Tesseract language code such as fra or eng")
     if args.expected_image_digest and not DIGEST.match(args.expected_image_digest):
         parser.error("--expected-image-digest must be sha256:<64 hex>")
     os.umask(0o077)

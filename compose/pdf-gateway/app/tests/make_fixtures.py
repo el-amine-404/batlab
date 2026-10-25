@@ -123,6 +123,10 @@ def main() -> int:
     fixtures["conflicting.pdf"] = page_pdf(lines(
         "Example Telecom invoice", "Banque Exemple releve de compte", "Invoice date: 01/10/2026"))
     fixtures["undated-invoice.pdf"] = page_pdf(lines("Example Telecom", "Invoice", "Total due: 12.00 EUR"))
+    # Unknown to the filing rules: the AI must file it from its text alone.
+    fixtures["streamco-invoice.pdf"] = page_pdf(lines(
+        "STREAMCO MEDIA SARL", "Facture", "www.streamco.example", "Facture No: 88123", "Date: 12-Mar-2026",
+        "Abonnement TV et football 12 mois", "Total TTC MAD 499.00"))
     long_page = b"".join(text("Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor " + str(n), 195 - n)
                          for n in range(190))
     fixtures["large-text.pdf"] = page_pdf(long_page, pages=20)

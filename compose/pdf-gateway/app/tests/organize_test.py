@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, "/opt/pdf-gateway")
 from archive import Archive, schema_errors  # noqa: E402
-from organize import default_taxonomy, from_filename, organise, validated  # noqa: E402
+from organize import default_taxonomy, organise, validated  # noqa: E402
 
 DATA = Path(sys.argv[1])
 NOW = "2026-10-25T12:00:00Z"
@@ -108,10 +108,4 @@ check("unfamiliar document published to Unsorted fallback", path.relative_to(arc
       == "Unsorted/2026/undated - Unclassified document [doc-01J000000000000000000000G2]", path)
 check("content.txt keeps hostile text as inert data", "<script>" in (published / "content.txt").read_text()
       and archive.verify()["ok"])
-# Unfiled documents take their title and date from the upload's file name.
-check("file name gives title and date", from_filename("2026-06-10_facture_beinsport.pdf") == ("Facture beinsport", "2026-06-10"))
-check("an invalid date stays in the title", from_filename("2026-13-40 x.pdf") == ("2026-13-40 x", None))
-check("no letters or the placeholder name give no title",
-      from_filename("0001.pdf") == (None, None) and from_filename("upload.pdf") == (None, None) and from_filename(None) == (None, None))
-check("control characters and leading dots are dropped", from_filename("../evil\x07name.pdf") == ("Evilname", None))
 print("M4 organisation tests passed")

@@ -70,7 +70,8 @@ export const PaperlessImport = z.object({
 });
 export type PaperlessImport = z.infer<typeof PaperlessImport>;
 export const EnrichmentJob = z.object({ kind: z.enum(["OCR", "SUGGEST"]), status: z.string(), errorCode: z.string().nullable(),
-  createdAt: z.string(), completedAt: z.string().nullable() });
+  createdAt: z.string(), completedAt: z.string().nullable(), deadlineAt: z.string().nullish(),
+  applied: z.record(z.string(), z.unknown()).nullish() });
 export type EnrichmentJob = z.infer<typeof EnrichmentJob>;
 export const DocumentPage = z.object({ items: z.array(Document), nextCursor: z.string().nullable() });
 export const Sidecar = z.object({
@@ -78,6 +79,9 @@ export const Sidecar = z.object({
   documentType: z.string().optional(),
   documentDate: z.object({ value: z.string(), source: z.string(), reviewState: z.string() }).optional(),
   issuer: z.object({ value: z.string(), source: z.string(), reviewState: z.string() }).optional(),
+  reference: z.object({ value: z.string(), source: z.string() }).optional(),
+  amount: z.object({ value: z.string(), currency: z.string(), source: z.string() }).optional(),
+  titleSource: z.string().optional(),
   organization: z.object({ category: z.string(), reviewState: z.string(), reason: z.string().optional(), folder: z.string().optional() }),
   signature: z.object({ originalSigned: z.boolean(), viewingCopySigned: z.literal(false), summary: z.string().optional() }),
   relativePdfPath: z.string(),
@@ -170,6 +174,7 @@ export const api = {
   ai: () => request(Ai, "/api/v1/system/ai"),
   suggestions: (id: string) => request(z.array(Suggestion), `/api/v1/archive/${encodeURIComponent(id)}/suggestions`),
   enrichment: (id: string) => request(z.array(EnrichmentJob), `/api/v1/archive/${encodeURIComponent(id)}/enrichment`),
+  scanEnrichment: (scanId: string) => request(z.array(EnrichmentJob), `/api/v1/scans/${encodeURIComponent(scanId)}/enrichment`),
   applySuggestion: (id: string, suggestion: string, etag: string) =>
     request(Edit, `/api/v1/archive/${encodeURIComponent(id)}/suggestions/${encodeURIComponent(suggestion)}/apply`, { method: "POST", headers: { "If-Match": etag } }),
   dismissSuggestion: (id: string, suggestion: string) =>

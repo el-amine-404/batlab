@@ -124,8 +124,12 @@ d=sys.argv[1]; s=json.load(open(d+"/metadata.json"))
 with pikepdf.open(d+"/"+s["relativePdfPath"]) as pdf:
     info={str(k):str(v) for k,v in pdf.docinfo.items()}
     assert "/Metadata" not in pdf.Root and "/Info" not in pdf.Root, "XMP or catalog Info survived"
-expected={"/Title":s["title"],"/Producer":"Batlab PDF Gateway (metadata-writer-1)"}
-if s.get("documentType"): expected["/Subject"]=s["documentType"].replace("_"," ")
+    assert pdf.is_linearized, "published PDF is not linearized (fast web view)"
+expected={"/Title":s["title"],"/Producer":"PDF Gateway"}
+if s.get("issuer"): expected["/Author"]=s["issuer"]["value"]
+subject=[{"invoice":"Invoice"}.get(s.get("documentType"), s.get("documentType")), (s.get("issuer") or {}).get("value"),
+         (s.get("documentDate") or {}).get("value"), ("no. "+s["reference"]["value"]) if s.get("reference") else None]
+if any(subject): expected["/Subject"]=" · ".join(x for x in subject if x)
 if s.get("tags"): expected["/Keywords"]=", ".join(s["tags"])
 assert info==expected, (info, expected)
 assert s["embeddedMetadata"]["fields"]==sorted(k[1:] for k in expected), s["embeddedMetadata"]

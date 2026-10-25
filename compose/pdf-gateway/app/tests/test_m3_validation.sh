@@ -29,6 +29,8 @@ prepare_storage
 # A real Dangerzone output produced by this account, used where a test must
 # show that only one property (hash, scanner availability) makes it fail.
 dangerzone-cli -o "$TEST_STORAGE/fixtures/dz-unsigned.pdf" "$TEST_STORAGE/fixtures/unsigned.pdf" >/dev/null 2>&1
+# The same with the invisible OCR text layer the provider adds (GlyphLessFont).
+dangerzone-cli --ocr-lang fra -o "$TEST_STORAGE/fixtures/dz-ocr.pdf" "$TEST_STORAGE/fixtures/unsigned.pdf" >/dev/null 2>&1
 cp "$TEST_STORAGE/fixtures/dz-unsigned.pdf" "$TEST_STORAGE/fixtures/dz-tampered.pdf"
 printf '%% appended after CDR\n' >>"$TEST_STORAGE/fixtures/dz-tampered.pdf"
 chmod 0644 "$TEST_STORAGE/fixtures"/*
@@ -52,10 +54,11 @@ seed_output 35 unsigned.pdf multipage.pdf
 seed_output 36 unsigned.pdf dz-unsigned.pdf dz-tampered.pdf
 seed_output 38 unsigned.pdf blank-image.pdf
 seed_output 39 unsigned.pdf dz-unsigned.pdf
-pump 30 31 32 33 34 35 36 38 39
+seed_output 37 unsigned.pdf dz-ocr.pdf
+pump 30 31 32 33 34 35 36 37 38 39
 
 fv() { q "SELECT $2 FROM final_validations WHERE scan_id='$(scan_id "$1")' ORDER BY attempt DESC LIMIT 1"; }
-for n in 30 31 32 39; do
+for n in 30 31 32 37 39; do
   eq "$(sv $n "status||','||policy||','||artifact_state||','||detection")" "AWAITING_ARCHIVE,ALLOW_SANITIZED,FINAL_VALIDATED,NO_THREATS_DETECTED"
   eq "$(fv $n "verdict||','||failure_codes::text||','||policy_version")" "PASS,[],final-policy-1"
   [[ "$(fv $n "engines->>'clamav'")" == ClamAV* ]]

@@ -1,7 +1,9 @@
 """Allowlisted embedded metadata for new, unsigned, already-sanitized PDFs.
 
-Writes only Title, Subject, Keywords and a fixed Producer into the document
-information dictionary of a *copy* of a validated CDR output. Any existing
+Writes only Title, Author, Subject, Keywords and a fixed Producer into the
+document information dictionary of a *copy* of a validated CDR output, saved
+linearized ("fast web view"; the page images are copied, not re-encoded). No
+Creator, dates or tool versions are written. Any existing
 info dictionary, XMP stream or catalog-level /Info is removed, and the file is
 rewritten in full (no incremental update), so no earlier metadata survives in
 an older revision. The result is a new artifact that must pass final
@@ -16,8 +18,14 @@ from pathlib import Path
 
 import pikepdf
 
-WRITER_VERSION = "metadata-writer-1"
-PRODUCER = "Batlab PDF Gateway (metadata-writer-1)"
+WRITER_VERSION = "metadata-writer-2"
+# Names no host, person or tool version.
+PRODUCER = "PDF Gateway"
+TYPE_LABEL = {"invoice": "Invoice", "receipt": "Receipt", "bank_statement": "Bank statement", "payslip": "Payslip",
+              "contract": "Contract", "tax_document": "Tax document", "insurance": "Insurance", "medical": "Medical",
+              "identity_document": "Identity document", "certificate": "Certificate", "letter": "Letter",
+              "school_document": "School document", "presentation": "Presentation", "report": "Report",
+              "manual": "Manual", "other": "Document"}
 OUTPUT_GROUP = int(os.getenv("PDF_GATEWAY_OUTPUT_GROUP", "10010"))
 CONTROL = re.compile(r"[\x00-\x1f\x7f  ‪-‮⁦-⁩﻿]")
 
@@ -27,13 +35,21 @@ def clean(value: str, limit: int) -> str:
 
 
 def fields_for(sidecar_fields: dict) -> dict[str, str]:
-    """The allowlisted embedded values derived from organisation fields.
+    """The allowlisted embedded values derived from the document's organisation.
 
-    Author is never written automatically: issuer is not author, and an author
-    claim would need verification. Untrusted source metadata is never copied."""
+    Author is the correspondent that issued the document (as PDF readers and
+    Paperless use it), and only when its value was checked against the text.
+    Untrusted source metadata is never copied."""
     values = {"/Title": clean(sidecar_fields["title"], 200)}
-    if sidecar_fields.get("documentType"):
-        values["/Subject"] = clean(sidecar_fields["documentType"].replace("_", " "), 100)
+    issuer = (sidecar_fields.get("issuer") or {}).get("value")
+    if issuer:
+        values["/Author"] = clean(issuer, 120)
+    kind = sidecar_fields.get("documentType")
+    subject = [TYPE_LABEL.get(kind, kind.replace("_", " ").capitalize()) if kind else None, issuer,
+               (sidecar_fields.get("documentDate") or {}).get("value"),
+               f"no. {sidecar_fields['reference']['value']}" if sidecar_fields.get("reference") else None]
+    if any(subject):
+        values["/Subject"] = clean(" · ".join(part for part in subject if part), 200)
     if sidecar_fields.get("tags"):
         values["/Keywords"] = clean(", ".join(sidecar_fields["tags"]), 500)
     values["/Producer"] = PRODUCER
@@ -50,8 +66,11 @@ def write(source: Path, target: Path, values: dict[str, str]) -> None:
         info = pdf.make_indirect(pikepdf.Dictionary({key: pikepdf.String(value) for key, value in values.items()}))
         pdf.trailer["/Info"] = info
         temporary = target.with_name(f".{target.name}.partial")
-        pdf.save(temporary, linearize=False, object_stream_mode=pikepdf.ObjectStreamMode.disable,
-                 compress_streams=True, fix_metadata_version=False, deterministic_id=True)
+        # Linearized for fast web view; streams keep their encoding (preserve), so the
+        # page images are byte-for-byte the validated ones.
+        pdf.save(temporary, linearize=True, object_stream_mode=pikepdf.ObjectStreamMode.disable,
+                 compress_streams=True, stream_decode_level=pikepdf.StreamDecodeLevel.none,
+                 fix_metadata_version=False, deterministic_id=True)
     with temporary.open("rb+") as handle:
         # Readable only by the validation stage, like CDR output (group 10010).
         os.fchown(handle.fileno(), -1, OUTPUT_GROUP)

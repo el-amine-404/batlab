@@ -20,7 +20,9 @@ code in `compose/pdf-gateway/app`). It runs on lab2 with the host CDR provider.
    ```
 
    Its socket is `/mnt/docker-volumes/pdf-gateway/cdr-socket/cdr.sock`. Without
-   it, uploads stop at `SANITIZING` and nothing is released.
+   it, uploads stop at `SANITIZING` and nothing is released. `PDF_CDR_OCR_LANGUAGE`
+   (in `~/.config/pdf-cdr-provider/provider.env`, default `fra`) is the one language
+   Dangerzone uses for the clean copy's invisible text layer; empty for none.
 4. A dedicated Paperless user for the adapter (it may add documents, tags and
    custom fields, and read tasks; it is not an administrator):
 
@@ -31,6 +33,7 @@ code in `compose/pdf-gateway/app`). It runs on lab2 with the host CDR provider.
    u, _ = User.objects.get_or_create(username="pdf-gateway")
    u.set_unusable_password(); u.is_staff = u.is_superuser = False; u.save()
    codes = ["add_document", "view_document", "change_document", "view_tag", "add_tag",
+            "view_correspondent", "add_correspondent", "view_documenttype", "add_documenttype",
             "view_customfield", "add_customfield", "view_paperlesstask"]
    u.user_permissions.set(Permission.objects.filter(codename__in=codes))
    print(Token.objects.get_or_create(user=u)[0].key)'
@@ -75,18 +78,25 @@ The site is `https://pdf.homelab.lan`, with a certificate from Caddy's own CA
 The CA lives in `/mnt/docker-volumes/caddy/data/caddy/pki` (backed up). If it is
 lost, Caddy makes a new one and every device must trust the new one.
 
-## OCR and AI from the laptop (optional)
+## The AI files documents (laptop, optional)
 
-The T1000 laptop's agent (`compose/pdf-gateway/app/enrichment-agent`) pulls work
-from the gateway: Tesseract OCR (English, French, Arabic) for scans without text,
-and the LM Studio model `qwen/qwen3-4b-2507` for proposed title, issuer, type,
-date and tags. Proposals carry a quote from the document and change nothing until
-someone applies them on the document's page. With the laptop off, documents are
-archived as usual and the jobs wait (the Status page says so).
+When no filing rule recognises a document, the T1000 laptop's agent
+(`compose/pdf-gateway/app/enrichment-agent`) files it with the LM Studio model
+`qwen/qwen3-30b-a3b-2507` (about a minute a document; LM Studio splits it between
+the GPU and RAM). The archive **waits up to 10 minutes** for it, so the saved PDF,
+its folder and the Paperless copy are right from the start. If the laptop is off,
+the document is saved at once as Unsorted and filed when the laptop is back.
+
+The answer is applied by itself, field by field, and only what the document
+supports: the type and section from fixed lists, a correspondent the text names,
+a date printed in it, a number and an amount that appear verbatim, tags from the
+archive's vocabulary (`manifests/taxonomy.json`, which you may extend). The page
+says "Filled in by the AI"; fix anything with Edit. A document your rules filed
+keeps its filing; the AI's answer is then only a suggestion.
 
 1. On lab2: `PDF_GATEWAY_ENRICHMENT_ENABLED=true` in `compose/.env`, then recreate
    `api` and `archive-worker`.
-2. An `ENRICHMENT` token (it can only lease jobs and read released copies): make
+2. An `ENRICHMENT` token (it can only lease jobs and read what it is given): make
    it on the laptop, store its SHA-256 on lab2 as in step 6 above, with the role
    `ENRICHMENT` and the user `t1000-agent`.
 3. On the laptop, in `compose/pdf-gateway/app/enrichment-agent`:
@@ -94,12 +104,20 @@ archived as usual and the jobs wait (the Status page says so).
    `curl -o caddy-local-ca.crt http://pdf.homelab.lan/ca.crt` (compare it with
    `/mnt/docker-volumes/caddy/data/caddy/pki/authorities/local/root.crt` on lab2).
    Then `docker compose up -d --build`. It restarts with Docker.
-4. LM Studio's server must run on 127.0.0.1:1234. The agent loads the model at
-   a 4096-token context (≈3.2 GB of the T1000's 4 GB) when it has work. LM Studio
-   keeps it loaded afterwards; unload it there (or `lms unload --all`) to free the GPU.
+4. LM Studio's server must run on 127.0.0.1:1234; the agent loads the model when it
+   has work, and LM Studio keeps it loaded (`lms unload --all` frees the RAM and GPU).
+   The lighter `qwen/qwen3-4b-2507` (`PDF_GATEWAY_LLM_MODEL`, with
+   `PDF_GATEWAY_LLM_CONTEXT=4096`) fits the GPU alone and takes ~17 s.
 
-Only documents filed for review (no rule matched) get these jobs. Lab2 has no
-filing rules yet, so that is every document for now.
+## What the PDF carries
+
+The clean copy is each page redrawn as a lossless 150-DPI image with an invisible
+OCR text layer (searchable, copyable). Inside the PDF: Title, Author (the
+correspondent), Subject (type · correspondent · date · number), Keywords (tags),
+Producer "PDF Gateway"; no Creator, dates or versions; saved linearized (fast web
+view). Paperless keeps such a file exactly as it is (it counts as born-digital, so
+Paperless makes no re-encoded copy of its own) and gets the title, correspondent,
+document type, date and tags.
 
 ## Signing in
 

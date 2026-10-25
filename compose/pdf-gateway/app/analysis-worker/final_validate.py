@@ -33,6 +33,15 @@ MAX_JSON = 16 * 1024 * 1024
 FORBIDDEN_KEYS = {"/JS", "/JavaScript", "/AA", "/OpenAction", "/Launch", "/EmbeddedFile", "/EmbeddedFiles",
                   "/RichMedia", "/XFA", "/AcroForm", "/Annots", "/URI", "/SubmitForm", "/ImportData",
                   "/GoToR", "/GoToE", "/Names", "/Encrypt", "/Font", "/Movie", "/Sound", "/Threads", "/Metadata"}
+# The one font allowed: Tesseract's GlyphLessFont, which Dangerzone's OCR uses for
+# an invisible text layer. It has no glyph outlines; its bytes are pinned. Any other
+# font, any font file other than this one, or visible text fails the check.
+GLYPHLESS_FONT_SHA256 = {"c7845420925a23d88ed830a63957b8af85a66a8daf8d9fc90e843673b2ef1a59"}
+TYPE0_KEYS = {"/Type", "/Subtype", "/BaseFont", "/Encoding", "/DescendantFonts", "/ToUnicode"}
+CIDFONT_KEYS = {"/Type", "/Subtype", "/BaseFont", "/CIDSystemInfo", "/FontDescriptor", "/CIDToGIDMap", "/DW", "/W"}
+DESCRIPTOR_KEYS = {"/Type", "/FontName", "/Flags", "/FontBBox", "/ItalicAngle", "/Ascent", "/Descent", "/CapHeight",
+                   "/StemV", "/FontFile2"}
+MAX_FONT_STREAM = 256 * 1024
 # Document information may carry only these keys (string values; checked below).
 INFO_KEYS = {"/Title", "/Subject", "/Keywords", "/Author", "/Creator", "/Producer", "/CreationDate", "/ModDate"}
 FORBIDDEN_VALUES = {"/JavaScript", "/Launch", "/URI", "/SubmitForm", "/ImportData", "/GoToR", "/GoToE",
@@ -90,7 +99,12 @@ def structure(path: Path, findings: list[dict]) -> tuple[dict, list[list[float]]
     for name, entry in objects.items():
         value = entry.get("value") if isinstance(entry, dict) else None
         stream = entry.get("stream", {}).get("dict") if isinstance(entry, dict) else None
-        walk(value, findings, name)
+        # A page's own /Resources may name fonts (the text layer, checked in fonts());
+        # /Font anywhere else stays forbidden.
+        if isinstance(value, dict) and value.get("/Type") == "/Page" and isinstance(value.get("/Resources"), dict):
+            walk({**value, "/Resources": {key: item for key, item in value["/Resources"].items() if key != "/Font"}}, findings, name)
+        else:
+            walk(value, findings, name)
         walk(stream, findings, name)
         if isinstance(stream, dict) and stream.get("/Type") == "/XObject" and stream.get("/Subtype") != "/Image":
             fail(findings, "structure", "NON_IMAGE_XOBJECT", "Output page uses a non-image XObject", object=name)
@@ -101,7 +115,7 @@ def structure(path: Path, findings: list[dict]) -> tuple[dict, list[list[float]]
                 fail(findings, "structure", "PAGE_BOX_INVALID", "Output page lacks a MediaBox", object=name)
                 continue
             pages.append([float(item) for item in box])
-            if not isinstance(resources, dict) or set(resources) - {"/XObject", "/ProcSet"}:
+            if not isinstance(resources, dict) or set(resources) - {"/XObject", "/ProcSet", "/Font"}:
                 fail(findings, "structure", "PAGE_RESOURCES_UNEXPECTED", "Output page has non-image resources",
                      object=name, keys=sorted(resources) if isinstance(resources, dict) else None)
     # Info dictionaries (trailer, and MuPDF's catalog-level copy) hold strings
@@ -125,7 +139,95 @@ def structure(path: Path, findings: list[dict]) -> tuple[dict, list[list[float]]
                  keys=unexpected[:10], nonStrings=non_strings[:10])
     engine["pages"] = len(pages)
     engine["infoDictionaries"] = len(info_refs)
+    engine["textLayerFonts"] = fonts(path, objects, findings)
     return engine, pages
+
+
+def stream_bytes(path: Path, ref: str, limit: int) -> bytes | None:
+    """One object's decoded stream data, bounded; None when it can't be read."""
+    match = re.fullmatch(r"(\d+) (\d+) R", ref) if isinstance(ref, str) else None
+    if not match:
+        return None
+    try:
+        result = subprocess.run(["qpdf", f"--show-object={match.group(1)},{match.group(2)}", "--filtered-stream-data", str(path)],
+                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=30,
+                                check=False, env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "HOME": "/nonexistent"},
+                                preexec_fn=scan.bounded_preexec)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return result.stdout if result.returncode == 0 and len(result.stdout) <= limit else None
+
+
+def fonts(path: Path, objects: dict, findings: list[dict]) -> int:
+    """Admit only GlyphLessFont text layers drawn invisibly; returns how many fonts were checked."""
+    def value(ref):
+        entry = objects.get(f"obj:{ref}") if isinstance(ref, str) else None
+        return entry.get("value") if isinstance(entry, dict) else None
+
+    def bad(code, message, **evidence):
+        fail(findings, "structure", code, message, **evidence)
+
+    checked = 0
+    font_maps = []
+    for name, entry in objects.items():
+        item = entry.get("value") if isinstance(entry, dict) else None
+        stream = entry.get("stream", {}).get("dict") if isinstance(entry, dict) else None
+        if isinstance(stream, dict) and stream.get("/Type") in ("/Font", "/FontDescriptor"):
+            bad("FONT_NOT_ALLOWED", "A font object is a stream", object=name)
+        if not isinstance(item, dict):
+            continue
+        if item.get("/Type") == "/Page":
+            resources = item.get("/Resources")
+            if isinstance(resources, dict) and "/Font" in resources:
+                font_maps.append((name, resources["/Font"], item.get("/Contents")))
+        if item.get("/Type") == "/Font":
+            checked += 1
+            subtype = item.get("/Subtype")
+            if subtype == "/Type0":
+                if set(item) - TYPE0_KEYS or item.get("/BaseFont") != "/GlyphLessFont" or item.get("/Encoding") != "/Identity-H":
+                    bad("FONT_NOT_ALLOWED", "Only the GlyphLessFont text layer is allowed", object=name, font=str(item.get("/BaseFont"))[:40])
+                to_unicode = item.get("/ToUnicode")
+                if to_unicode is not None and stream_bytes(path, to_unicode, MAX_FONT_STREAM) is None:
+                    bad("FONT_NOT_ALLOWED", "Text layer ToUnicode map unreadable or too large", object=name)
+            elif subtype == "/CIDFontType2":
+                if set(item) - CIDFONT_KEYS or item.get("/BaseFont") != "/GlyphLessFont":
+                    bad("FONT_NOT_ALLOWED", "Only the GlyphLessFont text layer is allowed", object=name)
+                gid_map = item.get("/CIDToGIDMap")
+                if gid_map not in (None, "/Identity") and stream_bytes(path, gid_map, MAX_FONT_STREAM) is None:
+                    bad("FONT_NOT_ALLOWED", "Text layer glyph map unreadable or too large", object=name)
+                descriptor = value(item.get("/FontDescriptor"))
+                if not isinstance(descriptor, dict) or set(descriptor) - DESCRIPTOR_KEYS \
+                        or descriptor.get("/FontName") != "/GlyphLessFont" or "/FontFile2" not in descriptor:
+                    bad("FONT_NOT_ALLOWED", "Text layer font descriptor is not the expected one", object=name)
+                else:
+                    data = stream_bytes(path, descriptor["/FontFile2"], MAX_FONT_STREAM)
+                    if data is None or hashlib.sha256(data).hexdigest() not in GLYPHLESS_FONT_SHA256:
+                        bad("FONT_NOT_ALLOWED", "Text layer font file is not the pinned GlyphLessFont",
+                            object=name, sha256=hashlib.sha256(data).hexdigest() if data else None)
+            else:
+                bad("FONT_NOT_ALLOWED", "Only the GlyphLessFont text layer is allowed", object=name, subtype=str(subtype)[:20])
+        if item.get("/Type") == "/FontDescriptor" and set(item) - DESCRIPTOR_KEYS:
+            bad("FONT_NOT_ALLOWED", "Font descriptor carries unexpected entries", object=name, keys=sorted(set(item) - DESCRIPTOR_KEYS)[:10])
+    for page, font_map, contents in font_maps:
+        if not isinstance(font_map, dict) or not all(isinstance(value(ref), dict) and value(ref).get("/Subtype") == "/Type0"
+                                                     for ref in font_map.values()):
+            bad("FONT_NOT_ALLOWED", "Page font map does not point at the text layer font", object=page)
+        refs = contents if isinstance(contents, list) else [contents]
+        content = b""
+        for ref in refs:
+            data = stream_bytes(path, ref, 16 * 1024 * 1024)
+            if data is None:
+                bad("TEXT_LAYER_UNREADABLE", "Page content with a text layer could not be read", object=page)
+                break
+            content += data + b"\n"
+        # Every text object must switch to render mode 3 (invisible) before it shows text.
+        for block in re.findall(rb"\bBT\b(.*?)\bET\b", content, flags=re.S):
+            shows = re.search(rb"(\)|>|\])\s*(Tj|TJ|'|\")", block)
+            mode = re.search(rb"\b3\s+Tr\b", block)
+            if shows and (not mode or mode.start() > shows.start()) or re.search(rb"\b[0-24-7]\s+Tr\b", block):
+                bad("VISIBLE_TEXT", "Text layer is not invisible", object=page)
+                break
+    return checked
 
 
 def page_count(path: Path) -> int | None:
