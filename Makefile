@@ -320,14 +320,20 @@ setup: check-env
 	@echo "Setup complete."
 
 # The gateway's images one at a time, waiting while the CPU is above 75 °C: a
-# first build all at once (Maven, npm, wheels) heats lab2 past 90 °C.
+# first build all at once (Maven, npm, wheels) heats lab2 past 90 °C. Plain
+# docker build, on the host network (lab2's bridge has no DNS for builders):
+# compose's build asks to allow network.host and fails without a terminal.
+# The next `make up` finds every layer cached.
 build-pdf-gateway:
-	@for s in $$($(DC) -f compose/pdf-gateway/docker-compose.yml config --services); do \
+	@$(DC) -f compose/pdf-gateway/docker-compose.yml config --format json | python3 -c 'import json, sys; \
+		[print(s["image"], s["build"]["context"], s["build"].get("dockerfile", "Dockerfile")) \
+		 for s in json.load(sys.stdin)["services"].values() if "build" in s]' | \
+	while read -r image context dockerfile; do \
 		while [ "$$(cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null | sort -n | tail -1)" -gt 75000 ]; do \
 			echo "    CPU above 75 °C, waiting..."; sleep 20; \
 		done; \
-		echo "==> build $$s"; \
-		$(DC) -f compose/pdf-gateway/docker-compose.yml build $$s || exit 1; \
+		echo "==> build $$image"; \
+		docker build --network host -t "$$image" -f "$$context/$$dockerfile" "$$context" || exit 1; \
 	done
 
 # Only the gateway's folders (also part of setup).
