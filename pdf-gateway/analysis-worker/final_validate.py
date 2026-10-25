@@ -32,7 +32,9 @@ MAX_JSON = 16 * 1024 * 1024
 # carries more than page images. Raster reconstruction must never produce them.
 FORBIDDEN_KEYS = {"/JS", "/JavaScript", "/AA", "/OpenAction", "/Launch", "/EmbeddedFile", "/EmbeddedFiles",
                   "/RichMedia", "/XFA", "/AcroForm", "/Annots", "/URI", "/SubmitForm", "/ImportData",
-                  "/GoToR", "/GoToE", "/Names", "/Encrypt", "/Font", "/Movie", "/Sound", "/Threads"}
+                  "/GoToR", "/GoToE", "/Names", "/Encrypt", "/Font", "/Movie", "/Sound", "/Threads", "/Metadata"}
+# Document information may carry only these keys (string values; checked below).
+INFO_KEYS = {"/Title", "/Subject", "/Keywords", "/Author", "/Creator", "/Producer", "/CreationDate", "/ModDate"}
 FORBIDDEN_VALUES = {"/JavaScript", "/Launch", "/URI", "/SubmitForm", "/ImportData", "/GoToR", "/GoToE",
                     "/RichMedia", "/Movie", "/Sound", "/EmbeddedFile", "/Form", "/PS"}
 
@@ -75,7 +77,8 @@ def structure(path: Path, findings: list[dict]) -> tuple[dict, list[list[float]]
     except (OSError, subprocess.TimeoutExpired) as error:
         engine = {"engine": "qpdf-json", "status": "FAILED", "exitCode": None, "error": type(error).__name__}
     if engine["status"] != "OK":
-        fail(findings, "qpdf-json", "STRUCTURE_UNREADABLE", "Decoded structure could not be inspected", **engine)
+        fail(findings, "qpdf-json", "STRUCTURE_UNREADABLE", "Decoded structure could not be inspected",
+             status=engine["status"], exitCode=engine["exitCode"])
         return engine, []
     try:
         document = json.loads(result.stdout)
@@ -101,7 +104,27 @@ def structure(path: Path, findings: list[dict]) -> tuple[dict, list[list[float]]
             if not isinstance(resources, dict) or set(resources) - {"/XObject", "/ProcSet"}:
                 fail(findings, "structure", "PAGE_RESOURCES_UNEXPECTED", "Output page has non-image resources",
                      object=name, keys=sorted(resources) if isinstance(resources, dict) else None)
+    # Info dictionaries (trailer, and MuPDF's catalog-level copy) hold strings
+    # under standard keys only; anything else is an unexpected carrier.
+    info_refs = []  # references ("N 0 R") or inline dictionaries (MuPDF's catalog /Info)
+    for holder in ("trailer", *(name for name, entry in objects.items()
+                                if isinstance(entry, dict) and isinstance(entry.get("value"), dict)
+                                and entry["value"].get("/Type") == "/Catalog")):
+        value = objects.get(holder, {}).get("value", {})
+        if isinstance(value, dict) and "/Info" in value:
+            info_refs.append(value["/Info"])
+    for ref in info_refs:
+        info = ref if isinstance(ref, dict) else objects.get(f"obj:{ref}", {}).get("value")
+        if not isinstance(info, dict):
+            fail(findings, "structure", "INFO_INVALID", "Document information is not a dictionary", ref=str(ref)[:40])
+            continue
+        unexpected = sorted(set(info) - INFO_KEYS)
+        non_strings = sorted(key for key, item in info.items() if not (isinstance(item, str) and item.startswith(("u:", "b:"))))
+        if unexpected or non_strings:
+            fail(findings, "structure", "INFO_NOT_ALLOWLISTED", "Document information has non-allowlisted content",
+                 keys=unexpected[:10], nonStrings=non_strings[:10])
     engine["pages"] = len(pages)
+    engine["infoDictionaries"] = len(info_refs)
     return engine, pages
 
 

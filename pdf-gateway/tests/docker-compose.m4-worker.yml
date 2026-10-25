@@ -14,6 +14,7 @@ services:
       - ../api/src/main/resources/db/migration/V003__m3_cdr.sql:/docker-entrypoint-initdb.d/003.sql:ro
       - ../api/src/main/resources/db/migration/V004__m3_final_validation.sql:/docker-entrypoint-initdb.d/004.sql:ro
       - ../api/src/main/resources/db/migration/V005__m4_archive.sql:/docker-entrypoint-initdb.d/005.sql:ro
+      - ../api/src/main/resources/db/migration/V006__m4_embedded_metadata.sql:/docker-entrypoint-initdb.d/006.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pdf_gateway -d pdf_gateway"]
       interval: 2s
@@ -47,6 +48,8 @@ services:
       PDF_GATEWAY_STORAGE_ROOT: /var/lib/pdf-gateway
       PDF_GATEWAY_ARCHIVE_ROOT: /var/lib/pdf-archive
       PDF_GATEWAY_ARCHIVE_RETRY_SECONDS: "300"
+      # This stage test has no validation worker; the embed round trip is test_m4_metadata.sh.
+      PDF_GATEWAY_EMBED_METADATA: "false"
     depends_on:
       postgres: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}

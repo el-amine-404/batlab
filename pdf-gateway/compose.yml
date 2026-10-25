@@ -235,6 +235,7 @@ services:
     volumes:
       - ${PDF_GATEWAY_STORAGE_ROOT:?set to a private host directory}/quarantine:/var/lib/pdf-gateway/quarantine:ro
       - ${PDF_GATEWAY_STORAGE_ROOT:?set to a private host directory}/cdr-output:/var/lib/pdf-gateway/cdr-output:ro
+      - ${PDF_GATEWAY_STORAGE_ROOT:?set to a private host directory}/metadata-versions:/var/lib/pdf-gateway/metadata-versions:ro
       - ${PDF_GATEWAY_STORAGE_ROOT:?set to a private host directory}/validation-reports:/var/lib/pdf-gateway/validation-reports
     read_only: true
     tmpfs:
@@ -278,6 +279,7 @@ services:
     volumes:
       - ${PDF_GATEWAY_STORAGE_ROOT:?set to a private host directory}/cdr-output:/var/lib/pdf-gateway/cdr-output:ro
       - ${PDF_GATEWAY_STORAGE_ROOT:?set to a private host directory}/text-extracts:/var/lib/pdf-gateway/text-extracts:ro
+      - ${PDF_GATEWAY_STORAGE_ROOT:?set to a private host directory}/metadata-versions:/var/lib/pdf-gateway/metadata-versions
       # archive/, staging/ and manifests/ must share one filesystem (checked at start).
       - ${PDF_GATEWAY_ARCHIVE_ROOT:?set to the portable archive root}:/var/lib/pdf-archive
     read_only: true
