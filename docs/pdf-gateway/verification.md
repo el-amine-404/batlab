@@ -273,3 +273,23 @@ root, all capabilities dropped, 1 CPU, 512 MiB.
 | Paperless resync CLI | NOT STARTED | M6. |
 
 Command: `pdf-gateway/tests/test_m4_archive.sh` (local, about 1 min).
+
+## 2026-10-25 — M4 slice 2: deterministic organisation
+
+Ran on the local PC in networkless, read-only, 1-CPU containers.
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Native-text extraction | VERIFIED | Real `pdftotext 25.03.0` in the analysis image under the M2 rlimits, first 20 pages. Bounded after formatting (16 KiB test bound → `truncated: true`, ≤16,384 bytes; production default 256 KiB). Bidi/control characters stripped. Image-only and malformed inputs gave `NO_TEXT`, not a failure. The analysis worker runs it only for `CDR_ELIGIBLE` originals and records the summary in the analysis report. Its successful path through the durable worker is exercised in slice 3; `test_m2_pipeline.sh` covers the soft-fail path. |
+| Validated manifests | VERIFIED | `manifests/rules.json` (new `rules.schema.json`) and `taxonomy.json` are contract-validated. An invalid rules file was refused with `ValidationError`, never silently replaced. Missing files use the documented default taxonomy. |
+| Rule-based filing | VERIFIED | Named-issuer English invoice → `Finance/Invoices`, `invoice`, issuer "Example Telecom" (rule, with evidence snippet), the labelled invoice date `2026-10-15` chosen over the due date, title "Internet Invoice - October 2026". Tags restricted to the taxonomy; `not-in-taxonomy` dropped and recorded. A French statement with a `dd/mm/yyyy` date → `Finance/Statements`, 2026-10-31. |
+| Review instead of aggressive filing | VERIFIED | No rule → `Unsorted` (`FALLBACK`, `NO_RULE_MATCHED`). No text → `Unsorted` (`FALLBACK`, `NO_TEXT`). Two rules with different categories → `Unsorted` (`REVIEW_REQUIRED`, `CONFLICTING_RULES`). Rule match without a date → `Unsorted` (`REVIEW_REQUIRED`, `RULE_WITHOUT_DATE`), issuer kept as unverified. |
+| Determinism and path safety | VERIFIED | Identical inputs gave identical fields. Publishing gave `Finance/2026/Invoices/2026-10-15 - Example Telecom - Internet Invoice - October 2026 [doc-…]` and `Unsorted/2026/undated - Unclassified - Unclassified document [doc-…]`. Hostile text (`../../etc/passwd CON <script>`) stayed inert inside `content.txt`; categories, folders and issuers come only from rules. |
+| Threat model | IMPLEMENTED | The residual risk of running pdftotext on originals outside gVisor is documented. |
+| Regression | VERIFIED | `test_m2.sh`, `test_m2_pipeline.sh`, `test_m4_archive.sh`; contract validator (3 schemas). |
+
+Command: `pdf-gateway/tests/test_m4_organize.sh` (local).
+
+Not yet: user corrections that create reviewed rules (M5 UI), multilingual dates
+beyond EN/FR month names, and OCR text for scans (M7). Scans without a text layer
+therefore always land in `Unsorted` for review.

@@ -110,6 +110,22 @@ def main() -> int:
         stream(f"q {PAGE[0]} 0 0 {PAGE[1]} 0 0 cm /Im0 Do Q".encode()),
         stream(white, b"/Type /XObject /Subtype /Image /Width 32 /Height 16 /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode "),
     ])
+    # Native-text documents for deterministic organisation (M4).
+    def lines(*items: str) -> bytes:
+        return b"".join(text(item, 180 - 14 * index) for index, item in enumerate(items))
+    fixtures["invoice-en.pdf"] = page_pdf(lines(
+        "Example Telecom S.A.", "INVOICE No 2026-10-4471", "Invoice date: 15 October 2026",
+        "Due date: 30/10/2026", "Internet subscription  Total due: 29.99 EUR",
+        "Ref ../../etc/passwd CON <script>alert(1)</script>"))
+    fixtures["statement-fr.pdf"] = page_pdf(lines(
+        "Banque Exemple", "Releve de compte", "Date du releve : 31/10/2026", "Solde : 1 204,55 EUR"))
+    fixtures["unfamiliar.pdf"] = page_pdf(lines("Meeting notes about the garden", "2026-10-01", "Plant tomatoes"))
+    fixtures["conflicting.pdf"] = page_pdf(lines(
+        "Example Telecom invoice", "Banque Exemple releve de compte", "Invoice date: 01/10/2026"))
+    fixtures["undated-invoice.pdf"] = page_pdf(lines("Example Telecom", "Invoice", "Total due: 12.00 EUR"))
+    long_page = b"".join(text("Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor " + str(n), 195 - n)
+                         for n in range(190))
+    fixtures["large-text.pdf"] = page_pdf(long_page, pages=20)
     hand, regions = handwritten()
     fixtures["handwritten.pdf"] = hand
     for name, data in fixtures.items():

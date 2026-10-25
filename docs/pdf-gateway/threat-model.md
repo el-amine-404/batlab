@@ -51,6 +51,16 @@ Upstream basis:
 - [Docker Engine security boundaries](https://docs.docker.com/engine/security/)
 
 ## Residual risk
+Native-text extraction (M4) runs `pdftotext` on CDR-eligible originals inside
+the networkless, read-only, capability-free analysis container under the same
+CPU/memory/file rlimits as qpdf, limited to 20 pages and 256 KiB. That adds
+poppler's text and font parsing to the surface already exposed to hostile
+originals, without the gVisor sandbox. The text is untrusted data: it can select
+only rule-defined categories, folders, issuers and taxonomy tags, plus a parsed
+date, and is stored verbatim as `content.txt`. It never affects a security verdict
+or a filesystem path. Hidden or invisible text in an original therefore appears in
+`content.txt`.
+
 
 Raster reconstruction reduces active-content risk; it does not prove safety.
 Converter, image-decoder, kernel, gVisor, and host vulnerabilities remain possible.
