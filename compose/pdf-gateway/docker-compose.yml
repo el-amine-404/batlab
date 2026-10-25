@@ -88,7 +88,10 @@ services:
 
   api:
     image: local/pdf-gateway-api
-    build: ./app/api
+    build:
+      context: ./app/api
+      # lab2's bridge has no DNS for builders (as stanzarr, musicguard).
+      network: host
     pull_policy: build
     container_name: pdf-gateway-api
     environment:
@@ -129,7 +132,10 @@ services:
   # through it too (/api/v1/system/status).
   web:
     image: local/pdf-gateway-web
-    build: ./app/web
+    build:
+      context: ./app/web
+      # lab2's bridge has no DNS for builders (as stanzarr, musicguard).
+      network: host
     pull_policy: build
     container_name: pdf-gateway-web
     environment:
@@ -177,7 +183,10 @@ services:
   analysis-worker:
     <<: *worker
     image: local/pdf-gateway-analysis
-    build: ./app/analysis-worker
+    build:
+      context: ./app/analysis-worker
+      # lab2's bridge has no DNS for builders (as stanzarr, musicguard).
+      network: host
     pull_policy: build
     container_name: pdf-gateway-analysis
     environment:
@@ -202,7 +211,10 @@ services:
   signature-worker:
     <<: *worker
     image: local/pdf-gateway-signature
-    build: ./app/signature-worker
+    build:
+      context: ./app/signature-worker
+      # lab2's bridge has no DNS for builders (as stanzarr, musicguard).
+      network: host
     pull_policy: build
     container_name: pdf-gateway-signature
     entrypoint: ["python", "/opt/pdf-gateway/worker.py"]
@@ -226,7 +238,10 @@ services:
   cdr-worker:
     <<: *worker
     image: local/pdf-gateway-cdr
-    build: ./app/cdr-worker
+    build:
+      context: ./app/cdr-worker
+      # lab2's bridge has no DNS for builders (as stanzarr, musicguard).
+      network: host
     pull_policy: build
     container_name: pdf-gateway-cdr
     environment:
@@ -282,6 +297,7 @@ services:
     build:
       context: ./app
       dockerfile: archive-worker/Dockerfile
+      network: host
     pull_policy: build
     container_name: pdf-gateway-archive
     entrypoint: ["python", "/opt/pdf-gateway/worker.py"]
@@ -310,7 +326,10 @@ services:
   paperless-adapter:
     <<: *worker
     image: local/pdf-gateway-paperless
-    build: ./app/paperless-adapter
+    build:
+      context: ./app/paperless-adapter
+      # lab2's bridge has no DNS for builders (as stanzarr, musicguard).
+      network: host
     pull_policy: build
     container_name: pdf-gateway-paperless
     environment:

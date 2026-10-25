@@ -39,7 +39,7 @@ SITES_ROOT   ?= /srv/sites
 PUID := $(shell id -u)
 PGID := $(shell id -g)
 
-.PHONY: help list setup setup-pdf-gateway network up down restart pull config logs ps check-stack check-all-confirm
+.PHONY: help list setup setup-pdf-gateway build-pdf-gateway network up down restart pull config logs ps check-stack check-all-confirm
 
 define compose-loop
 @for s in $(TARGETS); do \
@@ -66,6 +66,7 @@ help:
 	@echo "  make list       - List all discovered stacks"
 	@echo "  make setup      - Create base directories and symlinks"
 	@echo "  make setup-pdf-gateway - Create only the PDF gateway's directories"
+	@echo "  make build-pdf-gateway - Build the PDF gateway's images one at a time (keeps lab2 cool)"
 	@echo "  make up         - Start stacks (STACK=<name> [SERVICE=<name>])"
 	@echo "  make down       - Stop and remove stacks (STACK=<name> [SERVICE=<name>])"
 	@echo "  make restart    - Restart stacks (STACK=<name> [SERVICE=<name>])"
@@ -317,6 +318,17 @@ setup: check-env
 
 	@echo
 	@echo "Setup complete."
+
+# The gateway's images one at a time, waiting while the CPU is above 75 °C: a
+# first build all at once (Maven, npm, wheels) heats lab2 past 90 °C.
+build-pdf-gateway:
+	@for s in $$($(DC) -f compose/pdf-gateway/docker-compose.yml config --services); do \
+		while [ "$$(cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null | sort -n | tail -1)" -gt 75000 ]; do \
+			echo "    CPU above 75 °C, waiting..."; sleep 20; \
+		done; \
+		echo "==> build $$s"; \
+		$(DC) -f compose/pdf-gateway/docker-compose.yml build $$s || exit 1; \
+	done
 
 # Only the gateway's folders (also part of setup).
 setup-pdf-gateway:

@@ -52,9 +52,12 @@ code in `compose/pdf-gateway/app`). It runs on lab2 with the host CDR provider.
 
    Put `$token` in `PDF_GATEWAY_HOMEPAGE_TOKEN`, then `make up STACK=homepage`.
 
-`make up` builds the gateway's images on the host. The first build (Maven, npm,
-Python wheels) takes a few minutes of full CPU on lab2; later builds are cached.
-To spare lab2 the first one, build elsewhere and `docker save | ssh lab2 docker load`.
+`make up` builds the gateway's images on the host (`pull_policy: build`, like the
+other local apps), on the host network because lab2's bridge has no DNS for
+builders. The first build (Maven, npm, Python wheels) is minutes of CPU on lab2;
+later ones are cached. Loading images built elsewhere does not avoid it (the
+build cache is not carried over). To keep lab2 cool on the first one, build one
+image at a time: `make build-pdf-gateway`.
 
 ## Phones and PCs: trust the local CA once
 
