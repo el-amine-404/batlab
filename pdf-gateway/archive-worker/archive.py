@@ -172,7 +172,8 @@ class Archive:
         self.archive.mkdir(mode=0o755, parents=True, exist_ok=True)
         self.staging.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.manifests.mkdir(mode=0o755, parents=True, exist_ok=True)
-        os.chmod(self.staging, 0o700)
+        if stat.S_IMODE(os.stat(self.staging).st_mode) != 0o700:
+            os.chmod(self.staging, 0o700)
         if os.stat(self.staging).st_dev != os.stat(self.archive).st_dev:
             raise ArchiveError("STAGING_NOT_SAME_FILESYSTEM", "atomic rename requires one filesystem")
 
@@ -261,7 +262,7 @@ class Archive:
                 if text is not None:
                     write_file(stage / TEXT, text.encode("utf-8"))
                 write_file(stage / SIDECAR, canonical_json(sidecar))
-                problems = self._check_document(stage, sidecar_location=archive_path)
+                problems = self.check_document(stage, sidecar_location=archive_path)
                 if problems:
                     raise ArchiveError("STAGED_DOCUMENT_INVALID", "; ".join(problems)[:500])
                 os.chmod(stage, 0o755)
@@ -316,7 +317,7 @@ class Archive:
 
     # ------------------------------------------------------------ verification
 
-    def _check_document(self, directory: Path, sidecar_location: str | None = None) -> list[str]:
+    def check_document(self, directory: Path, sidecar_location: str | None = None) -> list[str]:
         """Problems with one document directory; empty means valid.
 
         sidecar_location is given for a staged directory, whose own name is
@@ -359,7 +360,7 @@ class Archive:
         for directory in self.document_dirs():
             documents += 1
             relative = directory.relative_to(self.archive).as_posix()
-            problems = self._check_document(directory)
+            problems = self.check_document(directory)
             try:
                 doc_id = json.loads((directory / SIDECAR).read_text(encoding="utf-8"))["documentId"]
                 if doc_id in seen:
@@ -397,7 +398,7 @@ class Archive:
             indexed = 0
             for directory in self.document_dirs():
                 relative = directory.relative_to(self.archive).as_posix()
-                problems = self._check_document(directory)
+                problems = self.check_document(directory)
                 if problems:
                     connection.execute("INSERT INTO rejected VALUES (?,?)", (relative, json.dumps(problems)))
                     continue

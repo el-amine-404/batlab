@@ -252,6 +252,50 @@ services:
     restart: unless-stopped
     networks: [backend]
 
+  # Sole writer of the portable archive. Reads only validated CDR output and
+  # text extracts; never quarantine. The archive root is shared read-only elsewhere.
+  archive-worker:
+    profiles: [archive]
+    build:
+      context: .
+      dockerfile: archive-worker/Dockerfile
+    entrypoint: ["python", "/opt/pdf-gateway/worker.py"]
+    # 10010: staged CDR output (0640); 10002: analysis text extracts (0640).
+    group_add: ["10010", "10002"]
+    environment:
+      PDF_GATEWAY_DATABASE_HOST: postgres
+      PDF_GATEWAY_DATABASE_NAME: pdf_gateway
+      PDF_GATEWAY_DATABASE_USER: pdf_gateway
+      PDF_GATEWAY_DATABASE_PASSWORD: ${PDF_GATEWAY_DATABASE_PASSWORD:?set in the deployment environment}
+      PDF_GATEWAY_RABBITMQ_HOST: rabbitmq
+      PDF_GATEWAY_RABBITMQ_USER: pdf_gateway
+      PDF_GATEWAY_RABBITMQ_PASSWORD: ${PDF_GATEWAY_RABBITMQ_PASSWORD:?set in the deployment environment}
+      PDF_GATEWAY_STORAGE_ROOT: /var/lib/pdf-gateway
+      PDF_GATEWAY_ARCHIVE_ROOT: /var/lib/pdf-archive
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+    volumes:
+      - ${PDF_GATEWAY_STORAGE_ROOT:?set to a private host directory}/cdr-output:/var/lib/pdf-gateway/cdr-output:ro
+      - ${PDF_GATEWAY_STORAGE_ROOT:?set to a private host directory}/text-extracts:/var/lib/pdf-gateway/text-extracts:ro
+      # archive/, staging/ and manifests/ must share one filesystem (checked at start).
+      - ${PDF_GATEWAY_ARCHIVE_ROOT:?set to the portable archive root}:/var/lib/pdf-archive
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 32
+    mem_limit: 256m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+    networks: [backend]
+
 volumes:
   postgres-data: {}
   rabbitmq-data: {}
