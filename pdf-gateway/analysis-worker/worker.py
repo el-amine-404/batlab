@@ -88,6 +88,9 @@ def persist(scan_id: str, attempt: int, report: dict) -> None:
                        (f"report-{scan_id[5:]}", scan_id, f"reports/{scan_id}.json", report_hash, len(encoded)))
         cursor.execute("INSERT INTO audit_events(action,resource_type,resource_id,outcome,trace_id,details) VALUES ('ANALYSIS_COMPLETED','SCAN',%s,'SUCCESS',%s,%s::jsonb)",
                        (scan_id, str(uuid.uuid4()), json.dumps({"detection": report["detection"], "policy": report["policyDecision"]})))
+        if status == "AWAITING_POLICY":
+            cursor.execute("INSERT INTO outbox_events(id,aggregate_type,aggregate_id,event_type,payload) VALUES (%s,'SCAN',%s,'SIGNATURE_QUEUED',jsonb_build_object('scanId',%s))",
+                           (str(uuid.uuid4()), scan_id, scan_id))
 
 
 def fail_attempt(scan_id: str, attempt: int, error: Exception) -> None:

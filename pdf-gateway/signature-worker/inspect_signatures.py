@@ -136,16 +136,22 @@ def main() -> int:
     parser.add_argument("--trust-root", action="append", type=Path, default=[])
     args = parser.parse_args()
     bounded()
+    source_hash = None
+    source_bytes = None
     try:
         path = args.path.resolve(strict=True)
         if not path.is_file() or path.stat().st_size <= 0 or path.stat().st_size > MAX_BYTES:
             raise ValueError("input must be a regular file from 1 byte through 50 MiB")
+        source_bytes = path.stat().st_size
+        source_hash = hashlib.sha256(path.read_bytes()).hexdigest()
         report, exit_code = inspect(path, args.trust_root)
     except Exception as error:
         report = {
             "schemaVersion": SCHEMA_VERSION,
             "policyVersion": POLICY_VERSION,
             "engine": {"name": "pyHanko", "version": importlib.metadata.version("pyhanko"), "networkFetching": False},
+            "sourceSha256": source_hash,
+            "sourceBytes": source_bytes,
             "state": "UNKNOWN",
             "policyDecision": "REVIEW_REQUIRED",
             # A parse failure cannot prove that the source is unsigned. Retain
