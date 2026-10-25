@@ -47,11 +47,14 @@ services:
       PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN: ${PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN:?set in the deployment environment}
       PDF_GATEWAY_STORAGE_ROOT: /var/lib/pdf-gateway
       PDF_GATEWAY_MULTIPART_DIR: /var/lib/pdf-gateway/multipart
+      PDF_GATEWAY_ARCHIVE_ROOT: /var/lib/pdf-archive
     depends_on:
       postgres: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}
     volumes:
       - ${PDF_GATEWAY_STORAGE_ROOT:?set to a private host directory}:/var/lib/pdf-gateway
+      # Read-only: the API serves approved files; only archive-worker writes.
+      - ${PDF_GATEWAY_ARCHIVE_ROOT:?set to the portable archive root}:/var/lib/pdf-archive:ro
     ports:
       - 127.0.0.1:${PDF_GATEWAY_API_PORT:-18089}:8080
     read_only: true

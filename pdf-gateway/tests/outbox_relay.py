@@ -13,6 +13,7 @@ import pika
 import psycopg2
 
 QUEUES = {"CDR_QUEUED": "pdf.gateway.cdr.v1", "VALIDATION_QUEUED": "pdf.gateway.validation.v1",
+          "METADATA_EDIT_QUEUED": "pdf.gateway.metadata-edit.v1",
           "ARCHIVE_QUEUED": "pdf.gateway.archive.v1"}
 
 types = sys.argv[1:] or list(QUEUES)

@@ -26,6 +26,7 @@ from archive import Archive, ArchiveError, SIDECAR, sha256_file
 from organize import default_taxonomy, organise, validated
 
 QUEUE = "pdf.gateway.archive.v1"
+EDIT_QUEUE = "pdf.gateway.metadata-edit.v1"
 STORAGE = Path(os.getenv("PDF_GATEWAY_STORAGE_ROOT", "/var/lib/pdf-gateway"))
 ARCHIVE = Archive(Path(os.getenv("PDF_GATEWAY_ARCHIVE_ROOT", "/var/lib/pdf-archive")))
 MAX_ATTEMPTS = int(os.getenv("PDF_GATEWAY_ARCHIVE_MAX_ATTEMPTS", "5"))
@@ -284,6 +285,47 @@ def handle(channel, method, _properties, body: bytes) -> None:
         channel.basic_nack(method.delivery_tag, requeue=job is None or job["attempt"] < MAX_ATTEMPTS)
 
 
+def handle_edit(channel, method, _properties, body: bytes) -> None:
+    """Apply one API-requested sidecar edit with compare-and-swap. Never touches the PDF."""
+    try:
+        edit_id = str(uuid.UUID(json.loads(body)["editId"]))
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        channel.basic_reject(method.delivery_tag, requeue=False)
+        return
+    try:
+        with database() as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT document_id,expected_revision,changes,status,actor_id FROM metadata_edits WHERE id=%s FOR UPDATE", (edit_id,))
+            row = cursor.fetchone()
+            if row is None or row[3] != "PENDING":
+                channel.basic_ack(method.delivery_tag)
+                return
+            document_id, expected, changes, _status, actor = row
+            status, code, revision = "APPLIED", None, None
+            try:
+                sidecar = ARCHIVE.update_sidecar(document_id, expected, changes)
+                revision = sidecar["metadataRevision"]
+            except ArchiveError as error:
+                directory = ARCHIVE.find(document_id) if error.code == "REVISION_CONFLICT" else None
+                current = json.loads((directory / SIDECAR).read_text(encoding="utf-8")) if directory else None
+                if current and current["metadataRevision"] == expected + 1 and all(current.get(k) == v for k, v in changes.items()):
+                    sidecar, revision = current, current["metadataRevision"]  # applied before a crash; finish recording it
+                else:
+                    status = "CONFLICT" if error.code == "REVISION_CONFLICT" else "INVALID"
+                    code = error.code
+            if status == "APPLIED":
+                cursor.execute("UPDATE archive_documents SET title=%s,metadata_revision=%s,sidecar=%s::jsonb,updated_at=now() WHERE document_id=%s",
+                               (sidecar["title"], revision, json.dumps(sidecar), document_id))
+            cursor.execute("UPDATE metadata_edits SET status=%s,result_revision=%s,error_code=%s,finished_at=now() WHERE id=%s",
+                           (status, revision, code, edit_id))
+            cursor.execute("INSERT INTO audit_events(actor_id,action,resource_type,resource_id,outcome,trace_id,details) VALUES (%s,'METADATA_EDIT_APPLIED','DOCUMENT',%s,%s,%s,%s::jsonb)",
+                           (actor, document_id, "SUCCESS" if status == "APPLIED" else "FAILURE", str(uuid.uuid4()),
+                            json.dumps({"editId": edit_id, "status": status, "code": code, "revision": revision})))
+        channel.basic_ack(method.delivery_tag)
+    except Exception as error:
+        print(json.dumps({"event": "metadata_edit_error", "editId": edit_id, "errorType": type(error).__name__}), flush=True)
+        channel.basic_nack(method.delivery_tag, requeue=True)
+
+
 def main() -> None:
     ARCHIVE.initialise()
     credentials = pika.PlainCredentials(os.environ["PDF_GATEWAY_RABBITMQ_USER"], os.environ["PDF_GATEWAY_RABBITMQ_PASSWORD"])
@@ -294,8 +336,10 @@ def main() -> None:
             connection = pika.BlockingConnection(parameters)
             channel = connection.channel()
             channel.queue_declare(queue=QUEUE, durable=True)
+            channel.queue_declare(queue=EDIT_QUEUE, durable=True)
             channel.basic_qos(prefetch_count=1)
             channel.basic_consume(queue=QUEUE, on_message_callback=handle)
+            channel.basic_consume(queue=EDIT_QUEUE, on_message_callback=handle_edit)
             channel.start_consuming()
         except (pika.exceptions.AMQPError, psycopg2.Error, OSError):
             time.sleep(5)
