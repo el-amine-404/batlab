@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Batlab PDF Security Gateway API
-  version: 0.1.0
+  version: 0.2.0
   description: Fail-closed contract. Quarantine artifacts are never browser-previewable.
 servers:
   - url: /api/v1
@@ -134,14 +134,18 @@ components:
     Scan:
       type: object
       additionalProperties: false
-      required: [scanId, status, detection, policy, artifact, importStatus, createdAt, updatedAt]
+      required: [scanId, status, stage, detection, policy, artifact, originalRetention, importStatus, sourceBytes, sourceSha256, createdAt, updatedAt]
       properties:
         scanId: {type: string}
         status: {enum: [RECEIVED, QUARANTINED, QUEUED, SCANNING, ANALYZING, AWAITING_POLICY, SANITIZING, VALIDATING_OUTPUT, ARCHIVING, READY, REVIEW_REQUIRED, BLOCKED, FAILED, CANCELLED]}
+        stage: {type: string, pattern: '^[A-Z][A-Z_]{2,31}$', description: 'Exact internal pipeline state, for diagnostics only; clients act on status.'}
         detection: {enum: [NO_THREATS_DETECTED, SUSPICIOUS, MALICIOUS, UNKNOWN]}
-        policy: {enum: [ALLOW_SANITIZED, REVIEW_REQUIRED, BLOCK]}
+        policy: {enum: [ALLOW_SANITIZED, REVIEW_REQUIRED, BLOCK, CDR_ELIGIBLE], description: 'CDR_ELIGIBLE means sanitization may run; only ALLOW_SANITIZED follows final validation of the exact output bytes.'}
         artifact: {enum: [ORIGINAL_QUARANTINED, SANITIZED_STAGED, FINAL_VALIDATED, PUBLISHED]}
+        originalRetention: {enum: [STANDARD, SIGNED_RESTRICTED], description: 'SIGNED_RESTRICTED preserves a cryptographically signed original as evidence; any viewing copy is unsigned.'}
         importStatus: {enum: [NOT_REQUESTED, PENDING, IMPORTING, IMPORTED, FAILED_RETRYABLE, FAILED_FINAL]}
+        sourceBytes: {type: integer, minimum: 1}
+        sourceSha256: {type: string, pattern: '^[0-9a-f]{64}$'}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
     ScanPage:

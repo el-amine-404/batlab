@@ -119,11 +119,13 @@ public class ScanService {
 
     public ScanView get(GatewayPrincipal principal, String scanId) {
         List<ScanView> rows = jdbc.query("""
-                SELECT id,status,detection,policy,artifact_state,import_status,source_bytes,source_sha256,created_at,updated_at
+                SELECT id,status,detection,policy,artifact_state,original_retention,import_status,source_bytes,source_sha256,created_at,updated_at
                   FROM scan_jobs WHERE id=? AND (owner_id=? OR ?)
-                """, (rs, row) -> new ScanView(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4),
-                rs.getString(5), rs.getString(6), rs.getLong(7), rs.getString(8),
-                rs.getObject(9, OffsetDateTime.class), rs.getObject(10, OffsetDateTime.class)),
+                """, (rs, row) -> new ScanView(rs.getString(1), ScanContract.status(rs.getString(2)),
+                ScanContract.stage(rs.getString(2)), ScanContract.detection(rs.getString(3)),
+                ScanContract.policy(rs.getString(4)), ScanContract.artifact(rs.getString(5)),
+                ScanContract.retention(rs.getString(6)), rs.getString(7), rs.getLong(8), rs.getString(9),
+                rs.getObject(10, OffsetDateTime.class), rs.getObject(11, OffsetDateTime.class)),
                 scanId, principal.userId(), principal.admin());
         if (rows.isEmpty()) throw new ApiException(404, "SCAN_NOT_FOUND", "Scan not found");
         return rows.getFirst();

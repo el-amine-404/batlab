@@ -214,3 +214,27 @@ generated documents. Representative real-document latency, memory and quality
 measurements belong to M8. Detection vocabulary is not yet uniform
 (`CLEAN` from M2 vs `NO_THREATS_DETECTED` after validation); slice 4 aligns
 the public contract.
+
+## 2026-10-25 — M3 slice 4: public scan contract alignment
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Contract drift found | VERIFIED | `GET /api/v1/scans/{id}` returned raw database values outside the OpenAPI `Scan` enums (`AWAITING_CDR`, `AWAITING_ARCHIVE`, `CLEAN`, `CDR_ELIGIBLE`) and undeclared fields (`sourceBytes`, `sourceSha256`) under `additionalProperties: false`. A pre-change response shape failed the new checker. |
+| Boundary mapping | VERIFIED | `ScanContract` maps internal values to contract values (`AWAITING_CDR`→`SANITIZING`, `AWAITING_ARCHIVE`→`ARCHIVING`, `CLEAN`→`NO_THREATS_DETECTED`). The exact internal state is exposed as the diagnostic `stage`. Unknown or null values map to `REVIEW_REQUIRED`/`UNKNOWN`/`ORIGINAL_QUARANTINED`/`SIGNED_RESTRICTED`, never to a release state (`ScanContractTest`, 2 tests). |
+| OpenAPI 0.2.0 | VERIFIED | The `Scan` schema adds `stage`, `originalRetention`, `sourceBytes`, `sourceSha256`, and policy `CDR_ELIGIBLE` (spec §5 step 5). `validate_contracts.py` passed. No database migration was needed. |
+| Live responses | VERIFIED | `test_m3_e2e.sh` checked all ten live scan views against the `Scan` schema in `openapi.yaml` (exact keys, enums, patterns). Signed: `ARCHIVING`/`AWAITING_ARCHIVE`/`ALLOW_SANITIZED`/`FINAL_VALIDATED`/`SIGNED_RESTRICTED`. Modified-after-signing: `REVIEW_REQUIRED`, `SIGNED_RESTRICTED`. EICAR: `BLOCKED`/`MALICIOUS`/`BLOCK`. |
+| Regression | VERIFIED | Maven (4 tests), `test_m1.sh`; from Lab2 main `fc52569`: `test_m3_validation.sh`, `test_m3_e2e.sh`. |
+
+## M3 gate summary (2026-10-25)
+
+| Gate item | Status |
+|---|---|
+| pyHanko signature inspection with typed evidence; cryptographic vs visible/handwritten marks | VERIFIED |
+| Signed originals immutable and retention-restricted; viewing copy unsigned | VERIFIED |
+| Isolated CDR through the verified Dangerzone boundary, with per-conversion evidence | VERIFIED |
+| Exact-final-byte qpdf/YARA/ClamAV/structure revalidation; no CLEAN→release shortcut (database-enforced) | VERIFIED |
+| Image, graphic (vector) and handwritten/signature appearance preserved; blank/missing pages flagged | VERIFIED (gross ink-region checks, not fidelity) |
+| Unsafe/unknown output never released | VERIFIED |
+| Optional bounded OCR and allowlisted metadata writer | NOT STARTED (optional, deferred to M4/M7) |
+| Persistent provider service and `cdr` profile deployment | NOT STARTED (deliberately not deployed) |
+| M0 item "review and accept the measured CDR approach" | BLOCKED on user acceptance |
