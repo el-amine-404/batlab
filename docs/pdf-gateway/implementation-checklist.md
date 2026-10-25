@@ -12,7 +12,7 @@ mean verified behavior, not merely committed code.
 - [x] Never release an artifact after a failed, unknown, stale, or skipped required check.
 - [x] Revalidate and rescan the exact final bytes after every PDF-producing step.
 - [x] Keep secrets out of Git, logs, sidecars, browser storage, and API responses.
-- [ ] Rotate the Paperless token exposed by the discarded prototype history.
+- [x] Rotate the Paperless token exposed by the discarded prototype history.
 
 ## M0 — specification, feasibility, and contracts
 
