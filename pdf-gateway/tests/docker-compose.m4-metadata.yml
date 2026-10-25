@@ -31,7 +31,7 @@ services:
       RABBITMQ_DEFAULT_USER: pdf_gateway
       RABBITMQ_DEFAULT_PASS: test-rabbit-password
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      test: ["CMD", "nc", "-z", "127.0.0.1", "5672"]  # an Erlang CLI probe is too slow under CPU caps
       interval: 3s
       timeout: 3s
       retries: 30

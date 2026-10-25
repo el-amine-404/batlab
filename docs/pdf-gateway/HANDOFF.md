@@ -33,7 +33,7 @@ Every agent that continues this project must update this file before stopping:
 
 The latest green checkpoint is the source of truth; chat summaries are advisory.
 
-## Verified state (2026-10-25 UTC, after M5)
+## Verified state (2026-10-25 UTC, after M6)
 
 - M0 VERIFIED, including the user's acceptance of the measured CDR approach (a VM was offered and declined).
 - M1, M2 VERIFIED. M3 VERIFIED (see `verification.md` gate table). M4 VERIFIED for its spec gate
@@ -44,7 +44,10 @@ The latest green checkpoint is the source of truth; chat summaries are advisory.
   390×844 phone viewport). Real iPhone Safari is NOT STARTED (needs deployment over HTTPS and your phone).
 - Real-document check: corpus profiled (703 PDFs, none cryptographically signed). The 2-document pipeline run
   was stopped twice by the thermal guard and is BLOCKED; a lighter real-only run is still possible.
-- Nothing is deployed as a service. The provider unit and the `cdr`/`archive` profiles are installable only.
+- M6 VERIFIED against a disposable Paperless 3.3.2 on Lab2: exactly-once import via a `gateway_document_id`
+  marker field (Paperless 3 accepts duplicates and exposes no checksum), outage/resume, metadata sync,
+  `resync`, token never exposed. Bypass paths are documented in `paperless-bypass.md` (not changed).
+- Nothing is deployed as a service. The provider unit and the `cdr`/`archive`/`paperless` profiles are installable only.
 
 ### Lab2 thermal rule (user requirement, 2026-10-25)
 
@@ -68,6 +71,7 @@ at 85 °C), one at a time, starting below 75 °C. Production CPU caps are config
 | `501124a` | Budget/healthcheck changes, `lab2_test.sh`, `test_pipeline_e2e.sh` through the archive, docs |
 | `25ee7a4` | M5-1 sessions + CSRF, scan/quarantine lists, findings, SSE, safe delete, summary, health, V008 |
 | `b3dbb3c` | M5-2/3 web UI, web container, Firefox/Playwright UI tests |
+| `5a01bc2` | Paperless adapter, V009, import API, archive-worker hooks, bypass doc, TCP RabbitMQ probes |
 
 ### Pipeline as implemented
 
@@ -87,6 +91,8 @@ remove the root-owned `pdf-gateway/api/target` afterwards).
 
 Also local: `test_m5_api.sh`; `test_m5_ui.sh` needs `VENV` (selenium 4.38, playwright 1.56) and
 `PLAYWRIGHT_BROWSERS_PATH` with Playwright Firefox installed (`python -m playwright install firefox`, ~97 MB).
+
+Lab2 via `pdf-gateway/tools/lab2_test.sh test_m6_paperless`: PASSED (485 s, peak 81 °C).
 
 Lab2 via `pdf-gateway/tools/lab2_test.sh`: `test_pipeline_e2e` PASSED (348 s, peak 82 °C).
 `test_m3_cdr` and `test_m3_validation` were aborted by the thermal guard with their old caps; caps are now
@@ -123,16 +129,17 @@ None after the checkpoint commit.
 
 ## Next implementation order
 
-1. M6 exactly-once Paperless projection: a test Paperless instance (disposable, local), documented REST
-   upload and task API, idempotency by archive artifact hash, durable retry/backoff, reconciliation, outage
-   and resume without duplicates, metadata sync on sidecar edits, `pdf-archive resync-paperless`. Never
-   write the Paperless database or media. Document consume-folder/email/web bypass risks.
-2. M7 optional OCR/AI. 3. M8 hardening, budget measurement, backup/restore, real-iPhone check.
+1. M7 optional OCR and AI enrichment: OCR (English/French/Arabic) for textless scans, so they can be
+   organised instead of always landing in Unsorted (CPU-heavy: bounded, low priority, thermally tested,
+   preferably off Lab2). Remote Ollama availability state machine with circuit breaker; AI only proposes
+   fields with evidence and can never change a security verdict.
+2. M8 hardening, measured budget, monitoring, backup/restore, real-iPhone check, deployment, and the
+   Homepage `customapi` tile.
 
 ### First command for the next agent
 
 ```bash
-cd /home/bro/.codex-worktrees/pdf-security-gateway && git fetch origin && git status --short && git log --oneline -10 && pdf-gateway/tests/test_m5_api.sh
+cd /home/bro/.codex-worktrees/pdf-security-gateway && git fetch origin && git status --short && git log --oneline -10 && pdf-gateway/tools/lab2_test.sh test_m6_paperless
 ```
 
 ## M3 plan as written before implementation (completed; kept for history)
