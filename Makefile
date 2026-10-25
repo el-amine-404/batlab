@@ -305,6 +305,28 @@ setup: check-env
 	# carwatch runs as 10001 (compose/frigate).
 	sudo chown 10001:10001 $(VOLUMES_ROOT)/frigate/carwatch
 
+	@echo "==> Creating pdf-gateway directories..."
+	# Each stage runs as its own uid and sees only these (compose/pdf-gateway):
+	# api 10001, analysis/validation 10002, signature 10003, cdr 10004 (group
+	# 10010 for its output), archive 10005. postgres, rabbitmq (100:101) and
+	# clamav (its image chowns) own their state.
+	sudo install -d -m 0755 $(VOLUMES_ROOT)/pdf-gateway $(VOLUMES_ROOT)/pdf-gateway/storage
+	sudo install -d -m 0700 $(VOLUMES_ROOT)/pdf-gateway/postgres $(VOLUMES_ROOT)/pdf-gateway/clamav
+	sudo install -d -m 0700 -o 100 -g 101 $(VOLUMES_ROOT)/pdf-gateway/rabbitmq
+	sudo install -d -m 0755 -o 10001 -g 10001 $(VOLUMES_ROOT)/pdf-gateway/storage/quarantine
+	sudo install -d -m 0700 -o 10001 -g 10001 $(VOLUMES_ROOT)/pdf-gateway/storage/multipart
+	sudo install -d -m 0700 -o 10002 -g 10002 \
+		$(VOLUMES_ROOT)/pdf-gateway/storage/reports \
+		$(VOLUMES_ROOT)/pdf-gateway/storage/validation-reports
+	sudo install -d -m 0750 -o 10002 -g 10002 $(VOLUMES_ROOT)/pdf-gateway/storage/text-extracts
+	sudo install -d -m 0700 -o 10003 -g 10003 $(VOLUMES_ROOT)/pdf-gateway/storage/signature-reports
+	sudo install -d -m 0750 -o 10004 -g 10010 $(VOLUMES_ROOT)/pdf-gateway/storage/cdr-output
+	sudo install -d -m 0750 -o 10005 -g 10010 $(VOLUMES_ROOT)/pdf-gateway/storage/metadata-versions
+	# The host CDR provider (hosts/lab2/pdf-cdr-provider) runs as this user.
+	sudo install -d -m 0755 -o $(PUID) -g $(PGID) $(VOLUMES_ROOT)/pdf-gateway/cdr-socket
+	# The portable archive: plain folders of PDFs, readable without the gateway.
+	sudo install -d -m 0755 -o 10005 -g 10005 $(DATA_ROOT)/documents/pdf-archive
+
 	@echo "==> Symlinking .env to all stacks..."
 	@for d in compose/*; do \
 		if [ -d "$$d" ]; then \

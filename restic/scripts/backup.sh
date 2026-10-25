@@ -87,5 +87,5 @@ stage="success notification"
 restic_notify success "Backup completed" \
   "Snapshot" "${snapshot:-saved; see journal for ID}" \
   "Databases" "Paperless and Immich PostgreSQL; all SQLite databases validated" \
-  "Scope" "Container state, host configuration and Paperless documents; personal/media libraries excluded" \
+  "Scope" "Container state, host configuration, Paperless documents and the PDF archive; personal/media libraries excluded" \
   "Duration" "${elapsed}s" || echo "Backup success notification was not delivered" >&2

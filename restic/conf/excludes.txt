@@ -14,6 +14,13 @@
 /mnt/docker-volumes/frigate/media.img
 /mnt/docker-volumes/frigate/media/**
 
+# PDF gateway: virus signatures are downloaded again, multipart holds half-sent
+# uploads, and the socket belongs to the running CDR provider. The archive
+# itself is under /mnt/storage/data/documents/pdf-archive, which is kept.
+/mnt/docker-volumes/pdf-gateway/clamav/**
+/mnt/docker-volumes/pdf-gateway/storage/multipart/**
+/mnt/docker-volumes/pdf-gateway/cdr-socket/**
+
 # Redis is transient queue/cache state; Paperless rebuilds it.
 /mnt/docker-volumes/paperless/redis/**
 

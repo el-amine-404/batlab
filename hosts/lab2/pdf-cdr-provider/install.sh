@@ -17,7 +17,7 @@ env_file="$HOME/.config/pdf-cdr-provider/provider.env"
 if [[ ! -f $env_file ]]; then
   # The socket directory must be the one bind-mounted into the cdr-worker.
   printf '%s\n' \
-    'PDF_CDR_SOCKET=/srv/pdf-gateway/cdr-socket/cdr.sock' \
+    'PDF_CDR_SOCKET=/mnt/docker-volumes/pdf-gateway/cdr-socket/cdr.sock' \
     'PDF_CDR_ALLOWED_UID=10004' \
     'PDF_CDR_TIMEOUT_SECONDS=600' >"$env_file"
   chmod 0600 "$env_file"

@@ -5,6 +5,11 @@
 	admin off
 	auto_https off
 	persist_config off
+	# Keep the scheme and host the homelab Caddy saw (HTTPS): the API compares a
+	# browser's Origin with them. Only private addresses can reach this container.
+	servers {
+		trusted_proxies static private_ranges
+	}
 }
 
 :8080 {

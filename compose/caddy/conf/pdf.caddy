@@ -1,0 +1,27 @@
+# PDF Security Gateway. HTTPS with Caddy's local CA: the sign-in cookie is
+# Secure, so the browser sends it only over HTTPS. Devices trust the CA once:
+# its certificate (public, not a secret) is at http://pdf.homelab.lan/ca.crt.
+https://pdf.homelab.lan {
+	tls internal
+	import localSubnets
+	# The API caps an upload at 50 MB (51 MB request); this only stops larger bodies early.
+	request_body {
+		max_size 52MB
+	}
+	reverse_proxy @localSubnets http://pdf-gateway-web:8080 {
+		flush_interval -1
+	}
+}
+
+http://pdf.homelab.lan {
+	import localSubnets
+	handle /ca.crt {
+		header Content-Type application/x-x509-ca-cert
+		root * /data/caddy/pki/authorities/local
+		rewrite * /root.crt
+		file_server
+	}
+	handle {
+		redir https://{host}{uri} 308
+	}
+}
