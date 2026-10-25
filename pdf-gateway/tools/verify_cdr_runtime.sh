@@ -90,6 +90,12 @@ grep -Eiq '(network[= :]+none|--network=none)' "$debug_log" || {
   echo "CDR_UNAVAILABLE: conversion did not provide network isolation evidence" >&2
   exit 1
 }
+# The input is streamed over stdin. Any host bind/volume mount would violate the
+# quarantine boundary; Dangerzone's private tmpfs cgroup mount is acceptable.
+if grep -Eiq -- '(^|[[:space:]])--volume([=[:space:]]|$)|--mount=type=bind' "$debug_log"; then
+  echo "CDR_UNAVAILABLE: conversion command exposed a host bind/volume mount" >&2
+  exit 1
+fi
 
 printf 'CDR_READY dangerzone=%s output_sha256=%s\n' \
   "$(dangerzone-cli --version | tr -d '\n')" \

@@ -24,7 +24,7 @@ This file is the resumable source of truth for agents continuing
   - `pdf-gateway/tests/test_m2_pipeline.sh`
 - Main on Lab2 currently includes merge `1273e18`.
 
-## Current CDR gate
+## CDR gate — verified
 
 Dangerzone 0.11.1 and its signed image digest
 `sha256:b1e2ad0aa19c5b994c5c8e49d74d9c4ee99fba1795cf7162ac7aa103440b9f97`
@@ -33,32 +33,25 @@ incorrectly selected host `runsc` as Podman's outer runtime. Official Dangerzone
 architecture uses rootless Podman/crun as the networkless outer container and
 launches bundled gVisor/runsc inside it. Commit `e808050` corrects this.
 
-User action currently required on Lab2 (interactive sudo):
-
-```bash
-cd /home/potato/batlab
-sudo hosts/lab2/install-pdf-cdr-runtime.sh
-```
-
-After that, run from the development host:
+The corrected installer was run on Lab2. This command passed:
 
 ```bash
 ssh lab2 'cd /home/potato/batlab && pdf-gateway/tools/verify_cdr_runtime.sh'
 ```
 
-Do not mark CDR verified unless it prints `CDR_READY` after a real conversion and
-the debug evidence shows both inner gVisor/runsc and `--network=none`. Record the
-exact result in `verification.md` and update the M0 checklist.
+It printed `CDR_READY dangerzone=0.11.1` with output SHA-256
+`b30f4e27459b601bf135e0d5927be06d4d8b50043356bb5cd246a7a5ef05fd66`.
+The verifier requires signed-image validation, outer crun, inner gVisor/runsc,
+`--network=none`, no host bind/volume mounts, and a non-empty PDF output.
 
 ## Next implementation order
 
-1. Close the real CDR isolation gate above.
-2. M3: pyHanko signature evidence, immutable signed originals, Dangerzone adapter, final-byte rescan/revalidation, safe visual/handwritten signature fixture checks.
-3. M4 portable archive and database-less reconstruction before any Paperless integration.
-4. M5 real mobile frontend/PWA.
-5. M6 exactly-once Paperless projection and outage recovery.
-6. M7 optional OCR/AI with offline-safe behavior.
-7. M8 hardening, measured Lab2 impact, monitoring, encrypted backup and clean restore.
+1. M3: pyHanko signature evidence, immutable signed originals, Dangerzone adapter, final-byte rescan/revalidation, safe visual/handwritten signature fixture checks.
+2. M4 portable archive and database-less reconstruction before any Paperless integration.
+3. M5 real mobile frontend/PWA.
+4. M6 exactly-once Paperless projection and outage recovery.
+5. M7 optional OCR/AI with offline-safe behavior.
+6. M8 hardening, measured Lab2 impact, monitoring, encrypted backup and clean restore.
 
 Never skip a milestone gate or substitute mocked security verdicts for actual
 engine execution.

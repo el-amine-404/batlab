@@ -21,9 +21,9 @@ mean verified behavior, not merely committed code.
 - [x] Define portable archive metadata and taxonomy JSON Schemas.
 - [x] Draft OpenAPI 3.1 external contract and typed problem responses.
 - [x] Define the CDR adapter protocol and fail-closed capability check.
-- [ ] Install supported Dangerzone/Podman runtime on Lab2.
-- [ ] Verify signed sandbox image and gVisor-backed, networkless conversion on Lab2.
-- [ ] Run an isolation test proving no network and no host-file access.
+- [x] Install supported Dangerzone/Podman runtime on Lab2.
+- [x] Verify signed sandbox image and gVisor-backed, networkless conversion on Lab2.
+- [x] Run an isolation test proving no network and no host bind/volume access.
 - [ ] Gate: review and accept the measured CDR approach.
 
 ## M1 — infrastructure, authentication, upload, and quarantine
