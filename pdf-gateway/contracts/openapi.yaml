@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Batlab PDF Security Gateway API
-  version: 0.3.0
+  version: 0.4.0
   description: Fail-closed contract. Quarantine artifacts are never browser-previewable.
 servers:
   - url: /api/v1
@@ -108,6 +108,11 @@ paths:
   /archive/{documentId}/sidecar:
     parameters: [{$ref: '#/components/parameters/DocumentId'}]
     get: {operationId: getArchiveSidecar, responses: {'200': {description: Current metadata.json}, '404': {$ref: '#/components/responses/Problem'}}}
+  /session:
+    description: Browser session for the web UI. POST exchanges an API token for an HttpOnly, Secure, SameSite=Strict __Host- cookie and returns a CSRF token. Cookie-authenticated unsafe requests must send it as X-CSRF-Token and a same-origin Origin (or none); bearer-token requests need neither.
+    post: {operationId: createSession, security: [], responses: {'201': {description: Session created; Set-Cookie and csrfToken}, '401': {$ref: '#/components/responses/Problem'}}}
+    get: {operationId: getSession, responses: {'200': {description: Current user, role, csrfToken and expiry}, '401': {$ref: '#/components/responses/Problem'}}}
+    delete: {operationId: deleteSession, responses: {'204': {description: Session revoked and cookie cleared}, '403': {$ref: '#/components/responses/Problem'}}}
   /dashboard/summary:
     get: {operationId: getDashboardSummary, responses: {'200': {description: Authorized aggregate data}}}
   /dashboard/timeseries:
@@ -153,9 +158,10 @@ components:
     Scan:
       type: object
       additionalProperties: false
-      required: [scanId, status, stage, detection, policy, artifact, originalRetention, importStatus, sourceBytes, sourceSha256, createdAt, updatedAt]
+      required: [scanId, displayName, status, stage, detection, policy, artifact, originalRetention, importStatus, sourceBytes, sourceSha256, createdAt, updatedAt]
       properties:
         scanId: {type: string}
+        displayName: {type: string, maxLength: 255, description: 'Untrusted upload filename; clients must render it as plain text only.'}
         status: {enum: [RECEIVED, QUARANTINED, QUEUED, SCANNING, ANALYZING, AWAITING_POLICY, SANITIZING, VALIDATING_OUTPUT, ARCHIVING, READY, REVIEW_REQUIRED, BLOCKED, FAILED, CANCELLED]}
         stage: {type: string, pattern: '^[A-Z][A-Z_]{2,31}$', description: 'Exact internal pipeline state, for diagnostics only; clients act on status.'}
         detection: {enum: [NO_THREATS_DETECTED, SUSPICIOUS, MALICIOUS, UNKNOWN]}

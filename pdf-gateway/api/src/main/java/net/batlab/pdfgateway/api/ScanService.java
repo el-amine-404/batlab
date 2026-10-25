@@ -117,18 +117,37 @@ public class ScanService {
         return new ScanPersisted(accepted(scanId), true);
     }
 
+    private static final String VIEW_COLUMNS =
+            "id,display_name,status,detection,policy,artifact_state,original_retention,import_status,source_bytes,source_sha256,created_at,updated_at";
+
+    private static ScanView view(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new ScanView(rs.getString(1), rs.getString(2), ScanContract.status(rs.getString(3)),
+                ScanContract.stage(rs.getString(3)), ScanContract.detection(rs.getString(4)),
+                ScanContract.policy(rs.getString(5)), ScanContract.artifact(rs.getString(6)),
+                ScanContract.retention(rs.getString(7)), rs.getString(8), rs.getLong(9), rs.getString(10),
+                rs.getObject(11, OffsetDateTime.class), rs.getObject(12, OffsetDateTime.class));
+    }
+
     public ScanView get(GatewayPrincipal principal, String scanId) {
-        List<ScanView> rows = jdbc.query("""
-                SELECT id,status,detection,policy,artifact_state,original_retention,import_status,source_bytes,source_sha256,created_at,updated_at
-                  FROM scan_jobs WHERE id=? AND (owner_id=? OR ?)
-                """, (rs, row) -> new ScanView(rs.getString(1), ScanContract.status(rs.getString(2)),
-                ScanContract.stage(rs.getString(2)), ScanContract.detection(rs.getString(3)),
-                ScanContract.policy(rs.getString(4)), ScanContract.artifact(rs.getString(5)),
-                ScanContract.retention(rs.getString(6)), rs.getString(7), rs.getLong(8), rs.getString(9),
-                rs.getObject(10, OffsetDateTime.class), rs.getObject(11, OffsetDateTime.class)),
-                scanId, principal.userId(), principal.admin());
+        List<ScanView> rows = jdbc.query("SELECT " + VIEW_COLUMNS + " FROM scan_jobs WHERE id=? AND (owner_id=? OR ?)",
+                (rs, row) -> view(rs), scanId, principal.userId(), principal.admin());
         if (rows.isEmpty()) throw new ApiException(404, "SCAN_NOT_FOUND", "Scan not found");
         return rows.getFirst();
+    }
+
+    public record ScanPage(List<ScanView> items, String nextCursor) {}
+
+    /** Newest first; the cursor is the last scan ID of the previous page (ULIDs sort by time). */
+    public ScanPage list(GatewayPrincipal principal, int limit, String cursor, boolean quarantineOnly) {
+        int size = Math.max(1, Math.min(limit, 100));
+        if (cursor != null && !cursor.matches("^scan-[0-9A-HJKMNP-TV-Z]{26}$"))
+            throw new ApiException(400, "INVALID_CURSOR", "Cursor is not a scan ID");
+        String quarantine = quarantineOnly ? " AND status IN ('REVIEW_REQUIRED','BLOCKED','FAILED')" : "";
+        List<ScanView> rows = jdbc.query("SELECT " + VIEW_COLUMNS + " FROM scan_jobs WHERE (owner_id=? OR ?) AND (?::text IS NULL OR id < ?)"
+                        + quarantine + " ORDER BY id DESC LIMIT ?",
+                (rs, row) -> view(rs), principal.userId(), principal.admin(), cursor, cursor, size + 1);
+        String next = rows.size() > size ? rows.get(size - 1).scanId() : null;
+        return new ScanPage(rows.subList(0, Math.min(size, rows.size())), next);
     }
 
     private void assertHeadroom(Path path, long incoming) throws IOException {

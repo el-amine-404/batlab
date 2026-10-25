@@ -15,10 +15,15 @@ public class SecurityConfig {
     @Bean
     SecurityFilterChain security(HttpSecurity http, BearerTokenFilter tokens) throws Exception {
         return http
-                .csrf(csrf -> csrf.disable()) // bearer API only in M1; cookie UI adds CSRF in M5
+                // CSRF for cookie sessions is enforced in BearerTokenFilter (per-session token
+                // plus Origin check); bearer-token requests are not ambient and need none.
+                .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // SSE completes on an async dispatch; the request was authorised on entry.
+                        .dispatcherTypeMatchers(jakarta.servlet.DispatcherType.ASYNC).permitAll()
                         .requestMatchers("/internal/actuator/health/**").permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/session").permitAll()
                         // Allow Spring to render the original failure. Otherwise an
                         // ERROR dispatch without the bearer header masks a 500 as 401.
                         .requestMatchers("/error").permitAll()
