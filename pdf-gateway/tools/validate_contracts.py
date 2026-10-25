@@ -17,7 +17,7 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
-for name in ("archive-metadata.schema.json", "taxonomy.schema.json"):
+for name in ("archive-metadata.schema.json", "taxonomy.schema.json", "rules.schema.json"):
     with (CONTRACTS / name).open("r", encoding="utf-8") as stream:
         value = json.load(stream)
     if value.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
@@ -50,4 +50,4 @@ for forbidden in ("safe: true", "confidencePercentage", "docker.sock"):
     if forbidden in openapi:
         fail(f"forbidden contract text: {forbidden}")
 
-print(f"validated 2 strict JSON Schemas and {len(required)} required OpenAPI paths")
+print(f"validated 3 strict JSON Schemas and {len(required)} required OpenAPI paths")

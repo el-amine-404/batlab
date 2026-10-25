@@ -3,4 +3,5 @@
 !archive-worker/*.py
 !contracts/archive-metadata.schema.json
 !contracts/taxonomy.schema.json
+!contracts/rules.schema.json
 **/__pycache__

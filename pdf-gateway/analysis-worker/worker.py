@@ -93,6 +93,23 @@ def persist(scan_id: str, attempt: int, report: dict) -> None:
                            (str(uuid.uuid4()), scan_id, scan_id))
 
 
+def extract_text(scan_id: str, path: Path) -> dict:
+    """Untrusted native text for organisation only; failure just means no text."""
+    directory = STORAGE / "text-extracts"
+    temporary = directory / f".{scan_id}.{uuid.uuid4().hex}.txt"
+    try:
+        result = subprocess.run(["python3", "/opt/pdf-gateway/extract_text.py", str(path), str(temporary)],
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=60, check=False, env=os.environ.copy())
+        summary = json.loads(result.stdout)
+        if temporary.is_file():
+            os.replace(temporary, directory / f"{scan_id}.txt")
+            summary["sha256"] = sha256(directory / f"{scan_id}.txt")
+        return summary
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        temporary.unlink(missing_ok=True)
+        return {"method": "native_text", "source": "original", "status": "NO_TEXT", "pages": 0, "characters": 0, "truncated": False}
+
+
 def fail_attempt(scan_id: str, attempt: int, error: Exception) -> None:
     code = type(error).__name__[:80]
     with database() as connection, connection.cursor() as cursor:
@@ -117,6 +134,8 @@ def handle(channel, method, _properties, body: bytes) -> None:
         report = json.loads(result.stdout)
         if result.returncode not in (0, 2):
             raise RuntimeError("scanner exited without a typed fail-closed report")
+        if report.get("policyDecision") == "CDR_ELIGIBLE":
+            report["textExtraction"] = extract_text(scan_id, path)
         persist(scan_id, attempt, report)
         channel.basic_ack(method.delivery_tag)
     except (json.JSONDecodeError, KeyError, TypeError):

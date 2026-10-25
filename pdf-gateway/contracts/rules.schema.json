@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://batlab.invalid/schemas/rules-1.0.0.json",
+  "title": "Reviewed deterministic organisation rules (manifests/rules.json)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "revision", "rules", "updatedAt"],
+  "properties": {
+    "schemaVersion": {"const": "1.0.0"},
+    "revision": {"type": "integer", "minimum": 1},
+    "updatedAt": {"type": "string", "format": "date-time"},
+    "rules": {"type": "array", "maxItems": 2000, "items": {"$ref": "#/$defs/rule"}}
+  },
+  "$defs": {
+    "term": {"type": "string", "minLength": 2, "maxLength": 100},
+    "rule": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "issuer", "match", "category", "folder", "documentType", "title"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"},
+        "enabled": {"type": "boolean"},
+        "priority": {"type": "integer", "minimum": 0, "maximum": 1000},
+        "issuer": {"type": "string", "minLength": 1, "maxLength": 80},
+        "match": {
+          "type": "object", "additionalProperties": false, "minProperties": 1,
+          "properties": {
+            "all": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/term"}},
+            "any": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/term"}},
+            "none": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/term"}}
+          }
+        },
+        "category": {"enum": ["Finance", "Employment", "Identity", "Medical", "Education", "Contracts", "Property", "Vehicles", "Taxes", "Personal", "Other"]},
+        "folder": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9 &()_-]{0,39}$"},
+        "documentType": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 120},
+        "tags": {"type": "array", "maxItems": 16, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"}},
+        "createdBy": {"type": "string", "maxLength": 80},
+        "reviewedAt": {"type": "string", "format": "date-time"}
+      }
+    }
+  }
+}

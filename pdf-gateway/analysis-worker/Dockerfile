@@ -17,8 +17,10 @@ COPY --from=tools /suite/pdfid.py /opt/pdf-tools/pdfid.py
 COPY --from=tools /suite/pdf-parser.py /opt/pdf-tools/pdf-parser.py
 COPY --chown=10002:10002 scan.py /opt/pdf-gateway/scan.py
 COPY --chown=10002:10002 worker.py /opt/pdf-gateway/worker.py
-# poppler renders only sanitized CDR output (blank-page checks), never originals.
+# poppler: renders only sanitized CDR output (blank-page checks); pdftotext reads
+# originals' native text under the analysis rlimits (untrusted, organisation only).
 COPY --chown=10002:10002 final_validate.py /opt/pdf-gateway/final_validate.py
+COPY --chown=10002:10002 extract_text.py /opt/pdf-gateway/extract_text.py
 COPY --chown=10002:10002 validation_worker.py /opt/pdf-gateway/validation_worker.py
 COPY rules /opt/pdf-gateway/rules
 USER 10002:10002
