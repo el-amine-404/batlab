@@ -170,3 +170,47 @@ converter does not emit them). Real-converter outputs were validated end to end
 within this stage. Page boxes are not compared with the source, to avoid parsing
 the hostile original further; page count is.
 
+## 2026-10-25 — M3 slice 3: end-to-end signature-aware CDR on the production definition
+
+`test_m3_e2e.sh` ran the production `pdf-gateway/compose.yml` (`scanning` and
+`cdr` profiles) on Lab2. A test override only substitutes a disposable trust
+root. The host provider ran as a transient user unit with the tracked limits.
+Ten generated fixtures were uploaded through the authenticated API with
+idempotency keys. The real outbox publisher drove every stage.
+
+| Fixture | Outcome | Evidence |
+|---|---|---|
+| Unsigned text | VERIFIED released-to-archive | `AWAITING_ARCHIVE`, `ALLOW_SANITIZED`, `FINAL_VALIDATED`, final `PASS`, `ARCHIVE_QUEUED` published. |
+| Validly signed (visible pyHanko signature, trusted test root) | VERIFIED | `SIGNED_VALID_TRUSTED`; `original_retention=SIGNED_RESTRICTED`; viewing copy passed final validation. pyHanko on the viewing copy: `UNSIGNED`, 0 signatures (a new unsigned PDF, not the signed document). Signature-widget ink 0.142 → 0.083, retained. |
+| Tampered after signing (byte flip in signed range) | VERIFIED held | `SIGNED_INVALID` → `REVIEW_REQUIRED`; no CDR attempted; retention `SIGNED_RESTRICTED`. |
+| Modified after signing (incremental content update) | VERIFIED held | Bytes intact, modification level `OTHER`, DocMDP not permitted → `SIGNED_MODIFIED` → `REVIEW_REQUIRED`; no CDR. |
+| Visible signature-like text, no signature | VERIFIED | `UNSIGNED`, retention `STANDARD`, released. Not treated as cryptographic. |
+| Handwritten/graphical marks (vector strokes + raster image) | VERIFIED | `UNSIGNED`, released. Region ink: vector 0.061 → 0.073, raster 0.170 → 0.172. No authenticity claimed. |
+| Malformed | VERIFIED held | Analysis `UNKNOWN` → `REVIEW_REQUIRED`; no signature stage, no CDR. |
+| Encrypted (AES-256, qpdf) | VERIFIED held | `PDF_ENCRYPTED` → `REVIEW_REQUIRED`; no CDR. |
+| Active JavaScript/OpenAction | VERIFIED | Analysis `SUSPICIOUS`/`CDR_ELIGIBLE`; rasterised; the final validator found no active content; released with `NO_THREATS_DETECTED` for the new bytes. |
+| EICAR in a PDF stream | VERIFIED blocked | ClamAV match at analysis → `MALICIOUS`/`BLOCK`/`BLOCKED`; no later stage. |
+
+Cross-cutting evidence:
+
+- Exactly five jobs were in any release-eligible state; the other five never reached CDR.
+- Every quarantined original's SHA-256 equalled the uploaded fixture after the
+  whole pipeline. The stored `source_sha256` matched.
+- Neither `/api/v1/quarantine/{id}` nor `/api/v1/artifacts/{id}/download`
+  returned a 2xx response. No route serves original or staged bytes.
+- Regressions passed afterwards: `test_m1.sh`, `test_m2.sh`,
+  `test_m2_pipeline.sh`, `test_m3_pipeline.sh`, `test_m3_signatures.sh`,
+  `validate_contracts.py`, and `test_m3_cdr.sh` on Lab2.
+
+Command used:
+
+```text
+ssh lab2 'cd <checkout> && pdf-gateway/tests/test_m3_e2e.sh'   # Lab2 only, about 4.5 min
+```
+
+Limits: appearance checks compare ink inside known regions at 50 DPI, a gross
+preservation check rather than visual fidelity. The tested outputs are small
+generated documents. Representative real-document latency, memory and quality
+measurements belong to M8. Detection vocabulary is not yet uniform
+(`CLEAN` from M2 vs `NO_THREATS_DETECTED` after validation); slice 4 aligns
+the public contract.

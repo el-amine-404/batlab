@@ -53,7 +53,7 @@ mean verified behavior, not merely committed code.
 - [x] Verified Dangerzone adapter: host provider with per-conversion isolation evidence, bounded input/output/time, typed failures, and a durable cdr-worker stage.
 - [ ] Optional bounded OCR and allowlisted metadata writer (NOT STARTED; deferred. Any PDF-producing step must create a new artifact and rerun final validation).
 - [x] Final qpdf/structure/YARA/ClamAV checks and exact-byte SHA-256, with a database guard against release without a passing validation.
-- [ ] Visual regression and signed-original immutability tests.
+- [x] Visual appearance (signature widget, handwritten vector/raster marks), blank/missing-page checks, and signed-original immutability tests.
 
 ## M4 — portable archive
 
