@@ -377,3 +377,11 @@ samples the package temperature every second.
 
 Lab2 after testing: 69 °C, no gateway containers, provider units or sandboxes,
 scratch removed, and test images deleted.
+
+## 2026-10-25 — first real-document check (attempted, not completed)
+
+| Item | Status | Evidence |
+|---|---|---|
+| Corpus profile (read-only) | VERIFIED | 703 PDFs, median 421 KB, max 45 MB. No `/ByteRange` (no cryptographic signatures) anywhere, so signed handling stays covered only by generated fixtures. In a deterministic sample of 61: 41 have a text layer and 16 are scan-like. Originals are read through symlinks; copies only, by index, in 0700 scratch. |
+| Real-sample pipeline run | BLOCKED (thermal) | Two documents (1-page with a text layer, 2-page scan) were added to `test_pipeline_e2e` through the anonymous `REAL_SAMPLE_DIR` hook. It reports invariants and non-identifying facts only, never names, titles, paths or text. Both attempts were stopped by the thermal guard (88 °C at an 85 limit, 92 °C at a raised 90 limit) during the 13-document conversion burst, with Lab2 already at 72–80 °C from its own services. No outcome for the real documents is claimed. |
+| Data handling | VERIFIED | Source SHA-256 identical before and after. Local and Lab2 copies, the remote 0700 sample directory, logs and test images were all deleted. carwatch was stopped at the user's request (Frigate 88% → 21% CPU); restart with `docker compose start carwatch` in `compose/frigate`. |

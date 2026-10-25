@@ -121,6 +121,18 @@ upload malformed malformed.pdf
 upload encrypted encrypted.pdf
 upload active active-js.pdf
 upload eicar eicar-in-stream.pdf
+fixture_names=("${!SCAN[@]}")
+fixture_ids="$(printf "'%s'," "${SCAN[@]}" | sed 's/,$//')"
+# Optional real documents (REAL_SAMPLE_DIR, private): checked for invariants
+# only and reported anonymously; their content never reaches logs or Git.
+real_names=()
+if [[ -n ${REAL_SAMPLE_DIR:-} ]]; then
+  for file in "$REAL_SAMPLE_DIR"/*.pdf; do
+    name="real$(basename "$file" .pdf)"
+    cp "$file" "$fx/$name.pdf"; chmod 0644 "$fx/$name.pdf"
+    upload "$name" "$name.pdf"; real_names+=("$name")
+  done
+fi
 
 js() { q "SELECT $2 FROM scan_jobs WHERE id='${SCAN[$1]}'"; }
 for _ in $(seq 1 300); do
@@ -170,7 +182,7 @@ q "SELECT details::text FROM job_steps WHERE scan_id='${SCAN[encrypted]}' AND st
 eq "$(q "SELECT count(*) FROM signature_verifications WHERE scan_id IN ('${SCAN[malformed]}','${SCAN[encrypted]}','${SCAN[eicar]}')")" 0
 
 # Exactly the five passing documents are in a release-eligible state.
-eq "$(q "SELECT count(*) FROM scan_jobs WHERE status IN ('AWAITING_ARCHIVE','ARCHIVING','READY') OR policy='ALLOW_SANITIZED' OR artifact_state IN ('FINAL_VALIDATED','PUBLISHED')")" 6
+eq "$(q "SELECT count(*) FROM scan_jobs WHERE status IN ('AWAITING_ARCHIVE','ARCHIVING','READY') OR policy='ALLOW_SANITIZED' OR artifact_state IN ('FINAL_VALIDATED','PUBLISHED')) AND id IN ($fixture_ids)")" 6
 
 # Originals are byte-identical after the whole pipeline.
 for name in "${!SCAN[@]}"; do
@@ -221,8 +233,28 @@ docker run --rm --network none --group-add 10010 -v "$scratch/invoice.pdf:/i.pdf
 signed_meta="$(curl -fsS -H "Authorization: Bearer $PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN" "$base/api/v1/archive/doc-${SCAN[signed]:5}/metadata")"
 python3 -c 'import json,sys; s=json.loads(sys.argv[1])["signature"]; assert s["originalSigned"] and not s["viewingCopySigned"], s' "$signed_meta"
 docker run --rm --network none --read-only --user 10005:10005 -v "$PDF_GATEWAY_ARCHIVE_ROOT:/archive:ro" "$project-archive-worker" --root /archive verify \
-  | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["ok"] and r["documents"]==6, r; print("archive verify:", r["documents"], "documents")'
-find "$PDF_GATEWAY_ARCHIVE_ROOT/archive" -mindepth 3 -maxdepth 4 -type d | sed "s|$PDF_GATEWAY_ARCHIVE_ROOT/archive/||" | sort
+  | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["ok"] and r["documents"]==6+int(sys.argv[1]), r; print("archive verify:", r["documents"], "documents")' \
+    "$(q "SELECT count(*) FROM scan_jobs WHERE status='READY' AND id NOT IN ($fixture_ids)")"
+find "$PDF_GATEWAY_ARCHIVE_ROOT/archive" -mindepth 3 -maxdepth 4 -type d | sed "s|$PDF_GATEWAY_ARCHIVE_ROOT/archive/||" | grep -v -F -f <(for n in "${real_names[@]}"; do echo "doc-${SCAN[$n]:5}"; done) | sort
+
+for name in "${real_names[@]}"; do
+  id="${SCAN[$name]}"
+  status="$(js "$name" status)"
+  [[ $status =~ ^(READY|REVIEW_REQUIRED|BLOCKED|FAILED)$ ]] || { echo "$name stuck in $status" >&2; exit 1; }
+  if [[ $status == READY ]]; then
+    eq "$(q "SELECT string_agg(verdict,',' ORDER BY attempt) FROM final_validations WHERE scan_id='$id'")" PASS,PASS
+  fi
+  # Anonymous outcome only: no names, titles, issuers, paths or text.
+  q "SELECT '$name', s.status, s.detection, s.policy, s.original_retention,
+            (SELECT details->'textExtraction'->>'status' FROM job_steps WHERE scan_id=s.id AND step_type='ANALYSIS' AND status='SUCCEEDED'),
+            (SELECT details->'textExtraction'->>'pages' FROM job_steps WHERE scan_id=s.id AND step_type='ANALYSIS' AND status='SUCCEEDED'),
+            (SELECT string_agg(c.status||':'||COALESCE(c.failure_code,'-')||':'||COALESCE(c.duration_ms::text,'-')||'ms:'||COALESCE(c.output_bytes::text,'-')||'B',' ' ORDER BY attempt) FROM cdr_results c WHERE c.scan_id=s.id),
+            (SELECT string_agg(f.verdict||':'||f.failure_codes::text,' ' ORDER BY attempt) FROM final_validations f WHERE f.scan_id=s.id),
+            (SELECT d.category||'/'||d.review_state FROM archive_documents d WHERE d.scan_id=s.id),
+            s.source_bytes
+       FROM scan_jobs s WHERE s.id='$id'"
+  q "SELECT coalesce(string_agg(f->>'code', ',' ORDER BY f->>'code'),'none') FROM job_steps, jsonb_array_elements(details->'findings') f WHERE scan_id='$id' AND step_type='ANALYSIS' AND status='SUCCEEDED'" | sed "s/^/$name analysis findings: /"
+done
 
 # The API exposes no route that serves original or staged bytes.
 for path in "/api/v1/quarantine/${SCAN[signed]}" "/api/v1/artifacts/cdr-${SCAN[signed]:5}-1/download"; do
