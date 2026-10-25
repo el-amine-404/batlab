@@ -293,3 +293,29 @@ Command: `pdf-gateway/tests/test_m4_organize.sh` (local).
 Not yet: user corrections that create reviewed rules (M5 UI), multilingual dates
 beyond EN/FR month names, and OCR text for scans (M7). Scans without a text layer
 therefore always land in `Unsorted` for review.
+
+## 2026-10-25 — M4 slice 3: durable archive worker
+
+Ran on the local PC; every container capped (archive worker 0.5 CPU / 256 MiB).
+Stage-isolated: committed M2/M3 evidence was seeded *through* the real V004 guards
+(final-validation PASS for the exact output bytes); text came from real
+`extract_text.py` runs.
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Publish from validated output | VERIFIED | The worker re-derives eligibility (`AWAITING_ARCHIVE`, `ALLOW_SANITIZED`, `FINAL_VALIDATED`, a PASS for the artifact's exact SHA-256) and rehashes the bytes. It organises, publishes atomically, then in one transaction writes `archive_documents`/`archive_versions` and sets the artifact `PUBLISHED` and the scan `READY`. Invoice → `Finance/2026/Invoices/2026-10-15 - Example Telecom - Internet Invoice - October 2026 [doc-…]`; archived bytes equal the validated output. |
+| Sidecar content | VERIFIED | `textExtraction` (native_text from original), `content.txt`, taxonomy tags, approval policy + final report ID, and `originalSigned` for a signed original with a summary stating that the copy is an unsigned reconstruction. |
+| Fallback filing | VERIFIED | Unfamiliar and textless documents were published to `Unsorted` as `FALLBACK` (archive grows; review later). |
+| Bytes changed after validation | VERIFIED | `VALIDATED_BYTES_CHANGED` → `REVIEW_REQUIRED`, artifact `REJECTED`, nothing in the archive or index. |
+| Crash between publish and index | VERIFIED | The document ID is derived from the scan ID. A document pre-published by a "dead" attempt was recognised by identical bytes and indexed (`recoveredExistingPublication`); still exactly one directory. |
+| Replay | VERIFIED | Republishing a READY job's message created no second document or step. |
+| Invalid organisation config | VERIFIED | A broken `rules.json` was not replaced by defaults: `ARCHIVE_CONFIG_INVALID`, job back to `AWAITING_ARCHIVE` with a delayed durable retry, nothing published. |
+| Database guard (V005) | VERIFIED | `READY` without an archive record and `PUBLISHED` without an archive version were both refused. Found in testing: one PL/pgSQL guard function shared by two tables fails on the other table's fields; split into per-table functions. |
+| Archive stays standalone | VERIFIED | `pdf-archive verify` (4 documents, ok) and `reindex` (4 indexed, 0 rejected) on the worker's archive. |
+| Regression | VERIFIED | `test_m1.sh` (V005 through the API's Flyway), `test_m3_pipeline.sh`, `test_m4_archive.sh`, `test_m4_organize.sh`; production compose with `scanning`, `cdr` and `archive` profiles passes `config`. |
+
+Command: `pdf-gateway/tests/test_m4_worker.sh` (local).
+
+Not yet: the real CDR chain into the archive (Lab2, final M4 slice); text
+extraction inside the durable analysis worker with a writable `text-extracts`
+mount (covered by that run).

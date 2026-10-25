@@ -12,7 +12,8 @@ import sys
 import pika
 import psycopg2
 
-QUEUES = {"CDR_QUEUED": "pdf.gateway.cdr.v1", "VALIDATION_QUEUED": "pdf.gateway.validation.v1"}
+QUEUES = {"CDR_QUEUED": "pdf.gateway.cdr.v1", "VALIDATION_QUEUED": "pdf.gateway.validation.v1",
+          "ARCHIVE_QUEUED": "pdf.gateway.archive.v1"}
 
 types = sys.argv[1:] or list(QUEUES)
 db = psycopg2.connect(host="postgres", dbname="pdf_gateway", user="pdf_gateway", password=os.environ["PDF_GATEWAY_DATABASE_PASSWORD"])
