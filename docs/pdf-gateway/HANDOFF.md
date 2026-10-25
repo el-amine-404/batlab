@@ -13,6 +13,23 @@ This file is the resumable source of truth for agents continuing
 - Do not send the final Discord completion notification until every M0-M8 definition-of-done gate passes.
 - Another AI may edit unrelated files in the main worktree. Never discard unrelated dirty/untracked work; fetch and merge concurrent remote commits.
 
+## Mandatory agent handoff protocol
+
+Before starting a new milestone slice, check the active goal/usage budget. Do not
+start a slice that cannot reasonably be implemented, tested, documented, and
+committed within the remaining budget.
+
+Every agent that continues this project must update this file before stopping:
+
+1. Record completed work with commit IDs and exact verification commands/results.
+2. Record every uncommitted or partially implemented file and whether it is safe to keep.
+3. Record the first exact command the next agent should run and any required user action.
+4. Push the feature branch; merge only verified slices into `main`; pull `main` on Lab2.
+5. Never claim a gate from another agent's note alone. The returning/next agent must inspect the diff and rerun the relevant tests before continuing.
+6. If usage is low or limited, stop at the last green commit rather than beginning another change.
+
+The latest green checkpoint is the source of truth; chat summaries are advisory.
+
 ## Verified state (2026-10-25 UTC)
 
 - M0 contracts, architecture, threat model, schemas, and capacity plan are tracked.
