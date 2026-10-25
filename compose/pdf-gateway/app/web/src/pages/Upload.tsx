@@ -59,7 +59,9 @@ export function UploadPage({ session }: { session: Session }) {
           className={cx("flex min-h-44 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-6 text-center",
             dragging ? "border-slate-900 bg-slate-100 dark:border-slate-200 dark:bg-slate-800" : "border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-900",
             !canUpload && "pointer-events-none opacity-50")}>
-          <span className="text-3xl" aria-hidden>⇪</span>
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="text-slate-400">
+            <path d="M12 16V4M7 9l5-5 5 5" /><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
+          </svg>
           <span className="text-base font-medium">Choose PDFs or drop them here</span>
           <span className="text-sm text-slate-500 dark:text-slate-400">Up to 50 MB each · they start right away</span>
           <input type="file" accept="application/pdf,.pdf" multiple className="sr-only" disabled={!canUpload}
