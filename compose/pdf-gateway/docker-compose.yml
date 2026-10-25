@@ -1,0 +1,339 @@
+name: ${PDF_GATEWAY_PROJECT_NAME}
+# PDF Security Gateway (docs/pdf-gateway): PDFs uploaded from the phone or a PC
+# are scanned (ClamAV, qpdf, YARA, PDFiD, signatures), rebuilt by Dangerzone in
+# the host's gVisor sandbox (hosts/lab2/pdf-cdr-provider), validated again and
+# filed into a portable archive under ${DATA_ROOT}/documents/pdf-archive, which
+# restic backs up with the rest of the documents. Paperless gets a copy only on
+# request. https://pdf.homelab.lan (compose/caddy/conf/pdf.caddy).
+#
+# Directories and their owners come from `make setup`: each stage runs as its
+# own uid and sees only the directories it needs. app/compose.yml is the
+# stand-alone file the tests build on; keep the two in step.
+x-worker: &worker
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  restart: unless-stopped
+  depends_on:
+    postgres: {condition: service_healthy}
+    rabbitmq: {condition: service_healthy}
+  healthcheck:
+    test: ["CMD", "python3", "-c", "import os; os.kill(1, 0)"]
+    interval: 30s
+    timeout: 3s
+    retries: 3
+  logging: &logging
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-database: &database
+  PDF_GATEWAY_DATABASE_HOST: postgres
+  PDF_GATEWAY_DATABASE_NAME: pdf_gateway
+  PDF_GATEWAY_DATABASE_USER: pdf_gateway
+  PDF_GATEWAY_DATABASE_PASSWORD: ${PDF_GATEWAY_DATABASE_PASSWORD:?set PDF_GATEWAY_DATABASE_PASSWORD in compose/.env}
+  PDF_GATEWAY_RABBITMQ_HOST: rabbitmq
+  PDF_GATEWAY_RABBITMQ_USER: pdf_gateway
+  PDF_GATEWAY_RABBITMQ_PASSWORD: ${PDF_GATEWAY_RABBITMQ_PASSWORD:?set PDF_GATEWAY_RABBITMQ_PASSWORD in compose/.env}
+  PDF_GATEWAY_STORAGE_ROOT: /var/lib/pdf-gateway
+  PDF_GATEWAY_ARCHIVE_ROOT: /var/lib/pdf-archive
+
+services:
+  postgres:
+    image: ${IMAGE_PDF_GATEWAY_DB}:${TAG_PDF_GATEWAY_DB}
+    container_name: pdf-gateway-db
+    environment:
+      TZ: ${TZ}
+      POSTGRES_DB: pdf_gateway
+      POSTGRES_USER: pdf_gateway
+      POSTGRES_PASSWORD: ${PDF_GATEWAY_DATABASE_PASSWORD:?set PDF_GATEWAY_DATABASE_PASSWORD in compose/.env}
+    volumes:
+      # restic/scripts/dump-databases.sh dumps it before each snapshot.
+      - ${VOLUMES_ROOT}/pdf-gateway/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pdf_gateway -d pdf_gateway"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    cpus: ${PDF_GATEWAY_CORE_CPUS:?set in hosts/<profile>/compose.env}
+    mem_limit: 512m
+    logging: *logging
+    networks: [backend]
+
+  rabbitmq:
+    image: ${IMAGE_PDF_GATEWAY_RABBITMQ}:${TAG_PDF_GATEWAY_RABBITMQ}
+    container_name: pdf-gateway-rabbitmq
+    hostname: pdf-gateway-rabbitmq
+    environment:
+      # Erlang schedulers busy-wait by default; that burns idle CPU on a shared host.
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: +sbwt none +sbwtdcpu none +sbwtdio none
+      RABBITMQ_DEFAULT_USER: pdf_gateway
+      RABBITMQ_DEFAULT_PASS: ${PDF_GATEWAY_RABBITMQ_PASSWORD:?set PDF_GATEWAY_RABBITMQ_PASSWORD in compose/.env}
+    volumes:
+      - ${VOLUMES_ROOT}/pdf-gateway/rabbitmq:/var/lib/rabbitmq
+    healthcheck:
+      # A TCP check: rabbitmq-diagnostics boots an Erlang VM per probe.
+      test: ["CMD", "nc", "-z", "127.0.0.1", "5672"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+    cpus: ${PDF_GATEWAY_CORE_CPUS:?set in hosts/<profile>/compose.env}
+    mem_limit: 512m
+    logging: *logging
+    networks: [backend]
+
+  api:
+    image: local/pdf-gateway-api
+    build: ./app/api
+    pull_policy: build
+    container_name: pdf-gateway-api
+    environment:
+      <<: *database
+      TZ: ${TZ}
+      PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN: ${PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN:?set PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN in compose/.env}
+      PDF_GATEWAY_MULTIPART_DIR: /var/lib/pdf-gateway/multipart
+      # OCR and AI from the laptop agent (app/enrichment-agent); off until it is set up.
+      PDF_GATEWAY_ENRICHMENT_ENABLED: ${PDF_GATEWAY_ENRICHMENT_ENABLED:-false}
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+    volumes:
+      - ${VOLUMES_ROOT}/pdf-gateway/storage/quarantine:/var/lib/pdf-gateway/quarantine
+      - ${VOLUMES_ROOT}/pdf-gateway/storage/multipart:/var/lib/pdf-gateway/multipart
+      # Read-only: the API serves approved files; only archive-worker writes.
+      - ${DATA_ROOT}/documents/pdf-archive:/var/lib/pdf-archive:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 768m
+    cpus: ${PDF_GATEWAY_API_CPUS:?set in hosts/<profile>/compose.env}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/internal/actuator/health/readiness"]
+      interval: 30s
+      timeout: 3s
+      retries: 12
+      start_period: 40s
+    restart: unless-stopped
+    logging: *logging
+    networks: [backend, edge]
+
+  # Static UI and a same-origin proxy to the API; no document storage. The
+  # homelab Caddy terminates HTTPS in front of it. Homepage reads its tile
+  # through it too (/api/v1/system/status).
+  web:
+    image: local/pdf-gateway-web
+    build: ./app/web
+    pull_policy: build
+    container_name: pdf-gateway-web
+    environment:
+      PDF_GATEWAY_API_UPSTREAM: api:8080
+    depends_on:
+      api: {condition: service_healthy}
+    read_only: true
+    tmpfs:
+      - /config:size=1m,mode=0700,uid=10006,gid=10006
+      - /data:size=1m,mode=0700,uid=10006,gid=10006
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 32
+    mem_limit: 128m
+    cpus: ${PDF_GATEWAY_CORE_CPUS:?set in hosts/<profile>/compose.env}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/manifest.webmanifest"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+    logging: *logging
+    networks: [edge, home_server]
+
+  clamav:
+    image: ${IMAGE_PDF_GATEWAY_CLAMAV}:${TAG_PDF_GATEWAY_CLAMAV}
+    container_name: pdf-gateway-clamav
+    volumes:
+      # Signatures are downloaded again; restic leaves them out.
+      - ${VOLUMES_ROOT}/pdf-gateway/clamav:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdscan", "--ping", "3"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 180s
+    restart: unless-stopped
+    mem_limit: 4g
+    cpus: ${PDF_GATEWAY_CLAMAV_CPUS:?set in hosts/<profile>/compose.env}
+    pids_limit: 128
+    logging: *logging
+    # updates: freshclam's only way out; backend is internal.
+    networks: [backend, updates]
+
+  analysis-worker:
+    <<: *worker
+    image: local/pdf-gateway-analysis
+    build: ./app/analysis-worker
+    pull_policy: build
+    container_name: pdf-gateway-analysis
+    environment:
+      <<: *database
+      PDF_GATEWAY_CLAMD_HOST: clamav
+      PDF_GATEWAY_SCAN_MAX_ATTEMPTS: 3
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+      clamav: {condition: service_healthy}
+    volumes:
+      - ${VOLUMES_ROOT}/pdf-gateway/storage/quarantine:/var/lib/pdf-gateway/quarantine:ro
+      - ${VOLUMES_ROOT}/pdf-gateway/storage/reports:/var/lib/pdf-gateway/reports
+      - ${VOLUMES_ROOT}/pdf-gateway/storage/text-extracts:/var/lib/pdf-gateway/text-extracts
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    pids_limit: 64
+    mem_limit: 768m
+    cpus: ${PDF_GATEWAY_WORKER_CPUS:?set in hosts/<profile>/compose.env}
+    networks: [backend]
+
+  signature-worker:
+    <<: *worker
+    image: local/pdf-gateway-signature
+    build: ./app/signature-worker
+    pull_policy: build
+    container_name: pdf-gateway-signature
+    entrypoint: ["python", "/opt/pdf-gateway/worker.py"]
+    environment:
+      <<: *database
+      PDF_GATEWAY_SIGNATURE_TRUST_ROOTS: ""
+      PDF_GATEWAY_SIGNATURE_MAX_ATTEMPTS: 3
+    volumes:
+      - ${VOLUMES_ROOT}/pdf-gateway/storage/quarantine:/var/lib/pdf-gateway/quarantine:ro
+      - ${VOLUMES_ROOT}/pdf-gateway/storage/signature-reports:/var/lib/pdf-gateway/signature-reports
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    pids_limit: 64
+    mem_limit: 1g
+    cpus: ${PDF_GATEWAY_WORKER_CPUS:?set in hosts/<profile>/compose.env}
+    networks: [backend]
+
+  # Hands each PDF to the host Dangerzone provider over a Unix socket; the
+  # sandbox is the provider's rootless Podman + gVisor, never this container.
+  # Until the provider runs, conversions fail closed and nothing is released.
+  cdr-worker:
+    <<: *worker
+    image: local/pdf-gateway-cdr
+    build: ./app/cdr-worker
+    pull_policy: build
+    container_name: pdf-gateway-cdr
+    environment:
+      <<: *database
+      PDF_GATEWAY_CDR_SOCKET: /run/pdf-cdr/cdr.sock
+      PDF_GATEWAY_CDR_MAX_ATTEMPTS: 4
+    volumes:
+      - ${VOLUMES_ROOT}/pdf-gateway/storage/quarantine:/var/lib/pdf-gateway/quarantine:ro
+      - ${VOLUMES_ROOT}/pdf-gateway/storage/cdr-output:/var/lib/pdf-gateway/cdr-output
+      - ${VOLUMES_ROOT}/pdf-gateway/cdr-socket:/run/pdf-cdr
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    pids_limit: 32
+    mem_limit: 256m
+    cpus: ${PDF_GATEWAY_WORKER_CPUS:?set in hosts/<profile>/compose.env}
+    networks: [backend]
+
+  # Final validation of the exact rebuilt bytes; the only path to a released copy.
+  validation-worker:
+    <<: *worker
+    image: local/pdf-gateway-analysis
+    pull_policy: never
+    container_name: pdf-gateway-validation
+    entrypoint: ["python3", "/opt/pdf-gateway/validation_worker.py"]
+    # Reads staged CDR output and metadata versions (files 0640, group 10010).
+    group_add: ["10010"]
+    environment:
+      <<: *database
+      PDF_GATEWAY_CLAMD_HOST: clamav
+      PDF_GATEWAY_VALIDATION_MAX_ATTEMPTS: 3
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+      clamav: {condition: service_healthy}
+      analysis-worker: {condition: service_started}
+    volumes:
+      - ${VOLUMES_ROOT}/pdf-gateway/storage/quarantine:/var/lib/pdf-gateway/quarantine:ro
+      - ${VOLUMES_ROOT}/pdf-gateway/storage/cdr-output:/var/lib/pdf-gateway/cdr-output:ro
+      - ${VOLUMES_ROOT}/pdf-gateway/storage/metadata-versions:/var/lib/pdf-gateway/metadata-versions:ro
+      - ${VOLUMES_ROOT}/pdf-gateway/storage/validation-reports:/var/lib/pdf-gateway/validation-reports
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    pids_limit: 64
+    mem_limit: 768m
+    cpus: ${PDF_GATEWAY_WORKER_CPUS:?set in hosts/<profile>/compose.env}
+    networks: [backend]
+
+  # The archive's only writer. Reads validated output and text extracts, never
+  # quarantine.
+  archive-worker:
+    <<: *worker
+    image: local/pdf-gateway-archive
+    build:
+      context: ./app
+      dockerfile: archive-worker/Dockerfile
+    pull_policy: build
+    container_name: pdf-gateway-archive
+    entrypoint: ["python", "/opt/pdf-gateway/worker.py"]
+    # 10010: staged CDR output (0640); 10002: analysis text extracts (0640).
+    group_add: ["10010", "10002"]
+    environment:
+      <<: *database
+      PDF_GATEWAY_ENRICHMENT_ENABLED: ${PDF_GATEWAY_ENRICHMENT_ENABLED:-false}
+    volumes:
+      - ${VOLUMES_ROOT}/pdf-gateway/storage/cdr-output:/var/lib/pdf-gateway/cdr-output:ro
+      - ${VOLUMES_ROOT}/pdf-gateway/storage/text-extracts:/var/lib/pdf-gateway/text-extracts:ro
+      - ${VOLUMES_ROOT}/pdf-gateway/storage/metadata-versions:/var/lib/pdf-gateway/metadata-versions
+      # archive/, staging/ and manifests/ sit together (one filesystem, checked at start).
+      - ${DATA_ROOT}/documents/pdf-archive:/var/lib/pdf-archive
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    pids_limit: 32
+    mem_limit: 256m
+    cpus: ${PDF_GATEWAY_WORKER_CPUS:?set in hosts/<profile>/compose.env}
+    networks: [backend]
+
+  # Copies a document into Paperless when its upload asked for it, through the
+  # REST API with a token of its own (a dedicated Paperless user,
+  # docs/pdf-gateway/operations.md). Without the token it takes nothing and the
+  # copies wait in the queue.
+  paperless-adapter:
+    <<: *worker
+    image: local/pdf-gateway-paperless
+    build: ./app/paperless-adapter
+    pull_policy: build
+    container_name: pdf-gateway-paperless
+    environment:
+      <<: *database
+      PDF_GATEWAY_PAPERLESS_URL: http://paperless:8000
+      PDF_GATEWAY_PAPERLESS_TOKEN: ${PDF_GATEWAY_PAPERLESS_TOKEN:-}
+    volumes:
+      - ${DATA_ROOT}/documents/pdf-archive:/var/lib/pdf-archive:ro
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    pids_limit: 32
+    mem_limit: 256m
+    cpus: ${PDF_GATEWAY_WORKER_CPUS:?set in hosts/<profile>/compose.env}
+    networks: [backend, home_server]
+
+networks:
+  # Database, broker and workers: no way out.
+  backend:
+    internal: true
+  # web ↔ api only.
+  edge:
+    internal: true
+  updates: {}
+  home_server:
+    external: true
+    name: home_server

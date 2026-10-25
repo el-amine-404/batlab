@@ -6,7 +6,9 @@ the homelab server. Runtime credentials are deliberately stored outside Git.
 ## Backup scope
 
 The paths in `conf/paths.txt` contain the homelab definitions, host
-configuration, Docker application state, and Paperless documents. Replaceable
+configuration, Docker application state, Paperless documents, and the PDF
+gateway's archive (`/mnt/storage/data/documents/pdf-archive`: the PDFs with
+their sidecars). Replaceable
 media, download queues, caches, Redis state, and downloaded AI models are
 excluded by `conf/excludes.txt`.
 
@@ -17,7 +19,9 @@ password in an independent password manager: the copy inside the encrypted
 repository cannot unlock that repository after a total host loss.
 
 Before every snapshot, `scripts/dump-databases.sh` creates consistent custom
-format PostgreSQL dumps from `paperless-db` and `immich-db`. The raw database
+format PostgreSQL dumps from `paperless-db`, `immich-db` and `pdf-gateway-db`.
+The restore test also restores one archived PDF and checks it against the
+SHA-256 in its sidecar. The raw database
 volumes remain in the backup as secondary recovery paths.
 
 When either database is stopped, its export is skipped rather than failing the

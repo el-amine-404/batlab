@@ -475,7 +475,28 @@ itself, and [its README](../compose/stanzarr/app/README.md).
 - **Not its job**: whether a file may enter the library, its tags and place
   (musicguard).
 
-### camwatch: camera health
+### pdf-gateway: PDF → checked, rebuilt, filed
+
+`compose/pdf-gateway/app`, `https://pdf.homelab.lan` (HTTPS from Caddy's local
+CA; devices install `http://pdf.homelab.lan/ca.crt` once). Docs:
+[docs/pdf-gateway](pdf-gateway/) and [its README](../compose/pdf-gateway/app/README.md).
+
+- **Job**: takes PDFs from the phone or a PC, scans them (ClamAV, qpdf, YARA,
+  PDFiD, signatures), rebuilds them in the host's gVisor sandbox (Dangerzone,
+  `hosts/lab2/pdf-cdr-provider`), validates the exact output again and files
+  it into a portable archive. Anything unknown, failed or timed out is held,
+  never released.
+- **Alone**: the archive is plain folders of PDFs with a `metadata.json` each;
+  `pdf-archive verify|reindex|repair|export|import` works without the gateway.
+- **Plugs in through**: Paperless, only when an upload asks for it (its REST API,
+  a dedicated user's token); the laptop's OCR/AI agent pulls work with a token
+  of its own and only proposes changes; Homepage reads `/api/v1/system/status`.
+- **Owns**: `$VOLUMES_ROOT/pdf-gateway` (database, broker, quarantine and
+  reports; each stage its own uid, `make setup`) and
+  `documents/pdf-archive`, backed up by restic with the other documents.
+- **Not its job**: searching and managing documents day to day (Paperless), editing PDFs.
+
+
 
 `compose/frigate/camwatch`. No page.
 

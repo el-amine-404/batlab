@@ -39,7 +39,7 @@ SITES_ROOT   ?= /srv/sites
 PUID := $(shell id -u)
 PGID := $(shell id -g)
 
-.PHONY: help list setup network up down restart pull config logs ps check-stack check-all-confirm
+.PHONY: help list setup setup-pdf-gateway network up down restart pull config logs ps check-stack check-all-confirm
 
 define compose-loop
 @for s in $(TARGETS); do \
@@ -65,6 +65,7 @@ help:
 	@echo ""
 	@echo "  make list       - List all discovered stacks"
 	@echo "  make setup      - Create base directories and symlinks"
+	@echo "  make setup-pdf-gateway - Create only the PDF gateway's directories"
 	@echo "  make up         - Start stacks (STACK=<name> [SERVICE=<name>])"
 	@echo "  make down       - Stop and remove stacks (STACK=<name> [SERVICE=<name>])"
 	@echo "  make restart    - Restart stacks (STACK=<name> [SERVICE=<name>])"
@@ -305,6 +306,8 @@ setup: check-env
 	# carwatch runs as 10001 (compose/frigate).
 	sudo chown 10001:10001 $(VOLUMES_ROOT)/frigate/carwatch
 
+	$(MAKE) --no-print-directory setup-pdf-gateway
+
 	@echo "==> Symlinking .env to all stacks..."
 	@for d in compose/*; do \
 		if [ -d "$$d" ]; then \
@@ -314,6 +317,30 @@ setup: check-env
 
 	@echo
 	@echo "Setup complete."
+
+# Only the gateway's folders (also part of setup).
+setup-pdf-gateway:
+	@echo "==> Creating pdf-gateway directories..."
+	# Each stage runs as its own uid and sees only these (compose/pdf-gateway):
+	# api 10001, analysis/validation 10002, signature 10003, cdr 10004 (group
+	# 10010 for its output), archive 10005. postgres, rabbitmq (100:101) and
+	# clamav (its image chowns) own their state.
+	sudo install -d -m 0755 $(VOLUMES_ROOT)/pdf-gateway $(VOLUMES_ROOT)/pdf-gateway/storage
+	sudo install -d -m 0700 $(VOLUMES_ROOT)/pdf-gateway/postgres $(VOLUMES_ROOT)/pdf-gateway/clamav
+	sudo install -d -m 0700 -o 100 -g 101 $(VOLUMES_ROOT)/pdf-gateway/rabbitmq
+	sudo install -d -m 0755 -o 10001 -g 10001 $(VOLUMES_ROOT)/pdf-gateway/storage/quarantine
+	sudo install -d -m 0700 -o 10001 -g 10001 $(VOLUMES_ROOT)/pdf-gateway/storage/multipart
+	sudo install -d -m 0700 -o 10002 -g 10002 \
+		$(VOLUMES_ROOT)/pdf-gateway/storage/reports \
+		$(VOLUMES_ROOT)/pdf-gateway/storage/validation-reports
+	sudo install -d -m 0750 -o 10002 -g 10002 $(VOLUMES_ROOT)/pdf-gateway/storage/text-extracts
+	sudo install -d -m 0700 -o 10003 -g 10003 $(VOLUMES_ROOT)/pdf-gateway/storage/signature-reports
+	sudo install -d -m 0750 -o 10004 -g 10010 $(VOLUMES_ROOT)/pdf-gateway/storage/cdr-output
+	sudo install -d -m 0750 -o 10005 -g 10010 $(VOLUMES_ROOT)/pdf-gateway/storage/metadata-versions
+	# The host CDR provider (hosts/lab2/pdf-cdr-provider) runs as this user.
+	sudo install -d -m 0755 -o $(PUID) -g $(PGID) $(VOLUMES_ROOT)/pdf-gateway/cdr-socket
+	# The portable archive: plain folders of PDFs, readable without the gateway.
+	sudo install -d -m 0755 -o 10005 -g 10005 $(DATA_ROOT)/documents/pdf-archive
 
 status:
 ifeq ($(STACK),)

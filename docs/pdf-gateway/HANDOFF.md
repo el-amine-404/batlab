@@ -56,7 +56,7 @@ The latest green checkpoint is the source of truth; chat summaries are advisory.
 
 Lab2 runs live services and reached 95.5 °C from uncapped test stacks. Rules now in force:
 run tests on the local PC unless they need Dangerzone; run Lab2-only tests **only** through
-`pdf-gateway/tools/lab2_test.sh <test>` (local image builds, 1 s temperature sampling, guard aborts
+`compose/pdf-gateway/app/tools/lab2_test.sh <test>` (local image builds, 1 s temperature sampling, guard aborts
 at 85 °C), one at a time, starting below 75 °C. Production CPU caps are configurable
 (`PDF_GATEWAY_CPUS_*`, defaults about 4 cores worst case) and the provider is `CPUQuota=100%`.
 
@@ -89,16 +89,16 @@ refuse every release state without a PASS for the exact published bytes and an a
 
 Local PC, all passed: `test_m1.sh`, `test_m2.sh`, `test_m2_pipeline.sh`, `test_m3_signatures.sh`,
 `test_m3_pipeline.sh`, `test_m4_archive.sh`, `test_m4_organize.sh`, `test_m4_worker.sh`,
-`test_m4_metadata.sh`, `test_m4_gate.sh`, `python3 pdf-gateway/tools/validate_contracts.py`, Maven
+`test_m4_metadata.sh`, `test_m4_gate.sh`, `python3 compose/pdf-gateway/app/tools/validate_contracts.py`, Maven
 (`docker run --rm -v "$PWD/pdf-gateway/api:/src" -w /src maven:3.9.11-eclipse-temurin-21@sha256:6fdc855a6ed81d288ca7ca37ac6ff5e9308b612485c0801d70b25a858c83d237 mvn -B -q test`, 4 tests;
-remove the root-owned `pdf-gateway/api/target` afterwards).
+remove the root-owned `compose/pdf-gateway/app/api/target` afterwards).
 
 Also local: `test_m5_api.sh`; `test_m5_ui.sh` needs `VENV` (selenium 4.38, playwright 1.56) and
 `PLAYWRIGHT_BROWSERS_PATH` with Playwright Firefox installed (`python -m playwright install firefox`, ~97 MB).
 
-Lab2 via `pdf-gateway/tools/lab2_test.sh test_m6_paperless`: PASSED (485 s, peak 81 °C).
+Lab2 via `compose/pdf-gateway/app/tools/lab2_test.sh test_m6_paperless`: PASSED (485 s, peak 81 °C).
 
-Lab2 via `pdf-gateway/tools/lab2_test.sh`: `test_pipeline_e2e` PASSED (348 s, peak 82 °C).
+Lab2 via `compose/pdf-gateway/app/tools/lab2_test.sh`: `test_pipeline_e2e` PASSED (348 s, peak 82 °C).
 `test_m3_cdr` and `test_m3_validation` were aborted by the thermal guard with their old caps; caps are now
 lowered but they have **not been rerun** (pending, run one at a time when Lab2 is cool).
 
@@ -131,6 +131,30 @@ None after the checkpoint commit.
    and host ownership for UIDs 10001–10005 and groups 10002/10010.
 2. `potato` is in the `docker` group (root-equivalent): residual risk for M8 (dedicated Dangerzone account recommended).
 
+## M8 in progress (2026-10-25)
+
+- VERIFIED: the gateway lives in `compose/pdf-gateway/app` (commit `0f927bf`), and runs as a homelab stack,
+  `compose/pdf-gateway/docker-compose.yml` (commit `a703f16`, plus follow-ups). It uses the repo's
+  conventions: image pins in `compose/versions.env`, CPU caps in `hosts/lab2/compose.env`, secrets in
+  `compose/.env`, `make setup-pdf-gateway` (also run by `make setup`) for folders and per-stage owners, the
+  archive at `${DATA_ROOT}/documents/pdf-archive` (inside restic's `paths.txt`), `pdf-gateway` in
+  `hosts/lab2/stacks.txt`, and `docs/services.md`.
+  `compose/pdf-gateway/app/tests/test_m8_stack.sh` passed locally: Makefile folders, HTTPS through
+  `compose/caddy/conf/pdf.caddy` with Caddy's local CA (`http://pdf.homelab.lan/ca.crt`), Secure/HttpOnly
+  cookie, CSRF plus https Origin upload, per-stage uids, fail-closed without CDR, idle Paperless adapter
+  without a token, Homepage READ_ONLY card through the web container, and DB unreachable from home_server.
+- VERIFIED: `GET /api/v1/system/status` (counts only; `test_m5_api`) and the Homepage `customapi` card.
+- IMPLEMENTED, not yet run on Lab2: restic dumps `pdf-gateway-db`; the restore test checks that dump
+  and one random archived PDF's SHA-256; the ClamAV signatures, multipart uploads and the socket are excluded.
+- User decision: HTTPS for this app only (Caddy `tls internal`, port 443).
+- BLOCKED on the user (sudo / access grants): `make setup-pdf-gateway` and `sudo loginctl enable-linger potato`
+  on Lab2. The Paperless user/token for the adapter (operations.md step 4) was refused by the
+  permission classifier as an access grant, so the user must run it. The first restic backup and
+  restore test after deployment also need sudo.
+- Lab2 `compose/.env`: gateway secrets generated on Lab2 (backup `compose/.env.bak-before-pdf-gateway`).
+  The old unused keys `PDF_GATEWAY_HTTP_PORT`, `PDF_DB_PASSWORD` and `AI_LAPTOP_IP` were left in place.
+- Runbook: `docs/pdf-gateway/operations.md`.
+
 ## Next implementation order
 
 1. M8 hardening and operations: adversarial/fuzz/load/disk-full tests; measured host budget (Paperless,
@@ -143,7 +167,7 @@ None after the checkpoint commit.
 ### First command for the next agent
 
 ```bash
-cd /home/bro/.codex-worktrees/pdf-security-gateway && git fetch origin && git status --short && git log --oneline -10 && pdf-gateway/tests/test_m7_enrichment.sh
+cd /home/bro/.codex-worktrees/pdf-security-gateway && git fetch origin && git status --short && git log --oneline -10 && compose/pdf-gateway/app/tests/test_m7_enrichment.sh
 ```
 
 ## M3 plan as written before implementation (completed; kept for history)

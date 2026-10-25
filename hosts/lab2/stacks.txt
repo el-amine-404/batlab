@@ -27,6 +27,7 @@ netdata
 nodecast
 open-webui
 paperless
+pdf-gateway
 portainer
 seerr
 speed_test

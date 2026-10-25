@@ -180,6 +180,27 @@
           key: "{{HOMEPAGE_VAR_IMMICH_KEY}}"
           version: 2
           fields: ["users", "photos", "videos", "storage"]
+    - PDF Gateway:
+        icon: mdi-file-lock
+        href: https://pdf.homelab.lan
+        description: Checks PDFs, rebuilds them safely, files them
+        siteMonitor: http://pdf-gateway-web:8080/manifest.webmanifest
+        # Counts only, read with a READ_ONLY token (PDF_GATEWAY_HOMEPAGE_TOKEN).
+        widget:
+          type: customapi
+          url: http://pdf-gateway-web:8080/api/v1/system/status
+          refreshInterval: 60000
+          headers:
+            Authorization: "Bearer {{HOMEPAGE_VAR_PDF_GATEWAY_TOKEN}}"
+          mappings:
+            - field: archived
+              label: Archived
+            - field: inProgress
+              label: Checking
+            - field: toReview
+              label: To review
+            - field: held
+              label: Held
     - Paperless:
         icon: paperless-ngx
         href: http://paperless.homelab.lan

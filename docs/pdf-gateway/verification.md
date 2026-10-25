@@ -22,9 +22,9 @@ Commands used:
 find /home/bro/Documents -type f -iname '*.pdf' -printf '%s\n'
 ssh lab2 'nproc; free -h; df -h / /mnt/storage/data; stat -fc %T /sys/fs/cgroup'
 ssh lab2 'command -v dangerzone-cli podman runsc'
-ssh lab2 'cd /home/potato/batlab && pdf-gateway/tools/verify_cdr_runtime.sh'
-python3 pdf-gateway/tools/validate_contracts.py
-pdf-gateway/tests/test_m1.sh
+ssh lab2 'cd /home/potato/batlab && compose/pdf-gateway/app/tools/verify_cdr_runtime.sh'
+python3 compose/pdf-gateway/app/tools/validate_contracts.py
+compose/pdf-gateway/app/tests/test_m1.sh
 docker run --rm ... maven:3.9.11-eclipse-temurin-21 mvn -B test
 ```
 
@@ -63,10 +63,10 @@ host installation step; no source document has entered the new pipeline.
 Commands used:
 
 ```text
-pdf-gateway/tests/test_m2.sh
-pdf-gateway/tests/test_m2_pipeline.sh
-python3 -m py_compile pdf-gateway/analysis-worker/scan.py pdf-gateway/analysis-worker/worker.py
-docker compose -f pdf-gateway/compose.yml --profile scanning config --quiet
+compose/pdf-gateway/app/tests/test_m2.sh
+compose/pdf-gateway/app/tests/test_m2_pipeline.sh
+python3 -m py_compile compose/pdf-gateway/app/analysis-worker/scan.py compose/pdf-gateway/app/analysis-worker/worker.py
+docker compose -f compose/pdf-gateway/app/compose.yml --profile scanning config --quiet
 ```
 
 All fixtures and service state were disposable. `/home/bro/Documents` was not
@@ -86,7 +86,7 @@ mounted, read, moved, or modified by these tests.
 Command used:
 
 ```text
-pdf-gateway/tests/test_m3_signatures.sh
+compose/pdf-gateway/app/tests/test_m3_signatures.sh
 ```
 
 Implementation commit: `2ce4e10`.
@@ -105,11 +105,11 @@ Implementation commit: `2ce4e10`.
 Commands used:
 
 ```text
-pdf-gateway/tests/test_m3_pipeline.sh
-pdf-gateway/tests/test_m3_signatures.sh
-pdf-gateway/tests/test_m2_pipeline.sh
+compose/pdf-gateway/app/tests/test_m3_pipeline.sh
+compose/pdf-gateway/app/tests/test_m3_signatures.sh
+compose/pdf-gateway/app/tests/test_m2_pipeline.sh
 docker run --rm -v "$PWD/pdf-gateway/api:/src" -w /src maven:3.9.11-eclipse-temurin-21@sha256:6fdc855a6ed81d288ca7ca37ac6ff5e9308b612485c0801d70b25a858c83d237 mvn -B test
-docker compose -f pdf-gateway/compose.yml --profile scanning config --quiet
+docker compose -f compose/pdf-gateway/app/compose.yml --profile scanning config --quiet
 ```
 
 Implementation commit: `f3efc26`. M3 remains incomplete until the isolated CDR
@@ -134,10 +134,10 @@ adapter, exact-final-byte rescan, and visual preservation gates pass.
 Commands used:
 
 ```text
-ssh lab2 'cd /home/potato/batlab && pdf-gateway/tools/verify_cdr_runtime.sh'
-ssh lab2 'cd <checkout> && pdf-gateway/tests/test_m3_cdr.sh'      # Lab2 only: needs Dangerzone
-pdf-gateway/tests/test_m3_pipeline.sh
-pdf-gateway/tests/test_m1.sh
+ssh lab2 'cd /home/potato/batlab && compose/pdf-gateway/app/tools/verify_cdr_runtime.sh'
+ssh lab2 'cd <checkout> && compose/pdf-gateway/app/tests/test_m3_cdr.sh'      # Lab2 only: needs Dangerzone
+compose/pdf-gateway/app/tests/test_m3_pipeline.sh
+compose/pdf-gateway/app/tests/test_m1.sh
 docker run --rm -v "$PWD/pdf-gateway/api:/src" -w /src maven:3.9.11-eclipse-temurin-21@sha256:6fdc855a… mvn -B -q test
 ```
 
@@ -162,7 +162,7 @@ enabled as a persistent service, and Lab2 linger is off.
 Command used:
 
 ```text
-ssh lab2 'cd <checkout> && pdf-gateway/tests/test_m3_validation.sh'   # Lab2 only
+ssh lab2 'cd <checkout> && compose/pdf-gateway/app/tests/test_m3_validation.sh'   # Lab2 only
 ```
 
 Limits: final-failure outputs were seeded directly as CDR results (the real
@@ -172,7 +172,7 @@ the hostile original further; page count is.
 
 ## 2026-10-25 — M3 slice 3: end-to-end signature-aware CDR on the production definition
 
-`test_m3_e2e.sh` ran the production `pdf-gateway/compose.yml` (`scanning` and
+`test_m3_e2e.sh` ran the production `compose/pdf-gateway/app/compose.yml` (`scanning` and
 `cdr` profiles) on Lab2. A test override only substitutes a disposable trust
 root. The host provider ran as a transient user unit with the tracked limits.
 Ten generated fixtures were uploaded through the authenticated API with
@@ -205,7 +205,7 @@ Cross-cutting evidence:
 Command used:
 
 ```text
-ssh lab2 'cd <checkout> && pdf-gateway/tests/test_m3_e2e.sh'   # Lab2 only, about 4.5 min
+ssh lab2 'cd <checkout> && compose/pdf-gateway/app/tests/test_m3_e2e.sh'   # Lab2 only, about 4.5 min
 ```
 
 Limits: appearance checks compare ink inside known regions at 50 DPI, a gross
@@ -272,7 +272,7 @@ root, all capabilities dropped, 1 CPU, 512 MiB.
 | Crash safety (real SIGKILL) | VERIFIED | 25 random SIGKILLs during 24 MB publishes, window calibrated to the measured 0.7 s publish, 3 runs. Every visible document was always complete and valid; 2–5 kills per run left only invisible staging, which `repair --apply` removed. The rename→manifest window was created deterministically: dry-run reported it without changes and apply re-recorded it. Found by the test: an append after a torn final manifest line was glued onto it; fixed. |
 | Paperless resync CLI | NOT STARTED | M6. |
 
-Command: `pdf-gateway/tests/test_m4_archive.sh` (local, about 1 min).
+Command: `compose/pdf-gateway/app/tests/test_m4_archive.sh` (local, about 1 min).
 
 ## 2026-10-25 — M4 slice 2: deterministic organisation
 
@@ -288,7 +288,7 @@ Ran on the local PC in networkless, read-only, 1-CPU containers.
 | Threat model | IMPLEMENTED | The residual risk of running pdftotext on originals outside gVisor is documented. |
 | Regression | VERIFIED | `test_m2.sh`, `test_m2_pipeline.sh`, `test_m4_archive.sh`; contract validator (3 schemas). |
 
-Command: `pdf-gateway/tests/test_m4_organize.sh` (local).
+Command: `compose/pdf-gateway/app/tests/test_m4_organize.sh` (local).
 
 Not yet: user corrections that create reviewed rules (M5 UI), multilingual dates
 beyond EN/FR month names, and OCR text for scans (M7). Scans without a text layer
@@ -314,7 +314,7 @@ Stage-isolated: committed M2/M3 evidence was seeded *through* the real V004 guar
 | Archive stays standalone | VERIFIED | `pdf-archive verify` (4 documents, ok) and `reindex` (4 indexed, 0 rejected) on the worker's archive. |
 | Regression | VERIFIED | `test_m1.sh` (V005 through the API's Flyway), `test_m3_pipeline.sh`, `test_m4_archive.sh`, `test_m4_organize.sh`; production compose with `scanning`, `cdr` and `archive` profiles passes `config`. |
 
-Command: `pdf-gateway/tests/test_m4_worker.sh` (local).
+Command: `compose/pdf-gateway/app/tests/test_m4_worker.sh` (local).
 
 Not yet: the real CDR chain into the archive (Lab2, final M4 slice); text
 extraction inside the durable analysis worker with a writable `text-extracts`
@@ -337,7 +337,7 @@ definitions, qpdf, YARA, poppler) and the archive worker.
 | Disabled mode | VERIFIED | `PDF_GATEWAY_EMBED_METADATA=false` publishes the validated CDR output directly (`test_m4_worker.sh`). |
 | Regression | VERIFIED | `test_m1.sh` (V006 via Flyway), `test_m4_archive.sh`, `test_m4_organize.sh`, `test_m4_worker.sh`, contracts, production compose config. |
 
-Command: `pdf-gateway/tests/test_m4_metadata.sh` (local).
+Command: `compose/pdf-gateway/app/tests/test_m4_metadata.sh` (local).
 
 Pending on Lab2 (final M4 run): the updated validator against real Dangerzone
 output end to end; the earlier M3 Lab2 runs predate the info-key check.
@@ -358,11 +358,11 @@ outbox publisher, and the archive worker.
 | Contract | IMPLEMENTED | OpenAPI 0.3.0 documents the queued PATCH (202/400/404/409/428) and edit status. Download/listing response schemas are not yet formalised in OpenAPI. |
 | Regression | VERIFIED | `test_m1.sh`, `test_m4_worker.sh`, `test_m4_metadata.sh`, Maven (4 tests), contracts. |
 
-Command: `pdf-gateway/tests/test_m4_gate.sh` (local, about 3 min).
+Command: `compose/pdf-gateway/app/tests/test_m4_gate.sh` (local, about 3 min).
 
 ## 2026-10-25 — M4 integration on Lab2 and the CPU budget
 
-`pdf-gateway/tools/lab2_test.sh test_pipeline_e2e` (renamed from
+`compose/pdf-gateway/app/tools/lab2_test.sh test_pipeline_e2e` (renamed from
 `test_m3_e2e.sh`, now covering the archive too) builds every image on the local
 PC and streams it to Lab2 (`docker save | docker load`), so Lab2 never compiles.
 It then runs the production compose (`scanning`, `cdr`, `archive` profiles) and
@@ -402,12 +402,12 @@ Ran on the local PC with the real API (Flyway V001–V008) and archive worker.
 | Summary / health | VERIFIED | Counts, statuses, archived, CDR failures and READY latency percentiles. Health covers DB, broker, archive readability, outbox backlog, pipeline counts, latest ClamAV definitions and CDR outcome (inferred, not probed). |
 | Regressions found | VERIFIED fixed | The new `DELETE /quarantine/{id}` made `GET` on that path a 500; it now returns a 405 problem. M1's "no raw quarantine route" check accepts 404/405 and asserts no PDF bytes. |
 
-Commands: `pdf-gateway/tests/test_m5_api.sh`, `test_m1.sh`, `test_m4_gate.sh`, Maven, contracts (OpenAPI 0.4.0).
+Commands: `compose/pdf-gateway/app/tests/test_m5_api.sh`, `test_m1.sh`, `test_m4_gate.sh`, Maven, contracts (OpenAPI 0.4.0).
 Not done: login rate limiting (tokens are 256-bit random), quarantine override/rescan.
 
 ## 2026-10-25 — M5 slices 2–3: web UI and browser tests
 
-`pdf-gateway/web/`: React 19, TypeScript 7, Vite 8, Tailwind 4, TanStack Query 5 and Zod 4, every package
+`compose/pdf-gateway/app/web/`: React 19, TypeScript 7, Vite 8, Tailwind 4, TanStack Query 5 and Zod 4, every package
 exact-pinned and integrity-locked (`package-lock.json`, `npm ci`). It is served same-origin by a non-root,
 read-only Caddy container that proxies `/api`. Tests ran on the local PC (headless Firefox 152 via
 Selenium for desktop; Playwright Firefox 142 for the exact phone viewport).
@@ -426,13 +426,13 @@ Selenium for desktop; Playwright Firefox 142 for the exact phone viewport).
 | Real iPhone Safari | NOT STARTED | Needs your phone and deployment over HTTPS (Safari/WebKit was not available locally). |
 | Bugs found and fixed | VERIFIED | Caddy's file capability could not exec under `no-new-privileges` + `cap_drop: ALL` (the image now runs a copy without it); ETag rewriting (above); sign-out left the shell signed in (`queryClient.clear()` detached the observed session query). |
 
-Commands: `VENV=<venv with selenium, playwright> PLAYWRIGHT_BROWSERS_PATH=<dir> pdf-gateway/tests/test_m5_ui.sh [SCREENSHOT_DIR]`,
-`pdf-gateway/tests/test_m5_api.sh`.
+Commands: `VENV=<venv with selenium, playwright> PLAYWRIGHT_BROWSERS_PATH=<dir> compose/pdf-gateway/app/tests/test_m5_ui.sh [SCREENSHOT_DIR]`,
+`compose/pdf-gateway/app/tests/test_m5_api.sh`.
 
 ## 2026-10-25 — M6: exactly-once Paperless projection
 
 Against a real, disposable **Paperless-ngx 3.3.2** on Lab2 (its own Valkey, SQLite and media; OCR off;
-1 CPU), via `pdf-gateway/tools/lab2_test.sh test_m6_paperless`. 485 s, thermal peak 81 °C. The
+1 CPU), via `compose/pdf-gateway/app/tools/lab2_test.sh test_m6_paperless`. 485 s, thermal peak 81 °C. The
 production Paperless was never contacted.
 
 | Capability | Status | Evidence |
@@ -483,6 +483,6 @@ Ran on this PC, which is the AI laptop (Quadro T1000 4 GB, i7-10750H, 46 GB RAM)
 | UI | VERIFIED | Status page AI card; document page proposals with quoted evidence, Apply and Dismiss (Firefox UI test checks the card). |
 | Not covered | NOT STARTED | Arabic OCR is installed but not exercised by a fixture; vision-model OCR not used (it can invent text). M6 Paperless test not rerun on Lab2 after this slice; the archive-worker changes are off by default and the other archive tests pass. |
 
-Command: `pdf-gateway/tests/test_m7_enrichment.sh` (needs LM Studio with `qwen/qwen3-4b-2507`).
+Command: `compose/pdf-gateway/app/tests/test_m7_enrichment.sh` (needs LM Studio with `qwen/qwen3-4b-2507`).
 Regression (local, all passed): `test_m1`, `test_m4_archive`, `test_m4_worker`, `test_m4_metadata`,
 `test_m4_gate`, `test_m5_api`, `test_m5_ui`, Maven, contracts.

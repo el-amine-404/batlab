@@ -33,6 +33,7 @@ stage="restore from newest snapshot"
 restic restore latest --target "$work" \
   --include /mnt/docker-volumes/database-dumps/paperless.dump \
   --include /mnt/docker-volumes/database-dumps/immich.dump \
+  --include /mnt/docker-volumes/database-dumps/pdf-gateway.dump \
   --include /mnt/docker-volumes/database-dumps/sqlite/netalertx/db/app.db \
   --include /home/potato/batlab/compose/.env \
   --include /home/potato/batlab/compose/versions.env
@@ -45,10 +46,11 @@ fi
 
 paperless="$work/mnt/docker-volumes/database-dumps/paperless.dump"
 immich="$work/mnt/docker-volumes/database-dumps/immich.dump"
+gateway="$work/mnt/docker-volumes/database-dumps/pdf-gateway.dump"
 sqlite="$work/mnt/docker-volumes/database-dumps/sqlite/netalertx/db/app.db"
 versions="$work/home/potato/batlab/compose/versions.env"
 secrets="$work/home/potato/batlab/compose/.env"
-for restored in "$paperless" "$immich" "$sqlite" "$versions" "$secrets"; do
+for restored in "$paperless" "$immich" "$gateway" "$sqlite" "$versions" "$secrets"; do
   [[ -s "$restored" ]] || { echo "Missing or empty restored file: $restored" >&2; exit 1; }
 done
 
@@ -80,10 +82,38 @@ docker exec -i paperless-db pg_restore --list <"$paperless" >/dev/null
 stage="Immich PostgreSQL archive validation"
 docker exec -i immich-db pg_restore --list <"$immich" >/dev/null
 
+stage="PDF gateway PostgreSQL archive validation"
+docker exec -i pdf-gateway-db pg_restore --list <"$gateway" >/dev/null
+
+# The archive's PDFs are the gateway's real data (its database can be rebuilt
+# from their sidecars with pdf-archive reindex-db). Restore one document and
+# check its PDF against the SHA-256 its sidecar recorded.
+stage="PDF archive restore"
+archive=/mnt/storage/data/documents/pdf-archive/archive
+sidecar="$(restic ls latest "$archive" | grep '/metadata\.json$' | shuf -n 1 || true)"
+if [[ -z $sidecar ]]; then
+  if find "$archive" -name metadata.json -mmin +1440 -print -quit 2>/dev/null | grep -q .; then
+    echo "The newest snapshot has no PDF archive documents, but the archive has day-old ones" >&2
+    exit 1
+  fi
+  archived="no PDF archived yet"
+else
+  restic restore latest --target "$work" --include "$(dirname "$sidecar")"
+  python3 - "$work$sidecar" <<'PY'
+import hashlib, json, pathlib, sys
+sidecar = pathlib.Path(sys.argv[1])
+meta = json.loads(sidecar.read_text())
+pdf = sidecar.parent / meta["relativePdfPath"]
+if hashlib.sha256(pdf.read_bytes()).hexdigest() != meta["integrity"]["sha256"]:
+    raise SystemExit(f"Restored archive PDF does not match its sidecar: {pdf.name}")
+PY
+  archived="an archived PDF matching its recorded SHA-256"
+fi
+
 elapsed="$(($(date +%s) - started))"
 stage="success notification"
 restic_notify success "Backup restore test passed" \
-  "Validated" "Paperless PostgreSQL, Immich PostgreSQL, NetAlertX SQLite, encrypted secrets, repository configuration and Frigate-media exclusion" \
+  "Validated" "Paperless, Immich and PDF gateway PostgreSQL, $archived, NetAlertX SQLite, encrypted secrets, repository configuration and Frigate-media exclusion" \
   "Source" "Newest off-site Restic snapshot" \
   "Action" "None" \
   "Duration" "${elapsed}s" || echo "Restore-test success notification was not delivered" >&2
