@@ -28,13 +28,13 @@ mean verified behavior, not merely committed code.
 
 ## M1 — infrastructure, authentication, upload, and quarantine
 
-- [ ] Minimal core Compose profile with PostgreSQL and RabbitMQ on private networks.
-- [ ] Flyway migrations for users, jobs, steps, artifacts, audit, and outbox.
-- [ ] Secure bootstrap plus ADMIN, USER, and READ_ONLY authorization.
-- [ ] Streaming multipart upload with 50 MiB default limit and disk-headroom guard.
-- [ ] Private immutable quarantine with generated IDs and SHA-256 during streaming.
-- [ ] Transactional job/outbox creation and durable queue publication.
-- [ ] Restart, replay, idempotency, cross-user denial, and raw-file exposure tests.
+- [x] Minimal core Compose profile with PostgreSQL and RabbitMQ on private networks.
+- [x] Flyway migrations for users, jobs, steps, artifacts, audit, and outbox.
+- [x] Secure bootstrap plus ADMIN, USER, and READ_ONLY authorization.
+- [x] Streaming multipart upload with 50 MiB default limit and disk-headroom guard.
+- [x] Private immutable quarantine with generated IDs and SHA-256 during streaming.
+- [x] Transactional job/outbox creation and durable queue publication.
+- [x] Restart, replay, idempotency, cross-user denial, and raw-file exposure tests.
 
 ## M2 — scanners and deterministic policy
 

@@ -1,0 +1,62 @@
+name: pdf-gateway-m1-test
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: pdf_gateway
+      POSTGRES_USER: pdf_gateway
+      POSTGRES_PASSWORD: ${TEST_DB_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pdf_gateway -d pdf_gateway"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    tmpfs:
+      - /var/lib/postgresql/data
+    networks: [private]
+  rabbitmq:
+    image: rabbitmq:4.1-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: pdf_gateway
+      RABBITMQ_DEFAULT_PASS: ${TEST_RABBIT_PASSWORD}
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    networks: [private]
+  api:
+    build:
+      context: ../api
+    environment:
+      PDF_GATEWAY_DATABASE_PASSWORD: ${TEST_DB_PASSWORD}
+      PDF_GATEWAY_RABBITMQ_PASSWORD: ${TEST_RABBIT_PASSWORD}
+      PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN: ${TEST_ADMIN_TOKEN}
+      PDF_GATEWAY_STORAGE_ROOT: /data
+      PDF_GATEWAY_MULTIPART_DIR: /data/multipart
+      PDF_GATEWAY_MINIMUM_FREE_BYTES: 1048576
+      PDF_GATEWAY_MINIMUM_FREE_PERCENT: 1
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+    volumes:
+      - ${TEST_STORAGE}:/data
+    ports:
+      - 127.0.0.1:18089:8080
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 768m
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/internal/actuator/health/readiness"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+      start_period: 10s
+    networks: [private]
+networks:
+  private: {}

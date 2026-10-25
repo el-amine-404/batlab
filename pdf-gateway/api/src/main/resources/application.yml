@@ -1,0 +1,48 @@
+spring:
+  application:
+    name: pdf-gateway-api
+  datasource:
+    url: ${PDF_GATEWAY_DATABASE_URL:jdbc:postgresql://postgres:5432/pdf_gateway}
+    username: ${PDF_GATEWAY_DATABASE_USER:pdf_gateway}
+    password: ${PDF_GATEWAY_DATABASE_PASSWORD}
+  flyway:
+    validate-migration-naming: true
+  servlet:
+    multipart:
+      max-file-size: ${PDF_GATEWAY_MAX_UPLOAD_BYTES:52428800}
+      max-request-size: ${PDF_GATEWAY_MAX_REQUEST_BYTES:53477376}
+      file-size-threshold: 0
+      location: ${PDF_GATEWAY_MULTIPART_DIR:/var/lib/pdf-gateway/multipart}
+  rabbitmq:
+    host: ${PDF_GATEWAY_RABBITMQ_HOST:rabbitmq}
+    port: ${PDF_GATEWAY_RABBITMQ_PORT:5672}
+    username: ${PDF_GATEWAY_RABBITMQ_USER:pdf_gateway}
+    password: ${PDF_GATEWAY_RABBITMQ_PASSWORD}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+server:
+  port: 8080
+  shutdown: graceful
+  forward-headers-strategy: framework
+  error:
+    include-message: never
+    include-stacktrace: never
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+      base-path: /internal/actuator
+  endpoint:
+    health:
+      probes:
+        enabled: true
+pdf-gateway:
+  storage-root: ${PDF_GATEWAY_STORAGE_ROOT:/var/lib/pdf-gateway}
+  max-upload-bytes: ${PDF_GATEWAY_MAX_UPLOAD_BYTES:52428800}
+  minimum-free-bytes: ${PDF_GATEWAY_MINIMUM_FREE_BYTES:10737418240}
+  minimum-free-percent: ${PDF_GATEWAY_MINIMUM_FREE_PERCENT:10}
+  bootstrap-admin-name: ${PDF_GATEWAY_BOOTSTRAP_ADMIN_NAME:admin}
+  bootstrap-admin-token: ${PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN:}
