@@ -60,7 +60,7 @@ at 85 °C), one at a time, starting below 75 °C. Production CPU caps are config
 | `a3995b9` | M4-3 durable archive worker, V005 archive index + READY/PUBLISHED guard |
 | `38f4f0f` | M4-4 allowlisted embedded metadata revalidated as a new version, V006 |
 | `f3718f0` | M4-5 archive API (read-only, RBAC, safe downloads, CAS edits), V007, `reindex-db`, DB-loss gate |
-| (this checkpoint) | Budget/healthcheck changes, `lab2_test.sh`, `test_pipeline_e2e.sh` through the archive, docs |
+| `501124a` | Budget/healthcheck changes, `lab2_test.sh`, `test_pipeline_e2e.sh` through the archive, docs |
 
 ### Pipeline as implemented
 
