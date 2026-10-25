@@ -238,3 +238,17 @@ the public contract.
 | Optional bounded OCR and allowlisted metadata writer | NOT STARTED (optional, deferred to M4/M7) |
 | Persistent provider service and `cdr` profile deployment | NOT STARTED (deliberately not deployed) |
 | M0 item "review and accept the measured CDR approach" | BLOCKED on user acceptance |
+
+## 2026-10-25 — M0 CDR gate accepted; Lab2 thermal incident
+
+| Item | Status | Evidence |
+|---|---|---|
+| CDR approach | VERIFIED (accepted) | The user accepted the measured approach: rootless Dangerzone on Lab2 with outer crun and inner gVisor, no network, no host mounts, final-byte revalidation. Stated residual risk: converter/gVisor/kernel bugs, deceptive visible content, and loss of text/vector fidelity. A dedicated VM was offered as the stronger alternative and declined. |
+| Lab2 overheating during M3 tests | VERIFIED fixed | Netdata reported 95.5 °C during `test_m3_validation.sh`. Busiest: the test RabbitMQ at 172% CPU, test ClamAV at 63%, Frigate at 45%. The test PostgreSQL/RabbitMQ (and the production compose's) had no CPU limit. Every service in `compose.yml` and in each test compose file now has a CPU cap (PostgreSQL/RabbitMQ 0.5 CPU and 512 MiB; ClamAV 1.0, previously 1.5 production / 2.0 tests). RabbitMQ runs with Erlang scheduler busy-waiting disabled. A local idle and connection-churn comparison did not show that busy-waiting was the cause, so the hard cap is the actual safeguard. |
+| Thermal guard | VERIFIED | Lab2 tests (`test_m3_cdr.sh`, `test_m3_validation.sh`, `test_m3_e2e.sh`) wait for `x86_pkg_temp` < 75 °C before starting and abort through their cleanup trap at ≥ 85 °C. Checked on Lab2: a normal run completed; a forced 1 °C threshold aborted with exit 143 and ran cleanup. Lab2 sat at 62–72 °C at rest. |
+
+Regression after the caps (local): `test_m1.sh`, `test_m2.sh`, `test_m2_pipeline.sh`,
+`test_m3_pipeline.sh`, `test_m3_signatures.sh` passed; all compose files pass
+`docker compose config`. Not yet rerun on Lab2 after the cap change:
+`test_m3_cdr.sh`, `test_m3_validation.sh`, `test_m3_e2e.sh`. They run once,
+under the thermal guard, at the M4 integration step.

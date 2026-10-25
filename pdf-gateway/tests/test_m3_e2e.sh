@@ -35,6 +35,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
+thermal_guard
 prepare_storage
 mkdir -p "$TEST_STORAGE/trust"
 # The API container (UID 10001) writes quarantine objects here.

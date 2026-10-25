@@ -24,7 +24,7 @@ mean verified behavior, not merely committed code.
 - [x] Install supported Dangerzone/Podman runtime on Lab2.
 - [x] Verify signed sandbox image and gVisor-backed, networkless conversion on Lab2.
 - [x] Run an isolation test proving no network and no host bind/volume access.
-- [ ] Gate: review and accept the measured CDR approach.
+- [x] Gate: review and accept the measured CDR approach (accepted by the user on 2026-10-25; a separate VM was offered and declined).
 
 ## M1 — infrastructure, authentication, upload, and quarantine
 

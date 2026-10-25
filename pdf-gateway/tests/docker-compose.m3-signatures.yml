@@ -18,6 +18,7 @@ services:
   signer:
     build:
       context: ../signature-worker
+    cpus: 0.5
     entrypoint: ["python", "/test-tools/make_signed_fixture.py"]
     volumes:
       - ${TEST_FIXTURES}:/fixtures

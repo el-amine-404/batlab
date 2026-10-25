@@ -2,6 +2,8 @@ name: pdf-gateway-m3-validation-test
 services:
   postgres:
     image: postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
+    cpus: 0.5
+    mem_limit: 512m
     environment:
       POSTGRES_DB: pdf_gateway
       POSTGRES_USER: pdf_gateway
@@ -20,7 +22,11 @@ services:
 
   rabbitmq:
     image: rabbitmq:4.1-alpine@sha256:3dd4ce7606f9fbf2e2dbca90a02f29c19c5cdf66bf15cdf5237430e3614128ca
+    cpus: 0.5
+    mem_limit: 512m
     environment:
+      # Erlang schedulers busy-wait by default; that burns idle CPU on a shared host.
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: +sbwt none +sbwtdcpu none +sbwtdio none
       RABBITMQ_DEFAULT_USER: pdf_gateway
       RABBITMQ_DEFAULT_PASS: test-rabbit-password
     healthcheck:
@@ -41,11 +47,12 @@ services:
     tmpfs:
       - /tmp:size=64m,mode=1777
     mem_limit: 4g
-    cpus: 2.0
+    cpus: 1.0
     networks: [backend, updates]
 
   cdr-worker:
     image: pdf-gateway-m3-test/cdr-worker:local
+    cpus: 0.5
     environment:
       PDF_GATEWAY_DATABASE_PASSWORD: test-database-password
       PDF_GATEWAY_RABBITMQ_USER: pdf_gateway
@@ -75,6 +82,7 @@ services:
 
   validation-worker:
     image: pdf-gateway-m3-test/analysis-worker:local
+    cpus: 0.5
     entrypoint: ["python3", "/opt/pdf-gateway/validation_worker.py"]
     # Read access to staged CDR output (files 0640, group 10010).
     group_add: ["10010"]
@@ -108,6 +116,7 @@ services:
 
   relay:
     image: pdf-gateway-m3-test/cdr-worker:local
+    cpus: 0.5
     entrypoint: ["python3", "/test-tools/outbox_relay.py"]
     environment:
       PDF_GATEWAY_DATABASE_PASSWORD: test-database-password
