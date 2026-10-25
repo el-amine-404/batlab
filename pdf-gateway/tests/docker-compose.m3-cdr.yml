@@ -1,0 +1,73 @@
+name: pdf-gateway-m3-cdr-test
+services:
+  postgres:
+    image: postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
+    environment:
+      POSTGRES_DB: pdf_gateway
+      POSTGRES_USER: pdf_gateway
+      POSTGRES_PASSWORD: test-database-password
+    volumes:
+      - ../api/src/main/resources/db/migration/V001__m1_core.sql:/docker-entrypoint-initdb.d/001.sql:ro
+      - ../api/src/main/resources/db/migration/V002__m3_signatures.sql:/docker-entrypoint-initdb.d/002.sql:ro
+      - ../api/src/main/resources/db/migration/V003__m3_cdr.sql:/docker-entrypoint-initdb.d/003.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pdf_gateway -d pdf_gateway"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    networks: [backend]
+
+  rabbitmq:
+    image: rabbitmq:4.1-alpine@sha256:3dd4ce7606f9fbf2e2dbca90a02f29c19c5cdf66bf15cdf5237430e3614128ca
+    environment:
+      RABBITMQ_DEFAULT_USER: pdf_gateway
+      RABBITMQ_DEFAULT_PASS: test-rabbit-password
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    networks: [backend]
+
+  cdr-worker:
+    # Built by the test script with host networking (Lab2's bridge has no DNS).
+    image: pdf-gateway-m3-test/cdr-worker:local
+    environment:
+      PDF_GATEWAY_DATABASE_PASSWORD: test-database-password
+      PDF_GATEWAY_RABBITMQ_USER: pdf_gateway
+      PDF_GATEWAY_RABBITMQ_PASSWORD: test-rabbit-password
+      PDF_GATEWAY_STORAGE_ROOT: /var/lib/pdf-gateway
+      PDF_GATEWAY_CDR_SOCKET: /run/pdf-cdr/cdr.sock
+      PDF_GATEWAY_CDR_RETRY_SECONDS: "300"
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+    volumes:
+      - ${TEST_STORAGE}/quarantine:/var/lib/pdf-gateway/quarantine:ro
+      - ${TEST_STORAGE}/cdr-output:/var/lib/pdf-gateway/cdr-output
+      - ${TEST_STORAGE}/cdr-socket:/run/pdf-cdr
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 32
+    mem_limit: 256m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import os; os.kill(1, 0)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [backend]
+
+  signer:
+    image: pdf-gateway-m3-test/signature-worker:local
+    entrypoint: ["python", "/test-tools/make_signed_fixture.py"]
+    volumes:
+      - ${TEST_STORAGE}/builder:/fixtures
+      - ./make_signed_fixture.py:/test-tools/make_signed_fixture.py:ro
+    network_mode: none
+
+networks:
+  backend: {internal: true}

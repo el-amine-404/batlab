@@ -159,6 +159,47 @@ services:
     restart: unless-stopped
     networks: [backend]
 
+  # Dispatches to the host Dangerzone provider (hosts/lab2/pdf-cdr-provider)
+  # over a Unix socket. The sandbox boundary is the provider's rootless
+  # Podman + gVisor runtime, never this container; no Docker socket is mounted.
+  cdr-worker:
+    profiles: [cdr]
+    build:
+      context: cdr-worker
+    environment:
+      PDF_GATEWAY_DATABASE_HOST: postgres
+      PDF_GATEWAY_DATABASE_NAME: pdf_gateway
+      PDF_GATEWAY_DATABASE_USER: pdf_gateway
+      PDF_GATEWAY_DATABASE_PASSWORD: ${PDF_GATEWAY_DATABASE_PASSWORD:?set in the deployment environment}
+      PDF_GATEWAY_RABBITMQ_HOST: rabbitmq
+      PDF_GATEWAY_RABBITMQ_USER: pdf_gateway
+      PDF_GATEWAY_RABBITMQ_PASSWORD: ${PDF_GATEWAY_RABBITMQ_PASSWORD:?set in the deployment environment}
+      PDF_GATEWAY_STORAGE_ROOT: /var/lib/pdf-gateway
+      PDF_GATEWAY_CDR_SOCKET: /run/pdf-cdr/cdr.sock
+      PDF_GATEWAY_CDR_MAX_ATTEMPTS: ${PDF_GATEWAY_CDR_MAX_ATTEMPTS:-4}
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+    volumes:
+      - ${PDF_GATEWAY_STORAGE_ROOT:?set to a private host directory}/quarantine:/var/lib/pdf-gateway/quarantine:ro
+      - ${PDF_GATEWAY_STORAGE_ROOT:?set to a private host directory}/cdr-output:/var/lib/pdf-gateway/cdr-output
+      - ${PDF_GATEWAY_CDR_SOCKET_DIR:?set to the provider socket directory}:/run/pdf-cdr
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 32
+    mem_limit: 256m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import os; os.kill(1, 0)"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+    networks: [backend]
+
 volumes:
   postgres-data: {}
   rabbitmq-data: {}

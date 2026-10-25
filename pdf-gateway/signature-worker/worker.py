@@ -80,7 +80,7 @@ def persist(scan_id: str, attempt: int, report: dict) -> None:
     review = report["policyDecision"] == "REVIEW_REQUIRED"
     next_status = "REVIEW_REQUIRED" if review else "AWAITING_CDR"
     next_policy = "REVIEW_REQUIRED" if review else "CDR_ELIGIBLE"
-    artifact_state = "SIGNED_ORIGINAL_RESTRICTED" if report["preserveOriginal"] else "ORIGINAL_QUARANTINED"
+    retention = "SIGNED_RESTRICTED" if report["preserveOriginal"] else "STANDARD"
     with database() as connection, connection.cursor() as cursor:
         cursor.execute("SELECT source_sha256 FROM scan_jobs WHERE id=%s FOR UPDATE", (scan_id,))
         row = cursor.fetchone()
@@ -88,8 +88,9 @@ def persist(scan_id: str, attempt: int, report: dict) -> None:
             raise RuntimeError("source identity changed before signature commit")
         cursor.execute("INSERT INTO signature_verifications(id,scan_id,attempt,source_sha256,state,policy_decision,preserve_original,signature_count,report) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)",
                        (str(uuid.uuid4()), scan_id, attempt, report["sourceSha256"], report["state"], report["policyDecision"], report["preserveOriginal"], report["signatureCount"], json.dumps(report)))
-        cursor.execute("UPDATE scan_jobs SET status=%s,policy=%s,artifact_state=%s,updated_at=now(),version=version+1 WHERE id=%s",
-                       (next_status, next_policy, artifact_state, scan_id))
+        # Retention is only ever raised; the V003 trigger also rejects lowering it.
+        cursor.execute("UPDATE scan_jobs SET status=%s,policy=%s,original_retention=CASE WHEN original_retention='SIGNED_RESTRICTED' THEN original_retention ELSE %s END,updated_at=now(),version=version+1 WHERE id=%s",
+                       (next_status, next_policy, retention, scan_id))
         cursor.execute("UPDATE job_steps SET status='SUCCEEDED',finished_at=now(),engine_version=%s,details=%s::jsonb WHERE scan_id=%s AND step_type='SIGNATURE' AND attempt=%s",
                        (f"pyHanko {report['engine']['version']}", json.dumps({"state": report["state"], "policyDecision": report["policyDecision"]}), scan_id, attempt))
         cursor.execute("INSERT INTO artifacts(id,scan_id,kind,storage_object,sha256,bytes,state) VALUES (%s,%s,'SIGNATURE_REPORT',%s,%s,%s,'RESTRICTED')",
