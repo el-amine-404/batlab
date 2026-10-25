@@ -1,24 +1,29 @@
 #!/usr/bin/env bash
-# M3 slice 3: the production compose definition end to end on Lab2. Fixtures are
+# Full pipeline on Lab2 with the production compose definition: fixtures are
 # uploaded through the authenticated API and pass through the real analysis,
-# signature, CDR (host Dangerzone provider) and final-validation stages.
+# signature, CDR (host Dangerzone provider), final validation, embedded-metadata
+# revalidation and archive publication stages. One run at a time, thermally
+# guarded: Lab2 runs live services.
 set -Eeuo pipefail
-trap 'echo "test_m3_e2e.sh: failed at line $LINENO: $BASH_COMMAND" >&2' ERR
+trap 'echo "test_pipeline_e2e.sh: failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 compose="$root/pdf-gateway/compose.yml"
-project=pdf-gateway-m3-e2e
-dc=(docker compose -p "$project" -f "$compose" -f "$root/pdf-gateway/tests/docker-compose.m3-e2e.override.yml" --profile scanning --profile cdr)
+project=pdf-gateway-e2e
+dc=(docker compose -p "$project" -f "$compose" -f "$root/pdf-gateway/tests/docker-compose.pipeline-e2e.override.yml" --profile scanning --profile cdr --profile archive)
 scratch="$(mktemp -d)"
 export TEST_STORAGE="$scratch/storage"
 . "$root/pdf-gateway/tests/lib_m3.sh"
 
 export PDF_GATEWAY_STORAGE_ROOT="$TEST_STORAGE"
 export PDF_GATEWAY_CDR_SOCKET_DIR="$TEST_STORAGE/cdr-socket"
+export PDF_GATEWAY_ARCHIVE_ROOT="$scratch/archive"
 export PDF_GATEWAY_DATABASE_PASSWORD="$(openssl rand -hex 24)"
 export PDF_GATEWAY_RABBITMQ_PASSWORD="$(openssl rand -hex 24)"
 export PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN="$(openssl rand -hex 32)"
 export PDF_GATEWAY_API_PORT=18189
+# Below the production defaults: this test bursts 11 documents through every stage at once.
+export PDF_GATEWAY_CPUS_WORKER=0.25 PDF_GATEWAY_CPUS_CLAMAV=0.5 PDF_GATEWAY_CPUS_API=0.5 PDF_GATEWAY_CPUS_CORE=0.25
 base="http://127.0.0.1:$PDF_GATEWAY_API_PORT"
 
 cleanup() {
@@ -29,6 +34,9 @@ cleanup() {
   fi
   stop_provider
   "${dc[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
+  # Archive and metadata-version files belong to the archive UID.
+  docker run --rm --network none --user 10005:10005 -v "$PDF_GATEWAY_ARCHIVE_ROOT:/archive" -v "$TEST_STORAGE:/storage" --entrypoint sh \
+    "$project-archive-worker" -c 'rm -rf /archive/archive /archive/staging /archive/manifests/* /storage/metadata-versions/*' >/dev/null 2>&1 || true
   chmod -R u+rwX "$scratch" 2>/dev/null || true
   rm -rf -- "$scratch"
   exit "$status"
@@ -40,12 +48,27 @@ prepare_storage
 mkdir -p "$TEST_STORAGE/trust"
 # The API container (UID 10001) writes quarantine objects here.
 chmod 0777 "$TEST_STORAGE/quarantine"
+mkdir -p "$TEST_STORAGE/text-extracts" "$TEST_STORAGE/metadata-versions" "$PDF_GATEWAY_ARCHIVE_ROOT/manifests"
+chmod 0777 "$TEST_STORAGE/text-extracts" "$TEST_STORAGE/metadata-versions" "$PDF_GATEWAY_ARCHIVE_ROOT" "$PDF_GATEWAY_ARCHIVE_ROOT/manifests"
+cat >"$PDF_GATEWAY_ARCHIVE_ROOT/manifests/rules.json" <<'JSON'
+{"schemaVersion": "1.0.0", "revision": 1, "updatedAt": "2026-10-25T12:00:00Z", "rules": [
+ {"id": "example-telecom-invoice", "issuer": "Example Telecom", "match": {"all": ["example telecom"], "any": ["invoice"]},
+  "category": "Finance", "folder": "Invoices", "documentType": "invoice", "title": "Internet Invoice", "tags": ["finance", "internet", "invoice"]}]}
+JSON
+chmod 0644 "$PDF_GATEWAY_ARCHIVE_ROOT/manifests/rules.json"
 fx="$TEST_STORAGE/fixtures"
 
-# Images are tagged as the production compose expects; Lab2 builds need host networking.
-for service in api analysis-worker signature-worker cdr-worker; do
-  docker build -q --network host -t "$project-$service" "$root/pdf-gateway/$service" >/dev/null
-done
+# Images are tagged as the production compose expects. Prefer PDF_GATEWAY_PREBUILT=1
+# (tools/lab2_test.sh builds off-Lab2); otherwise build here with host networking.
+images=(api analysis-worker signature-worker cdr-worker archive-worker)
+if [[ ${PDF_GATEWAY_PREBUILT:-} == 1 ]]; then
+  for service in "${images[@]}"; do docker image inspect "$project-$service" >/dev/null; done
+else
+  for service in api analysis-worker signature-worker cdr-worker; do
+    docker build -q --network host -t "$project-$service" "$root/pdf-gateway/$service" >/dev/null
+  done
+  docker build -q --network host -f "$root/pdf-gateway/archive-worker/Dockerfile" -t "$project-archive-worker" "$root/pdf-gateway" >/dev/null
+fi
 docker tag "$project-analysis-worker" "$project-validation-worker"
 
 # Disposable CA, a real visible signature, a post-signature incremental update,
@@ -83,11 +106,12 @@ declare -A SCAN HASH
 upload() {
   local name=$1 file=$2 body
   HASH[$name]="$(sha256sum "$fx/$file" | cut -d' ' -f1)"
-  body="$(curl -fsS -H "Authorization: Bearer $PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN" -H "Idempotency-Key: m3-e2e-upload-$name-0001" \
+  body="$(curl -fsS -H "Authorization: Bearer $PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN" -H "Idempotency-Key: e2e-upload-$name-00000001" \
     -F intent=ARCHIVE -F cdrMode=RASTER -F "file=@$fx/$file;type=application/pdf" "$base/api/v1/scans")"
   SCAN[$name]="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["scanId"])' <<<"$body")"
 }
 upload unsigned unsigned.pdf
+upload invoice invoice-en.pdf
 upload signed signed.pdf
 upload tampered tampered.pdf
 upload modified signed-then-modified.pdf
@@ -100,7 +124,7 @@ upload eicar eicar-in-stream.pdf
 
 js() { q "SELECT $2 FROM scan_jobs WHERE id='${SCAN[$1]}'"; }
 for _ in $(seq 1 300); do
-  busy="$(q "SELECT count(*) FROM scan_jobs WHERE status NOT IN ('AWAITING_ARCHIVE','REVIEW_REQUIRED','BLOCKED','FAILED')")"
+  busy="$(q "SELECT count(*) FROM scan_jobs WHERE status NOT IN ('READY','REVIEW_REQUIRED','BLOCKED','FAILED')")"
   [[ $busy == 0 ]] && break
   sleep 2
 done
@@ -111,12 +135,14 @@ eq "$busy" 0
 
 released() {
   local name=$1 signature=$2 retention=$3
-  eq "$(js "$name" "status||','||policy||','||artifact_state||','||original_retention")" "AWAITING_ARCHIVE,ALLOW_SANITIZED,FINAL_VALIDATED,$retention"
+  eq "$(js "$name" "status||','||policy||','||artifact_state||','||original_retention")" "READY,ALLOW_SANITIZED,PUBLISHED,$retention"
   eq "$(q "SELECT state FROM signature_verifications WHERE scan_id='${SCAN[$name]}'")" "$signature"
-  eq "$(q "SELECT verdict FROM final_validations WHERE scan_id='${SCAN[$name]}'")" PASS
-  eq "$(q "SELECT count(*) FROM outbox_events WHERE aggregate_id='${SCAN[$name]}' AND event_type='ARCHIVE_QUEUED' AND published_at IS NOT NULL")" 1
+  # Two validations: the CDR output, then the embedded-metadata version that is published.
+  eq "$(q "SELECT string_agg(verdict,',' ORDER BY attempt) FROM final_validations WHERE scan_id='${SCAN[$name]}'")" PASS,PASS
+  eq "$(q "SELECT a.kind||','||a.state FROM archive_documents d JOIN archive_versions v USING (document_id) JOIN artifacts a ON a.id=v.artifact_id WHERE d.scan_id='${SCAN[$name]}'")" EMBEDDED_METADATA,PUBLISHED
 }
 released unsigned UNSIGNED STANDARD
+released invoice UNSIGNED STANDARD
 released signed SIGNED_VALID_TRUSTED SIGNED_RESTRICTED
 released visible UNSIGNED STANDARD
 released handwritten UNSIGNED STANDARD
@@ -144,7 +170,7 @@ q "SELECT details::text FROM job_steps WHERE scan_id='${SCAN[encrypted]}' AND st
 eq "$(q "SELECT count(*) FROM signature_verifications WHERE scan_id IN ('${SCAN[malformed]}','${SCAN[encrypted]}','${SCAN[eicar]}')")" 0
 
 # Exactly the five passing documents are in a release-eligible state.
-eq "$(q "SELECT count(*) FROM scan_jobs WHERE status IN ('AWAITING_ARCHIVE','ARCHIVING','READY') OR policy='ALLOW_SANITIZED' OR artifact_state IN ('FINAL_VALIDATED','PUBLISHED')")" 5
+eq "$(q "SELECT count(*) FROM scan_jobs WHERE status IN ('AWAITING_ARCHIVE','ARCHIVING','READY') OR policy='ALLOW_SANITIZED' OR artifact_state IN ('FINAL_VALIDATED','PUBLISHED')")" 6
 
 # Originals are byte-identical after the whole pipeline.
 for name in "${!SCAN[@]}"; do
@@ -174,13 +200,33 @@ api_view() {
     | python3 -I "$root/pdf-gateway/tests/check_scan_contract.py" "$root/pdf-gateway/contracts/openapi.yaml"
 }
 for name in "${!SCAN[@]}"; do api_view "$name" >/dev/null; done
-eq "$(api_view signed)" '{"status": "ARCHIVING", "stage": "AWAITING_ARCHIVE", "detection": "NO_THREATS_DETECTED", "policy": "ALLOW_SANITIZED", "artifact": "FINAL_VALIDATED", "originalRetention": "SIGNED_RESTRICTED"}'
+eq "$(api_view signed)" '{"status": "READY", "stage": "READY", "detection": "NO_THREATS_DETECTED", "policy": "ALLOW_SANITIZED", "artifact": "PUBLISHED", "originalRetention": "SIGNED_RESTRICTED"}'
 eq "$(api_view modified)" '{"status": "REVIEW_REQUIRED", "stage": "REVIEW_REQUIRED", "detection": "NO_THREATS_DETECTED", "policy": "REVIEW_REQUIRED", "artifact": "ORIGINAL_QUARANTINED", "originalRetention": "SIGNED_RESTRICTED"}'
 eq "$(api_view eicar)" '{"status": "BLOCKED", "stage": "BLOCKED", "detection": "MALICIOUS", "policy": "BLOCK", "artifact": "ORIGINAL_QUARANTINED", "originalRetention": "STANDARD"}'
+
+# The archive: named-issuer invoice filed by rule with embedded metadata;
+# the signed original's viewing copy is unsigned; everything verifies standalone.
+invoice_doc="doc-${SCAN[invoice]:5}"
+eq "$(curl -fsS -H "Authorization: Bearer $PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN" "$base/api/v1/archive/$invoice_doc" \
+      | python3 -c 'import json,sys; v=json.load(sys.stdin); print(v["category"]+"|"+v["reviewState"]+"|"+v["archivePath"].split("/")[2])')" "Finance|RULE|Invoices"
+curl -fsS -H "Authorization: Bearer $PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN" -o "$scratch/invoice.pdf" "$base/api/v1/archive/$invoice_doc/file"
+docker run --rm --network none -v "$scratch/invoice.pdf:/i.pdf:ro" --entrypoint python "$project-archive-worker" -c '
+import pikepdf
+with pikepdf.open("/i.pdf") as pdf:
+    info={str(k):str(v) for k,v in pdf.docinfo.items()}
+assert info["/Title"]=="Internet Invoice - October 2026" and info["/Keywords"]=="finance, internet, invoice" and "/Author" not in info, info
+print("embedded:", info)'
+docker run --rm --network none --group-add 10010 -v "$scratch/invoice.pdf:/i.pdf:ro" "$project-signature-worker" /i.pdf \
+  | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["state"]=="UNSIGNED", r'
+signed_meta="$(curl -fsS -H "Authorization: Bearer $PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN" "$base/api/v1/archive/doc-${SCAN[signed]:5}/metadata")"
+python3 -c 'import json,sys; s=json.loads(sys.argv[1])["signature"]; assert s["originalSigned"] and not s["viewingCopySigned"], s' "$signed_meta"
+docker run --rm --network none --read-only --user 10005:10005 -v "$PDF_GATEWAY_ARCHIVE_ROOT:/archive:ro" "$project-archive-worker" --root /archive verify \
+  | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["ok"] and r["documents"]==6, r; print("archive verify:", r["documents"], "documents")'
+find "$PDF_GATEWAY_ARCHIVE_ROOT/archive" -mindepth 3 -maxdepth 4 -type d | sed "s|$PDF_GATEWAY_ARCHIVE_ROOT/archive/||" | sort
 
 # The API exposes no route that serves original or staged bytes.
 for path in "/api/v1/quarantine/${SCAN[signed]}" "/api/v1/artifacts/cdr-${SCAN[signed]:5}-1/download"; do
   code="$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN" "$base$path")"
   [[ $code != 2* ]] || { echo "$path returned $code" >&2; exit 1; }
 done
-echo "M3 end-to-end signature-aware CDR, final validation, appearance, immutability, and fail-closed tests passed"
+echo "Pipeline end-to-end: signature-aware CDR, final validation, metadata revalidation, archive publication, immutability, and fail-closed tests passed"

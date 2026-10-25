@@ -57,11 +57,11 @@ mean verified behavior, not merely committed code.
 
 ## M4 — portable archive
 
-- [ ] Deterministic taxonomy, evidence-backed organization, and safe path renderer.
-- [ ] Same-filesystem staging, fsync, atomic directory publish, and recovery sweeper.
-- [ ] Sidecar validation, immutable PDF versions, metadata CAS/ETag revisions.
-- [ ] `verify`, `reindex`, `repair --dry-run`, `export`, `import`, and Paperless resync CLI.
-- [ ] Recover a mixed archive with PostgreSQL and Paperless unavailable.
+- [x] Deterministic taxonomy, evidence-backed organization, and safe path renderer. (User-created rules from corrections: M5 UI.)
+- [x] Same-filesystem staging, fsync, atomic directory publish, and recovery sweeper (`pdf-archive repair`; not yet scheduled automatically — M8).
+- [x] Sidecar validation, immutable PDF versions, metadata CAS/ETag revisions. (`POST /reissue` for a user-requested new PDF version is NOT STARTED.)
+- [x] `verify`, `reindex`, `reindex-db`, `repair --dry-run`, `export`, `import` CLI. (Paperless resync: M6.)
+- [x] Recover an archive with PostgreSQL and Paperless unavailable (invoice, French statement, unclassified; signed and image-only documents were archived on Lab2 but not part of the DB-loss run).
 
 ## M5 — mobile frontend/PWA
 
