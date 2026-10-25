@@ -15,9 +15,12 @@ This file is the resumable source of truth for agents continuing
 
 ## Mandatory agent handoff protocol
 
-Before starting a new milestone slice, check the active goal/usage budget. Do not
-start a slice that cannot reasonably be implemented, tested, documented, and
-committed within the remaining budget.
+Before starting a new milestone slice, check the active goal/usage budget. The
+goal tool may retain a stale `usageLimited` result after the five-hour quota has
+reset; do not treat that stale record as the sole authority if tool calls and
+work are succeeding in the new session. Also assess the actual remaining
+context and stop before a slice that cannot reasonably be implemented, tested,
+documented, and committed.
 
 Every agent that continues this project must update this file before stopping:
 
@@ -39,7 +42,7 @@ The latest green checkpoint is the source of truth; chat summaries are advisory.
   - `pdf-gateway/tests/test_m1.sh`
   - `pdf-gateway/tests/test_m2.sh`
   - `pdf-gateway/tests/test_m2_pipeline.sh`
-- Main on Lab2 currently includes the first M3 signature-inspector checkpoint `52300c2`.
+- Main on Lab2 currently includes the durable M3 signature-stage checkpoint `d7d001c`.
 
 ## CDR gate — verified
 
