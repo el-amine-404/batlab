@@ -25,8 +25,13 @@ prepare_storage() {
   chmod 0644 "$TEST_STORAGE/fixtures"/*
 }
 
-# Lab2's default bridge has no DNS, so image builds use host networking.
-build_image() { docker build -q --network host -t "pdf-gateway-m3-test/$1:local" "$root/pdf-gateway/$1" >/dev/null; }
+# Lab2's default bridge has no DNS, so image builds use host networking. With
+# PDF_GATEWAY_PREBUILT=1 (set by tools/lab2_test.sh) images were built off-Lab2
+# and loaded, because builds are not CPU-capped and must not heat Lab2.
+build_image() {
+  [[ ${PDF_GATEWAY_PREBUILT:-} == 1 ]] && { docker image inspect "pdf-gateway-m3-test/$1:local" >/dev/null; return; }
+  docker build -q --network host -t "pdf-gateway-m3-test/$1:local" "$root/pdf-gateway/$1" >/dev/null
+}
 
 stop_provider() { systemctl --user stop "$unit" >/dev/null 2>&1 || true; }
 start_provider() {
@@ -129,7 +134,8 @@ thermal_guard() {
   trap 'echo "aborted: Lab2 package above ${THERMAL_ABORT_AT:-85}°C" >&2; exit 143' TERM
   ( while kill -0 "$parent" 2>/dev/null; do
       if (( $(package_temp) >= abort_at )); then kill -TERM "$parent"; exit; fi
-      sleep 5
+      # 1 s: at 5 s, 87-88 °C peaks fell between samples (2026-10-25).
+      sleep 1
     done ) &
   echo "thermal guard: start $(package_temp)°C, abort at ${abort_at}°C"
 }

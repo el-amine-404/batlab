@@ -15,7 +15,8 @@ RestartSec=10
 RestartPreventExitStatus=3
 Nice=10
 IOSchedulingClass=idle
-CPUQuota=200%
+# One core: Lab2 health outranks conversion speed (88 °C peak at 200%, 2026-10-25).
+CPUQuota=100%
 MemoryMax=3G
 MemorySwapMax=0
 TasksMax=256

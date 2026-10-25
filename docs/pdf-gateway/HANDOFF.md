@@ -33,128 +33,95 @@ Every agent that continues this project must update this file before stopping:
 
 The latest green checkpoint is the source of truth; chat summaries are advisory.
 
-## Verified state (2026-10-25 UTC, after M3)
+## Verified state (2026-10-25 UTC, after M4)
 
-- M0 contracts, architecture, threat model, schemas, and capacity plan are tracked.
-  The M0 item "review and accept the measured CDR approach" still needs the user's acceptance.
-- M1 VERIFIED: authenticated streaming upload, RBAC, immutable opaque quarantine,
-  headroom guard, PostgreSQL, RabbitMQ transactional outbox, audit, idempotency,
-  ownership, restart durability.
-- M2 VERIFIED: live ClamAV, qpdf, pinned PDFiD/pdf-parser, YARA, typed fail-closed
-  policy, durable single-concurrency worker.
-- M3 VERIFIED (implementation gate; see the gate table at the end of
-  `verification.md`). Optional OCR/metadata writer is NOT STARTED, and nothing from
-  M3 is deployed as a service.
+- M0 VERIFIED, including the user's acceptance of the measured CDR approach (a VM was offered and declined).
+- M1, M2 VERIFIED. M3 VERIFIED (see `verification.md` gate table). M4 VERIFIED for its spec gate
+  (PostgreSQL removed and catalog/tags/contents/index rebuilt from the archive; archive grows with
+  Paperless absent; crash-safe publish under a real SIGKILL loop), with listed gaps below.
+- Nothing is deployed as a service. The provider unit and the `cdr`/`archive` profiles are installable only.
 
-### M3 commits (all on `main`, Lab2 pulled)
+### Lab2 thermal rule (user requirement, 2026-10-25)
+
+Lab2 runs live services and reached 95.5 °C from uncapped test stacks. Rules now in force:
+run tests on the local PC unless they need Dangerzone; run Lab2-only tests **only** through
+`pdf-gateway/tools/lab2_test.sh <test>` (local image builds, 1 s temperature sampling, guard aborts
+at 85 °C), one at a time, starting below 75 °C. Production CPU caps are configurable
+(`PDF_GATEWAY_CPUS_*`, defaults about 4 cores worst case) and the provider is `CPUQuota=100%`.
+
+### Commits (all on `main`, Lab2 pulled)
 
 | Commit | Content |
 |---|---|
-| `2ce4e10`, `f3efc26` | (earlier agent) pyHanko inspector; durable signature stage |
-| `ee8b1e4` | Host Dangerzone provider (`hosts/lab2/pdf-cdr-provider/`), `cdr-worker`, V003 `cdr_results` + `original_retention` |
-| `c160831` | Final validator + `validation-worker`, V004 `final_validations` + release-guard triggers, archive queue |
-| `a8d3eef` | End-to-end test on the production compose via the API |
-| `26924eb` | API/OpenAPI 0.2.0 scan contract alignment (`ScanContract`) |
+| `ee8b1e4`, `c160831`, `a8d3eef`, `26924eb` | M3: CDR provider + stage, final validation + guards, e2e, scan contract |
+| `3a064fb` (merge) | Resource caps everywhere, thermal guard, CDR acceptance recorded |
+| `4745a18` | M4-1 archive library + `pdf-archive` CLI (publish/verify/reindex/repair/export/import) |
+| `1bcfe1c` | M4-2 bounded native-text extraction + deterministic organiser, rules schema |
+| `a3995b9` | M4-3 durable archive worker, V005 archive index + READY/PUBLISHED guard |
+| `38f4f0f` | M4-4 allowlisted embedded metadata revalidated as a new version, V006 |
+| `f3718f0` | M4-5 archive API (read-only, RBAC, safe downloads, CAS edits), V007, `reindex-db`, DB-loss gate |
+| (this checkpoint) | Budget/healthcheck changes, `lab2_test.sh`, `test_pipeline_e2e.sh` through the archive, docs |
 
 ### Pipeline as implemented
 
-`QUEUED → SCANNING (analysis) → AWAITING_POLICY → ANALYZING (signature) →
-AWAITING_CDR → SANITIZING (cdr-worker → host provider → Dangerzone) →
-VALIDATING_OUTPUT (validation-worker) → AWAITING_ARCHIVE` + durable
-`ARCHIVE_QUEUED` on `pdf.gateway.archive.v1`, which **has no consumer until M4**.
-The public API maps internal values to the contract (`AWAITING_ARCHIVE`→`ARCHIVING`).
-`READY`/`PUBLISHED` are unreachable without M4 and are trigger-guarded.
+`QUEUED → SCANNING → AWAITING_POLICY → ANALYZING (signature) → AWAITING_CDR → SANITIZING →
+VALIDATING_OUTPUT → AWAITING_ARCHIVE → ARCHIVING (organise + embed metadata) → VALIDATING_OUTPUT
+(metadata version) → AWAITING_ARCHIVE → ARCHIVING (publish) → READY`. With
+`PDF_GATEWAY_EMBED_METADATA=false` the CDR output is published directly. Database triggers (V004–V006)
+refuse every release state without a PASS for the exact published bytes and an archive record.
 
-### Test commands and outcomes (all passed 2026-10-25)
+### Test commands and latest outcomes (2026-10-25)
 
-Local (any Docker host): `pdf-gateway/tests/test_m1.sh`, `test_m2.sh`,
-`test_m2_pipeline.sh`, `test_m3_signatures.sh`, `test_m3_pipeline.sh`,
-`python3 pdf-gateway/tools/validate_contracts.py`, and Maven:
-`docker run --rm -v "$PWD/pdf-gateway/api:/src" -w /src maven:3.9.11-eclipse-temurin-21@sha256:6fdc855a6ed81d288ca7ca37ac6ff5e9308b612485c0801d70b25a858c83d237 mvn -B -q test`
-(4 tests; delete the root-owned `pdf-gateway/api/target` afterwards, it is not ignored).
+Local PC, all passed: `test_m1.sh`, `test_m2.sh`, `test_m2_pipeline.sh`, `test_m3_signatures.sh`,
+`test_m3_pipeline.sh`, `test_m4_archive.sh`, `test_m4_organize.sh`, `test_m4_worker.sh`,
+`test_m4_metadata.sh`, `test_m4_gate.sh`, `python3 pdf-gateway/tools/validate_contracts.py`, Maven
+(`docker run --rm -v "$PWD/pdf-gateway/api:/src" -w /src maven:3.9.11-eclipse-temurin-21@sha256:6fdc855a6ed81d288ca7ca37ac6ff5e9308b612485c0801d70b25a858c83d237 mvn -B -q test`, 4 tests;
+remove the root-owned `pdf-gateway/api/target` afterwards).
 
-Lab2 only (needs Dangerzone; run as `potato` in a checkout):
-`pdf-gateway/tools/verify_cdr_runtime.sh` (`CDR_READY`), `pdf-gateway/tests/test_m3_cdr.sh`
-(about 1.5 min), `test_m3_validation.sh` (about 2.5 min), `test_m3_e2e.sh` (about 4.5 min).
-`test_m3_cdr`, `test_m3_validation` and `test_m3_e2e` passed from Lab2's `main`
-checkout at `fc52569`. `test_m3_e2e` with the slice-4 contract checks passed from a
-synced copy of `26924eb`.
+Lab2 via `pdf-gateway/tools/lab2_test.sh`: `test_pipeline_e2e` PASSED (348 s, peak 82 °C).
+`test_m3_cdr` and `test_m3_validation` were aborted by the thermal guard with their old caps; caps are now
+lowered but they have **not been rerun** (pending, run one at a time when Lab2 is cool).
 
 ### Operational facts learned
 
-- Lab2's default Docker bridge has no DNS: tests use `docker build --network host`
-  and `compose up --no-build`. Compose `build.network: host` triggers an
-  interactive bake prompt; do not use it.
-- Never put `RLIMIT_FSIZE` on `dangerzone-cli`: gVisor's sparse memory file crashes.
-  The provider bounds host files by polling.
-- Dangerzone runs its sandbox with `--cgroups=disabled`; the provider's systemd user
-  unit limits (3 GiB, 200% CPU, 256 tasks, idle I/O) contain `runsc`/`gvisor_sentry`.
-- Staged CDR output: 0640, UID 10004, group 10010 (validation worker `group_add`).
+- Lab2's default Docker bridge has no DNS; Compose `build.network: host` triggers a bake prompt. Build
+  locally and load instead (`lab2_test.sh`).
+- Never put `RLIMIT_FSIZE` on `dangerzone-cli` (gVisor sparse memory file).
+- PL/pgSQL resolves `NEW.<column>` per table: one trigger function cannot guard two tables.
+- MuPDF (Dangerzone) writes an inline `/Info` in the catalog; validators must accept that shape.
+- `rabbitmq-diagnostics` health probes start an Erlang VM; use `nc -z` under small CPU caps.
+- Archive files belong to UID 10005; tests remove them through a container running as that UID.
+- Groups: 10010 = staged CDR output and metadata versions (0640); 10002 = analysis text extracts.
 
 ### Partial / uncommitted work
 
-None. The worktree is clean at the handoff commit.
+None after the checkpoint commit.
+
+### Gaps (explicitly not done)
+
+- `POST /archive/{id}/reissue` (user-requested new PDF version) NOT STARTED; archive versions are 1 only.
+- Automatic scheduled sweeper (`pdf-archive repair`) NOT STARTED (M8). OCR NOT STARTED (M7).
+- Rule creation from user corrections needs the M5 UI. OpenAPI lacks formal list/download response schemas.
+- Measured impact on Paperless/DNS/Jellyfin latency NOT STARTED (M8).
 
 ### Blockers and user actions
 
-1. Accept (or reject) the measured CDR approach: the M0 gate checkbox.
-2. Before deploying the `cdr` profile: run `hosts/lab2/pdf-cdr-provider/install.sh`
-   as `potato`. Enable linger (`loginctl enable-linger potato`; may need sudo/polkit).
-   Choose host storage ownership (quarantine is written by UID 10001 with umask 022;
-   workers 10002–10004 read it). Deployment is deliberately not done; the archive
-   consumer (M4) does not exist yet.
-3. `potato` is in the `docker` group (root-equivalent). The provider's rootless
-   boundary does not protect against that account; this is a residual risk to record in M8.
+1. Deployment decisions (not needed for M5 development): install the provider (`hosts/lab2/pdf-cdr-provider/install.sh`),
+   `sudo loginctl enable-linger potato`, choose `PDF_GATEWAY_ARCHIVE_ROOT` (e.g. under `/mnt/storage/data/documents`)
+   and host ownership for UIDs 10001–10005 and groups 10002/10010.
+2. `potato` is in the `docker` group (root-equivalent): residual risk for M8 (dedicated Dangerzone account recommended).
 
 ## Next implementation order
 
-1. M4 portable archive: consume `pdf.gateway.archive.v1`. Publish only artifacts in
-   `FINAL_VALIDATED` with a matching `final_validations` PASS. Any embedded-metadata
-   write produces a **new** artifact that must go back through the validation worker
-   (extend V004's guard to that artifact kind). Then taxonomy/paths, sidecars,
-   atomic publish, reindex without PostgreSQL.
-2. M5 real mobile frontend/PWA.
-3. M6 exactly-once Paperless projection and outage recovery.
-4. M7 optional OCR/AI with offline-safe behavior.
-5. M8 hardening, measured Lab2 impact, monitoring, encrypted backup and clean restore.
-
-### M4 plan (written 2026-10-25, before implementation)
-
-Constraint from the user: Lab2 must stay healthy. Run M4 tests on the local PC.
-Use Lab2 only for the final CDR-integrated run, under the thermal guard and one
-test at a time.
-
-Design (safe, reversible): `pdf-gateway/archive-worker/` holds a library + CLI
-(`pdf-archive`: `publish`, `verify`, `reindex`, `repair --dry-run|--apply`,
-`export`, `import`) on Python stdlib plus hash-locked `jsonschema`. The archive
-root has `archive/`, `staging/` (same filesystem, checked by `st_dev`) and
-`manifests/`. Publishing stages the PDF + `metadata.json` (+ `content.txt`),
-fsyncs, validates schema and hash, renames the directory atomically (never
-overwrites), fsyncs the parent, then appends the manifest. Sidecars are
-authoritative; the manifest and PostgreSQL are rebuildable. Reindex writes a
-standalone SQLite catalog from sidecars alone.
-
-Slices:
-1. Library, CLI, path normaliser, atomic publish/verify/reindex/repair/export/import,
-   including a real SIGKILL crash loop and a tamper test. Local.
-2. Deterministic organisation: default `taxonomy.json` + reviewed `rules.json`;
-   bounded native-text extraction from the original inside the networkless analysis
-   sandbox (untrusted, classification-only); title/date/issuer/type with
-   provenance; filename template; `Unsorted` fallback with review reason. Local.
-3. Durable `archive-worker` consuming `pdf.gateway.archive.v1`: re-verify
-   FINAL_VALIDATED + PASS + hash, organise, publish. V005 `archive_documents`/
-   `archive_versions`; READY only after publish (extend V004 guard). Local.
-4. Allowlisted embedded metadata: a new unsigned artifact version that goes back
-   through the validation worker before publish. Local.
-5. API read endpoints + sidecar PATCH with ETag/CAS (no PDF rewrite). Gate test:
-   drop PostgreSQL, reindex from the archive alone; crash-safe publish;
-   export/import into a fresh archive. One thermally guarded Lab2 run of the
-   CDR chain into the archive.
+1. M5 real mobile frontend/PWA: upload, jobs/SSE, scan details, quarantine list, archive browser + tag/title editor
+   (uses the queued CAS edit API), stats, health; no raw-original preview; CSP/CSRF/XSS/IDOR tests; desktop and
+   iPhone viewports. Cookie sessions require CSRF (SecurityConfig currently disables CSRF for bearer-only use).
+2. M6 exactly-once Paperless projection. 3. M7 optional OCR/AI. 4. M8 hardening, budget measurement, backup/restore.
 
 ### First command for the next agent
 
 ```bash
-cd /home/bro/.codex-worktrees/pdf-security-gateway && git fetch origin && git status --short && git log --oneline -8 && ssh lab2 'cd /home/potato/batlab && git log --oneline -1 && pdf-gateway/tools/verify_cdr_runtime.sh'
+cd /home/bro/.codex-worktrees/pdf-security-gateway && git fetch origin && git status --short && git log --oneline -10 && pdf-gateway/tests/test_m4_gate.sh
 ```
 
 ## M3 plan as written before implementation (completed; kept for history)

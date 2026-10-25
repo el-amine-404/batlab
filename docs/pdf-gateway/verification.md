@@ -359,3 +359,21 @@ outbox publisher, and the archive worker.
 | Regression | VERIFIED | `test_m1.sh`, `test_m4_worker.sh`, `test_m4_metadata.sh`, Maven (4 tests), contracts. |
 
 Command: `pdf-gateway/tests/test_m4_gate.sh` (local, about 3 min).
+
+## 2026-10-25 — M4 integration on Lab2 and the CPU budget
+
+`pdf-gateway/tools/lab2_test.sh test_pipeline_e2e` (renamed from
+`test_m3_e2e.sh`, now covering the archive too) builds every image on the local
+PC and streams it to Lab2 (`docker save | docker load`), so Lab2 never compiles.
+It then runs the production compose (`scanning`, `cdr`, `archive` profiles) and
+samples the package temperature every second.
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Full pipeline on real engines | VERIFIED | 11 uploads via the API. Six released: unsigned, *named-issuer invoice*, validly signed, visible-only, handwritten, active JavaScript. Each went through two PASS validations (CDR output, then the embedded-metadata version) and was published, `READY`/`PUBLISHED`, with an archive version pointing at the `EMBEDDED_METADATA` artifact. Five held as in M3. Invoice: `Finance/2026/Invoices/2026-10-15 - Example Telecom - Internet Invoice - October 2026 [doc-…]`, embedded Title/Subject/Keywords/Producer only, no Author, and pyHanko reports the published copy `UNSIGNED`. Signed document: sidecar `originalSigned: true`, `viewingCopySigned: false`. `pdf-archive verify`: 6 valid documents. The validator's new info-key checks passed on real Dangerzone output. |
+| Lab2 stays healthy | VERIFIED | First integrated run (images built on Lab2, previous caps): passed, but 80–88 °C for about 2 minutes; the 5-second guard missed the peaks. Second run (images prebuilt, 1-second guard): aborted itself at 87 °C as designed. Third run (reduced budget below): passed in 348 s, peak 82 °C for 2 s, otherwise ≤80 °C; Lab2 rests at 60–72 °C with Frigate. |
+| CPU budget (spec 12A) | IMPLEMENTED | Production compose limits are configurable (`PDF_GATEWAY_CPUS_CORE` 0.25, `_API` 0.5, `_CLAMAV` 0.5, `_WORKER` 0.5); the provider unit is `CPUQuota=100%`. That is about 4 cores worst case with every stage busy (previously about 8–9). RabbitMQ health is a TCP check: the Erlang CLI probe alone exceeded a 0.25 CPU cap and caused an unhealthy start. Not yet measured: the effect on Paperless/DNS/Jellyfin latency (M8). |
+| Stage tests after the budget change | BLOCKED (deliberately not rerun) | `test_m3_cdr.sh` and `test_m3_validation.sh` aborted on their thermal guard (85 °C and 90 °C peaks) with their older, higher test caps. Their caps are now lowered (0.25 / ClamAV 0.5) with TCP RabbitMQ checks, but they have not been rerun, to spare Lab2. The production code paths they cover passed in the full pipeline run above. |
+
+Lab2 after testing: 69 °C, no gateway containers, provider units or sandboxes,
+scratch removed, and test images deleted.

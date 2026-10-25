@@ -71,10 +71,33 @@ Lab2 verification (needs Dangerzone, so not runnable on other hosts):
 ```bash
 pdf-gateway/tests/test_m3_cdr.sh          # provider, isolation evidence, typed failures
 pdf-gateway/tests/test_m3_validation.sh   # final-byte validation and release guard
-pdf-gateway/tests/test_m3_e2e.sh          # production compose end to end via the API
+pdf-gateway/tests/test_pipeline_e2e.sh    # production compose end to end via the API, into the archive
 ```
 
 Lab2's default Docker bridge has no DNS, so these tests build images with
 `docker build --network host` and run Compose with `--no-build`. Nothing here is
 deployed as a service; enabling the provider and the `cdr` profile is a separate
 deployment decision after the M3 gate.
+
+## M4: portable archive
+
+The `archive` profile adds `archive-worker`, the only writer of
+`PDF_GATEWAY_ARCHIVE_ROOT` (`archive/`, `staging/`, `manifests/` on one
+filesystem). The API mounts the archive read-only. Released documents land in
+`archive/<Category>/<year>/<Folder>/<date> - <issuer> - <title> [doc-…]/` with the
+PDF, `metadata.json` (authoritative) and `content.txt`. Filing follows reviewed
+rules in `manifests/rules.json` (see `contracts/rules.schema.json`); anything
+uncertain goes to `Unsorted` for review. The archive works without PostgreSQL
+or Paperless:
+
+```bash
+pdf-archive --root ARCHIVE verify | reindex --catalog c.sqlite | repair [--apply] | export --bundle b.tar | import --bundle b.tar | reindex-db
+```
+
+`pdf-archive` is the archive-worker image's entrypoint. Local tests:
+`test_m4_archive.sh`, `test_m4_organize.sh`, `test_m4_worker.sh`,
+`test_m4_metadata.sh`, `test_m4_gate.sh`.
+
+Lab2-only tests must go through `pdf-gateway/tools/lab2_test.sh <test>`. It
+builds images locally, samples temperature every second, and the tests abort
+themselves at 85 °C. Lab2 runs live services.

@@ -59,8 +59,10 @@ openssl x509 -req -in "$TEST_STORAGE/builder/signer.csr" -CA "$TEST_STORAGE/buil
   -CAcreateserial -days 2 -sha256 -extfile "$TEST_STORAGE/builder/signer.ext" -out "$TEST_STORAGE/builder/signer.crt" >/dev/null 2>&1
 chmod 0644 "$TEST_STORAGE/builder"/*
 # Lab2's default bridge has no DNS, so image builds use host networking.
-docker build -q --network host -t pdf-gateway-m3-test/cdr-worker:local "$root/pdf-gateway/cdr-worker" >/dev/null
-docker build -q --network host -t pdf-gateway-m3-test/signature-worker:local "$root/pdf-gateway/signature-worker" >/dev/null
+if [[ ${PDF_GATEWAY_PREBUILT:-} != 1 ]]; then  # tools/lab2_test.sh builds off-Lab2
+  docker build -q --network host -t pdf-gateway-m3-test/cdr-worker:local "$root/pdf-gateway/cdr-worker" >/dev/null
+  docker build -q --network host -t pdf-gateway-m3-test/signature-worker:local "$root/pdf-gateway/signature-worker" >/dev/null
+fi
 docker compose -f "$compose" run --rm --no-deps signer
 cp "$TEST_STORAGE/builder/signed.pdf" "$TEST_STORAGE/fixtures/signed.pdf"
 
@@ -71,7 +73,7 @@ q "INSERT INTO users(id,username,role) VALUES ('00000000-0000-0000-0000-00000000
 
 declare -A HASH
 # seed SCAN FIXTURE [nosig] — stage-isolated seeding of committed M2/M3 evidence.
-# The end-to-end chain with real analysis/signature engines is test_m3_e2e.sh.
+# The end-to-end chain with real analysis/signature engines is test_pipeline_e2e.sh.
 seed() {
   local n=$1 fixture=$2 mode=${3:-}
   local scan="scan-01J000000000000000000000$n" object="quar-01J000000000000000000000$n"
