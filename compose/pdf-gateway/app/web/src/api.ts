@@ -61,9 +61,13 @@ export type Findings = z.infer<typeof Findings>;
 export const Document = z.object({
   documentId: z.string(), title: z.string(), category: z.string(), reviewState: z.string(), archivePath: z.string(),
   currentVersion: z.number(), metadataRevision: z.number(), sha256: z.string(), bytes: z.number(),
-  publishedAt: z.string(), updatedAt: z.string(),
+  publishedAt: z.string(), updatedAt: z.string(), scanId: z.string().nullable().optional(),
 });
 export type Document = z.infer<typeof Document>;
+export const PaperlessImport = z.object({
+  status: z.string(), paperlessDocumentId: z.number().nullable(), syncedRevision: z.number().nullable(),
+  metadataRevision: z.number().nullable(), lastError: z.string().nullable(),
+});
 export const DocumentPage = z.object({ items: z.array(Document), nextCursor: z.string().nullable() });
 export const Sidecar = z.object({
   documentId: z.string(), title: z.string(), metadataRevision: z.number(), tags: z.array(z.string()).optional(),
@@ -146,6 +150,9 @@ export const api = {
     request(z.undefined(), `/api/v1/quarantine/${encodeURIComponent(id)}?confirmSigned=${confirmSigned}`, { method: "DELETE" }),
   documents: (cursor?: string) => request(DocumentPage, `/api/v1/archive?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`),
   document: (id: string) => request(Document, `/api/v1/archive/${encodeURIComponent(id)}`),
+  paperless: (scanId: string) => request(PaperlessImport, `/api/v1/scans/${encodeURIComponent(scanId)}/paperless-import`),
+  sendToPaperless: (scanId: string) =>
+    request(PaperlessImport, `/api/v1/scans/${encodeURIComponent(scanId)}/paperless-import`, { method: "POST" }),
   async sidecar(id: string): Promise<{ sidecar: Sidecar; etag: string }> {
     const response = await fetch(`/api/v1/archive/${encodeURIComponent(id)}/metadata`, { credentials: "same-origin", cache: "no-store" });
     if (!response.ok) throw new ApiError(response.status, "HTTP_" + response.status, response.statusText);

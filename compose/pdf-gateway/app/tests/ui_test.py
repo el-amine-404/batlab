@@ -109,6 +109,12 @@ try:
           and download.get_attribute("href").endswith("/file") and "/quarantine" not in download.get_attribute("href"))
     driver.save_screenshot(str(SHOTS / "desktop-document.png"))
 
+    # Send an archived document to Paperless later (no adapter in this stack: it waits).
+    wait(driver, ec.element_to_be_clickable((By.CSS_SELECTOR, "[data-testid=send-to-paperless]"))).click()
+    status = wait(driver, ec.presence_of_element_located((By.CSS_SELECTOR, "[data-testid=paperless-status]")))
+    check("send to Paperless queues the copy", "waiting to be sent" in status.text, status.text)
+    check("the button is gone once requested", not driver.find_elements(By.CSS_SELECTOR, "[data-testid=send-to-paperless]"))
+
     # Edit tags (If-Match CAS via the archive worker); the PDF stays unchanged.
     fields = wait(driver, lambda d: d.find_elements(By.CSS_SELECTOR, "form input") or False)
     fields[1].clear()
