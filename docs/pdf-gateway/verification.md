@@ -12,7 +12,7 @@ Capability status values are `IMPLEMENTED`, `VERIFIED`, `BLOCKED`, and
 | Lab2 baseline | VERIFIED | 8 CPUs, 31 GiB RAM, cgroup v2, 36 GiB root free, 1.9 TiB data free. |
 | Portable archive contracts | IMPLEMENTED | Strict metadata/taxonomy schemas and OpenAPI draft are tracked and syntax-tested. |
 | Threat model | IMPLEMENTED | Trust boundaries, abuse cases, fail-closed decisions, and residual risks are documented. |
-| Dangerzone CDR | BLOCKED | Debian 13 is supported, but Lab2 currently has neither Podman nor Dangerzone/gVisor. A fingerprint-verifying installer and fail-closed conversion probe are tracked; host installation still requires interactive sudo. Ordinary Docker is explicitly rejected as sufficient proof. |
+| Dangerzone CDR | VERIFIED | Lab2 installed Dangerzone 0.11.1 and rootless Podman 5.4.2 with outer crun. The signed image digest `b1e2ad0aa19c5b994c5c8e49d74d9c4ee99fba1795cf7162ac7aa103440b9f97` verified against the packaged public key. A real conversion returned `CDR_READY` and output SHA-256 `b30f4e27459b601bf135e0d5927be06d4d8b50043356bb5cd246a7a5ef05fd66`; debug evidence showed inner gVisor/runsc, `--network=none`, and no host bind/volume mount. |
 | Exposed Paperless token | VERIFIED | Archived prototype token matched the live token. It was replaced in Paperless and `compose/.env`; Homepage and Paperless GPT were recreated; an authenticated API request using the new token returned HTTP 200. No token value was logged. |
 | M1 | VERIFIED | The disposable production-shaped stack passed authentication/RBAC, streaming quarantine, idempotency, ownership, restart, audit, and publisher-confirmed outbox tests. Release remains impossible until CDR capability is verified. |
 
@@ -22,6 +22,7 @@ Commands used:
 find /home/bro/Documents -type f -iname '*.pdf' -printf '%s\n'
 ssh lab2 'nproc; free -h; df -h / /mnt/storage/data; stat -fc %T /sys/fs/cgroup'
 ssh lab2 'command -v dangerzone-cli podman runsc'
+ssh lab2 'cd /home/potato/batlab && pdf-gateway/tools/verify_cdr_runtime.sh'
 python3 pdf-gateway/tools/validate_contracts.py
 pdf-gateway/tests/test_m1.sh
 docker run --rm ... maven:3.9.11-eclipse-temurin-21 mvn -B test
