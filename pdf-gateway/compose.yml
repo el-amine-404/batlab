@@ -65,11 +65,68 @@ services:
     restart: unless-stopped
     networks: [backend, edge]
 
+  clamav:
+    profiles: [scanning]
+    image: clamav/clamav:1.4@sha256:3bba6dd5ac6663d55b80f86a3126e146612d93b593cc2617188d13f637d91260
+    volumes:
+      - clamav-definitions:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdscan", "--ping", "3"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
+    restart: unless-stopped
+    mem_limit: 4g
+    cpus: 1.5
+    pids_limit: 128
+    networks: [backend, updates]
+
+  analysis-worker:
+    profiles: [scanning]
+    build:
+      context: analysis-worker
+    environment:
+      PDF_GATEWAY_DATABASE_HOST: postgres
+      PDF_GATEWAY_DATABASE_NAME: pdf_gateway
+      PDF_GATEWAY_DATABASE_USER: pdf_gateway
+      PDF_GATEWAY_DATABASE_PASSWORD: ${PDF_GATEWAY_DATABASE_PASSWORD:?set in the deployment environment}
+      PDF_GATEWAY_RABBITMQ_HOST: rabbitmq
+      PDF_GATEWAY_RABBITMQ_USER: pdf_gateway
+      PDF_GATEWAY_RABBITMQ_PASSWORD: ${PDF_GATEWAY_RABBITMQ_PASSWORD:?set in the deployment environment}
+      PDF_GATEWAY_CLAMD_HOST: clamav
+      PDF_GATEWAY_STORAGE_ROOT: /var/lib/pdf-gateway
+      PDF_GATEWAY_SCAN_MAX_ATTEMPTS: ${PDF_GATEWAY_SCAN_MAX_ATTEMPTS:-3}
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+      clamav: {condition: service_healthy}
+    volumes:
+      - ${PDF_GATEWAY_STORAGE_ROOT:?set to a private host directory}/quarantine:/var/lib/pdf-gateway/quarantine:ro
+      - ${PDF_GATEWAY_STORAGE_ROOT:?set to a private host directory}/reports:/var/lib/pdf-gateway/reports
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 768m
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import os; os.kill(1, 0)"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+    networks: [backend]
+
 volumes:
   postgres-data: {}
   rabbitmq-data: {}
+  clamav-definitions: {}
 
 networks:
   backend:
     internal: true
   edge: {}
+  updates: {}
