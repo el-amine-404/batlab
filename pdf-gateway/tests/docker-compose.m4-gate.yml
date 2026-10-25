@@ -1,0 +1,116 @@
+name: pdf-gateway-m4-gate-test
+services:
+  postgres:
+    image: postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
+    cpus: 0.5
+    mem_limit: 512m
+    environment:
+      POSTGRES_DB: pdf_gateway
+      POSTGRES_USER: pdf_gateway
+      POSTGRES_PASSWORD: test-database-password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pdf_gateway -d pdf_gateway"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    networks: [backend]
+
+  rabbitmq:
+    image: rabbitmq:4.1-alpine@sha256:3dd4ce7606f9fbf2e2dbca90a02f29c19c5cdf66bf15cdf5237430e3614128ca
+    cpus: 0.5
+    mem_limit: 512m
+    environment:
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: +sbwt none +sbwtdcpu none +sbwtdio none
+      RABBITMQ_DEFAULT_USER: pdf_gateway
+      RABBITMQ_DEFAULT_PASS: test-rabbit-password
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    networks: [backend]
+
+  archive-worker:
+    image: pdf-gateway-m4-test/archive-worker:local
+    entrypoint: ["python", "/opt/pdf-gateway/worker.py"]
+    group_add: ["10010", "10002"]
+    environment:
+      PDF_GATEWAY_DATABASE_PASSWORD: test-database-password
+      PDF_GATEWAY_RABBITMQ_USER: pdf_gateway
+      PDF_GATEWAY_RABBITMQ_PASSWORD: test-rabbit-password
+      PDF_GATEWAY_STORAGE_ROOT: /var/lib/pdf-gateway
+      PDF_GATEWAY_ARCHIVE_ROOT: /var/lib/pdf-archive
+      PDF_GATEWAY_ARCHIVE_RETRY_SECONDS: "300"
+      # This stage test has no validation worker; the embed round trip is test_m4_metadata.sh.
+      PDF_GATEWAY_EMBED_METADATA: "false"
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+    volumes:
+      - ${TEST_STORAGE}/cdr-output:/var/lib/pdf-gateway/cdr-output:ro
+      - ${TEST_STORAGE}/text-extracts:/var/lib/pdf-gateway/text-extracts:ro
+      - ${TEST_ARCHIVE}:/var/lib/pdf-archive
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 32
+    mem_limit: 256m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks: [backend]
+
+  api:
+    image: pdf-gateway-m4-test/api:local
+    environment:
+      PDF_GATEWAY_DATABASE_PASSWORD: test-database-password
+      PDF_GATEWAY_RABBITMQ_PASSWORD: test-rabbit-password
+      PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN: ${TEST_ADMIN_TOKEN}
+      PDF_GATEWAY_STORAGE_ROOT: /data
+      PDF_GATEWAY_MULTIPART_DIR: /data/multipart
+      PDF_GATEWAY_ARCHIVE_ROOT: /var/lib/pdf-archive
+      PDF_GATEWAY_MINIMUM_FREE_BYTES: 1048576
+      PDF_GATEWAY_MINIMUM_FREE_PERCENT: 1
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+    volumes:
+      - ${TEST_STORAGE}/api:/data
+      - ${TEST_ARCHIVE}:/var/lib/pdf-archive:ro
+    ports:
+      - 127.0.0.1:18289:8080
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 768m
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/internal/actuator/health/readiness"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+      start_period: 10s
+    networks: [backend, edge]
+
+  relay:
+    image: pdf-gateway-m4-test/archive-worker:local
+    entrypoint: ["python", "/test-tools/outbox_relay.py"]
+    cpus: 0.5
+    environment:
+      PDF_GATEWAY_DATABASE_PASSWORD: test-database-password
+      PDF_GATEWAY_RABBITMQ_PASSWORD: test-rabbit-password
+    volumes:
+      - ./outbox_relay.py:/test-tools/outbox_relay.py:ro
+    networks: [backend]
+
+networks:
+  backend: {internal: true}
+  edge: {}

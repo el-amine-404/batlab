@@ -341,3 +341,21 @@ Command: `pdf-gateway/tests/test_m4_metadata.sh` (local).
 
 Pending on Lab2 (final M4 run): the updated validator against real Dangerzone
 output end to end; the earlier M3 Lab2 runs predate the info-key check.
+
+## 2026-10-25 — M4 slice 5: archive API and the database-loss gate
+
+Ran on the local PC with the real API (Spring Boot, Flyway V001–V007), the real
+outbox publisher, and the archive worker.
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Read API | VERIFIED | `GET /api/v1/archive` (cursor pagination), `/{id}`, `/{id}/metadata` (`ETag: "rev-N"`), `/{id}/sidecar`, `/{id}/file`. The API mounts the archive read-only. Every file is found through the index, confined to the archive root (real-path check), and must be a regular file. |
+| Safe downloads | VERIFIED | The PDF matched the indexed SHA-256 before being served. Headers: `Content-Disposition: attachment` (human filename), `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox; default-src 'none'`, `Cache-Control: private, no-store`. A tampered archived PDF returned 409 `ARCHIVE_INTEGRITY` and was not served. |
+| Authorisation | VERIFIED | Unauthenticated 401. Another USER saw 0 documents and got 404 on file and edit. READ_ONLY edit 403. Encoded traversal ids refused (400/404). |
+| Sidecar edits (ETag/CAS) | VERIFIED | Missing `If-Match` 428; stale 409; non-editable field 400; invalid tag 400. A valid edit returned 202 and was queued through the outbox. The archive worker (single writer) applied it by compare-and-swap; edit status `APPLIED`, revision 2; `ETag: "rev-2"`; PDF bytes unchanged; a stale retry 409. A redelivered edit that was applied before a crash is recognised as applied. |
+| PostgreSQL loss | VERIFIED | The PostgreSQL container and its volume were destroyed and a fresh database migrated (0 documents, 0 scans). `pdf-archive reindex` (no database, no network) rebuilt the catalog from files alone: 3 documents, tags including the edited `paid`, content text, revision 2 and edited title. `pdf-archive reindex-db` rebuilt the operational index from sidecars. The API then listed all 3 and served byte-identical files. Without scan rows, rebuilt documents are visible to administrators only (an ordinary user saw 0). |
+| Paperless independence | VERIFIED (by construction) | No Paperless service exists in this stack or in the archive code path. The archive grew and was served with Paperless entirely absent. Projection is M6. |
+| Contract | IMPLEMENTED | OpenAPI 0.3.0 documents the queued PATCH (202/400/404/409/428) and edit status. Download/listing response schemas are not yet formalised in OpenAPI. |
+| Regression | VERIFIED | `test_m1.sh`, `test_m4_worker.sh`, `test_m4_metadata.sh`, Maven (4 tests), contracts. |
+
+Command: `pdf-gateway/tests/test_m4_gate.sh` (local, about 3 min).

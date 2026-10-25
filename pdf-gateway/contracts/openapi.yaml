@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Batlab PDF Security Gateway API
-  version: 0.2.0
+  version: 0.3.0
   description: Fail-closed contract. Quarantine artifacts are never browser-previewable.
 servers:
   - url: /api/v1
@@ -77,9 +77,28 @@ paths:
     get: {operationId: getArchiveMetadata, responses: {'200': {description: Validated portable sidecar}, '404': {$ref: '#/components/responses/Problem'}}}
     patch:
       operationId: updateArchiveMetadata
+      description: Sidecar-only edit (never rewrites the PDF). Queued for the archive's single writer, which applies it by compare-and-swap on the revision in If-Match ("rev-N"). Editable fields are title and tags.
       parameters: [{$ref: '#/components/parameters/IfMatch'}]
-      requestBody: {required: true, content: {application/merge-patch+json: {schema: {type: object}}}}
-      responses: {'200': {description: Updated metadata with new ETag}, '412': {$ref: '#/components/responses/Problem'}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                title: {type: string, minLength: 1, maxLength: 200}
+                tags: {type: array, maxItems: 64, uniqueItems: true, items: {type: string, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}}
+      responses:
+        '202': {description: Edit queued; poll the Location (edit status)}
+        '400': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
+  /archive/{documentId}/edits/{editId}:
+    parameters: [{$ref: '#/components/parameters/DocumentId'}, {name: editId, in: path, required: true, schema: {type: string, format: uuid}}]
+    get: {operationId: getArchiveEdit, responses: {'200': {description: Edit status PENDING, APPLIED, CONFLICT or INVALID with resulting revision}, '404': {$ref: '#/components/responses/Problem'}}}
   /archive/{documentId}/reissue:
     parameters: [{$ref: '#/components/parameters/DocumentId'}, {$ref: '#/components/parameters/IdempotencyKey'}]
     post: {operationId: reissueArchivePdf, responses: {'202': {description: New immutable version queued}, '409': {$ref: '#/components/responses/Problem'}}}

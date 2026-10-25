@@ -7,6 +7,7 @@
   pdf-archive --root ROOT export --bundle out.tar [--document doc-...]
   pdf-archive --root ROOT import --bundle in.tar
   pdf-archive --root ROOT publish --pdf F --sha256 H --sidecar S.json [--text T]
+  pdf-archive --root ROOT reindex-db      (PDF_GATEWAY_DATABASE_* from the environment)
 
 Prints one JSON result. Exit 0 = ok, 1 = archive problems found, 2 = refused.
 """
@@ -34,6 +35,7 @@ def main() -> int:
     export.add_argument("--document", action="append")
     imported = commands.add_parser("import")
     imported.add_argument("--bundle", type=Path, required=True)
+    commands.add_parser("reindex-db")
     publish = commands.add_parser("publish")
     publish.add_argument("--pdf", type=Path, required=True)
     publish.add_argument("--sha256", required=True)
@@ -53,6 +55,18 @@ def main() -> int:
             result["ok"] = not result["reportedOnly"]
         elif args.command == "export":
             result = {**archive.export(args.bundle, args.document), "ok": True}
+        elif args.command == "reindex-db":
+            import os
+            import psycopg2
+            from reindex_db import reindex_db
+            connection = psycopg2.connect(host=os.getenv("PDF_GATEWAY_DATABASE_HOST", "postgres"),
+                                          dbname=os.getenv("PDF_GATEWAY_DATABASE_NAME", "pdf_gateway"),
+                                          user=os.getenv("PDF_GATEWAY_DATABASE_USER", "pdf_gateway"),
+                                          password=os.environ["PDF_GATEWAY_DATABASE_PASSWORD"])
+            try:
+                result = reindex_db(archive, connection)
+            finally:
+                connection.close()
         elif args.command == "import":
             result = {**archive.import_bundle(args.bundle), "ok": True}
         else:
