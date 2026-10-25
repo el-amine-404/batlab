@@ -28,9 +28,12 @@ def check(name, condition, detail=""):
     print(f"ok - {name}")
 
 
-def browser(width, height):
+def browser(width, height, dark=False):
     options = webdriver.FirefoxOptions()
     options.add_argument("-headless")
+    if dark:
+        # The system's own dark preference, as a dark desktop or phone sends it.
+        options.set_preference("ui.systemUsesDarkTheme", 1)
     driver = webdriver.Firefox(options=options)
     driver.set_window_rect(0, 0, width, height)
     # Inner viewport must match the target device width for layout checks.
@@ -52,7 +55,16 @@ def login(driver):
     field = wait(driver, ec.presence_of_element_located((By.NAME, "token")))
     field.send_keys(TOKEN)
     driver.find_element(By.CSS_SELECTOR, "button[type=submit]").click()
-    text_present(driver, "Upload PDFs")
+    text_present(driver, "Add PDF files")
+
+
+def body(driver):
+    return driver.find_element(By.TAG_NAME, "body").text
+
+
+def step_states(driver):
+    return {item.get_attribute("data-step"): item.get_attribute("data-state")
+            for item in driver.find_elements(By.CSS_SELECTOR, "[data-testid=steps] li")}
 
 
 # --- Static shell headers -------------------------------------------------------
@@ -72,85 +84,98 @@ try:
         "return getComputedStyle(document.body).backgroundColor") not in ("rgba(0, 0, 0, 0)", "transparent"))
     check("API token not kept in browser storage", driver.execute_script(
         "return localStorage.length + sessionStorage.length") == 0 and TOKEN not in driver.page_source)
+    # The theme switch stores only an explicit choice, and only that.
+    driver.find_element(By.CSS_SELECTOR, "[data-testid=theme]").click()
+    stored = driver.execute_script("return Object.keys(localStorage).map(k => [k, localStorage.getItem(k)])")
+    check("theme choice is the only thing stored", stored == [["pgw-theme", "light"]], stored)
+    driver.find_element(By.CSS_SELECTOR, "[data-testid=theme]").click()
+    check("dark theme applies", driver.execute_script("return document.documentElement.classList.contains('dark')"))
+    driver.find_element(By.CSS_SELECTOR, "[data-testid=theme]").click()
+    check("back to the system theme stores nothing", driver.execute_script("return localStorage.length") == 0)
     check("session cookie not readable by scripts", driver.execute_script("return document.cookie") == "")
 
-    # Jobs: the hostile display name is shown as text and never interpreted.
-    driver.get(BASE + "/jobs")
+    # Documents: one list for every upload; the hostile file name is shown as text, never interpreted.
+    driver.get(BASE + "/documents")
     text_present(driver, HOSTILE)
-    jobs = driver.find_element(By.CSS_SELECTOR, "[data-testid=job-list]")
-    check("XSS payload rendered as text, no element created", len(jobs.find_elements(By.TAG_NAME, "img")) == 0)
-    check("released documents listed", "Ready" in jobs.text and "Needs review" in jobs.text)
-    driver.save_screenshot(str(SHOTS / "desktop-jobs.png"))
+    listing = driver.find_element(By.CSS_SELECTOR, "[data-testid=document-list]")
+    check("XSS payload rendered as text, no element created", len(listing.find_elements(By.TAG_NAME, "img")) == 0)
+    check("one list with ready and held files", "Ready" in listing.text and "Held" in listing.text)
+    check("archived files show their title and folder", "Internet Invoice - October 2026" in listing.text
+          and "Finance › 2026 › Invoices" in listing.text, listing.text)
+    driver.save_screenshot(str(SHOTS / "desktop-documents.png"))
 
-    # Upload through the real file input; the server accepts and queues it.
-    driver.get(BASE + "/upload")
+    # Add files: choosing a file starts it at once (archive and Paperless, no options to pick).
+    driver.get(BASE + "/")
     wait(driver, ec.presence_of_element_located((By.CSS_SELECTOR, "[data-testid=file-input]"))).send_keys(FIXTURE)
-    wait(driver, lambda d: "Upload 1" in d.find_element(By.TAG_NAME, "body").text)
-    next(button for button in driver.find_elements(By.TAG_NAME, "button") if button.text.startswith("Upload")).click()
-    link = wait(driver, ec.element_to_be_clickable((By.LINK_TEXT, "View progress")))
+    link = wait(driver, ec.element_to_be_clickable((By.LINK_TEXT, "Open")))
     link.click()
     text_present(driver, "invoice-en.pdf")
-    # No workers run in this stack, so the new upload waits in the queue (live status shown).
-    text_present(driver, "Queued")
-    check("upload accepted and tracked", "/scans/scan-" in driver.current_url)
+    # No workers run in this stack, so the new upload waits (live status shown in words).
+    text_present(driver, "Checking your file")
+    check("upload accepted and tracked on its document page", "/documents/scan-" in driver.current_url)
+    text_present(driver, "After the checks.")
+    check("a new upload is headed for Paperless", "Added to Paperless" in body(driver))
 
-    # Released scan: findings, final checks and the archive link.
-    driver.get(BASE + "/scans/scan-01J00000000000000000000060")
-    text_present(driver, "Final check 1")
-    check("scan detail shows PASS and archive link", "PASS" in driver.find_element(By.TAG_NAME, "body").text
-          and driver.find_element(By.LINK_TEXT, "open document"))
-    driver.find_element(By.LINK_TEXT, "open document").click()
-
-    # Archive document: downloads are attachment links to the approved file only.
+    # A released file: verdict, steps, clean copy, details, all on one page.
+    driver.get(BASE + "/documents/scan-01J00000000000000000000060")
     title = wait(driver, ec.presence_of_element_located((By.CSS_SELECTOR, "[data-testid=document-title]")))
+    wait(driver, lambda d: d.find_elements(By.CSS_SELECTOR, "[data-testid=copy-fields]"))
     check("archived invoice title", title.text == "Internet Invoice - October 2026", title.text)
+    check("verdict says the safe copy is ready", "Safe copy ready" in driver.find_element(By.CSS_SELECTOR, "[data-testid=verdict]").text)
+    states = step_states(driver)
+    check("every safety step done", all(states.get(key) == "done" for key in ("received", "scan", "signature", "rebuild", "recheck", "archive")), states)
     download = driver.find_element(By.CSS_SELECTOR, "[data-testid=download-pdf]")
     check("download is an attachment link to the archive file", download.get_attribute("download") is not None
           and download.get_attribute("href").endswith("/file") and "/quarantine" not in download.get_attribute("href"))
+    driver.find_element(By.XPATH, "//summary[contains(., 'Technical details')]").click()
+    text_present(driver, "Final check 1")
+    check("technical details keep the final check", "PASS" in driver.find_element(By.CSS_SELECTOR, "[data-testid=checks]").text)
     driver.save_screenshot(str(SHOTS / "desktop-document.png"))
 
-    # Send an archived document to Paperless later (no adapter in this stack: it waits).
+    # Archived without Paperless: add it from the page (no adapter in this stack: it stays on its way).
     wait(driver, ec.element_to_be_clickable((By.CSS_SELECTOR, "[data-testid=send-to-paperless]"))).click()
     status = wait(driver, ec.presence_of_element_located((By.CSS_SELECTOR, "[data-testid=paperless-status]")))
-    check("send to Paperless queues the copy", "waiting to be sent" in status.text, status.text)
+    check("adding to Paperless queues the copy", "Sending the clean copy" in status.text, status.text)
     check("the button is gone once requested", not driver.find_elements(By.CSS_SELECTOR, "[data-testid=send-to-paperless]"))
 
     # Edit tags (If-Match CAS via the archive worker); the PDF stays unchanged.
+    driver.find_element(By.XPATH, "//button[text()='Edit']").click()
     fields = wait(driver, lambda d: d.find_elements(By.CSS_SELECTOR, "form input") or False)
     fields[1].clear()
     fields[1].send_keys("finance, internet, invoice, paid")
     driver.find_element(By.XPATH, "//button[text()='Save']").click()
-    text_present(driver, "Saved (revision 2)", 30)
+    wait(driver, lambda d: "paid" in d.find_element(By.CSS_SELECTOR, "[data-testid=copy-fields]").text, 30)
     driver.refresh()
-    wait(driver, lambda d: d.find_elements(By.CSS_SELECTOR, "form input") and
-         d.find_elements(By.CSS_SELECTOR, "form input")[1].get_attribute("value") == "finance, internet, invoice, paid")
+    wait(driver, lambda d: d.find_elements(By.CSS_SELECTOR, "[data-testid=copy-fields]")
+         and "paid" in d.find_element(By.CSS_SELECTOR, "[data-testid=copy-fields]").text)
     check("tag edit persisted", True)
 
-    # Archive browser groups by folder.
-    driver.get(BASE + "/archive")
-    # Folder headings are uppercased by CSS; Selenium reports rendered text.
-    wait(driver, lambda d: "finance / 2026 / invoices" in d.find_element(By.TAG_NAME, "body").text.lower())
-    check("archive grouped by folder", "unsorted / 2026" in driver.find_element(By.TAG_NAME, "body").text.lower())
-
-    # Quarantine: held item, admin delete with confirmation.
-    driver.get(BASE + "/quarantine")
+    # Held files: the list's filter, then the admin deletes the original from its page.
+    driver.get(BASE + "/documents?show=held")
     text_present(driver, HOSTILE)
-    driver.find_element(By.XPATH, "//button[text()='Delete']").click()
+    driver.find_element(By.PARTIAL_LINK_TEXT, HOSTILE).click()
+    text_present(driver, "Held: not released")
+    driver.find_element(By.XPATH, "//button[text()='Delete original']").click()
     wait(driver, ec.alert_is_present()).accept()
-    text_present(driver, "Nothing is held.")
+    wait(driver, lambda d: "show=held" in d.current_url)
+    text_present(driver, "Nothing matches.")
     check("held original deleted from the UI", True)
 
-    # Status page renders real backend data.
-    driver.get(BASE + "/dashboard")
-    text_present(driver, "Database")
-    check("health shows database and broker up", driver.find_element(By.CSS_SELECTOR, "[data-testid=health]").text.count("UP") >= 2)
-    wait(driver, ec.presence_of_element_located((By.CSS_SELECTOR, "[data-testid=ai]")))
-    check("AI card shows enrichment is not configured", "Not configured" in driver.find_element(By.CSS_SELECTOR, "[data-testid=ai]").text)
-    driver.save_screenshot(str(SHOTS / "desktop-status.png"))
+    # Old addresses still lead to the right pages.
+    driver.get(BASE + "/archive/doc-01J00000000000000000000060")
+    wait(driver, lambda d: d.current_url.endswith("/documents/scan-01J00000000000000000000060"))
+    check("old archive link redirects to the document", True)
+
+    # System page renders real backend data, in words.
+    driver.get(BASE + "/system")
+    text_present(driver, "Is it working?")
+    check("system says checking and archiving work", "Working." in driver.find_element(By.CSS_SELECTOR, "[data-testid=health]").text)
+    check("AI line says it is not set up", "Not set up" in driver.find_element(By.CSS_SELECTOR, "[data-testid=ai]").text)
+    driver.save_screenshot(str(SHOTS / "desktop-system.png"))
 
     # The service worker never caches API data.
-    driver.get(BASE + "/jobs")
-    text_present(driver, "Jobs")
+    driver.get(BASE + "/documents")
+    text_present(driver, "Documents")
     time.sleep(2)
     cached = driver.execute_async_script("""
         const done = arguments[arguments.length - 1];
@@ -176,6 +201,21 @@ except Exception:
 finally:
     driver.quit()
 
+# --- Dark system ---------------------------------------------------------------------
+# A real Firefox told the system is dark (Playwright's colour-scheme emulation does
+# not reach pages served with this CSP, so it can't stand in for a real device).
+driver = browser(1280, 800, dark=True)
+try:
+    login(driver)
+    driver.get(BASE + "/documents/scan-01J00000000000000000000060")
+    wait(driver, lambda d: d.find_elements(By.CSS_SELECTOR, "[data-testid=download-pdf]"))
+    background = driver.execute_script("return getComputedStyle(document.body).backgroundColor")
+    check("dark system gives a dark page", driver.execute_script("return document.documentElement.classList.contains('dark')")
+          and background != "oklch(0.984 0.003 247.858)", background)
+    driver.save_screenshot(str(SHOTS / "desktop-document-dark.png"))
+finally:
+    driver.quit()
+
 # --- iPhone viewport (390x844 CSS px, 3x) -------------------------------------------
 # Headless Firefox under WebDriver will not shrink below 500 px, so the phone layout
 # is checked with Playwright's Firefox, which emulates the exact viewport.
@@ -190,13 +230,12 @@ with sync_playwright() as playwright:
     page.goto(BASE + "/")
     page.fill("input[name=token]", TOKEN)
     page.click("button[type=submit]")
-    page.wait_for_selector("text=Upload PDFs")
+    page.wait_for_selector("text=Add PDF files")
     check("phone viewport is 390 CSS px", page.evaluate("window.innerWidth") == 390, page.evaluate("window.innerWidth"))
     check("mobile navigation shown, desktop navigation hidden",
           page.is_visible("nav[aria-label='Main mobile']") and not page.is_visible("nav[aria-label='Main']"))
-    targets = {"upload": ("/upload", "Upload PDFs"), "jobs": ("/jobs", "invoice-en.pdf"), "archive": ("/archive", "Internet Invoice"),
-               "document": ("/archive/doc-01J00000000000000000000060", "Download PDF"),
-               "scan": ("/scans/scan-01J00000000000000000000060", "Final check"), "status": ("/dashboard", "System health")}
+    targets = {"add": ("/", "Add PDF files"), "documents": ("/documents", "invoice-en.pdf"),
+               "document": ("/documents/scan-01J00000000000000000000060", "Download clean copy"), "system": ("/system", "Is it working?")}
     for label, (path, marker) in targets.items():
         page.goto(BASE + path)
         page.wait_for_selector(f"text={marker}")
@@ -206,9 +245,10 @@ with sync_playwright() as playwright:
     heights = page.eval_on_selector_all("nav[aria-label='Main mobile'] a", "links => links.map(l => l.getBoundingClientRect().height)")
     check("mobile tap targets at least 44 px tall", heights and min(heights) >= 44, heights)
     # Tapping works with touch emulation: navigate via the bottom bar.
-    page.tap("nav[aria-label='Main mobile'] >> text=Archive")
-    page.wait_for_url(BASE + "/archive")
-    check("bottom navigation tap", page.url.endswith("/archive"))
+    page.tap("nav[aria-label='Main mobile'] >> text=Documents")
+    page.wait_for_url(BASE + "/documents")
+    check("bottom navigation tap", page.url.endswith("/documents"))
+
     phone_browser.close()
 
 print("M5 UI tests passed")

@@ -1,7 +1,7 @@
 // Offline shell only. API responses, documents, sessions and anything
 // authenticated are never cached: requests under /api/ bypass this worker.
-const CACHE = "pdf-gateway-shell-v1";
-const SHELL = ["/", "/manifest.webmanifest", "/icon.svg", "/icon-192.png", "/icon-512.png"];
+const CACHE = "pdf-gateway-shell-v2";
+const SHELL = ["/", "/theme.js", "/manifest.webmanifest", "/icon.svg", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));

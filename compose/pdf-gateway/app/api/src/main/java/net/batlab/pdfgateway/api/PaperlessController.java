@@ -3,6 +3,7 @@ package net.batlab.pdfgateway.api;
 import java.util.List;
 import java.util.UUID;
 import net.batlab.pdfgateway.security.GatewayPrincipal;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -19,7 +20,13 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class PaperlessController {
     private final JdbcTemplate jdbc;
-    public PaperlessController(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    /** Where people open Paperless (e.g. http://paperless.homelab.lan), for links; empty: no links. */
+    private final String publicUrl;
+
+    public PaperlessController(JdbcTemplate jdbc, @Value("${PDF_GATEWAY_PAPERLESS_PUBLIC_URL:}") String publicUrl) {
+        this.jdbc = jdbc;
+        this.publicUrl = publicUrl.matches("https?://[A-Za-z0-9.:-]+/?") ? publicUrl.replaceAll("/$", "") : "";
+    }
 
     @PostMapping(path = "/api/v1/scans/{scanId}/paperless-import", produces = MediaType.APPLICATION_JSON_VALUE)
     @PreAuthorize("hasAnyRole('ADMIN','USER')")
@@ -60,9 +67,11 @@ public class PaperlessController {
                 SELECT jsonb_build_object('scanId', s.id, 'documentId', d.document_id,
                          'status', COALESCE(i.status, 'NOT_REQUESTED'), 'paperlessDocumentId', i.paperless_document_id,
                          'syncedRevision', i.synced_revision, 'metadataRevision', d.metadata_revision,
-                         'attempts', COALESCE(i.attempts, 0), 'lastError', i.last_error, 'updatedAt', i.updated_at)::text
+                         'attempts', COALESCE(i.attempts, 0), 'lastError', i.last_error, 'updatedAt', i.updated_at,
+                         'paperlessUrl', CASE WHEN i.paperless_document_id IS NOT NULL AND ? <> ''
+                                              THEN ? || '/documents/' || i.paperless_document_id || '/details' END)::text
                   FROM scan_jobs s LEFT JOIN archive_documents d ON d.scan_id=s.id LEFT JOIN paperless_imports i ON i.document_id=d.document_id
-                 WHERE s.id=? AND (s.owner_id=? OR ?)""", (rs, row) -> rs.getString(1), scanId, principal.userId(), principal.admin());
+                 WHERE s.id=? AND (s.owner_id=? OR ?)""", (rs, row) -> rs.getString(1), publicUrl, publicUrl, scanId, principal.userId(), principal.admin());
         if (rows.isEmpty()) throw new ApiException(404, "SCAN_NOT_FOUND", "Scan not found");
         return rows.getFirst();
     }

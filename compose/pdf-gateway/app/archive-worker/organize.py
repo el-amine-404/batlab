@@ -113,6 +113,28 @@ def rule_matches(rule: dict, lowered: str) -> list[int] | None:
     return offsets if offsets else None
 
 
+def from_filename(name: str | None) -> tuple[str | None, str | None]:
+    """A title and an ISO date from an upload's file name (untrusted; used only when no rule filed it).
+
+    "2026-06-10_facture_beinsport.pdf" -> ("Facture beinsport", "2026-06-10").
+    """
+    stem = re.sub(r"\.pdf$", "", (name or "").strip(), flags=re.IGNORECASE)
+    stem = re.sub(r"[\x00-\x1f\x7f]", "", stem)
+    day = None
+    match = re.match(r"^(\d{4})-(\d{2})-(\d{2})(?!\d)", stem)
+    if match:
+        try:
+            day = date(int(match.group(1)), int(match.group(2)), int(match.group(3))).isoformat()
+            stem = stem[match.end():]
+        except ValueError:
+            day = None
+    title = re.sub(r"[_\s]+", " ", stem).strip(" -_./")
+    if title.lower() == "upload" or not re.search(r"[^\W\d_]", title):  # the API's name for a nameless upload, or no letters
+        title = ""
+    title = title[:1].upper() + title[1:200] if title else None
+    return title, day
+
+
 def organise(text: str, rules: dict, taxonomy: dict) -> Organisation:
     text = (text or "")[:MAX_TEXT]
     lowered = text.lower()

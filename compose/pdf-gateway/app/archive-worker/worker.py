@@ -24,7 +24,7 @@ import psycopg2
 import enrichment
 import metadata
 from archive import Archive, ArchiveError, SIDECAR, canonical_json, sha256_file
-from organize import default_taxonomy, organise, validated
+from organize import default_taxonomy, from_filename, organise, validated
 
 QUEUE = "pdf.gateway.archive.v1"
 EDIT_QUEUE = "pdf.gateway.metadata-edit.v1"
@@ -71,11 +71,11 @@ def audit_document(cursor, document_id: str, action: str, outcome: str, details:
 
 def claim(scan_id: str) -> dict | None:
     with database() as connection, connection.cursor() as cursor:
-        cursor.execute("SELECT status,policy,artifact_state,source_sha256,original_retention,quarantine_object,created_at,intent FROM scan_jobs WHERE id=%s FOR UPDATE", (scan_id,))
+        cursor.execute("SELECT status,policy,artifact_state,source_sha256,original_retention,quarantine_object,created_at,intent,display_name FROM scan_jobs WHERE id=%s FOR UPDATE", (scan_id,))
         row = cursor.fetchone()
         if row is None or row[0] not in ("AWAITING_ARCHIVE", "ARCHIVING") or row[1] != "ALLOW_SANITIZED" or row[2] != "FINAL_VALIDATED":
             return None
-        _status, _policy, _state, source_hash, retention, quarantine_object, created_at, intent = row
+        _status, _policy, _state, source_hash, retention, quarantine_object, created_at, intent, display_name = row
         cursor.execute("UPDATE job_steps SET status='FAILED',finished_at=now(),error_code='INTERRUPTED' WHERE scan_id=%s AND step_type='ARCHIVE' AND status='RUNNING'", (scan_id,))
         cursor.execute("""SELECT a.id,a.storage_object,a.sha256,a.bytes,f.policy_version,f.attempt,a.kind
                             FROM final_validations f JOIN artifacts a ON a.id=f.artifact_id
@@ -105,7 +105,7 @@ def claim(scan_id: str) -> dict | None:
         return {"scanId": scan_id, "attempt": attempt, "artifactId": artifact[0], "output": STORAGE / artifact[1],
                 "sha256": artifact[2], "bytes": artifact[3], "policyVersion": artifact[4],
                 "finalReportId": f"validation-{scan_id[5:]}-{artifact[5]}", "sourceSha256": source_hash,
-                "kind": artifact[6], "embedPhase": embedded, "intent": intent,
+                "kind": artifact[6], "embedPhase": embedded, "intent": intent, "displayName": display_name,
                 "signedOriginal": retention == "SIGNED_RESTRICTED" or (signature[1] or 0) > 0,
                 "signatureState": signature[0], "originalEvidenceId": quarantine_object,
                 "extraction": extraction if isinstance(extraction, dict) else None,
@@ -120,6 +120,14 @@ def build_sidecar(job: dict, text: str) -> tuple[dict, dict]:
     except Exception as error:  # an invalid manifest must not silently change filing
         raise ArchiveStageError("ARCHIVE_CONFIG_INVALID", type(error).__name__) from error
     organisation = organise(text, rules, taxonomy)
+    if organisation.fields.get("titleSource") == "fallback":
+        # No rule filed it: the uploader's file name beats "Unclassified document".
+        title, day = from_filename(job.get("displayName"))
+        if title:
+            organisation.fields.update(title=title, titleSource="source_metadata")
+        if day and "documentDate" not in organisation.fields:
+            organisation.fields["documentDate"] = {"value": day, "source": "source_metadata", "reviewState": "UNVERIFIED",
+                                                   "evidence": "file name"}
     summary = ("The original carried a cryptographic signature "
                f"({job['signatureState']}); it is retained restricted as evidence. "
                "This copy is a visual reconstruction and is not signed." if job["signedOriginal"] else
