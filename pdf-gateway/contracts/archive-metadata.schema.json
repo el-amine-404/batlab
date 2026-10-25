@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://batlab.invalid/schemas/archive-metadata-1.0.0.json",
+  "title": "Portable archive document metadata",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "documentId", "artifactVersion", "metadataRevision", "title", "organization", "relativePdfPath", "integrity", "derivedFrom", "approval", "signature", "integrations", "createdAt", "updatedAt"],
+  "properties": {
+    "schemaVersion": {"const": "1.0.0"},
+    "documentId": {"type": "string", "pattern": "^doc-[0-9A-HJKMNP-TV-Z]{26}$"},
+    "artifactVersion": {"type": "integer", "minimum": 1},
+    "metadataRevision": {"type": "integer", "minimum": 1},
+    "title": {"type": "string", "minLength": 1, "maxLength": 200},
+    "titleSource": {"$ref": "#/$defs/provenance"},
+    "documentType": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "documentDate": {"$ref": "#/$defs/datedValue"},
+    "issuer": {"$ref": "#/$defs/sourcedText"},
+    "author": {"$ref": "#/$defs/sourcedText"},
+    "language": {"type": "array", "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z]{2,3}(-[A-Z]{2})?$"}},
+    "tags": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"}},
+    "organization": {
+      "type": "object", "additionalProperties": false,
+      "required": ["category", "reviewState"],
+      "properties": {
+        "category": {"enum": ["Finance", "Employment", "Identity", "Medical", "Education", "Contracts", "Property", "Vehicles", "Taxes", "Personal", "Other", "Unsorted"]},
+        "reviewState": {"enum": ["VERIFIED", "RULE", "REVIEW_REQUIRED", "FALLBACK"]},
+        "reason": {"type": "string", "maxLength": 500}
+      }
+    },
+    "relativePdfPath": {"$ref": "#/$defs/relativePath"},
+    "relativeTextPath": {"$ref": "#/$defs/relativePath"},
+    "integrity": {
+      "type": "object", "additionalProperties": false, "required": ["sha256", "bytes"],
+      "properties": {"sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "bytes": {"type": "integer", "minimum": 1}}
+    },
+    "derivedFrom": {
+      "type": "object", "additionalProperties": false, "required": ["scanId", "kind"],
+      "properties": {"scanId": {"type": "string", "pattern": "^scan-[0-9A-HJKMNP-TV-Z]{26}$"}, "kind": {"enum": ["CDR_RECONSTRUCTION"]}, "originalEvidenceId": {"type": "string", "maxLength": 80}}
+    },
+    "approval": {
+      "type": "object", "additionalProperties": false, "required": ["policyVersion", "decision", "finalReportId"],
+      "properties": {"policyVersion": {"type": "string", "maxLength": 80}, "decision": {"const": "ALLOW_SANITIZED"}, "finalReportId": {"type": "string", "maxLength": 80}}
+    },
+    "signature": {
+      "type": "object", "additionalProperties": false, "required": ["originalSigned", "viewingCopySigned"],
+      "properties": {"originalSigned": {"type": "boolean"}, "viewingCopySigned": {"const": false}, "summary": {"type": "string", "maxLength": 500}}
+    },
+    "integrations": {
+      "type": "object", "additionalProperties": false,
+      "properties": {"paperlessDocumentId": {"type": ["integer", "null"], "minimum": 1}, "paperlessTaskId": {"type": ["string", "null"], "maxLength": 100}}
+    },
+    "sourceMetadata": {"type": "object", "description": "Untrusted source values; never authoritative", "additionalProperties": {"type": ["string", "number", "boolean", "null"]}, "maxProperties": 64},
+    "createdAt": {"type": "string", "format": "date-time"},
+    "updatedAt": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "relativePath": {"type": "string", "minLength": 1, "maxLength": 240, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*[\\\\\\x00-\\x1f]).+$"},
+    "provenance": {"enum": ["user_verified", "rule", "native_text", "ocr", "source_metadata", "ai", "fallback"]},
+    "sourcedText": {
+      "type": "object", "additionalProperties": false, "required": ["value", "source", "reviewState"],
+      "properties": {"value": {"type": "string", "minLength": 1, "maxLength": 200}, "source": {"$ref": "#/$defs/provenance"}, "reviewState": {"enum": ["VERIFIED", "UNVERIFIED", "REVIEW_REQUIRED"]}, "evidence": {"type": "string", "maxLength": 500}}
+    },
+    "datedValue": {
+      "type": "object", "additionalProperties": false, "required": ["value", "source", "reviewState"],
+      "properties": {"value": {"type": "string", "format": "date"}, "source": {"$ref": "#/$defs/provenance"}, "reviewState": {"enum": ["VERIFIED", "UNVERIFIED", "REVIEW_REQUIRED"]}, "evidence": {"type": "string", "maxLength": 500}}
+    }
+  }
+}
