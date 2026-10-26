@@ -305,6 +305,11 @@ try:
     background = driver.execute_script("return getComputedStyle(document.body).backgroundColor")
     check("dark system gives a dark page", driver.execute_script("return document.documentElement.classList.contains('dark')")
           and background != "oklch(0.984 0.003 247.858)", background)
+    schemes = driver.execute_script("""const frame = document.createElement('iframe'); document.body.appendChild(frame);
+        const value = [getComputedStyle(document.documentElement).colorScheme, getComputedStyle(document.body).colorScheme,
+                       getComputedStyle(frame).colorScheme]; frame.remove(); return value;""")
+    check("dark from the body down; the page and frames stay normal (no white Bitwarden frame)",
+          schemes == ["normal", "dark", "normal"], schemes)
     driver.save_screenshot(str(SHOTS / "desktop-document-dark.png"))
 finally:
     driver.quit()
