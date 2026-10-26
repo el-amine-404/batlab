@@ -119,7 +119,7 @@ None after the checkpoint commit.
 
 ### Gaps (explicitly not done)
 
-- `POST /archive/{id}/reissue` (user-requested new PDF version) NOT STARTED; archive versions are 1 only.
+- New PDF versions: VERIFIED since 2026-10-26 (edits write a new version through final validation; see below).
 - Automatic scheduled sweeper (`pdf-archive repair`) NOT STARTED (M8). OCR NOT STARTED (M7).
 - Rule creation from user corrections needs the M5 UI. OpenAPI lacks formal list/download response schemas.
 - Measured impact on Paperless/DNS/Jellyfin latency NOT STARTED (M8).
@@ -170,7 +170,8 @@ User decisions: the AI's answers apply automatically; a new file waits up to 10 
 - Dangerzone adds an invisible OCR layer (`PDF_CDR_OCR_LANGUAGE`, one language, default `fra`). Final
   validation admits only Tesseract's GlyphLessFont (pinned FontFile2 SHA-256 `c7845420…`) drawn in
   render mode 3 (`tests/final_validate_font_test.py` with `tests/fixtures/dangerzone-ocr-fra.pdf`).
-- The embedded metadata is Title, Author (correspondent), Subject, Keywords, Producer "PDF Gateway"; it's
+- The embedded metadata is Title, Author (correspondent), Subject, Keywords (no Producer/Creator since
+  2026-10-26: privacy); it's
   linearized, with streams copied unchanged (`test_m4_metadata` asserts `is_linearized`).
 - V011: SUGGEST jobs exist before publication (scan_id, context, deadline_at, applied). The archive
   worker defers (no attempt counted) while the agent is ready and the deadline is open. Checked fields
@@ -182,6 +183,37 @@ User decisions: the AI's answers apply automatically; a new file waits up to 10 
 - Model evaluation on the user's beIN invoice: old prompt (4B) date "1062-20-20", tag "internet";
   new prompt with layout text: 4B ≈17 s, all fields right; 30B ≈61 s, best; qwen2.5-vl-3b with the page
   image was worse (wrong date and amount), so no vision model is used.
+
+## Second feedback round (2026-10-26): commits `603209d` (features + layout), `61a947e` (make up), `fa0f54e` (index rebuild); main merges `b4dc61c`, `5c8dee0`, `42d8874`
+
+User decisions: delete removes everything (Paperless copy to its trash); Discord "received + done" via
+`DISCORD_WEBHOOK_DOCUMENTS` (user added it to Lab2 `compose/.env`); plain ASCII names; archive layout
+Section/Correspondent with the metadata hidden next to the PDF.
+
+- VERIFIED (tests below + Lab2): browsable archive `archive/<Section>/<Correspondent>/<YYYY-MM-DD Title>.pdf`,
+  hidden `.<name>.pdf.json` (sidecar) and `.<name>.pdf.txt`; ` (2)` on collisions; no IDs in names.
+  Publish moves text, sidecar, then PDF; repair finishes/removes interrupted publishes, moves, versions.
+  V013: unique (archive_path, pdf_file). The worker migrates the first layout at start and rebuilds an
+  index naming missing files. Lab2: 6 documents migrated, `verify` ok, index rebuilt (6/6), API serves
+  every sidecar and PDF (200). The first start crashed in reindex (nested connection context): fixed in
+  `42d8874` with a regression test in `test_m4_worker`.
+- VERIFIED by tests: edit every field (UI form), edits re-file and produce a new PDF version through final
+  validation (REVISION_VALIDATION_QUEUED → REVISION_PUBLISH_QUEUED, `Archive.replace_pdf`); re-run the AI
+  (`POST /archive/{id}/refile`); inline view (`?view=true`, CSP); delete everywhere (DOCUMENT_DELETED fan-out,
+  each stage deletes its files; `DELETE /api/v1/scans/{id}`); duplicate upload → 409 + Location; plain
+  ASCII names; no Producer; OCR before filing for scans; Paperless content, note, new versions, shared objects.
+- IMPLEMENTED, deployed, not yet observed on Lab2: Discord notifier (`pdf-gateway-notifier`, V012 marks old
+  scans as already notified), Paperless delete/notes/version (need the permissions below), un-owning existing
+  Paperless objects (`adapter.py share-created`).
+- `make up STACK=pdf-gateway` now builds via `build-pdf-gateway` and starts with `--no-build` (verified on
+  Lab2, peak 70 °C).
+- Tests run 2026-10-26 (laptop), all exit 0: `test_m4_archive`, `test_m4_organize`, `test_m4_worker`,
+  `test_m4_gate`, `test_m4_metadata`, `test_m5_api`, `VENV=<scratch venv> test_m5_ui`, `test_m6_paperless`,
+  `test_m7_enrichment`. (`test_m5_ui` needs `playwright install firefox` in the venv.)
+- USER ACTION: Paperless permissions for `pdf-gateway` (delete_document, add_note, view_note, change_tag,
+  change_correspondent, change_documenttype), then `docker exec pdf-gateway-paperless python /opt/pdf-gateway/adapter.py share-created`.
+- NEXT: Lab2 end-to-end (upload → Discord received/done → Paperless → edit → new version in Paperless →
+  delete everywhere), then the remaining M8 items below.
 
 ## Next implementation order
 
@@ -195,7 +227,7 @@ User decisions: the AI's answers apply automatically; a new file waits up to 10 
 ### First command for the next agent
 
 ```bash
-cd /home/bro/.codex-worktrees/pdf-security-gateway && git fetch origin && git status --short && git log --oneline -10 && compose/pdf-gateway/app/tests/test_m7_enrichment.sh
+cd /home/bro/.codex-worktrees/pdf-security-gateway && git fetch origin && git status --short && git log --oneline -10 && ssh lab2 "docker ps --format '{{.Names}} {{.Status}}' | grep pdf-gateway"
 ```
 
 ## M3 plan as written before implementation (completed; kept for history)
