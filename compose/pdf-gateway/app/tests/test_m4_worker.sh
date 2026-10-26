@@ -182,4 +182,13 @@ if q "UPDATE artifacts SET state='PUBLISHED' WHERE id='cdr-$(scan_id 75 | cut -c
 cli verify | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["ok"] and r["documents"]==4, r'
 cli reindex --catalog /scratch/catalog.sqlite | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["indexed"]==4 and r["rejected"]==0, r'
 q "SELECT right(scan_id,2), category, review_state, archive_path FROM archive_documents ORDER BY scan_id"
+
+# An index naming files that are not there (a start that stopped between moving the
+# archive and indexing it) is rebuilt from the sidecars when the worker starts.
+right70=$(q "SELECT archive_path||'/'||pdf_file FROM archive_documents WHERE scan_id='$(scan_id 70)'")
+q "UPDATE archive_documents SET archive_path='Finance/2026/Invoices/old [doc-01J00000000000000000000070]' WHERE scan_id='$(scan_id 70)'"
+"${dc[@]}" restart archive-worker >/dev/null
+for _ in $(seq 1 30); do [[ "$(q "SELECT archive_path||'/'||pdf_file FROM archive_documents WHERE scan_id='$(scan_id 70)'")" == "$right70" ]] && break; sleep 1; done
+eq "$(q "SELECT archive_path||'/'||pdf_file FROM archive_documents WHERE scan_id='$(scan_id 70)'")" "$right70"
+"${dc[@]}" logs archive-worker | grep -q '"event": "archive_index_rebuilt"'
 echo "M4 archive worker publish, index, guard, recovery, replay, and fail-closed tests passed"
