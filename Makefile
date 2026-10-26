@@ -41,19 +41,25 @@ PGID := $(shell id -g)
 
 .PHONY: help list setup setup-pdf-gateway build-pdf-gateway network up down restart pull config logs ps check-stack check-all-confirm
 
+# The gateway's images build only through build-pdf-gateway (host network, one at a
+# time, temperature-gated); `up` builds them that way, then starts with --no-build.
 define compose-loop
 @for s in $(TARGETS); do \
+	nobuild=""; \
+	if [ "$(1)" = "up" ] && [ "$$s" = "pdf-gateway" ]; then \
+		$(MAKE) --no-print-directory build-pdf-gateway || exit 1; nobuild="--no-build"; \
+	fi; \
 	if [ -n "$(SERVICE)" ]; then \
 		if [ "$(1)" = "down" ]; then \
 			echo "==> rm -s -f $$s (service: $(SERVICE))"; \
 			$(DC) -f compose/$$s/docker-compose.yml rm -s -f $(SERVICE) || exit 1; \
 		else \
 			echo "==> $(1) $$s (service: $(SERVICE))"; \
-			$(DC) -f compose/$$s/docker-compose.yml $(1) $(2) $(SERVICE) || exit 1; \
+			$(DC) -f compose/$$s/docker-compose.yml $(1) $(2) $$nobuild $(SERVICE) || exit 1; \
 		fi; \
 	else \
 		echo "==> $(1) $$s"; \
-		$(DC) -f compose/$$s/docker-compose.yml $(1) $(2) || exit 1; \
+		$(DC) -f compose/$$s/docker-compose.yml $(1) $(2) $$nobuild || exit 1; \
 	fi; \
 done
 endef
@@ -322,8 +328,8 @@ setup: check-env
 # The gateway's images one at a time, waiting while the CPU is above 75 °C: a
 # first build all at once (Maven, npm, wheels) heats lab2 past 90 °C. Plain
 # docker build, on the host network (lab2's bridge has no DNS for builders):
-# compose's build asks to allow network.host and fails without a terminal.
-# The next `make up` finds every layer cached.
+# compose's build (bake) asks to allow network.host and fails without a terminal,
+# so the images are built with docker build; `make up STACK=pdf-gateway` calls this.
 build-pdf-gateway:
 	@$(DC) -f compose/pdf-gateway/docker-compose.yml config --format json | python3 -c 'import json, sys; \
 		[print(s["image"], s["build"]["context"], s["build"].get("dockerfile", "Dockerfile"), \
