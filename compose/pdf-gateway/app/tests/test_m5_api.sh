@@ -135,6 +135,23 @@ curl -sS -H "Authorization: Bearer $ro_token" "$base/api/v1/system/status" | jso
 [[ $(code curl -sS "$base/api/v1/system/status") == 401 ]]
 web "$base/api/v1/system/health" | json 'v["database"]+"|"+v["broker"]+"|"+str(v["archiveReadable"])' | grep -qx "UP|UP|True"
 
+# --- Re-uploading a file already in the archive: no second copy ------------------
+upload() {  # upload TOKEN KEY -> HTTP code; headers in $scratch/upload.headers
+  curl -sS -o "$scratch/upload.json" -D "$scratch/upload.headers" -w '%{http_code}' -H "Authorization: Bearer $1" \
+    -H "Idempotency-Key: $2" -F intent=ARCHIVE_AND_IMPORT -F cdrMode=RASTER \
+    -F "file=@$TEST_STORAGE/fixtures/streamco-invoice.pdf;type=application/pdf" "$base/api/v1/scans"
+}
+eq "$(upload "$TEST_ADMIN_TOKEN" dup-first-000000001)" 202
+first="$(json 'v["scanId"]' <"$scratch/upload.json")"
+before="$(q "SELECT count(*) FROM scan_jobs")"
+eq "$(upload "$TEST_ADMIN_TOKEN" dup-second-00000001)" 409                       # same bytes, a new upload
+eq "$(json 'v["code"]' <"$scratch/upload.json")" DUPLICATE_UPLOAD
+grep -qi "^location: /api/v1/scans/$first" "$scratch/upload.headers"
+eq "$(q "SELECT count(*) FROM scan_jobs")" "$before"                              # nothing stored or queued
+eq "$(upload "$user_token" dup-other-000000001)" 202                              # another person's archive is theirs
+q "UPDATE scan_jobs SET status='FAILED' WHERE id='$first'"
+eq "$(upload "$TEST_ADMIN_TOKEN" dup-retry-00000001)" 202                         # a failed attempt can be retried
+
 # --- Expiry and logout ---------------------------------------------------------
 q "UPDATE web_sessions SET last_seen_at=now()-interval '3 hours' WHERE user_id='00000000-0000-0000-0000-0000000000b2'"
 eq "$(code curl -sS -b "$scratch/other.jar" "$base/api/v1/scans")" 401
