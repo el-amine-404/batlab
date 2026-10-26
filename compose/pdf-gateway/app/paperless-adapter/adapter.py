@@ -131,21 +131,25 @@ class Paperless:
             ids.append(by_key[key])
         return ids
 
-    def share_created(self) -> dict:
-        """Give up ownership of the tags, correspondents and types this user created (visible to all)."""
+    def share_created(self, imported: list[int]) -> dict:
+        """Give up ownership of the tags, correspondents and types this user created (visible to all).
+
+        This user's ID is the owner of a document it imported (imported: their Paperless IDs);
+        Paperless shows a user's own ID only to administrators."""
+        owners = {self.call("GET", f"/api/documents/{int(paperless_id)}/", query={"full_perms": "true"}).get("owner")
+                  for paperless_id in imported[:5]}
+        owners.discard(None)
+        if len(owners) != 1:
+            return {"skipped": "no single owner among the imported documents", "owners": len(owners)}
+        user = owners.pop()
         changed = {}
         for endpoint in ("tags", "correspondents", "document_types"):
             items = self.call("GET", f"/api/{endpoint}/", query={"page_size": 100000, "full_perms": "true"})["results"]
-            mine = [item for item in items if item.get("owner") == self.user_id()]
+            mine = [item for item in items if item.get("owner") == user]
             for item in mine:
                 self.call("PATCH", f"/api/{endpoint}/{int(item['id'])}/", body={"owner": None})
             changed[endpoint] = len(mine)
         return changed
-
-    def user_id(self) -> int:
-        if not hasattr(self, "_user_id"):
-            self._user_id = int(self.call("GET", "/api/ui_settings/")["user"]["id"])
-        return self._user_id
 
     def note(self, paperless_id: int, text: str) -> None:
         self.call("POST", f"/api/documents/{int(paperless_id)}/notes/", body={"note": text})
@@ -498,7 +502,10 @@ def main() -> None:
         print(json.dumps(resync(client), sort_keys=True))
         return
     if sys.argv[1:] == ["share-created"]:
-        print(json.dumps(client.share_created(), sort_keys=True))
+        with database() as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT paperless_document_id FROM paperless_imports WHERE paperless_document_id IS NOT NULL ORDER BY document_id")
+            imported = [row[0] for row in cursor.fetchall()]
+        print(json.dumps(client.share_created(imported), sort_keys=True))
         return
     credentials = pika.PlainCredentials(os.environ["PDF_GATEWAY_RABBITMQ_USER"], os.environ["PDF_GATEWAY_RABBITMQ_PASSWORD"])
     parameters = pika.ConnectionParameters(os.getenv("PDF_GATEWAY_RABBITMQ_HOST", "rabbitmq"), credentials=credentials,

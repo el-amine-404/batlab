@@ -129,6 +129,13 @@ paid="$(pl "$paperless/api/tags/?name__iexact=paid" | json 'v["results"][0]["id"
 pl "$paperless/api/documents/$p70/" | json 'v["tags"]' | grep -q "\b$paid\b"
 eq "$(marker_count "$(doc_id 70)")" 1
 
+# --- share-created: objects this user owns become shared (its ID from a document it imported) ---
+owner="$(pl "$paperless/api/documents/$(q "SELECT paperless_document_id FROM paperless_imports WHERE paperless_document_id IS NOT NULL LIMIT 1")/?full_perms=true" | json 'v["owner"]')"
+owned="$(pl -X POST -H 'Content-Type: application/json' -d "{\"name\": \"owned-by-adapter\", \"matching_algorithm\": 0, \"owner\": $owner}" "$paperless/api/tags/" | json 'v["id"]')"
+eq "$(pl "$paperless/api/tags/$owned/?full_perms=true" | json 'v["owner"]')" "$owner"
+"${dc[@]}" run --rm --no-deps -T paperless-adapter share-created | json 'v["tags"] >= 1' | grep -qx True
+eq "$(pl "$paperless/api/tags/$owned/?full_perms=true" | json 'v["owner"]')" None
+
 # --- Deleted in Paperless: resync restores it; nothing else changes -------------------
 p72="$(q "SELECT paperless_document_id FROM paperless_imports WHERE document_id='$(doc_id 72)'")"
 eq "$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: Token $TEST_PAPERLESS_TOKEN" "$paperless/api/documents/$p72/")" 204
