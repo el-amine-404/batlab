@@ -36,7 +36,7 @@ cleanup() {
   "${dc[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
   # Archive and metadata-version files belong to the archive UID.
   docker run --rm --network none --user 10005:10005 -v "$PDF_GATEWAY_ARCHIVE_ROOT:/archive" -v "$TEST_STORAGE:/storage" --entrypoint sh \
-    "$project-archive-worker" -c 'rm -rf /archive/archive /archive/staging /archive/manifests/* /storage/metadata-versions/*' >/dev/null 2>&1 || true
+    "$project-archive-worker" -c 'rm -rf /archive/archive /archive/previews /archive/staging /archive/manifests/* /storage/metadata-versions/*' >/dev/null 2>&1 || true
   chmod -R u+rwX "$scratch" 2>/dev/null || true
   rm -rf -- "$scratch"
   exit "$status"

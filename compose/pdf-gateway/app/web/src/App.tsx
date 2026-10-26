@@ -1,18 +1,23 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { NavLink, Navigate, Route, Routes, useParams } from "react-router-dom";
+import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { api, ApiError, setCsrf, type Session } from "./api";
 import { Button, cx } from "./components/ui";
+import { BrowseTree } from "./components/BrowseTree";
+import { useAttention } from "./library";
+import { UploadProvider, useUploads } from "./uploads";
 import { LoginPage } from "./pages/Login";
 import { UploadPage } from "./pages/Upload";
 import { DocumentsPage } from "./pages/Documents";
 import { DocumentPage } from "./pages/Document";
+import { AttentionPage } from "./pages/Attention";
 import { SystemPage } from "./pages/System";
 
 const NAV = [
-  { to: "/", label: "Add files", end: true },
-  { to: "/documents", label: "Documents" },
-  { to: "/system", label: "System" },
+  { to: "/", label: "Add files", short: "Add", end: true },
+  { to: "/documents", label: "Documents", short: "Documents" },
+  { to: "/attention", label: "Needs attention", short: "Attention", count: true },
+  { to: "/system", label: "System", short: "System" },
 ];
 
 export function App() {
@@ -45,40 +50,115 @@ export function App() {
   };
 
   return (
-    <div className="min-h-dvh pb-20 sm:pb-0">
-      <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 backdrop-blur dark:border-slate-800 dark:bg-slate-950/90">
-        <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-2">
-          <span className="font-semibold">PDF Gateway</span>
-          <nav className="hidden gap-1 sm:flex" aria-label="Main">
-            {NAV.map((item) => <NavItem key={item.to} {...item} />)}
-          </nav>
-          <div className="flex items-center gap-1 text-sm text-slate-600 dark:text-slate-400">
-            <ThemeSwitch />
-            <span className="hidden px-2 sm:inline" data-testid="whoami">{session.data.username}</span>
-            <Button variant="ghost" onClick={logout}>Sign out</Button>
-          </div>
+    <UploadProvider canUpload={session.data.role !== "READ_ONLY"}>
+      <Shell session={session.data} onLogout={logout} />
+    </UploadProvider>
+  );
+}
+
+function Shell({ session, onLogout }: { session: Session; onLogout: () => void }) {
+  const attention = useAttention();
+  return (
+    <div className="min-h-dvh pb-20 sm:pb-0 lg:grid lg:grid-cols-[16rem_minmax(0,1fr)]">
+      {/* Wide screens: the sidebar holds the navigation and the archive's sections. */}
+      <aside className="sticky top-0 hidden h-dvh flex-col gap-4 overflow-y-auto border-r border-slate-200 bg-white px-3 py-4 lg:flex dark:border-slate-800 dark:bg-slate-950" aria-label="Sidebar">
+        <Brand />
+        <nav className="flex flex-col gap-0.5" aria-label="Sidebar navigation">
+          {NAV.map((item) => <NavItem key={item.to} {...item} count={item.count ? attention.count : undefined} side />)}
+        </nav>
+        <div className="min-h-0 flex-1">
+          <p className="mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Your archive</p>
+          <BrowseTree />
         </div>
-      </header>
-      <main className="mx-auto max-w-3xl space-y-4 px-4 py-4">
-        <Routes>
-          <Route path="/" element={<UploadPage session={session.data} />} />
-          <Route path="/documents" element={<DocumentsPage />} />
-          <Route path="/documents/:scanId" element={<DocumentPage session={session.data} />} />
-          <Route path="/system" element={<SystemPage />} />
-          {/* Addresses of the first version of this UI. */}
-          <Route path="/upload" element={<Navigate to="/" replace />} />
-          <Route path="/jobs" element={<Navigate to="/documents" replace />} />
-          <Route path="/archive" element={<Navigate to="/documents" replace />} />
-          <Route path="/quarantine" element={<Navigate to="/documents?show=held" replace />} />
-          <Route path="/dashboard" element={<Navigate to="/system" replace />} />
-          <Route path="/scans/:scanId" element={<OldLink prefix="scan-" />} />
-          <Route path="/archive/:scanId" element={<OldLink prefix="doc-" />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </main>
-      <nav className="safe-bottom fixed inset-x-0 bottom-0 z-10 grid grid-cols-3 border-t border-slate-200 bg-white sm:hidden dark:border-slate-800 dark:bg-slate-950" aria-label="Main mobile">
-        {NAV.map((item) => <NavItem key={item.to} {...item} mobile />)}
+        <div className="flex items-center gap-1 border-t border-slate-200 pt-3 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-400">
+          <ThemeSwitch />
+          <span className="min-w-0 flex-1 truncate px-2" data-testid="whoami">{session.username}</span>
+          <Button variant="ghost" onClick={onLogout}>Sign out</Button>
+        </div>
+      </aside>
+      <div className="min-w-0">
+        <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 backdrop-blur lg:hidden dark:border-slate-800 dark:bg-slate-950/90">
+          <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-2">
+            <Brand />
+            <nav className="hidden gap-1 sm:flex" aria-label="Main">
+              {NAV.map((item) => <NavItem key={item.to} {...item} label={item.short} count={item.count ? attention.count : undefined} />)}
+            </nav>
+            <div className="flex items-center gap-1 text-sm text-slate-600 dark:text-slate-400">
+              <ThemeSwitch />
+              <Button variant="ghost" onClick={onLogout}>Sign out</Button>
+            </div>
+          </div>
+        </header>
+        <main className="mx-auto max-w-5xl space-y-4 px-4 py-4 lg:px-8 lg:py-6">
+          <Routes>
+            <Route path="/" element={<UploadPage session={session} />} />
+            <Route path="/documents" element={<DocumentsPage />} />
+            <Route path="/documents/:scanId" element={<DocumentPage session={session} />} />
+            <Route path="/attention" element={<AttentionPage />} />
+            <Route path="/system" element={<SystemPage />} />
+            {/* Addresses of the first version of this UI. */}
+            <Route path="/upload" element={<Navigate to="/" replace />} />
+            <Route path="/jobs" element={<Navigate to="/documents" replace />} />
+            <Route path="/archive" element={<Navigate to="/documents" replace />} />
+            <Route path="/quarantine" element={<Navigate to="/documents?show=held" replace />} />
+            <Route path="/dashboard" element={<Navigate to="/system" replace />} />
+            <Route path="/scans/:scanId" element={<OldLink prefix="scan-" />} />
+            <Route path="/archive/:scanId" element={<OldLink prefix="doc-" />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </main>
+      </div>
+      <nav className="safe-bottom fixed inset-x-0 bottom-0 z-10 grid grid-cols-4 border-t border-slate-200 bg-white sm:hidden dark:border-slate-800 dark:bg-slate-950" aria-label="Main mobile">
+        {NAV.map((item) => <NavItem key={item.to} {...item} label={item.short} count={item.count ? attention.count : undefined} mobile />)}
       </nav>
+      <DropAnywhere />
+    </div>
+  );
+}
+
+/** The logo and the name: both go to the main page. */
+function Brand() {
+  return (
+    <Link to="/" className="flex items-center gap-2 rounded-lg px-1 py-1 font-semibold hover:opacity-80 lg:px-3" data-testid="home-link" aria-label="PDF Gateway, main page">
+      <img src="/icon.svg" alt="" width={28} height={28} className="size-7 rounded-md" />
+      <span>PDF Gateway</span>
+    </Link>
+  );
+}
+
+/** Files dropped on any page are added (then shown on the main page). */
+function DropAnywhere() {
+  const { add, canUpload } = useUploads();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [over, setOver] = useState(false);
+  useEffect(() => {
+    if (!canUpload) return;
+    let depth = 0;
+    const hasFiles = (event: DragEvent) => !!event.dataTransfer && Array.from(event.dataTransfer.types).includes("Files");
+    const enter = (event: DragEvent) => { if (hasFiles(event)) { depth += 1; setOver(true); } };
+    const leave = (event: DragEvent) => { if (hasFiles(event)) { depth = Math.max(0, depth - 1); if (!depth) setOver(false); } };
+    const overHandler = (event: DragEvent) => { if (hasFiles(event)) event.preventDefault(); };
+    const drop = (event: DragEvent) => {
+      depth = 0; setOver(false);
+      if (!hasFiles(event) || event.defaultPrevented) return; // the main page's own drop area took it
+      event.preventDefault();
+      add(Array.from(event.dataTransfer!.files));
+      if (location.pathname !== "/") navigate("/");
+    };
+    window.addEventListener("dragenter", enter);
+    window.addEventListener("dragleave", leave);
+    window.addEventListener("dragover", overHandler);
+    window.addEventListener("drop", drop);
+    return () => {
+      window.removeEventListener("dragenter", enter); window.removeEventListener("dragleave", leave);
+      window.removeEventListener("dragover", overHandler); window.removeEventListener("drop", drop);
+    };
+  }, [add, canUpload, location.pathname, navigate]);
+  if (!over || location.pathname === "/") return null;
+  return (
+    <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-6" data-testid="drop-overlay">
+      <div className="rounded-2xl border-2 border-dashed border-white bg-slate-900/80 px-8 py-6 text-lg font-semibold text-white">Drop to add these PDFs</div>
     </div>
   );
 }
@@ -90,13 +170,14 @@ function OldLink({ prefix }: { prefix: string }) {
   return <Navigate to={`/documents/scan-${suffix}`} replace />;
 }
 
-function NavItem({ to, label, end, mobile }: { to: string; label: string; end?: boolean; mobile?: boolean }) {
+function NavItem({ to, label, end, mobile, side, count }: { to: string; label: string; end?: boolean; mobile?: boolean; side?: boolean; count?: number }) {
   return (
-    <NavLink to={to} end={end} className={({ isActive }) => cx(
-      mobile ? "flex min-h-14 items-center justify-center text-sm" : "rounded-lg px-3 py-2 text-sm",
+    <NavLink to={to} end={end} data-testid={`nav-${to === "/" ? "home" : to.slice(1)}`} className={({ isActive }) => cx(
+      mobile ? "flex min-h-14 items-center justify-center gap-1 text-sm" : side ? "flex items-center justify-between rounded-lg px-3 py-2 text-sm" : "flex items-center gap-1 rounded-lg px-3 py-2 text-sm",
       isActive ? "font-semibold text-slate-900 dark:text-white" + (mobile ? "" : " bg-slate-100 dark:bg-slate-800")
         : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white")}>
       {label}
+      {!!count && <span className="rounded-full bg-amber-500 px-1.5 text-xs font-semibold text-white" data-testid="attention-count" aria-label={`${count} need attention`}>{count}</span>}
     </NavLink>
   );
 }

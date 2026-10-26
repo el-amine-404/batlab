@@ -8,7 +8,10 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.text.Normalizer;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -48,7 +51,9 @@ public class ArchiveService {
 
     public record DocumentView(String documentId, String title, String category, String reviewState, String archivePath,
                                int currentVersion, int metadataRevision, String sha256, long bytes,
-                               OffsetDateTime publishedAt, OffsetDateTime updatedAt, String scanId) {}
+                               OffsetDateTime publishedAt, OffsetDateTime updatedAt, String scanId,
+                               String issuer, String documentType, String documentDate, List<String> tags) {}
+    public record SearchHit(String documentId, String snippet) {}
     public record DocumentPage(List<DocumentView> items, String nextCursor) {}
     public record EditView(String editId, String documentId, String status, int expectedRevision, Integer resultRevision,
                            String errorCode, String statusUrl) {}
@@ -57,7 +62,9 @@ public class ArchiveService {
 
     private static final String COLUMNS = """
             d.document_id,d.title,d.category,d.review_state,d.archive_path,d.current_version,d.metadata_revision,
-            d.sha256,d.bytes,d.published_at,d.updated_at,d.pdf_file,d.scan_id""";
+            d.sha256,d.bytes,d.published_at,d.updated_at,d.pdf_file,d.scan_id,
+            d.sidecar->'issuer'->>'value',d.sidecar->>'documentType',d.sidecar->'documentDate'->>'value',
+            ARRAY(SELECT jsonb_array_elements_text(COALESCE(d.sidecar->'tags','[]'::jsonb)))""";
     private final JdbcTemplate jdbc;
     private final GatewayProperties properties;
 
@@ -69,7 +76,8 @@ public class ArchiveService {
     private static DocumentView view(java.sql.ResultSet rs) throws java.sql.SQLException {
         return new DocumentView(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5),
                 rs.getInt(6), rs.getInt(7), rs.getString(8), rs.getLong(9),
-                rs.getObject(10, OffsetDateTime.class), rs.getObject(11, OffsetDateTime.class), rs.getString(13));
+                rs.getObject(10, OffsetDateTime.class), rs.getObject(11, OffsetDateTime.class), rs.getString(13),
+                rs.getString(14), rs.getString(15), rs.getString(16), Arrays.asList((String[]) rs.getArray(17).getArray()));
     }
 
     public DocumentPage list(GatewayPrincipal principal, int limit, String after) {
@@ -238,6 +246,70 @@ public class ArchiveService {
                 id, documentId);
         if (rows.isEmpty()) throw notFound();
         return rows.getFirst();
+    }
+
+    /**
+     * A first-page picture of the current version (small for lists, large for its page). Rendered by
+     * the archive worker from the clean copy into previews/, beside the archive and outside the
+     * folders people browse. 404 until it exists.
+     */
+    public Path preview(GatewayPrincipal principal, String documentId, String size) throws IOException {
+        if (!Set.of("small", "large").contains(size)) throw new ApiException(400, "INVALID_SIZE", "Size is small or large");
+        DocumentView view = locate(principal, documentId).view();
+        Path previews = properties.archiveRoot().resolve("previews");
+        Path file = previews.resolve(documentId + "-v" + view.currentVersion() + "-" + size + ".png");
+        if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS))
+            throw new ApiException(404, "PREVIEW_NOT_READY", "No preview yet");
+        return file;
+    }
+
+    private static final int SEARCH_TEXT_BYTES = 1 << 20;
+
+    /**
+     * Documents whose text (the hidden text file beside each PDF) contains every word of the query,
+     * case, accents and spacing aside ("m fitness" finds "MFITNESS"). Reads only this person's
+     * documents, each confined to the archive root.
+     */
+    public List<SearchHit> search(GatewayPrincipal principal, String query) throws IOException {
+        String needle = fold(query).trim();
+        if (needle.length() < 2 || needle.length() > 120) throw new ApiException(400, "INVALID_QUERY", "Search for 2 to 120 characters");
+        String[] words = needle.split("\\s+");
+        String compact = needle.replace(" ", "");
+        Path archive = properties.archiveRoot().resolve("archive").toRealPath();
+        List<String[]> rows = jdbc.query("""
+                SELECT d.document_id, d.archive_path, d.pdf_file FROM archive_documents d LEFT JOIN scan_jobs s ON s.id=d.scan_id
+                 WHERE s.owner_id=? OR ? ORDER BY d.published_at DESC LIMIT 5000""",
+                (rs, row) -> new String[] {rs.getString(1), rs.getString(2), rs.getString(3)}, principal.userId(), principal.admin());
+        List<SearchHit> hits = new ArrayList<>();
+        for (String[] row : rows) {
+            Path text = archive.resolve(row[1]).resolve("." + row[2] + ".txt").normalize();
+            if (!text.startsWith(archive) || !Files.isRegularFile(text, LinkOption.NOFOLLOW_LINKS)) continue;
+            String original;
+            try (InputStream input = Files.newInputStream(text, LinkOption.NOFOLLOW_LINKS)) {
+                original = new String(input.readNBytes(SEARCH_TEXT_BYTES), StandardCharsets.UTF_8);
+            }
+            String folded = fold(original);
+            int at = -1;
+            if (Arrays.stream(words).allMatch(folded::contains)) at = folded.indexOf(words[0]);
+            else if (compact.length() >= 3 && folded.replace(" ", "").contains(compact)) at = 0;
+            if (at < 0) continue;
+            int from = Math.max(0, at - 60), to = Math.min(original.length(), at + 100);
+            hits.add(new SearchHit(row[0], original.substring(from, to).replaceAll("\\s+", " ").trim()));
+            if (hits.size() >= 200) break;
+        }
+        return hits;
+    }
+
+    /** One folded character per input character (lower case, no accents, other spacing as a space), so indices match. */
+    static String fold(String text) {
+        StringBuilder out = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (Character.isWhitespace(ch)) { out.append(' '); continue; }
+            String base = Normalizer.normalize(String.valueOf(ch), Normalizer.Form.NFKD);
+            out.append(Character.toLowerCase(base.isEmpty() ? ch : base.charAt(0)));
+        }
+        return out.toString();
     }
 
     private static Path regularFile(Path path) {

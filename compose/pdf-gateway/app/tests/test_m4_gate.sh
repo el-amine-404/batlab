@@ -20,7 +20,7 @@ cleanup() {
   if [[ $status -ne 0 ]]; then "${dc[@]}" logs --no-color --tail=40 api archive-worker >&2 || true; fi
   "${dc[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
   docker run --rm --network none --user 10005:10005 -v "$TEST_ARCHIVE:/archive" --entrypoint sh \
-    pdf-gateway-m4-test/archive-worker:local -c 'rm -rf /archive/archive /archive/staging /archive/manifests/*' >/dev/null 2>&1 || true
+    pdf-gateway-m4-test/archive-worker:local -c 'rm -rf /archive/archive /archive/previews /archive/staging /archive/manifests/*' >/dev/null 2>&1 || true
   chmod -R u+rwX "$scratch" 2>/dev/null || true
   rm -rf -- "$scratch"
   exit "$status"
@@ -164,6 +164,19 @@ q "INSERT INTO users(id,username,role) VALUES ('00000000-0000-0000-0000-00000000
 q "INSERT INTO api_tokens(id,user_id,token_hash,label) VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000a2','$(printf %s "$user_token" | sha256sum | cut -d' ' -f1)','t')"
 eq "$(TOKEN=$user_token api "$base/api/v1/archive" | json 'len(v["items"])')" 0
 eq "$(TOKEN=$user_token code "$base/api/v1/archive/$invoice/file")" 404
+
+# --- First-page pictures and text search -------------------------------------
+for _ in $(seq 1 30); do [[ "$(code "$base/api/v1/archive/$invoice/preview?size=small")" == 200 ]] && break; sleep 1; done
+api -D "$scratch/preview.headers" -o "$scratch/preview.png" "$base/api/v1/archive/$invoice/preview?size=large"
+grep -qi '^content-type: image/png' "$scratch/preview.headers"
+[[ "$(head -c 8 "$scratch/preview.png" | od -An -tx1 | tr -d ' \n')" == 89504e470d0a1a0a ]]
+eq "$(code "$base/api/v1/archive/$invoice/preview?size=huge")" 400
+eq "$(TOKEN=$user_token code "$base/api/v1/archive/$invoice/preview?size=small")" 404             # not theirs
+eq "$(api "$base/api/v1/archive/search?q=TOTAL%20DUE" | json "'$invoice' in [h['documentId'] for h in v]")" True
+eq "$(api "$base/api/v1/archive/search?q=totaldue" | json "'$invoice' in [h['documentId'] for h in v]")" True   # spacing aside
+eq "$(TOKEN=$user_token api "$base/api/v1/archive/search?q=total%20due" | json 'len(v)')" 0       # only one's own
+eq "$(code "$base/api/v1/archive/search?q=x")" 400
+eq "$(api "$base/api/v1/archive/$invoice" | json 'v["issuer"]+"|"+v["documentType"]+"|"+str(isinstance(v["tags"], list) and "finance" in v["tags"])')" "Example Telecom|invoice|True"
 
 # --- Tampered archive bytes are never served ----------------------------------
 docker run --rm --network none --user 10005:10005 -v "$TEST_ARCHIVE:/archive" --entrypoint sh pdf-gateway-m4-test/archive-worker:local \

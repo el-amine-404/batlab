@@ -1,12 +1,13 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, ApiError, Scan, type EnrichmentJob, type Findings, type PaperlessImport, type Session, type Suggestion } from "../api";
+import { api, ApiError, Scan, type EnrichmentJob, type Findings, type MetadataChanges, type PaperlessImport, type Session, type Suggestion } from "../api";
+import { Preview, ProgressTrack, useScanProgress } from "../components/progress";
 import {
   Badge, Button, Card, Details, ErrorNote, Field, Muted, Notice, Steps, TERMINAL, formatBytes, formatDate, formatWhen,
   primaryLink, secondaryLink, type StepState,
 } from "../components/ui";
-import { AI_STATE, FIELD_LABEL, safetySteps, verdict } from "../words";
+import { AI_STATE, FIELD_LABEL, TYPE_LABEL, safetySteps, verdict } from "../words";
 import { folderOf } from "./Documents";
 
 const TAG = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -39,6 +40,7 @@ export function DocumentPage({ session }: { session: Session }) {
     refetchInterval: (query) => query.state.data?.some((job) => MOVING.has(job.status)) || !TERMINAL.has(status ?? "") ? 5_000 : false,
   });
   const suggestions = useQuery({ queryKey: ["suggestions", documentId, jobs.data?.map((job) => job.status).join()], queryFn: () => api.suggestions(documentId!), enabled: ready });
+  const progress = useScanProgress(scanId, scan.data);
 
   useEffect(() => {
     if (!scan.data || TERMINAL.has(scan.data.status)) return;
@@ -79,6 +81,8 @@ export function DocumentPage({ session }: { session: Session }) {
       </div>
 
       <Notice tone={v.tone} title={v.title}>{v.text}</Notice>
+
+      {progress && !progress.finished && <Card><ProgressTrack value={progress} /></Card>}
 
       {ready && doc.data && sidecar && meta.data && (
         <CopyCard documentId={documentId!} doc={doc.data} sidecar={sidecar} etag={meta.data.etag} paperless={paperless.data}
@@ -121,15 +125,24 @@ function CopyCard({ documentId, doc, sidecar, etag, paperless, canEdit, onSaved,
 }) {
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const rows: [string, ReactNode][] = [
-    ["Title", sidecar.title],
-    ["From", sidecar.issuer?.value],
-    ["Type", sidecar.documentType ? TYPE_LABEL[sidecar.documentType] ?? sidecar.documentType : undefined],
-    ["Date", sidecar.documentDate?.value],
-    ["Number", sidecar.reference?.value],
-    ["Amount", sidecar.amount ? `${sidecar.amount.value} ${sidecar.amount.currency}` : undefined],
-    ["Folder", folderOf(doc.archivePath)],
-    ["Tags", sidecar.tags?.length ? sidecar.tags.map((tag) => <Badge key={tag}>{tag}</Badge>) : undefined],
+  const [undo, setUndo] = useState<{ changes: MetadataChanges; text: string } | null>(null);
+  const [undoing, setUndoing] = useState(false);
+  // After a save: offer to put the previous values back (itself an ordinary edit).
+  const saved = async (changes: MetadataChanges) => {
+    setUndo({ changes: previous(sidecar, changes), text: Object.keys(changes).length === 1 ? `${FIELD_NAME[Object.keys(changes)[0]] ?? "Change"} saved.` : "Changes saved." });
+    await onSaved();
+  };
+  const rows: [string, ReactNode, InlineSpec | null][] = [
+    ["Title", sidecar.title, { key: "title", value: sidecar.title, required: true }],
+    ["From", sidecar.issuer?.value, { key: "issuer", value: sidecar.issuer?.value ?? "" }],
+    ["Type", sidecar.documentType ? TYPE_LABEL[sidecar.documentType] ?? sidecar.documentType : undefined,
+      { key: "documentType", value: sidecar.documentType ?? "", options: Object.entries(TYPE_LABEL) }],
+    ["Date", sidecar.documentDate?.value, { key: "documentDate", value: sidecar.documentDate?.value ?? "", type: "date" }],
+    ["Number", sidecar.reference?.value, { key: "reference", value: sidecar.reference?.value ?? "" }],
+    ["Amount", sidecar.amount ? `${sidecar.amount.value} ${sidecar.amount.currency}` : undefined, null],
+    ["Folder", folderOf(doc.archivePath), { key: "section", value: sidecar.organization.category, options: SECTIONS.map((value) => [value, value]), required: true }],
+    ["Tags", sidecar.tags?.length ? sidecar.tags.map((tag) => <Badge key={tag}>{tag}</Badge>) : undefined,
+      { key: "tags", value: (sidecar.tags ?? []).join(", "), hint: "separated by commas" }],
   ];
   const state = sidecar.organization.reviewState;
   const byAi = state === "AI";
@@ -149,12 +162,37 @@ function CopyCard({ documentId, doc, sidecar, etag, paperless, canEdit, onSaved,
           </span>
         </p>
       )}
-      {editing ? <EditForm documentId={documentId} sidecar={sidecar} etag={etag} onDone={async (saved) => { setEditing(false); if (saved) await onSaved(); }} /> : (
-        <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-2 text-sm" data-testid="copy-fields">
-          {rows.filter(([, value]) => value !== undefined && value !== "").map(([label, value]) => (
-            <div key={label} className="contents"><dt className="text-slate-500 dark:text-slate-400">{label}</dt><dd className="flex min-w-0 flex-wrap gap-1 break-words">{value}</dd></div>
-          ))}
-        </dl>
+      {undo && !editing && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-green-50 px-3 py-2 text-sm ring-1 ring-green-200 dark:bg-green-950 dark:ring-green-900" data-testid="saved-note">
+          <span>{undo.text} The PDF and Paperless follow in a moment.</span>
+          <span className="flex gap-1">
+            <Button variant="ghost" className="min-h-9" disabled={undoing} data-testid="undo" onClick={async () => {
+              setUndoing(true); setError(null);
+              try { await saveEdit(documentId, etag, undo.changes); setUndo(null); await onSaved(); }
+              catch (failure) { setError(failure); } finally { setUndoing(false); }
+            }}>{undoing ? "Undoing…" : "Undo"}</Button>
+            <Button variant="ghost" className="min-h-9" onClick={() => setUndo(null)} aria-label="Dismiss">✕</Button>
+          </span>
+        </div>
+      )}
+      {editing ? <EditForm documentId={documentId} sidecar={sidecar} etag={etag} onDone={async (changes) => { setEditing(false); if (changes) await saved(changes); }} /> : (
+        <div className="grid gap-4 sm:grid-cols-[10rem_1fr]">
+          <a href={`${file}?view=true`} target="_blank" rel="noopener noreferrer" className="block self-start" title="Open the clean copy" data-testid="large-preview">
+            <Preview documentId={documentId} version={doc.currentVersion} size="large" className="aspect-[3/4] w-28 sm:w-full sm:max-w-[10rem]" alt="First page" />
+          </a>
+          <dl className="grid content-start grid-cols-[5.5rem_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm" data-testid="copy-fields">
+            {rows.filter(([, value, spec]) => (value !== undefined && value !== "") || (canEdit && spec)).map(([label, value, spec]) => (
+              <div key={label} className="contents">
+                <dt className="py-1 text-slate-500 dark:text-slate-400">{label}</dt>
+                <dd className="min-w-0 break-words">
+                  {canEdit && spec
+                    ? <InlineField label={label} display={value} spec={spec} documentId={documentId} etag={etag} onSaved={saved} />
+                    : <span className="flex flex-wrap gap-1 py-1">{value}</span>}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
       )}
       <div className="mt-4 flex flex-wrap gap-2">
         {/* View opens the browser's own PDF viewer on the clean copy (validated: no scripts, links or forms). */}
@@ -199,8 +237,102 @@ function plain(text: string) {
 const SECTIONS = ["Finance", "Employment", "Identity", "Medical", "Education", "Contracts", "Property", "Vehicles", "Taxes", "Personal", "Other", "Unsorted"];
 const select = "block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base sm:text-sm dark:border-slate-700 dark:bg-slate-950";
 
+type SidecarData = Awaited<ReturnType<typeof api.sidecar>>["sidecar"];
+const FIELD_NAME: Record<string, string> = { title: "Title", issuer: "Correspondent", documentType: "Type", documentDate: "Date",
+  reference: "Number", amount: "Amount", section: "Section", tags: "Tags" };
+
+/** Send an edit and wait (briefly) until the archive worker applied it. */
+async function saveEdit(documentId: string, etag: string, changes: MetadataChanges) {
+  try {
+    const edit = await api.editMetadata(documentId, etag, changes);
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const status = await api.edit(edit.statusUrl);
+      if (status.status === "APPLIED") return;
+      if (status.status !== "PENDING") throw new Error(status.status === "CONFLICT" ? "It was changed meanwhile; reload the page and try again." : "The change was refused.");
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    throw new Error("Still saving; check again in a moment.");
+  } catch (failure) {
+    throw failure instanceof ApiError && failure.code === "REVISION_CONFLICT" ? new Error("It was changed meanwhile; reload the page and try again.") : failure;
+  }
+}
+
+/** The values a change replaces, as a change that puts them back. */
+function previous(sidecar: SidecarData, changes: MetadataChanges): MetadataChanges {
+  const out: MetadataChanges = {};
+  for (const key of Object.keys(changes) as (keyof MetadataChanges)[]) {
+    switch (key) {
+      case "title": out.title = sidecar.title; break;
+      case "tags": out.tags = sidecar.tags ?? []; break;
+      case "issuer": out.issuer = sidecar.issuer?.value ?? null; break;
+      case "documentType": out.documentType = sidecar.documentType ?? null; break;
+      case "documentDate": out.documentDate = sidecar.documentDate?.value ?? null; break;
+      case "reference": out.reference = sidecar.reference?.value ?? null; break;
+      case "amount": out.amount = sidecar.amount ? { value: sidecar.amount.value, currency: sidecar.amount.currency } : null; break;
+      case "section": out.section = sidecar.organization.category; break;
+    }
+  }
+  return out;
+}
+
+type InlineSpec = { key: keyof MetadataChanges; value: string; type?: string; options?: [string, string][]; required?: boolean; hint?: string };
+
+/** A field that becomes an input when clicked; Enter saves, Escape cancels. */
+function InlineField({ label, display, spec, documentId, etag, onSaved }: {
+  label: string; display: ReactNode; spec: InlineSpec; documentId: string; etag: string; onSaved: (changes: MetadataChanges) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState(spec.value);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  useEffect(() => { if (!open) setValue(spec.value); }, [spec.value, open]);
+  const empty = display === undefined || display === "";
+  if (!open) {
+    return (
+      <button type="button" onClick={() => setOpen(true)} data-testid={`inline-${spec.key}`} title={`Change ${label.toLowerCase()}`}
+        className="group -mx-1 flex w-full flex-wrap items-center gap-1 rounded px-1 py-1 text-left hover:bg-slate-100 dark:hover:bg-slate-800">
+        {empty ? <span className="text-slate-400">Add…</span> : display}
+        <span className="ml-auto text-xs text-slate-400 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100" aria-hidden>Edit</span>
+      </button>
+    );
+  }
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    const text = value.trim();
+    let changes: MetadataChanges;
+    if (spec.key === "tags") {
+      const list = [...new Set(text.split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean))];
+      if (!list.every((tag) => TAG.test(tag))) { setError(new Error("Tags: lowercase letters, digits, dot, dash or underscore, separated by commas.")); return; }
+      changes = { tags: list };
+    } else if (spec.required && !text) { setError(new Error(`${label} can't be empty.`)); return; }
+    else changes = { [spec.key]: text || null } as MetadataChanges;
+    if (text === spec.value.trim()) { setOpen(false); return; }
+    setBusy(true);
+    try { await saveEdit(documentId, etag, changes); setOpen(false); await onSaved(changes); }
+    catch (failure) { setError(failure); } finally { setBusy(false); }
+  };
+  const input = "block min-h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-base sm:text-sm dark:border-slate-700 dark:bg-slate-950";
+  return (
+    <form onSubmit={submit} onKeyDown={(event) => { if (event.key === "Escape") setOpen(false); }} className="space-y-1 py-1" data-testid={`inline-form-${spec.key}`}>
+      {spec.options ? (
+        <select autoFocus className={input} value={value} onChange={(event) => setValue(event.target.value)} aria-label={label}>
+          {!spec.required && <option value="">-</option>}
+          {spec.options.map(([option, text]) => <option key={option} value={option}>{text}</option>)}
+        </select>
+      ) : <input autoFocus className={input} type={spec.type ?? "text"} value={value} maxLength={200} aria-label={label} onChange={(event) => setValue(event.target.value)} />}
+      {spec.hint && <span className="block text-xs text-slate-500 dark:text-slate-400">{spec.hint}</span>}
+      <ErrorNote error={error} />
+      <span className="flex gap-1">
+        <Button type="submit" className="min-h-9" disabled={busy}>{busy ? "Saving…" : "Save"}</Button>
+        <Button type="button" variant="ghost" className="min-h-9" onClick={() => setOpen(false)}>Cancel</Button>
+      </span>
+    </form>
+  );
+}
+
 function EditForm({ documentId, sidecar, etag, onDone }: {
-  documentId: string; sidecar: Awaited<ReturnType<typeof api.sidecar>>["sidecar"]; etag: string; onDone: (saved: boolean) => void;
+  documentId: string; sidecar: SidecarData; etag: string; onDone: (changes: MetadataChanges | null) => void;
 }) {
   const [title, setTitle] = useState(sidecar.title);
   const [issuer, setIssuer] = useState(sidecar.issuer?.value ?? "");
@@ -225,23 +357,13 @@ function EditForm({ documentId, sidecar, etag, onDone }: {
       setError(new Error("To file it under a section, give it a type and a date (or choose Unsorted).")); return;
     }
     setBusy(true);
-    try {
-      const edit = await api.editMetadata(documentId, etag, {
-        title: title.trim(), tags: [...new Set(list)], issuer: issuer.trim() || null, documentType: kind || null,
-        documentDate: date || null, reference: reference.trim() || null,
-        amount: amount ? { value: amount, currency: currency.toUpperCase() } : null, section,
-      });
-      // The archive worker applies the edit; poll its status briefly.
-      for (let attempt = 0; attempt < 20; attempt += 1) {
-        const status = await api.edit(edit.statusUrl);
-        if (status.status === "APPLIED") { onDone(true); return; }
-        if (status.status !== "PENDING") throw new Error(status.status === "CONFLICT" ? "It was changed meanwhile; reload the page and try again." : "The change was refused.");
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-      throw new Error("Still saving; check again in a moment.");
-    } catch (failure) {
-      setError(failure instanceof ApiError && failure.code === "REVISION_CONFLICT" ? new Error("It was changed meanwhile; reload the page and try again.") : failure);
-    } finally { setBusy(false); }
+    const changes: MetadataChanges = {
+      title: title.trim(), tags: [...new Set(list)], issuer: issuer.trim() || null, documentType: kind || null,
+      documentDate: date || null, reference: reference.trim() || null,
+      amount: amount ? { value: amount, currency: currency.toUpperCase() } : null, section,
+    };
+    try { await saveEdit(documentId, etag, changes); onDone(changes); }
+    catch (failure) { setError(failure); } finally { setBusy(false); }
   };
   return (
     <form onSubmit={save} className="space-y-3" data-testid="edit-form">
@@ -270,7 +392,7 @@ function EditForm({ documentId, sidecar, etag, onDone }: {
       <ErrorNote error={error} />
       <div className="flex gap-2">
         <Button type="submit" disabled={busy}>{busy ? "Saving…" : "Save"}</Button>
-        <Button type="button" variant="secondary" onClick={() => onDone(false)}>Cancel</Button>
+        <Button type="button" variant="secondary" onClick={() => onDone(null)}>Cancel</Button>
       </div>
       <Muted className="text-xs">
         Saving files it again (folder and file name follow), updates Paperless, and writes a new version of the PDF
@@ -366,12 +488,6 @@ function aiStep(scan: Scan, state: string | undefined, enabled: boolean | undefi
   }
 }
 
-const TYPE_LABEL: Record<string, string> = {
-  invoice: "Invoice", receipt: "Receipt", bank_statement: "Bank statement", payslip: "Payslip", contract: "Contract",
-  tax_document: "Tax document", insurance: "Insurance", medical: "Medical", identity_document: "Identity document",
-  certificate: "Certificate", letter: "Letter", school_document: "School document", presentation: "Presentation",
-  report: "Report", manual: "Manual", other: "Document",
-};
 
 function DeleteCard({ scan, ready }: { scan: Scan; ready: boolean }) {
   const navigate = useNavigate();

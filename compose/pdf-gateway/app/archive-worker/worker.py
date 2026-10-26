@@ -15,6 +15,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -25,6 +26,7 @@ import psycopg2
 
 import enrichment
 import metadata
+import previews
 import revisions
 from archive import Archive, ArchiveError, Document, canonical_json, sha256_file
 from organize import DEFAULT_TAGS_REVISION, default_taxonomy, organise, validated
@@ -439,6 +441,7 @@ def handle(channel, method, _properties, body: bytes) -> None:
                 else:
                     document, sidecar, evidence = publish(job)
                     commit(job, document, sidecar, evidence)
+                    picture(sidecar, document.pdf)
             except Deferred:
                 defer(job)
         except ArchiveStageError as error:
@@ -661,6 +664,9 @@ def handle_revision(channel, method, _properties, body: bytes) -> None:
             updated = revisions.publish_revision(cursor, ARCHIVE, STORAGE, event)
             if updated is not None:
                 index_update(cursor, updated)
+                document = ARCHIVE.find(event["documentId"])
+                if document is not None:
+                    picture(updated, document.pdf)
                 audit_document(cursor, event["documentId"], "VERSION_PUBLISHED", "SUCCESS",
                                {"artifactId": event["artifactId"], "artifactVersion": updated["artifactVersion"]})
         channel.basic_ack(method.delivery_tag)
@@ -671,6 +677,15 @@ def handle_revision(channel, method, _properties, body: bytes) -> None:
         print(json.dumps({"event": "revision_error", "documentId": event["documentId"], "errorType": type(error).__name__}), flush=True)
         channel.basic_nack(method.delivery_tag, requeue=True)
         time.sleep(5)
+
+
+def picture(sidecar: dict, pdf: Path) -> None:
+    """The web app's first-page pictures; never fails the step that published the document."""
+    try:
+        if not previews.render(ARCHIVE.root, sidecar["documentId"], sidecar["artifactVersion"], pdf):
+            print(json.dumps({"event": "preview_failed", "documentId": sidecar["documentId"]}), flush=True)
+    except Exception as error:
+        print(json.dumps({"event": "preview_failed", "documentId": sidecar["documentId"], "errorType": type(error).__name__}), flush=True)
 
 
 def handle_deleted(channel, method, _properties, body: bytes) -> None:
@@ -684,6 +699,8 @@ def handle_deleted(channel, method, _properties, body: bytes) -> None:
         return
     try:
         removed = revisions.delete_files(STORAGE, ARCHIVE, event)
+        if event.get("documentId"):
+            removed["previews"] = previews.remove(ARCHIVE.root, event["documentId"])
         print(json.dumps({"event": "document_deleted", "scanId": event["scanId"], **removed}), flush=True)
         channel.basic_ack(method.delivery_tag)
     except Exception as error:
@@ -736,6 +753,9 @@ def main() -> None:
     ARCHIVE.initialise()
     ensure_taxonomy()
     migrate_layout()
+    # Pictures missing after an upgrade or a restore, made in the background.
+    threading.Thread(target=lambda: print(json.dumps({"event": "previews_backfilled", **previews.backfill(ARCHIVE)}), flush=True),
+                     daemon=True).start()
     credentials = pika.PlainCredentials(os.environ["PDF_GATEWAY_RABBITMQ_USER"], os.environ["PDF_GATEWAY_RABBITMQ_PASSWORD"])
     parameters = pika.ConnectionParameters(os.getenv("PDF_GATEWAY_RABBITMQ_HOST", "rabbitmq"), credentials=credentials,
                                            heartbeat=600, blocked_connection_timeout=60)
