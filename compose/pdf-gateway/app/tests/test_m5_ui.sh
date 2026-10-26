@@ -53,7 +53,8 @@ q "INSERT INTO scan_jobs(id,owner_id,status,intent,cdr_mode,display_name,source_
    VALUES ('$(scan_id 62)','$admin','REVIEW_REQUIRED','ARCHIVE','RASTER','<img src=x onerror=alert(1)>.pdf',30,'$(printf 'a%.0s' {1..64})','quar-held62','UNKNOWN','REVIEW_REQUIRED')"
 for _ in $(seq 1 60); do [[ "$(q "SELECT count(*) FROM scan_jobs WHERE status='READY'")" == 2 ]] && break; sleep 1; done
 
-"$python" "$root/compose/pdf-gateway/app/tests/ui_test.py" http://localhost:18290 "$TEST_ADMIN_TOKEN" "$TEST_STORAGE/fixtures/invoice-en.pdf" "$shots"
+setup_code="$(q "SELECT value FROM account_state WHERE key='setup_code'")"
+"$python" "$root/compose/pdf-gateway/app/tests/ui_test.py" http://localhost:18290 "$setup_code" "$TEST_STORAGE/fixtures/invoice-en.pdf" "$shots"
 [[ ! -e $TEST_STORAGE/api/quarantine/quar-held62.bin ]]
 # Three edits through the UI: the form, an inline change, and its Undo.
 [[ "$(q "SELECT metadata_revision FROM archive_documents WHERE scan_id='$(scan_id 60)'")" == 4 ]]

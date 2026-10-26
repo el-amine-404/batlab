@@ -106,8 +106,14 @@ themselves at 85 °C. Lab2 runs live services.
 
 `web/` is a React PWA served by the stateless `web` container (127.0.0.1:18088 by
 default; put the homelab Caddy in front for HTTPS). It proxies `/api` same-origin.
-Sign in with an API token: it is exchanged for an HttpOnly session cookie and is not
-stored. The app never previews originals; approved PDFs are downloads only.
+People sign in with a name and a password (PBKDF2-hashed; five wrong tries in 15
+minutes slow further tries down) and get an HttpOnly session cookie. Until an admin
+can sign in, the page asks for the setup code the API writes to its log
+(`docker logs pdf-gateway-api 2>&1 | grep 'setup code'`); an admin that only had a
+token (the bootstrap `admin`) keeps its documents by taking its name there. Admins
+then add people with a role (admin, user, read-only) and apps (Homepage, the agent,
+scripts) with API keys, under System. The app never previews originals; approved
+PDFs are downloads only.
 
 ```bash
 compose/pdf-gateway/app/tests/test_m5_api.sh
@@ -121,7 +127,8 @@ filed for review get an OCR job (no text layer) or an AI suggestion job. The age
 in `enrichment-agent/` runs on the AI laptop next to LM Studio and *pulls* work, so
 the laptop exposes nothing and may be off at any time.
 
-1. Create a dedicated agent account and token (store only the token's SHA-256):
+1. Under System → Apps and API keys, add `t1000-agent` with the AI agent role (its key
+   is shown once). Or by SQL (store only the token's SHA-256):
    `INSERT INTO users(id,username,role) VALUES (gen_random_uuid(),'t1000-agent','ENRICHMENT');`
    `INSERT INTO api_tokens(id,user_id,token_hash,label) SELECT gen_random_uuid(),id,'<sha256 of token>','agent' FROM users WHERE username='t1000-agent';`
 2. On the laptop: copy `agent.env.example` to `agent.env` (gateway URL, token, model), then

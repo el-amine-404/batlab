@@ -200,9 +200,19 @@ Paperless keeps its own copy on disk; the gateway's archive is already organised
 
 ## Signing in
 
-Sign in with `PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN` (the first ADMIN's API token).
-There is no user-management page yet: other users and tokens are rows in `users`
-and `api_tokens` (SHA-256 only), as in step 6.
+People sign in with a name and a password. Until an admin can, the page shows a
+setup form that needs the code the API writes to its log:
+
+```bash
+docker logs pdf-gateway-api 2>&1 | grep 'setup code'
+```
+
+Keep the name `admin` there: it is the account the bootstrap token made, and its
+documents stay its own. Admins then manage everything under **System**: people
+(name, password, role: admin, user or read-only; turn off; reset a password) and
+apps (Homepage, the laptop's agent, scripts), which get API keys shown once and sent
+as `Authorization: Bearer …`. `PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN` stays the admin's
+API key (listed as "bootstrap"); an API key no longer signs anyone in on the page.
 
 ## Backups and restores
 

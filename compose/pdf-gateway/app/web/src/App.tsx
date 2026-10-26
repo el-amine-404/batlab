@@ -37,8 +37,12 @@ export function App() {
     staleTime: 60_000,
   });
 
-  if (session.isPending) return <p className="p-6 text-sm text-slate-500">Loading…</p>;
-  if (!session.data) return <LoginPage onLogin={(value) => { setCsrf(value.csrfToken); client.setQueryData(["session"], value); }} />;
+  // Asked only when nobody is signed in: whether the page makes the first admin instead.
+  const setup = useQuery({ queryKey: ["setup"], queryFn: api.setupState, enabled: session.isSuccess && !session.data });
+
+  if (session.isPending || (!session.data && setup.isPending)) return <p className="p-6 text-sm text-slate-500">Loading…</p>;
+  if (!session.data) return <LoginPage setup={!!setup.data?.needed} suggested={setup.data?.suggestedUsername ?? null}
+    onLogin={(value) => { setCsrf(value.csrfToken); client.removeQueries({ queryKey: ["setup"] }); client.setQueryData(["session"], value); }} />;
 
   const logout = async () => {
     try { await api.logout(); } finally {
@@ -95,7 +99,7 @@ function Shell({ session, onLogout }: { session: Session; onLogout: () => void }
             <Route path="/documents" element={<DocumentsPage />} />
             <Route path="/documents/:scanId" element={<DocumentPage session={session} />} />
             <Route path="/attention" element={<AttentionPage />} />
-            <Route path="/system" element={<SystemPage />} />
+            <Route path="/system" element={<SystemPage session={session} />} />
             {/* Addresses of the first version of this UI. */}
             <Route path="/upload" element={<Navigate to="/" replace />} />
             <Route path="/jobs" element={<Navigate to="/documents" replace />} />

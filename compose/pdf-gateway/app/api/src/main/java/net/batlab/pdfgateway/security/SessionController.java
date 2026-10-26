@@ -5,9 +5,9 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.HexFormat;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import net.batlab.pdfgateway.api.ApiException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseCookie;
@@ -17,14 +17,15 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Exchanges an API token for a browser session. The token is used once and is
- * never stored by the browser; the session cookie is HttpOnly, Secure,
- * SameSite=Strict and host-only (__Host- prefix).
+ * Browser sessions: a person signs in with their name and password (or makes
+ * the first admin with the setup code). The session cookie is HttpOnly, Secure,
+ * SameSite=Strict and host-only (__Host- prefix); apps use API keys instead.
  */
 @RestController
 @RequestMapping("/api/v1/session")
@@ -32,35 +33,62 @@ public class SessionController {
     private static final Duration LIFETIME = Duration.ofHours(8);
     private static final SecureRandom RANDOM = new SecureRandom();
     private final JdbcTemplate jdbc;
+    private final Accounts accounts;
 
-    public SessionController(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    public SessionController(JdbcTemplate jdbc, Accounts accounts) {
+        this.jdbc = jdbc;
+        this.accounts = accounts;
+    }
 
     public record SessionView(String username, String role, String csrfToken, OffsetDateTime expiresAt) {}
 
+    public record SetupState(boolean needed, String suggestedUsername) {}
+    public record SetupIn(String code, String username, String password) {}
+    public record LoginIn(String username, String password) {}
+    public record PasswordIn(String current, String next) {}
+
+    /** Whether the page shows the setup form (no admin can sign in yet), and the name it offers. */
+    @GetMapping("/setup")
+    ResponseEntity<SetupState> setupState() {
+        boolean needed = accounts.needsSetup();
+        return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .body(new SetupState(needed, needed ? accounts.suggestedAdmin().orElse(null) : null));
+    }
+
+    /** The first admin, with the setup code from the API's log; signs them in. */
+    @PostMapping(path = "/setup", consumes = MediaType.APPLICATION_JSON_VALUE)
+    ResponseEntity<SessionView> setup(@RequestBody SetupIn body, HttpServletRequest request) {
+        if (body == null) throw new ApiException(422, "BAD_REQUEST", "The setup code, a name and a password are needed.");
+        return open(accounts.setup(body.code(), body.username(), body.password(), request.getRemoteAddr()));
+    }
+
+    /** Signs a person in with their name and password: the session cookie. Apps use an API key instead. */
     @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
-    ResponseEntity<?> create(@RequestBody Map<String, Object> body) {
-        Object token = body == null ? null : body.get("token");
-        if (!(token instanceof String raw) || raw.length() < 32 || raw.length() > 512)
-            return problem(401, "AUTH_REQUIRED", "A valid API token is required");
-        List<UUID> users = jdbc.query("""
-                SELECT u.id FROM api_tokens t JOIN users u ON u.id = t.user_id
-                 WHERE t.token_hash = ? AND t.revoked_at IS NULL AND u.enabled
-                   AND (t.expires_at IS NULL OR t.expires_at > now())""",
-                (rs, row) -> rs.getObject(1, UUID.class), TokenHasher.sha256(raw));
-        if (users.size() != 1) {
-            jdbc.update("INSERT INTO audit_events(action,resource_type,resource_id,outcome,trace_id) VALUES ('SESSION_CREATE','SESSION','-','FAILURE',?)", UUID.randomUUID().toString());
-            return problem(401, "AUTH_REQUIRED", "A valid API token is required");
-        }
+    ResponseEntity<SessionView> create(@RequestBody LoginIn body, HttpServletRequest request) {
+        if (body == null) throw new ApiException(401, "WRONG_PASSWORD", "That name and password don't match.");
+        return open(accounts.signIn(body.username(), body.password(), request.getRemoteAddr()));
+    }
+
+    /** Changes one's own password; one's other sessions end. */
+    @PutMapping(path = "/password", consumes = MediaType.APPLICATION_JSON_VALUE)
+    ResponseEntity<Void> password(@AuthenticationPrincipal GatewayPrincipal principal, @RequestBody PasswordIn body, HttpServletRequest request) {
+        if (!(request.getAttribute(BearerTokenFilter.SessionPrincipal.class.getName()) instanceof BearerTokenFilter.SessionPrincipal session))
+            throw new ApiException(400, "NOT_A_SESSION", "Change a password from the page.");
+        accounts.changeOwnPassword(principal.userId(), body == null ? null : body.current(), body == null ? null : body.next(), session.sessionId());
+        return ResponseEntity.noContent().build();
+    }
+
+    private ResponseEntity<SessionView> open(UUID user) {
         String cookie = randomHex();
         String csrf = randomHex();
         OffsetDateTime expires = OffsetDateTime.now().plus(LIFETIME);
         UUID id = UUID.randomUUID();
         jdbc.update("INSERT INTO web_sessions(id,session_hash,csrf_token,user_id,expires_at) VALUES (?,?,?,?,?)",
-                id, TokenHasher.sha256(cookie), csrf, users.getFirst(), expires);
+                id, TokenHasher.sha256(cookie), csrf, user, expires);
         jdbc.update("INSERT INTO audit_events(actor_id,action,resource_type,resource_id,outcome,trace_id) VALUES (?,'SESSION_CREATE','SESSION',?,'SUCCESS',?)",
-                users.getFirst(), id.toString(), UUID.randomUUID().toString());
+                user, id.toString(), UUID.randomUUID().toString());
         SessionView view = jdbc.queryForObject("SELECT username, role FROM users WHERE id=?",
-                (rs, row) -> new SessionView(rs.getString(1), rs.getString(2), csrf, expires), users.getFirst());
+                (rs, row) -> new SessionView(rs.getString(1), rs.getString(2), csrf, expires), user);
         return ResponseEntity.status(201).header(HttpHeaders.SET_COOKIE, sessionCookie(cookie, LIFETIME).toString())
                 .header(HttpHeaders.CACHE_CONTROL, "no-store").body(view);
     }

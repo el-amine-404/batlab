@@ -11,6 +11,18 @@ export const Session = z.object({
 });
 export type Session = z.infer<typeof Session>;
 
+export const SetupState = z.object({ needed: z.boolean(), suggestedUsername: z.string().nullable() });
+
+const Role = z.enum(["ADMIN", "USER", "READ_ONLY", "ENRICHMENT"]);
+export type Role = z.infer<typeof Role>;
+const Key = z.object({ id: z.string(), label: z.string(), createdAt: z.string(), lastUsedAt: z.string().nullable() });
+export const Account = z.object({
+  id: z.string(), username: z.string(), role: Role, enabled: z.boolean(), signsIn: z.boolean(),
+  createdAt: z.string(), lastLoginAt: z.string().nullable(), keys: z.array(Key),
+});
+export type Account = z.infer<typeof Account>;
+export const NewKey = z.object({ id: z.string(), label: z.string(), token: z.string(), account: Account });
+
 export const Scan = z.object({
   scanId: z.string(),
   displayName: z.string(),
@@ -163,7 +175,20 @@ const json = (body: unknown): RequestInit => ({ body: JSON.stringify(body), head
 
 export const api = {
   session: () => request(Session, "/api/v1/session"),
-  login: (token: string) => request(Session, "/api/v1/session", { method: "POST", ...json({ token }) }),
+  login: (username: string, password: string) => request(Session, "/api/v1/session", { method: "POST", ...json({ username, password }) }),
+  setupState: () => request(SetupState, "/api/v1/session/setup"),
+  setup: (code: string, username: string, password: string) =>
+    request(Session, "/api/v1/session/setup", { method: "POST", ...json({ code, username, password }) }),
+  changePassword: (current: string, next: string) =>
+    request(z.undefined(), "/api/v1/session/password", { method: "PUT", ...json({ current, next }) }),
+  accounts: () => request(z.array(Account), "/api/v1/accounts"),
+  createAccount: (body: { username: string; role: Role; password?: string }) =>
+    request(Account, "/api/v1/accounts", { method: "POST", ...json(body) }),
+  updateAccount: (id: string, body: { role?: Role; enabled?: boolean; password?: string }) =>
+    request(Account, `/api/v1/accounts/${encodeURIComponent(id)}`, { method: "PATCH", ...json(body) }),
+  addKey: (id: string, label: string) => request(NewKey, `/api/v1/accounts/${encodeURIComponent(id)}/keys`, { method: "POST", ...json({ label }) }),
+  revokeKey: (id: string, keyId: string) =>
+    request(z.undefined(), `/api/v1/accounts/${encodeURIComponent(id)}/keys/${encodeURIComponent(keyId)}`, { method: "DELETE" }),
   logout: () => request(z.undefined(), "/api/v1/session", { method: "DELETE" }),
   scans: (cursor?: string) => request(ScanPage, `/api/v1/scans?limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`),
   scan: (id: string) => request(Scan, `/api/v1/scans/${encodeURIComponent(id)}`),

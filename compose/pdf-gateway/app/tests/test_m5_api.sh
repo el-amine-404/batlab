@@ -36,7 +36,9 @@ bearer() { curl -sS -H "Authorization: Bearer $TEST_ADMIN_TOKEN" "$@"; }
 # Cookie-session request; JAR selects the browser profile.
 web() { curl -sS -b "$scratch/${JAR:-admin}.jar" -c "$scratch/${JAR:-admin}.jar" "$@"; }
 code() { "$@" -o /dev/null -w '%{http_code}'; }
-login() { curl -sS -c "$scratch/$1.jar" -D "$scratch/$1.headers" -H 'Content-Type: application/json' -d "{\"token\":\"$2\"}" -o "$scratch/$1.session" -w '%{http_code}' "$base/api/v1/session"; }
+# login JAR USER PASSWORD; setup CODE USER PASSWORD (into the admin jar).
+login() { curl -sS -c "$scratch/$1.jar" -D "$scratch/$1.headers" -H 'Content-Type: application/json' -d "{\"username\":\"$2\",\"password\":\"$3\"}" -o "$scratch/$1.session" -w '%{http_code}' "$base/api/v1/session"; }
+setup() { curl -sS -c "$scratch/admin.jar" -D "$scratch/admin.headers" -H 'Content-Type: application/json' -d "{\"code\":\"$1\",\"username\":\"$2\",\"password\":\"$3\"}" -o "$scratch/admin.session" -w '%{http_code}' "$base/api/v1/session/setup"; }
 
 mkdir -p "$TEST_STORAGE"/{fixtures,cdr-output,text-extracts,api/quarantine} "$TEST_ARCHIVE/manifests"
 chmod 0777 "$TEST_ARCHIVE" "$TEST_ARCHIVE/manifests" "$TEST_STORAGE/api" "$TEST_STORAGE/api/quarantine"
@@ -65,8 +67,23 @@ for _ in $(seq 1 60); do [[ "$(q "SELECT count(*) FROM scan_jobs WHERE status='R
 eq "$(q "SELECT count(*) FROM scan_jobs WHERE status='READY'")" 2
 
 # --- Sessions ----------------------------------------------------------------
-eq "$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '{"token":"0000000000000000000000000000000000000000"}' "$base/api/v1/session")" 401
-eq "$(login admin "$TEST_ADMIN_TOKEN")" 201
+# Until an admin has a password, the page makes one with the setup code from the log.
+eq "$(curl -sS "$base/api/v1/session/setup" | json 'str(v["needed"])+"|"+v["suggestedUsername"]')" "True|admin"
+setup_code="$(q "SELECT value FROM account_state WHERE key='setup_code'")"
+[[ $setup_code =~ ^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$ ]]
+"${dc[@]}" logs --no-color api | grep -q "setup code $setup_code"
+eq "$(login admin admin admin-password-1)" 401                                   # no password yet
+eq "$(setup ABCD-EFGH-JKLM admin admin-password-1)" 422
+eq "$(setup "$setup_code" admin short)" 422
+eq "$(setup "$(tr 'A-Z-' 'a-z ' <<<"$setup_code")" admin admin-password-1)" 201   # any case, any separators
+eq "$(q "SELECT count(*) FROM users WHERE username='admin' AND password_hash LIKE '{pbkdf2}%'")" 1   # the old admin, documents kept
+eq "$(q "SELECT count(*) FROM account_state")" 0
+eq "$(setup "$setup_code" admin2 admin-password-2)" 409
+eq "$(curl -sS "$base/api/v1/session/setup" | json 'v["needed"]')" False
+# An API token no longer opens a page session; a name and password do.
+eq "$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d "{\"token\":\"$TEST_ADMIN_TOKEN\"}" "$base/api/v1/session")" 401
+eq "$(login admin admin wrong-password)" 401
+eq "$(login admin ADMIN admin-password-1)" 201                                   # names ignore case
 cookie_line="$(grep -i '^set-cookie: __Host-pgw_session=' "$scratch/admin.headers")"
 for flag in HttpOnly Secure 'SameSite=Strict' 'Path=/'; do grep -qi "; *$flag" <<<"$cookie_line" || { echo "cookie lacks $flag: $cookie_line" >&2; exit 1; }; done
 ! grep -qi 'domain=' <<<"$cookie_line"
@@ -85,7 +102,22 @@ eq "$(web "$base/api/v1/scans?limit=1" | json 'v["nextCursor"]')" "$(scan_id 53)
 web "$base/api/v1/scans/$(scan_id 52)" | python3 -I "$root/compose/pdf-gateway/app/tests/check_scan_contract.py" "$root/compose/pdf-gateway/app/contracts/openapi.yaml" >/dev/null
 eq "$(web "$base/api/v1/scans/$(scan_id 52)" | json 'v["displayName"]')" '<img src=x onerror=alert(1)>.pdf'
 eq "$(web "$base/api/v1/quarantine" | json '",".join(sorted(i["scanId"][-2:] for i in v["items"]))')" "52,53"
-eq "$(login other "$user_token")" 201
+# Admins manage accounts; the others can't.
+eq "$(code web -X PATCH -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d '{"password":"other-password-1"}' "$base/api/v1/accounts/00000000-0000-0000-0000-0000000000b2")" 200
+eq "$(code web -X PATCH -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d '{"role":"USER"}' "$base/api/v1/accounts/$admin")" 409   # the last admin
+eq "$(code web -X PATCH -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d '{"enabled":false}' "$base/api/v1/accounts/$admin")" 409
+eq "$(login other other other-password-1)" 201
+eq "$(code curl -sS -b "$scratch/other.jar" "$base/api/v1/accounts")" 403
+# An app: an account without a password, and a key shown once.
+app_id="$(web -X POST -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d '{"username":"homepage-test","role":"READ_ONLY"}' "$base/api/v1/accounts" | json 'v["id"]')"
+web -X POST -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d '{"label":"dashboard"}' "$base/api/v1/accounts/$app_id/keys" >"$scratch/key.json"
+app_key="$(json 'v["token"]' <"$scratch/key.json")"; key_id="$(json 'v["id"]' <"$scratch/key.json")"
+eq "$(code curl -sS -H "Authorization: Bearer $app_key" "$base/api/v1/scans")" 200
+eq "$(login app homepage-test anything-at-all)" 401                               # keys don't sign in on the page
+eq "$(web "$base/api/v1/accounts" | json '[a["keys"][0]["label"] for a in v if a["username"]=="homepage-test"][0]')" dashboard
+! web "$base/api/v1/accounts" | grep -q "$app_key"
+eq "$(code web -X DELETE -H "X-CSRF-Token: $csrf" "$base/api/v1/accounts/$app_id/keys/$key_id")" 204
+eq "$(code curl -sS -H "Authorization: Bearer $app_key" "$base/api/v1/scans")" 401
 eq "$(JAR=other web "$base/api/v1/scans" | json 'len(v["items"])')" 0
 eq "$(code curl -sS -b "$scratch/other.jar" "$base/api/v1/scans/$(scan_id 50)/findings")" 404
 eq "$(code curl -sS -b "$scratch/other.jar" "$base/api/v1/scans/$(scan_id 50)/events")" 404
@@ -164,5 +196,9 @@ eq "$(code web -X DELETE -H "X-CSRF-Token: $csrf" "$base/api/v1/session")" 204
 eq "$(code web "$base/api/v1/scans")" 401
 eq "$(q "SELECT count(*) FROM web_sessions WHERE revoked_at IS NOT NULL")" 1
 eq "$(q "SELECT count(*) FROM web_sessions WHERE session_hash IS NULL OR length(session_hash)<>64")" 0
-echo "M5 API: sessions, CSRF, Origin, IDOR, lists, findings, SSE, quarantine, summary, health and logout tests passed"
+# Wrong passwords: after five, each try waits (429), even with the right one.
+for _ in 1 2 3 4 5 6; do [[ "$(login t other wrong-password)" == 429 ]] && break; done
+eq "$(login t other other-password-1)" 429
+
+echo "M5 API: setup code, passwords, accounts and keys, sign-in throttle, sessions, CSRF, Origin, IDOR, lists, findings, SSE, quarantine, summary, health and logout tests passed"
 
