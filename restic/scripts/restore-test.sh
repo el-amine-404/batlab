@@ -90,15 +90,17 @@ docker exec -i pdf-gateway-db pg_restore --list <"$gateway" >/dev/null
 # check its PDF against the SHA-256 its sidecar recorded.
 stage="PDF archive restore"
 archive=/mnt/storage/data/documents/pdf-archive/archive
-sidecar="$(restic ls latest "$archive" | grep '/metadata\.json$' | shuf -n 1 || true)"
+# Each PDF has its sidecar hidden beside it: ".<name>.pdf.json".
+sidecar="$(restic ls latest "$archive" | grep '/\.[^/]*\.pdf\.json$' | shuf -n 1 || true)"
 if [[ -z $sidecar ]]; then
-  if find "$archive" -name metadata.json -mmin +1440 -print -quit 2>/dev/null | grep -q .; then
+  if find "$archive" -name '.*.pdf.json' -mmin +1440 -print -quit 2>/dev/null | grep -q .; then
     echo "The newest snapshot has no PDF archive documents, but the archive has day-old ones" >&2
     exit 1
   fi
   archived="no PDF archived yet"
 else
-  restic restore latest --target "$work" --include "$(dirname "$sidecar")"
+  name="$(basename "$sidecar")"
+  restic restore latest --target "$work" --include "$sidecar" --include "$(dirname "$sidecar")/${name:1:-5}"
   python3 - "$work$sidecar" <<'PY'
 import hashlib, json, pathlib, sys
 sidecar = pathlib.Path(sys.argv[1])

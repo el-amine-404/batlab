@@ -82,7 +82,9 @@ export function DocumentPage({ session }: { session: Session }) {
 
       {ready && doc.data && sidecar && meta.data && (
         <CopyCard documentId={documentId!} doc={doc.data} sidecar={sidecar} etag={meta.data.etag} paperless={paperless.data}
-          canEdit={canEdit} onSaved={reload} />
+          canEdit={canEdit} onSaved={reload} aiEnabled={ai.data?.enabled === true}
+          aiBusy={!!jobs.data?.some((job) => job.kind === "SUGGEST" && MOVING.has(job.status))}
+          onRefile={async () => { await api.refile(documentId!); await client.invalidateQueries({ queryKey: ["enrichment", scanId] }); }} />
       )}
 
       {ready && meta.data && suggestions.data?.some((item) => item.status === "PROPOSED") && (
@@ -105,18 +107,20 @@ export function DocumentPage({ session }: { session: Session }) {
         <Steps items={steps} />
       </Card>
 
-      {["REVIEW_REQUIRED", "BLOCKED", "FAILED"].includes(view.status) && session.role === "ADMIN" && <HeldActions scan={view} />}
+      {TERMINAL.has(view.status) && canEdit && <DeleteCard scan={view} ready={ready} />}
 
       <TechnicalDetails scan={view} findings={findings.data} sidecar={sidecar} documentId={documentId} doc={doc.data} />
     </>
   );
 }
 
-function CopyCard({ documentId, doc, sidecar, etag, paperless, canEdit, onSaved }: {
+function CopyCard({ documentId, doc, sidecar, etag, paperless, canEdit, onSaved, aiEnabled, aiBusy, onRefile }: {
   documentId: string; doc: NonNullable<Awaited<ReturnType<typeof api.document>>>; sidecar: Awaited<ReturnType<typeof api.sidecar>>["sidecar"];
   etag: string; paperless?: PaperlessImport; canEdit: boolean; onSaved: () => Promise<unknown>;
+  aiEnabled: boolean; aiBusy: boolean; onRefile: () => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
+  const [error, setError] = useState<unknown>(null);
   const rows: [string, ReactNode][] = [
     ["Title", sidecar.title],
     ["From", sidecar.issuer?.value],
@@ -127,16 +131,21 @@ function CopyCard({ documentId, doc, sidecar, etag, paperless, canEdit, onSaved 
     ["Folder", folderOf(doc.archivePath)],
     ["Tags", sidecar.tags?.length ? sidecar.tags.map((tag) => <Badge key={tag}>{tag}</Badge>) : undefined],
   ];
-  const byAi = sidecar.organization.reviewState === "AI" || sidecar.titleSource === "ai";
-  const byRule = sidecar.organization.reviewState === "RULE";
+  const state = sidecar.organization.reviewState;
+  const byAi = state === "AI";
+  const embedded = sidecar.embeddedMetadata?.values ?? {};
+  // A saved change reaches the PDF through a new version, checked again first: show it until then.
+  const updating = Object.keys(embedded).length > 0 && embedded.Title !== plain(sidecar.title);
+  const file = `/api/v1/archive/${encodeURIComponent(documentId)}/file`;
   return (
-    <Card title="Your clean copy" actions={canEdit && !editing && <Button variant="ghost" onClick={() => setEditing(true)}>Edit</Button>}>
-      {!editing && (byAi || byRule || sidecar.organization.reviewState === "FALLBACK") && (
+    <Card title="Your clean copy" actions={canEdit && !editing && <Button variant="ghost" onClick={() => setEditing(true)} data-testid="edit">Edit</Button>}>
+      {!editing && (
         <p className="mb-3 text-xs" data-testid="filed-by">
-          {byAi ? <Badge tone="info">Filled in by the AI</Badge> : byRule ? <Badge tone="good">Filed by your rules</Badge> : <Badge tone="warn">Not filed yet</Badge>}
+          {byAi ? <Badge tone="info">Filled in by the AI</Badge> : state === "RULE" ? <Badge tone="good">Filed by your rules</Badge>
+            : state === "VERIFIED" ? <Badge tone="good">Filed by you</Badge> : <Badge tone="warn">Not filed yet</Badge>}
           <span className="ml-2 text-slate-500 dark:text-slate-400">
             {byAi ? "Every value was checked against the document's text; correct anything that's off with Edit."
-              : byRule ? "A filing rule recognised it." : "Neither your rules nor the AI could file it; give it a title with Edit."}
+              : state === "RULE" ? "A filing rule recognised it." : state === "VERIFIED" ? "" : "Give it a title and folder with Edit, or re-run the AI."}
           </span>
         </p>
       )}
@@ -148,22 +157,59 @@ function CopyCard({ documentId, doc, sidecar, etag, paperless, canEdit, onSaved 
         </dl>
       )}
       <div className="mt-4 flex flex-wrap gap-2">
-        {/* Downloads only: the API serves these as sandboxed attachments, never inline. */}
-        <a className={primaryLink} href={`/api/v1/archive/${encodeURIComponent(documentId)}/file`} download data-testid="download-pdf">Download clean copy</a>
+        {/* View opens the browser's own PDF viewer on the clean copy (validated: no scripts, links or forms). */}
+        <a className={primaryLink} href={`${file}?view=true`} target="_blank" rel="noopener noreferrer" data-testid="view-pdf">View</a>
+        <a className={secondaryLink} href={file} download data-testid="download-pdf">Download</a>
         {paperless?.paperlessUrl && (
           <a className={secondaryLink} href={paperless.paperlessUrl} target="_blank" rel="noopener noreferrer" data-testid="open-paperless">Open in Paperless</a>
         )}
+        {canEdit && aiEnabled && (
+          <Button variant="secondary" disabled={aiBusy} data-testid="refile" onClick={async () => {
+            setError(null);
+            try { await onRefile(); } catch (failure) { setError(failure); }
+          }}>{aiBusy ? "The AI is on it…" : "Re-run the AI"}</Button>
+        )}
       </div>
+      <ErrorNote error={error} />
+      {Object.keys(embedded).length > 0 && (
+        <details className="mt-4 text-sm" data-testid="inside-pdf">
+          <summary className="cursor-pointer text-slate-600 dark:text-slate-300">Inside the PDF {updating && <Badge tone="info">updating…</Badge>}</summary>
+          <dl className="mt-2 grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1">
+            {["Title", "Author", "Subject", "Keywords"].filter((key) => embedded[key]).map((key) => (
+              <div key={key} className="contents"><dt className="text-slate-500 dark:text-slate-400">{key}</dt><dd className="break-words">{embedded[key]}</dd></div>
+            ))}
+          </dl>
+          <Muted className="mt-1 text-xs">No producer, creator or dates are written. Fast web view is on. Version {sidecar.artifactVersion ?? 1}.</Muted>
+        </details>
+      )}
       <Muted className="mt-3 text-xs">
         The clean copy looks like your original: each page was redrawn as a lossless image, with an invisible text layer
-        so you can search and copy text. Title, author, subject and keywords are set inside the PDF. {formatBytes(doc.bytes)}.
+        so you can search and copy text. {formatBytes(doc.bytes)}.
       </Muted>
     </Card>
   );
 }
 
-function EditForm({ documentId, sidecar, etag, onDone }: { documentId: string; sidecar: { title: string; tags?: string[] }; etag: string; onDone: (saved: boolean) => void }) {
+/** The same plain punctuation the archive writes into the PDF. */
+function plain(text: string) {
+  return text.replace(/[\u2013\u2014\u2012\u2212\u00b7\u2022]/g, "-").replace(/[\u201c\u201d\u201e\u00ab\u00bb\u2018\u2019]/g, "'")
+    .replace(/\u2026/g, "...").replace(/\s+/g, " ").trim();
+}
+
+const SECTIONS = ["Finance", "Employment", "Identity", "Medical", "Education", "Contracts", "Property", "Vehicles", "Taxes", "Personal", "Other", "Unsorted"];
+const select = "block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base sm:text-sm dark:border-slate-700 dark:bg-slate-950";
+
+function EditForm({ documentId, sidecar, etag, onDone }: {
+  documentId: string; sidecar: Awaited<ReturnType<typeof api.sidecar>>["sidecar"]; etag: string; onDone: (saved: boolean) => void;
+}) {
   const [title, setTitle] = useState(sidecar.title);
+  const [issuer, setIssuer] = useState(sidecar.issuer?.value ?? "");
+  const [kind, setKind] = useState(sidecar.documentType ?? "");
+  const [date, setDate] = useState(sidecar.documentDate?.value ?? "");
+  const [reference, setReference] = useState(sidecar.reference?.value ?? "");
+  const [amount, setAmount] = useState(sidecar.amount?.value ?? "");
+  const [currency, setCurrency] = useState(sidecar.amount?.currency ?? "");
+  const [section, setSection] = useState(sidecar.organization.category);
   const [tags, setTags] = useState((sidecar.tags ?? []).join(", "));
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
@@ -172,9 +218,19 @@ function EditForm({ documentId, sidecar, etag, onDone }: { documentId: string; s
     setError(null);
     const list = tags.split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean);
     if (!list.every((tag) => TAG.test(tag))) { setError(new Error("Tags: lowercase letters, digits, dot, dash or underscore, separated by commas.")); return; }
+    if ((amount && !/^-?\d{1,12}(\.\d{1,4})?$/.test(amount)) || (amount && !/^[A-Z]{3}$/.test(currency.toUpperCase()))) {
+      setError(new Error("Amount: a number like 1015.68 and a three-letter currency like MAD.")); return;
+    }
+    if (section !== "Unsorted" && (!kind || !date)) {
+      setError(new Error("To file it under a section, give it a type and a date (or choose Unsorted).")); return;
+    }
     setBusy(true);
     try {
-      const edit = await api.editMetadata(documentId, etag, { title: title.trim(), tags: [...new Set(list)] });
+      const edit = await api.editMetadata(documentId, etag, {
+        title: title.trim(), tags: [...new Set(list)], issuer: issuer.trim() || null, documentType: kind || null,
+        documentDate: date || null, reference: reference.trim() || null,
+        amount: amount ? { value: amount, currency: currency.toUpperCase() } : null, section,
+      });
       // The archive worker applies the edit; poll its status briefly.
       for (let attempt = 0; attempt < 20; attempt += 1) {
         const status = await api.edit(edit.statusUrl);
@@ -188,15 +244,38 @@ function EditForm({ documentId, sidecar, etag, onDone }: { documentId: string; s
     } finally { setBusy(false); }
   };
   return (
-    <form onSubmit={save} className="space-y-3">
+    <form onSubmit={save} className="space-y-3" data-testid="edit-form">
       <Field label="Title" value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)} />
+      <Field label="From (correspondent)" value={issuer} maxLength={120} onChange={(event) => setIssuer(event.target.value)} />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block text-sm"><span className="mb-1 block font-medium">Type</span>
+          <select className={select} value={kind} onChange={(event) => setKind(event.target.value)} name="documentType">
+            <option value="">-</option>
+            {Object.entries(TYPE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </label>
+        <Field label="Date" type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+        <Field label="Number" value={reference} maxLength={60} onChange={(event) => setReference(event.target.value)} />
+        <div className="grid grid-cols-[1fr_5rem] gap-2">
+          <Field label="Amount" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="1015.68" />
+          <Field label="Currency" value={currency} maxLength={3} onChange={(event) => setCurrency(event.target.value)} placeholder="MAD" />
+        </div>
+        <label className="block text-sm"><span className="mb-1 block font-medium">Section</span>
+          <select className={select} value={section} onChange={(event) => setSection(event.target.value)} name="section">
+            {SECTIONS.map((value) => <option key={value} value={value}>{value}</option>)}
+          </select>
+        </label>
+      </div>
       <Field label="Tags" hint="Separated by commas, e.g. finance, paid" value={tags} onChange={(event) => setTags(event.target.value)} />
       <ErrorNote error={error} />
       <div className="flex gap-2">
         <Button type="submit" disabled={busy}>{busy ? "Saving…" : "Save"}</Button>
         <Button type="button" variant="secondary" onClick={() => onDone(false)}>Cancel</Button>
       </div>
-      <Muted className="text-xs">This changes the title and tags (also in Paperless); the PDF itself stays as it is.</Muted>
+      <Muted className="text-xs">
+        Saving files it again (folder and file name follow), updates Paperless, and writes a new version of the PDF
+        with these values; the new version is checked again before it replaces the current one.
+      </Muted>
     </form>
   );
 }
@@ -294,25 +373,29 @@ const TYPE_LABEL: Record<string, string> = {
   report: "Report", manual: "Manual", other: "Document",
 };
 
-function HeldActions({ scan }: { scan: Scan }) {
+function DeleteCard({ scan, ready }: { scan: Scan; ready: boolean }) {
   const navigate = useNavigate();
   const client = useQueryClient();
   const [error, setError] = useState<unknown>(null);
   const signed = scan.originalRetention === "SIGNED_RESTRICTED";
   const remove = async () => {
-    if (!window.confirm(signed ? "This original is digitally signed and kept as evidence. Delete it permanently?" : "Delete the held original permanently?")) return;
+    const what = ready ? "the clean copy in your archive and in Paperless (Paperless keeps it in its trash for a while), the original" : "the held original";
+    if (!window.confirm(`Delete ${what} and every record of it? Your own file on your computer is not touched.${signed ? " The original is digitally signed and kept as evidence." : ""}`)) return;
     try {
-      await api.deleteQuarantined(scan.scanId, signed);
+      await api.deleteEverywhere(scan.scanId, signed);
       await client.invalidateQueries({ queryKey: ["scans"] });
-      navigate("/documents?show=held");
+      await client.invalidateQueries({ queryKey: ["documents"] });
+      navigate("/documents");
     } catch (failure) { setError(failure); }
   };
   return (
-    <Card title="Held original">
-      <Muted className="mb-3">The original stays locked away and is never shown. You can delete it once you don't need it.</Muted>
+    <Details summary="Delete">
+      <Muted className="mb-3">
+        Removes it everywhere: the archived copy, the original kept in quarantine, the reports, and the Paperless copy.
+      </Muted>
       <ErrorNote error={error} />
-      <Button variant="danger" onClick={remove}>Delete original</Button>
-    </Card>
+      <Button variant="danger" onClick={remove} data-testid="delete">Delete everywhere</Button>
+    </Details>
   );
 }
 

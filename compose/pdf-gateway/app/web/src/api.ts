@@ -82,11 +82,17 @@ export const Sidecar = z.object({
   reference: z.object({ value: z.string(), source: z.string() }).optional(),
   amount: z.object({ value: z.string(), currency: z.string(), source: z.string() }).optional(),
   titleSource: z.string().optional(),
+  artifactVersion: z.number().optional(),
+  embeddedMetadata: z.object({ values: z.record(z.string(), z.string()).optional() }).passthrough().optional(),
   organization: z.object({ category: z.string(), reviewState: z.string(), reason: z.string().optional(), folder: z.string().optional() }),
   signature: z.object({ originalSigned: z.boolean(), viewingCopySigned: z.literal(false), summary: z.string().optional() }),
   relativePdfPath: z.string(),
 }).passthrough();
 export type Sidecar = z.infer<typeof Sidecar>;
+export type MetadataChanges = {
+  title?: string; tags?: string[]; issuer?: string | null; documentType?: string | null; documentDate?: string | null;
+  reference?: string | null; amount?: { value: string; currency: string } | null; section?: string;
+};
 export const Edit = z.object({ editId: z.string(), status: z.enum(["PENDING", "APPLIED", "CONFLICT", "INVALID"]),
   resultRevision: z.number().nullable(), errorCode: z.string().nullable(), statusUrl: z.string() });
 
@@ -118,7 +124,7 @@ export const Suggestion = z.object({
 export type Suggestion = z.infer<typeof Suggestion>;
 
 export class ApiError extends Error {
-  constructor(public status: number, public code: string, message: string) { super(message); }
+  constructor(public status: number, public code: string, message: string, public location: string | null = null) { super(message); }
 }
 
 let csrfToken: string | null = null;
@@ -166,7 +172,7 @@ export const api = {
     if (!response.ok) throw new ApiError(response.status, "HTTP_" + response.status, response.statusText);
     return { sidecar: Sidecar.parse(await response.json()), etag: response.headers.get("ETag") ?? "" };
   },
-  editMetadata: (id: string, etag: string, changes: { title?: string; tags?: string[] }) =>
+  editMetadata: (id: string, etag: string, changes: MetadataChanges) =>
     request(Edit, `/api/v1/archive/${encodeURIComponent(id)}/metadata`, { method: "PATCH", ...json(changes), headers: { "Content-Type": "application/json", "If-Match": etag } }),
   edit: (url: string) => request(Edit, url),
   summary: () => request(Summary, "/api/v1/dashboard/summary"),
@@ -177,6 +183,9 @@ export const api = {
   scanEnrichment: (scanId: string) => request(z.array(EnrichmentJob), `/api/v1/scans/${encodeURIComponent(scanId)}/enrichment`),
   applySuggestion: (id: string, suggestion: string, etag: string) =>
     request(Edit, `/api/v1/archive/${encodeURIComponent(id)}/suggestions/${encodeURIComponent(suggestion)}/apply`, { method: "POST", headers: { "If-Match": etag } }),
+  refile: (id: string) => request(z.object({ status: z.string() }), `/api/v1/archive/${encodeURIComponent(id)}/refile`, { method: "POST" }),
+  deleteEverywhere: (scanId: string, confirmSigned: boolean) =>
+    request(z.undefined(), `/api/v1/scans/${encodeURIComponent(scanId)}?confirmSigned=${confirmSigned}`, { method: "DELETE" }),
   dismissSuggestion: (id: string, suggestion: string) =>
     request(z.undefined(), `/api/v1/archive/${encodeURIComponent(id)}/suggestions/${encodeURIComponent(suggestion)}/dismiss`, { method: "POST" }),
 };
@@ -194,7 +203,7 @@ export function upload(file: File, intent: string, onProgress: (fraction: number
       try {
         const body = JSON.parse(xhr.responseText);
         if (xhr.status === 202 && typeof body?.scanId === "string") resolve({ scanId: body.scanId });
-        else reject(new ApiError(xhr.status, body?.code ?? "HTTP_" + xhr.status, body?.detail ?? "Upload refused"));
+        else reject(new ApiError(xhr.status, body?.code ?? "HTTP_" + xhr.status, body?.detail ?? "Upload refused", xhr.getResponseHeader("Location")));
       } catch { reject(new ApiError(xhr.status, "HTTP_" + xhr.status, "Upload refused")); }
     };
     xhr.onerror = () => reject(new ApiError(0, "NETWORK", "Network error during upload"));

@@ -95,7 +95,8 @@ eq "$(ai_state)" UNKNOWN
 seed 80 scanned-invoice.pdf; seed 81 unfamiliar.pdf; seed 82 injection.pdf
 for _ in $(seq 1 60); do [[ "$(q "SELECT count(*) FROM scan_jobs WHERE status='READY'")" == 3 ]] && break; sleep 1; done
 eq "$(q "SELECT count(*) FROM scan_jobs WHERE status='READY'")" 3                      # the archive never waits for AI
-eq "$(q "SELECT string_agg(kind||':'||status,',' ORDER BY document_id) FROM enrichment_jobs")" "OCR:WAITING_FOR_AI,SUGGEST:WAITING_FOR_AI,SUGGEST:WAITING_FOR_AI"
+# A scan gets OCR; short text documents (under 200 characters of their own) get OCR and the AI.
+eq "$(q "SELECT string_agg(kind||':'||status,',' ORDER BY document_id, kind) FROM enrichment_jobs")" "OCR:WAITING_FOR_AI,OCR:WAITING_FOR_AI,SUGGEST:WAITING_FOR_AI,OCR:WAITING_FOR_AI,SUGGEST:WAITING_FOR_AI"
 eq "$(q "SELECT category FROM archive_documents WHERE document_id='$(doc_id 80)'")" Unsorted
 sha80="$(q "SELECT sha256 FROM archive_documents WHERE document_id='$(doc_id 80)'")"
 before82="$(q "SELECT archive_path||'|'||metadata_revision FROM archive_documents WHERE document_id='$(doc_id 82)'")"
@@ -114,12 +115,13 @@ AGENT_ARGS=(); agent pgw-m7-agent -d -e PDF_GATEWAY_AGENT_ID=t1000-laptop -e PDF
 for _ in $(seq 1 200); do jobs_done && break; sleep 3; done
 jobs_done
 q "SELECT kind, status, COALESCE(error_code,'-'), attempts FROM enrichment_jobs ORDER BY document_id"
-eq "$(q "SELECT string_agg(status,',' ORDER BY document_id) FROM enrichment_jobs")" "COMPLETED,COMPLETED,COMPLETED"
+eq "$(q "SELECT string_agg(DISTINCT status,',') FROM enrichment_jobs")" "COMPLETED"
 # OCR made the scan readable, and the reviewed rule re-filed it out of Unsorted.
 eq "$(q "SELECT category||'|'||review_state||'|'||(sidecar->'textExtraction'->>'method') FROM archive_documents WHERE document_id='$(doc_id 80)'")" "Finance|RULE|ocr"
 path80="$TEST_ARCHIVE/archive/$(q "SELECT archive_path FROM archive_documents WHERE document_id='$(doc_id 80)'")"
-[[ $path80 == *"Finance/2026/Invoices/2026-10-15 - Example Telecom"* ]]
-grep -qi "example telecom" "$path80/content.txt"
+file80=$(q "SELECT pdf_file FROM archive_documents WHERE document_id='$(doc_id 80)'")
+[[ $path80 == *"/archive/Finance/Example Telecom" && $file80 == "2026-10-15 "* ]]
+grep -qi "example telecom" "$path80/.$file80.txt"
 eq "$(sha256sum "$path80/$(q "SELECT pdf_file FROM archive_documents WHERE document_id='$(doc_id 80)'")" | cut -d' ' -f1)" "$sha80"   # PDF unchanged
 # Published before the laptop was there: the AI's checked answer filed them afterwards.
 q "SELECT right(document_id,2), review_state, archive_path, sidecar->>'title', sidecar->'tags' FROM archive_documents WHERE document_id IN ('$(doc_id 81)','$(doc_id 82)') ORDER BY 1"
@@ -138,11 +140,11 @@ eq "$(q "SELECT (deadline_at > now() + interval '5 minutes')::text FROM enrichme
 for _ in $(seq 1 150); do [[ "$(q "SELECT status FROM scan_jobs WHERE id='$(scan_id 84)'")" == READY ]] && break; sleep 2; done
 q "SELECT archive_path, sidecar::text FROM archive_documents WHERE document_id='$(doc_id 84)'" | cut -c1-600
 eq "$(q "SELECT category||'|'||review_state FROM archive_documents WHERE document_id='$(doc_id 84)'")" "Finance|AI"
-[[ "$(q "SELECT archive_path FROM archive_documents WHERE document_id='$(doc_id 84)'")" == "Finance/2026/Invoices/2026-03-12 - "* ]]
+[[ "$(q "SELECT archive_path||'/'||pdf_file FROM archive_documents WHERE document_id='$(doc_id 84)'")" == Finance/*/2026-03-12\ * ]]
 q "SELECT sidecar->'issuer'->>'value' FROM archive_documents WHERE document_id='$(doc_id 84)'" | grep -qi streamco
 eq "$(q "SELECT (sidecar->'reference'->>'value')||'|'||(sidecar->'amount'->>'value')||' '||(sidecar->'amount'->>'currency')||'|'||(sidecar->>'documentType') FROM archive_documents WHERE document_id='$(doc_id 84)'")" "88123|499.00 MAD|invoice"
 vocabulary_only "$(doc_id 84)"
-eq "$(q "SELECT status||'|'||(document_id IS NOT NULL) FROM enrichment_jobs WHERE scan_id='$(scan_id 84)'")" "COMPLETED|true"
+eq "$(q "SELECT status||'|'||(document_id IS NOT NULL) FROM enrichment_jobs WHERE scan_id='$(scan_id 84)' AND kind='SUGGEST'")" "COMPLETED|true"
 
 # --- Applying a proposal is an explicit, CAS-protected user edit ------------------------
 sid="$(q "SELECT id FROM ai_suggestions WHERE document_id='$(doc_id 81)' AND (fields ? 'title' OR fields ? 'tags') LIMIT 1")"

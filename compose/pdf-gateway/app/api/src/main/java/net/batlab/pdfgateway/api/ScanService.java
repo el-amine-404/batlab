@@ -100,6 +100,13 @@ public class ScanService {
                 throw new ApiException(409, "IDEMPOTENCY_CONFLICT", "Idempotency-Key was already used for different content or options");
             return new ScanPersisted(accepted(existing.getFirst()[0]), false);
         }
+        // The same file again (byte for byte) is not a second document: point at the first one.
+        // Only a failed earlier upload may be sent again.
+        List<String> duplicate = jdbc.query("""
+                SELECT id FROM scan_jobs WHERE owner_id=? AND source_sha256=? AND status NOT IN ('FAILED','CANCELLED')
+                 ORDER BY created_at LIMIT 1""", (rs, row) -> rs.getString(1), owner.userId(), sourceHash);
+        if (!duplicate.isEmpty())
+            throw new ApiException(409, "DUPLICATE_UPLOAD", "This file is already in your archive", "/api/v1/scans/" + duplicate.getFirst());
         String scanId = Ulid.next("scan-");
         jdbc.update("""
                 INSERT INTO scan_jobs(id, owner_id, status, intent, cdr_mode, display_name, source_bytes,

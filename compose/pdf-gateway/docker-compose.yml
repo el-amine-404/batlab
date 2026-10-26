@@ -94,6 +94,8 @@ services:
       network: host
     pull_policy: build
     container_name: pdf-gateway-api
+    # 10010: reads validated clean copies (0640) in cdr-output.
+    group_add: ["10010"]
     environment:
       <<: *database
       TZ: ${TZ}
@@ -109,6 +111,8 @@ services:
     volumes:
       - ${VOLUMES_ROOT}/pdf-gateway/storage/quarantine:/var/lib/pdf-gateway/quarantine
       - ${VOLUMES_ROOT}/pdf-gateway/storage/multipart:/var/lib/pdf-gateway/multipart
+      # Read-only: validated clean copies, for the laptop's OCR before a document is archived.
+      - ${VOLUMES_ROOT}/pdf-gateway/storage/cdr-output:/var/lib/pdf-gateway/cdr-output:ro
       # Read-only: the API serves approved files; only archive-worker writes.
       - ${DATA_ROOT}/documents/pdf-archive:/var/lib/pdf-archive:ro
     read_only: true
@@ -330,6 +334,8 @@ services:
     image: local/pdf-gateway-paperless
     build:
       context: ./app/paperless-adapter
+      additional_contexts:
+        common: ../../lib/batlab-common
       # lab2's bridge has no DNS for builders (as stanzarr, musicguard).
       network: host
     pull_policy: build
@@ -337,6 +343,8 @@ services:
     environment:
       <<: *database
       PDF_GATEWAY_PAPERLESS_URL: http://paperless:8000
+      # For the link in the note it leaves on each Paperless document.
+      PDF_GATEWAY_PUBLIC_URL: https://pdf.homelab.lan
       PDF_GATEWAY_PAPERLESS_TOKEN: ${PDF_GATEWAY_PAPERLESS_TOKEN:-}
     volumes:
       - ${DATA_ROOT}/documents/pdf-archive:/var/lib/pdf-archive:ro
@@ -345,6 +353,29 @@ services:
     pids_limit: 32
     mem_limit: 256m
     cpus: ${PDF_GATEWAY_WORKER_CPUS:?set in hosts/<profile>/compose.env}
+    networks: [backend, home_server]
+
+  # Discord, through Apprise (compose/apprise, the "documents" channel): one message when a
+  # file arrives, one when it is done. Reads the database; sends nothing about the content.
+  notifier:
+    <<: *worker
+    image: local/pdf-gateway-paperless
+    pull_policy: never
+    container_name: pdf-gateway-notifier
+    entrypoint: ["python", "/opt/pdf-gateway/notifier.py"]
+    environment:
+      <<: *database
+      PDF_GATEWAY_APPRISE_URL: http://apprise:8000/notify/pdf-gateway
+      PDF_GATEWAY_PUBLIC_URL: https://pdf.homelab.lan
+      PDF_GATEWAY_PAPERLESS_PUBLIC_URL: ${PAPERLESS_URL:-}
+    depends_on:
+      postgres: {condition: service_healthy}
+      paperless-adapter: {condition: service_started}
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    pids_limit: 16
+    mem_limit: 128m
+    cpus: ${PDF_GATEWAY_CORE_CPUS:?set in hosts/<profile>/compose.env}
     networks: [backend, home_server]
 
 networks:

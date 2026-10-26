@@ -94,7 +94,7 @@ invoice="doc-01J00000000000000000000090"
 eq "$(api "$base/api/v1/archive" | json 'len(v["items"])')" 3
 eq "$(api "$base/api/v1/archive?limit=2" | json 'v["nextCursor"]')" "doc-01J00000000000000000000091"
 eq "$(api "$base/api/v1/archive/$invoice" | json 'v["category"]+"|"+v["archivePath"]')" \
-   "Finance|Finance/2026/Invoices/2026-10-15 - Example Telecom - Internet Invoice - October 2026 [$invoice]"
+   "Finance|Finance/Example Telecom"
 eq "$(curl -sS -o /dev/null -w '%{http_code}' "$base/api/v1/archive")" 401
 eq "$(TOKEN=$user_token api "$base/api/v1/archive" | json 'len(v["items"])')" 0
 eq "$(TOKEN=$user_token code "$base/api/v1/archive/$invoice/file")" 404
@@ -103,7 +103,7 @@ eq "$(TOKEN=$user_token code "$base/api/v1/archive/$invoice/file")" 404
 [[ "$(code "$base/api/v1/archive/..%2F..%2F..%2Fetc%2Fpasswd/file")" =~ ^(400|404)$ ]]
 api -D "$scratch/file.headers" -o "$scratch/invoice.pdf" "$base/api/v1/archive/$invoice/file"
 eq "$(sha256sum "$scratch/invoice.pdf" | cut -d' ' -f1)" "$(q "SELECT sha256 FROM archive_documents WHERE document_id='$invoice'")"
-grep -qi '^content-disposition: attachment; filename="2026-10-15 - Example Telecom - Internet Invoice - October 2026.pdf"' "$scratch/file.headers"
+grep -qi '^content-disposition: attachment; filename="2026-10-15 Internet Invoice - October 2026.pdf"' "$scratch/file.headers"
 grep -qi '^x-content-type-options: nosniff' "$scratch/file.headers"
 grep -qi "^content-security-policy: sandbox; default-src 'none'" "$scratch/file.headers"
 grep -qi '^cache-control: private, no-store' "$scratch/file.headers"
@@ -167,6 +167,6 @@ eq "$(TOKEN=$user_token code "$base/api/v1/archive/$invoice/file")" 404
 
 # --- Tampered archive bytes are never served ----------------------------------
 docker run --rm --network none --user 10005:10005 -v "$TEST_ARCHIVE:/archive" --entrypoint sh pdf-gateway-m4-test/archive-worker:local \
-  -c 'f=$(find /archive/archive -path "*doc-01J00000000000000000000091]*" -name "*.pdf"); printf "X" >> "$f"'
+  -c 's=$(grep -rl --include=".*.pdf.json" "\"documentId\": \"doc-01J00000000000000000000091\"" /archive/archive); n=${s##*/}; n=${n#.}; printf "X" >> "${s%/*}/${n%.json}"'
 eq "$(code "$base/api/v1/archive/doc-01J00000000000000000000091/file")" 409
 echo "M4 gate: archive API, RBAC, safe downloads, CAS edits, and rebuild after PostgreSQL loss passed"

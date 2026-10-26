@@ -76,5 +76,5 @@ export function DocumentsPage() {
 }
 
 export function folderOf(archivePath: string) {
-  return archivePath.split("/").slice(0, -1).join(" › ");
+  return archivePath.split("/").join(" › ");
 }

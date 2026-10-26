@@ -13,7 +13,7 @@ RUN apt-get update \
  && rm /tmp/requirements.txt \
  && groupadd --gid 10005 archive \
  && useradd --uid 10005 --gid 10005 --no-create-home --shell /usr/sbin/nologin archive
-COPY --chown=10005:10005 archive-worker/archive.py archive-worker/organize.py archive-worker/pdf_archive.py archive-worker/worker.py archive-worker/metadata.py archive-worker/reindex_db.py archive-worker/enrichment.py /opt/pdf-gateway/
+COPY --chown=10005:10005 archive-worker/archive.py archive-worker/organize.py archive-worker/pdf_archive.py archive-worker/worker.py archive-worker/metadata.py archive-worker/reindex_db.py archive-worker/enrichment.py archive-worker/revisions.py /opt/pdf-gateway/
 COPY --chown=10005:10005 contracts/archive-metadata.schema.json contracts/taxonomy.schema.json contracts/rules.schema.json /opt/pdf-gateway/
 USER 10005:10005
 WORKDIR /work

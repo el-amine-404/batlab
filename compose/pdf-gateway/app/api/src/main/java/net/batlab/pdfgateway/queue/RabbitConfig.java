@@ -1,7 +1,11 @@
 package net.batlab.pdfgateway.queue;
 
+import java.util.ArrayList;
+import java.util.List;
 import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.BindingBuilder;
+import org.springframework.amqp.core.Declarable;
+import org.springframework.amqp.core.Declarables;
 import org.springframework.amqp.core.DirectExchange;
 import org.springframework.amqp.core.Queue;
 import org.springframework.context.annotation.Bean;
@@ -19,6 +23,11 @@ class RabbitConfig {
     static final String METADATA_EDIT_QUEUE = "pdf.gateway.metadata-edit.v1";
     static final String PAPERLESS_QUEUE = "pdf.gateway.paperless.v1";
     static final String ENRICHMENT_QUEUE = "pdf.gateway.enrichment-result.v1";
+    // A new version of a published document: final validation again, then the archive swaps it in.
+    static final String REVISION_VALIDATION_QUEUE = "pdf.gateway.revision-validation.v1";
+    static final String REVISION_PUBLISH_QUEUE = "pdf.gateway.revision-publish.v1";
+    // A deleted document: each stage removes its own files (one queue each, same event).
+    static final String[] DELETED_STAGES = {"analysis", "validation", "signature", "cdr", "archive", "paperless"};
     @Bean DirectExchange jobExchange() { return new DirectExchange(EXCHANGE, true, false); }
     @Bean Queue scanQueue() { return new Queue(QUEUE, true, false, false); }
     @Bean Binding scanBinding(Queue scanQueue, DirectExchange jobExchange) {
@@ -51,5 +60,22 @@ class RabbitConfig {
     @Bean Queue enrichmentQueue() { return new Queue(ENRICHMENT_QUEUE, true, false, false); }
     @Bean Binding enrichmentBinding(Queue enrichmentQueue, DirectExchange jobExchange) {
         return BindingBuilder.bind(enrichmentQueue).to(jobExchange).with("ENRICHMENT_RESULT_QUEUED");
+    }
+    @Bean Queue revisionValidationQueue() { return new Queue(REVISION_VALIDATION_QUEUE, true, false, false); }
+    @Bean Binding revisionValidationBinding(Queue revisionValidationQueue, DirectExchange jobExchange) {
+        return BindingBuilder.bind(revisionValidationQueue).to(jobExchange).with("REVISION_VALIDATION_QUEUED");
+    }
+    @Bean Queue revisionPublishQueue() { return new Queue(REVISION_PUBLISH_QUEUE, true, false, false); }
+    @Bean Binding revisionPublishBinding(Queue revisionPublishQueue, DirectExchange jobExchange) {
+        return BindingBuilder.bind(revisionPublishQueue).to(jobExchange).with("REVISION_PUBLISH_QUEUED");
+    }
+    @Bean Declarables deletedQueues(DirectExchange jobExchange) {
+        List<Declarable> declarables = new ArrayList<>();
+        for (String stage : DELETED_STAGES) {
+            Queue queue = new Queue("pdf.gateway.deleted." + stage + ".v1", true, false, false);
+            declarables.add(queue);
+            declarables.add(BindingBuilder.bind(queue).to(jobExchange).with("DOCUMENT_DELETED"));
+        }
+        return new Declarables(declarables);
     }
 }

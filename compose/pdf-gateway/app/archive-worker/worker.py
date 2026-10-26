@@ -25,12 +25,15 @@ import psycopg2
 
 import enrichment
 import metadata
-from archive import Archive, ArchiveError, SIDECAR, canonical_json, sha256_file
+import revisions
+from archive import Archive, ArchiveError, Document, canonical_json, sha256_file
 from organize import DEFAULT_TAGS_REVISION, default_taxonomy, organise, validated
 
 QUEUE = "pdf.gateway.archive.v1"
 EDIT_QUEUE = "pdf.gateway.metadata-edit.v1"
 ENRICHMENT_QUEUE = "pdf.gateway.enrichment-result.v1"
+REVISION_QUEUE = "pdf.gateway.revision-publish.v1"
+DELETED_QUEUE = "pdf.gateway.deleted.archive.v1"
 STORAGE = Path(os.getenv("PDF_GATEWAY_STORAGE_ROOT", "/var/lib/pdf-gateway"))
 ARCHIVE = Archive(Path(os.getenv("PDF_GATEWAY_ARCHIVE_ROOT", "/var/lib/pdf-archive")))
 MAX_ATTEMPTS = int(os.getenv("PDF_GATEWAY_ARCHIVE_MAX_ATTEMPTS", "5"))
@@ -179,27 +182,28 @@ def layer_text(path: Path) -> str:
     return enrichment.clean(text).strip()
 
 
-def ai_filing(job: dict, text: str, sidecar: dict, taxonomy: dict) -> tuple[str, dict | None]:
-    """Whether to wait for, apply, or go without the AI's answer: ('WAIT'|'APPLY'|'SKIP', fields)."""
-    if not enrichment.ENABLED or sidecar["organization"]["reviewState"] not in ("FALLBACK", "REVIEW_REQUIRED") or not text.strip():
-        return "SKIP", None
+def agent_ready(cursor) -> bool:
+    """An agent is there and able to answer (heartbeat, model, breaker)."""
+    cursor.execute("""SELECT EXISTS (SELECT 1 FROM ai_agents WHERE last_seen_at > now() - interval '3 minutes'
+                        AND (breaker_open_until IS NULL OR breaker_open_until < now())
+                        AND report->'llm'->>'service' = 'UP' AND (report->'llm'->>'modelInstalled')::boolean)""")
+    return cursor.fetchone()[0]
+
+
+def ai_job(job: dict, kind: str, context: dict | None) -> tuple[str, dict | None]:
+    """Whether to wait for, use, or go without the laptop's answer to a job made before
+    publication: ('WAIT'|'APPLY'|'SKIP', checked answer). Creates the job the first time."""
     with database() as connection, connection.cursor() as cursor:
-        cursor.execute("SELECT status, applied, deadline_at > now() FROM enrichment_jobs WHERE scan_id=%s AND kind='SUGGEST' FOR UPDATE",
-                       (job["scanId"],))
+        cursor.execute("SELECT status, applied, deadline_at > now() FROM enrichment_jobs WHERE scan_id=%s AND kind=%s FOR UPDATE",
+                       (job["scanId"], kind))
         row = cursor.fetchone()
         if row is None:
-            # Wait only for an agent that is there and able to answer.
-            cursor.execute("""SELECT EXISTS (SELECT 1 FROM ai_agents WHERE last_seen_at > now() - interval '3 minutes'
-                                AND (breaker_open_until IS NULL OR breaker_open_until < now())
-                                AND report->'llm'->>'service' = 'UP' AND (report->'llm'->>'modelInstalled')::boolean)""")
-            ready = cursor.fetchone()[0]
-            context = {"text": text[:CONTEXT_CHARS], "truncated": len(text) > CONTEXT_CHARS,
-                       "types": sorted(enrichment.TYPES), "sections": enrichment.SECTIONS,
-                       "tags": [tag["id"] for tag in taxonomy.get("tags", []) if not tag.get("blocked") and not tag.get("private")]}
+            ready = agent_ready(cursor)
             cursor.execute("""INSERT INTO enrichment_jobs(id,scan_id,artifact_sha256,kind,context,deadline_at)
-                              VALUES (%s,%s,%s,'SUGGEST',%s::jsonb,now()+make_interval(secs=>%s))""",
-                           (str(uuid.uuid4()), job["scanId"], job["sha256"], json.dumps(context), AI_WAIT_SECONDS if ready else 0))
-            audit(cursor, job["scanId"], "AI_FILING_REQUESTED", "SUCCESS", {"waiting": ready})
+                              VALUES (%s,%s,%s,%s,%s::jsonb,now()+make_interval(secs=>%s))""",
+                           (str(uuid.uuid4()), job["scanId"], job["sha256"], kind, json.dumps(context) if context else None,
+                            AI_WAIT_SECONDS if ready else 0))
+            audit(cursor, job["scanId"], f"AI_{kind}_REQUESTED", "SUCCESS", {"waiting": ready})
             return ("WAIT", None) if ready else ("SKIP", None)
         status, applied, waiting = row
         if status == "COMPLETED" and applied:
@@ -207,6 +211,24 @@ def ai_filing(job: dict, text: str, sidecar: dict, taxonomy: dict) -> tuple[str,
         if status in ("WAITING_FOR_AI", "LEASED", "SUBMITTED") and waiting:
             return "WAIT", None
         return "SKIP", None
+
+
+def known_correspondents() -> list[str]:
+    """Correspondents already in the archive, so the AI writes them the same way."""
+    with database() as connection, connection.cursor() as cursor:
+        cursor.execute("""SELECT sidecar->'issuer'->>'value' AS name, max(category) FROM archive_documents
+                           WHERE sidecar->'issuer'->>'value' IS NOT NULL GROUP BY 1 ORDER BY 1 LIMIT 300""")
+        return [f"{name} ({section})" for name, section in cursor.fetchall()]
+
+
+def ai_filing(job: dict, text: str, sidecar: dict, taxonomy: dict) -> tuple[str, dict | None]:
+    """The AI files what the rules did not recognise (see ai_job)."""
+    if not enrichment.ENABLED or sidecar["organization"]["reviewState"] not in ("FALLBACK", "REVIEW_REQUIRED") or not text.strip():
+        return "SKIP", None
+    context = {"text": text[:CONTEXT_CHARS], "truncated": len(text) > CONTEXT_CHARS,
+               "types": sorted(enrichment.TYPES), "sections": enrichment.SECTIONS, "correspondents": known_correspondents(),
+               "tags": [tag["id"] for tag in taxonomy.get("tags", []) if not tag.get("blocked") and not tag.get("private")]}
+    return ai_job(job, "SUGGEST", context)
 
 
 def defer(job: dict) -> None:
@@ -223,15 +245,36 @@ def defer(job: dict) -> None:
                        (str(uuid.uuid4()), job["scanId"], job["scanId"], job["artifactId"], AI_RETRY_SECONDS))
 
 
-def filing_text(job: dict) -> str:
-    """The original's text, or for an image-only original the clean copy's OCR layer."""
+MIN_NATIVE_TEXT = int(os.getenv("PDF_GATEWAY_MIN_NATIVE_TEXT", "200"))
+
+
+def filing_text(job: dict, wait: bool = True) -> str:
+    """The text the rules, the AI and the hidden text file use: the original's own text; for a scan (little
+    or no text of its own) the laptop's multi-language OCR of the clean copy, waiting for it while
+    the laptop is there (raises Deferred); else the clean copy's own OCR layer."""
     text = verified_inputs(job)
-    if not text.strip():
-        text = layer_text(job["output"])
-        if text:
-            job["extraction"] = {"status": "OK", "method": "ocr", "source": "viewing_copy", "engine": "dangerzone-ocr",
-                                 "pages": max(1, text.count("\f") + 1), "characters": len(text), "truncated": False}
+    if len(text.strip()) >= MIN_NATIVE_TEXT or not enrichment.ENABLED:
+        return text or layer_text(job["output"])
+    decision, applied = ai_job(job, "OCR", None) if wait else ("SKIP", ocr_applied(job["scanId"]))
+    if decision == "WAIT":
+        raise Deferred()
+    # OCR wins only when it found clearly more than the original's own text (a real short text beats guesses).
+    if applied and len(applied.get("text", "").strip()) > 1.5 * len(text.strip()):
+        job["extraction"] = dict(applied["meta"], status="OK")
+        return applied["text"]
+    layer = layer_text(job["output"])
+    if layer and len(layer.strip()) > len(text.strip()):
+        job["extraction"] = {"status": "OK", "method": "ocr", "source": "viewing_copy", "engine": "dangerzone-ocr",
+                             "pages": max(1, layer.count("\f") + 1), "characters": len(layer), "truncated": False}
+        return layer
     return text
+
+
+def ocr_applied(scan_id: str) -> dict | None:
+    with database() as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT applied FROM enrichment_jobs WHERE scan_id=%s AND kind='OCR' AND status='COMPLETED'", (scan_id,))
+        row = cursor.fetchone()
+        return row[0] if row else None
 
 
 def organised(job: dict, text: str) -> tuple[dict, dict]:
@@ -286,36 +329,37 @@ def commit_embed(job: dict, target: Path, sidecar: dict, evidence: dict, values:
 
 
 def publish(job: dict) -> tuple[Path, dict, dict]:
-    # An image-only original has no text of its own; its clean copy carries the OCR layer.
-    text = filing_text(job)
+    # The same text the embed phase filed it with (a scan's OCR is not waited for twice).
+    text = filing_text(job, wait=job["kind"] != "EMBEDDED_METADATA")
     if job["kind"] == "EMBEDDED_METADATA":
         # Publish the organisation recorded when the metadata was written, so the
         # sidecar and the embedded values cannot disagree.
         sidecar = dict(job["embedPhase"]["sidecar"], updatedAt=now())
         sidecar["embeddedMetadata"] = {"writer": metadata.WRITER_VERSION,
                                        "fields": sorted(key.lstrip("/") for key in job["embedPhase"]["embedded"]),
-                                       "linearized": True}
+                                       "linearized": True,
+                                       "values": {key.lstrip("/"): value for key, value in job["embedPhase"]["embedded"].items()}}
         evidence = dict(job["embedPhase"]["organisation"], publishedVersion="EMBEDDED_METADATA")
     else:
         sidecar, evidence = organised(job, text)
     existing = ARCHIVE.find(sidecar["documentId"])
     if existing is not None:
         # Published by an earlier attempt that died before committing the index.
-        current = json.loads((existing / SIDECAR).read_text(encoding="utf-8"))
+        current = existing.read()
         if current["integrity"]["sha256"] != job["sha256"] or ARCHIVE.check_document(existing):
             raise ArchiveStageError("ARCHIVE_CONFLICT", "a different or damaged document holds this ID")
         evidence["recoveredExistingPublication"] = True
         return existing, current, evidence
     try:
-        directory = ARCHIVE.publish(job["output"], job["sha256"], sidecar, text or None)
+        document = ARCHIVE.publish(job["output"], job["sha256"], sidecar, text or None)
     except ArchiveError as error:
         raise ArchiveStageError("STORAGE_ERROR" if error.code == "STAGING_NOT_SAME_FILESYSTEM" else error.code, error.detail) from error
     except OSError as error:
         raise ArchiveStageError("STORAGE_ERROR", type(error).__name__) from error
-    return directory, json.loads((directory / SIDECAR).read_text(encoding="utf-8")), evidence
+    return document, document.read(), evidence
 
 
-def commit(job: dict, directory: Path, sidecar: dict, evidence: dict) -> None:
+def commit(job: dict, document: Document, sidecar: dict, evidence: dict) -> None:
     scan_id = job["scanId"]
     with database() as connection, connection.cursor() as cursor:
         cursor.execute("SELECT status FROM scan_jobs WHERE id=%s FOR UPDATE", (scan_id,))
@@ -393,8 +437,8 @@ def handle(channel, method, _properties, body: bytes) -> None:
                 if job["kind"] == "CDR_OUTPUT" and EMBED_METADATA:
                     commit_embed(job, *embed(job))
                 else:
-                    directory, sidecar, evidence = publish(job)
-                    commit(job, directory, sidecar, evidence)
+                    document, sidecar, evidence = publish(job)
+                    commit(job, document, sidecar, evidence)
             except Deferred:
                 defer(job)
         except ArchiveStageError as error:
@@ -421,25 +465,33 @@ def handle_edit(channel, method, _properties, body: bytes) -> None:
                 return
             document_id, expected, changes, _status, actor = row
             status, code, revision = "APPLIED", None, None
+            filing = "integrations" not in changes  # a person's edit, not the adapter's bookkeeping
             try:
-                sidecar = ARCHIVE.update_sidecar(document_id, expected, changes)
+                if filing:
+                    document = ARCHIVE.find(document_id)
+                    current = document.read() if document else None
+                    if current is None:
+                        raise ArchiveError("DOCUMENT_NOT_FOUND", document_id)
+                    sidecar = ARCHIVE.reorganise(document_id, expected, revisions.edit_changes(changes, current))
+                else:
+                    sidecar = ARCHIVE.update_sidecar(document_id, expected, changes)
                 revision = sidecar["metadataRevision"]
             except ArchiveError as error:
-                directory = ARCHIVE.find(document_id) if error.code == "REVISION_CONFLICT" else None
-                current = json.loads((directory / SIDECAR).read_text(encoding="utf-8")) if directory else None
+                document = ARCHIVE.find(document_id) if error.code == "REVISION_CONFLICT" else None
+                current = document.read() if document else None
                 if current and current["metadataRevision"] == expected + 1 and all(current.get(k) == v for k, v in changes.items()):
                     sidecar, revision = current, current["metadataRevision"]  # applied before a crash; finish recording it
                 else:
                     status = "CONFLICT" if error.code == "REVISION_CONFLICT" else "INVALID"
                     code = error.code
-            if status == "APPLIED":
+            if status == "APPLIED" and filing:
+                # The folder, the index and Paperless follow; the PDF gets a new version with the new values.
+                index_update(cursor, sidecar)
+                if EMBED_METADATA:
+                    revisions.queue_revision(cursor, STORAGE, sidecar)
+            elif status == "APPLIED":
                 cursor.execute("UPDATE archive_documents SET title=%s,metadata_revision=%s,sidecar=%s::jsonb,updated_at=now() WHERE document_id=%s",
                                (sidecar["title"], revision, json.dumps(sidecar), document_id))
-                # Keep the Paperless projection in step with the sidecar (title and tags).
-                cursor.execute("""INSERT INTO outbox_events(id,aggregate_type,aggregate_id,event_type,payload)
-                                  SELECT %s,'DOCUMENT',%s,'PAPERLESS_QUEUED',jsonb_build_object('documentId',%s::text)
-                                   WHERE EXISTS (SELECT 1 FROM paperless_imports WHERE document_id=%s AND status<>'FAILED_FINAL')""",
-                               (str(uuid.uuid4()), document_id, document_id, document_id))
             cursor.execute("UPDATE metadata_edits SET status=%s,result_revision=%s,error_code=%s,finished_at=now() WHERE id=%s",
                            (status, revision, code, edit_id))
             cursor.execute("INSERT INTO audit_events(actor_id,action,resource_type,resource_id,outcome,trace_id,details) VALUES (%s,'METADATA_EDIT_APPLIED','DOCUMENT',%s,%s,%s,%s::jsonb)",
@@ -490,6 +542,34 @@ def handle_enrichment(channel, method, _properties, body: bytes) -> None:
                 channel.basic_ack(method.delivery_tag)
                 return
             _status, kind, document_id, job_sha, result, agent, current_sha, revision, scan_id, context, review = row
+            failed = result.get("failed") if isinstance(result, dict) and set(result) == {"kind", "failed"} else None
+            if isinstance(failed, str) and failed in ("DOCUMENT_UNAVAILABLE", "AGENT_ERROR"):
+                # The agent could not do it (not a bad answer: no breaker strike). Whatever waited goes on.
+                enrichment.record_failure(cursor, job_id, None, failed)
+                if scan_id and document_id is None:
+                    cursor.execute("""INSERT INTO outbox_events(id,aggregate_type,aggregate_id,event_type,payload)
+                                      SELECT %s,'SCAN',s.id,'ARCHIVE_QUEUED',jsonb_build_object('scanId',s.id,'artifactId',a.id)
+                                        FROM scan_jobs s JOIN artifacts a ON a.scan_id=s.id AND a.kind='CDR_OUTPUT' AND a.state='FINAL_VALIDATED'
+                                       WHERE s.id=%s AND s.status='AWAITING_ARCHIVE'""", (str(uuid.uuid4()), scan_id))
+                channel.basic_ack(method.delivery_tag)
+                return
+            if kind == "OCR" and document_id is None:
+                # Before publication: the checked OCR text waits for the archive step, which goes on at once.
+                try:
+                    text, meta = enrichment.validate_ocr(result if isinstance(result, dict) else {})
+                    cursor.execute("UPDATE enrichment_jobs SET applied=%s::jsonb WHERE id=%s",
+                                   (json.dumps({"text": text, "meta": meta}), job_id))
+                    enrichment.record_success(cursor, job_id, agent)
+                    audit(cursor, scan_id, "AI_OCR", "SUCCESS", {"jobId": job_id, "characters": len(text)})
+                except enrichment.InvalidResult as invalid:
+                    enrichment.record_failure(cursor, job_id, agent, "INVALID_RESULT")
+                    audit(cursor, scan_id, "ENRICHMENT_REJECTED", "FAILURE", {"jobId": job_id, "reason": str(invalid)[:200]})
+                cursor.execute("""INSERT INTO outbox_events(id,aggregate_type,aggregate_id,event_type,payload)
+                                  SELECT %s,'SCAN',s.id,'ARCHIVE_QUEUED',jsonb_build_object('scanId',s.id,'artifactId',a.id)
+                                    FROM scan_jobs s JOIN artifacts a ON a.scan_id=s.id AND a.kind='CDR_OUTPUT' AND a.state='FINAL_VALIDATED'
+                                   WHERE s.id=%s AND s.status='AWAITING_ARCHIVE'""", (str(uuid.uuid4()), scan_id))
+                channel.basic_ack(method.delivery_tag)
+                return
             if kind == "SUGGEST" and document_id is None:
                 # Before publication: check the answer against the text it was given; the
                 # waiting archive step picks the checked fields up at once.
@@ -532,18 +612,22 @@ def handle_enrichment(channel, method, _properties, body: bytes) -> None:
                         audit_document(cursor, document_id, "OCR_APPLIED", "SUCCESS",
                               {"jobId": job_id, "refiled": bool(changes), "category": updated["organization"]["category"]})
                     else:
-                        directory = ARCHIVE.find(document_id)
+                        document = ARCHIVE.find(document_id)
                         text = (context or {}).get("text", "")
-                        text_path = directory / "content.txt" if directory else None
+                        text_path = document.text if document else None
                         if not text and text_path and text_path.is_file():
                             text = text_path.read_text(encoding="utf-8", errors="replace")
                         fields, dropped = enrichment.validate_filing(result if isinstance(result, dict) else {}, text, taxonomy)
                         cursor.execute("UPDATE enrichment_jobs SET applied=%s::jsonb WHERE id=%s", (json.dumps(fields), job_id))
-                        if fields and review in ("FALLBACK", "REVIEW_REQUIRED"):
-                            # Published before the answer came (the laptop was away): file it now.
-                            current = json.loads((directory / SIDECAR).read_text(encoding="utf-8"))
-                            updated = ARCHIVE.reorganise(document_id, revision, enrichment.sidecar_changes(fields, current))
+                        forced = bool((context or {}).get("force"))
+                        if fields and (review in ("FALLBACK", "REVIEW_REQUIRED", "AI") or forced):
+                            # Published before the answer came (the laptop was away), or asked again: file it now.
+                            current = document.read()
+                            base = {**current, "tags": []} if forced else current  # asked again: its tags, not old ones
+                            updated = ARCHIVE.reorganise(document_id, revision, enrichment.sidecar_changes(fields, base))
                             index_update(cursor, updated)
+                            if EMBED_METADATA:
+                                revisions.queue_revision(cursor, STORAGE, updated)
                         elif fields:
                             # Someone filed it already: keep the answer as a suggestion only.
                             cursor.execute("INSERT INTO ai_suggestions(id,document_id,job_id,model,prompt_version,fields) VALUES (%s,%s,%s,%s,%s,%s::jsonb)",
@@ -559,6 +643,51 @@ def handle_enrichment(channel, method, _properties, body: bytes) -> None:
         channel.basic_ack(method.delivery_tag)
     except Exception as error:
         print(json.dumps({"event": "enrichment_apply_error", "jobId": job_id, "errorType": type(error).__name__}), flush=True)
+        channel.basic_nack(method.delivery_tag, requeue=True)
+        time.sleep(5)
+
+
+def handle_revision(channel, method, _properties, body: bytes) -> None:
+    """Swap a new version that passed final validation into the archive."""
+    try:
+        event = json.loads(body)
+        if not all(isinstance(event.get(key), str) for key in ("scanId", "artifactId", "documentId")):
+            raise TypeError("event")
+    except (json.JSONDecodeError, TypeError):
+        channel.basic_reject(method.delivery_tag, requeue=False)
+        return
+    try:
+        with database() as connection, connection.cursor() as cursor:
+            updated = revisions.publish_revision(cursor, ARCHIVE, STORAGE, event)
+            if updated is not None:
+                index_update(cursor, updated)
+                audit_document(cursor, event["documentId"], "VERSION_PUBLISHED", "SUCCESS",
+                               {"artifactId": event["artifactId"], "artifactVersion": updated["artifactVersion"]})
+        channel.basic_ack(method.delivery_tag)
+    except ArchiveError as error:
+        print(json.dumps({"event": "revision_error", "documentId": event["documentId"], "code": error.code}), flush=True)
+        channel.basic_ack(method.delivery_tag)  # a conflict means a newer edit is on its way
+    except Exception as error:
+        print(json.dumps({"event": "revision_error", "documentId": event["documentId"], "errorType": type(error).__name__}), flush=True)
+        channel.basic_nack(method.delivery_tag, requeue=True)
+        time.sleep(5)
+
+
+def handle_deleted(channel, method, _properties, body: bytes) -> None:
+    """A deleted document: remove the archived copy and the metadata versions."""
+    try:
+        event = json.loads(body)
+        if not isinstance(event.get("scanId"), str) or not re.fullmatch(r"scan-[0-9A-HJKMNP-TV-Z]{26}", event["scanId"]):
+            raise TypeError("scanId")
+    except (json.JSONDecodeError, TypeError):
+        channel.basic_reject(method.delivery_tag, requeue=False)
+        return
+    try:
+        removed = revisions.delete_files(STORAGE, ARCHIVE, event)
+        print(json.dumps({"event": "document_deleted", "scanId": event["scanId"], **removed}), flush=True)
+        channel.basic_ack(method.delivery_tag)
+    except Exception as error:
+        print(json.dumps({"event": "delete_error", "scanId": event["scanId"], "errorType": type(error).__name__}), flush=True)
         channel.basic_nack(method.delivery_tag, requeue=True)
         time.sleep(5)
 
@@ -583,9 +712,22 @@ def ensure_taxonomy() -> None:
     os.replace(temporary, path)
 
 
+def migrate_layout() -> None:
+    """Documents of the first layout (a folder per document) move to the browsable one; the
+    index follows. Idempotent, so it runs at every start."""
+    result = ARCHIVE.migrate_layout(apply=True)
+    if result["documents"]:
+        from reindex_db import reindex_db
+        with database() as connection:
+            indexed = reindex_db(ARCHIVE, connection)
+        print(json.dumps({"event": "archive_layout_migrated", "documents": len(result["documents"]),
+                          "indexed": indexed["indexed"], "rejected": len(indexed["rejected"])}), flush=True)
+
+
 def main() -> None:
     ARCHIVE.initialise()
     ensure_taxonomy()
+    migrate_layout()
     credentials = pika.PlainCredentials(os.environ["PDF_GATEWAY_RABBITMQ_USER"], os.environ["PDF_GATEWAY_RABBITMQ_PASSWORD"])
     parameters = pika.ConnectionParameters(os.getenv("PDF_GATEWAY_RABBITMQ_HOST", "rabbitmq"), credentials=credentials,
                                            heartbeat=600, blocked_connection_timeout=60)
@@ -596,10 +738,14 @@ def main() -> None:
             channel.queue_declare(queue=QUEUE, durable=True)
             channel.queue_declare(queue=EDIT_QUEUE, durable=True)
             channel.queue_declare(queue=ENRICHMENT_QUEUE, durable=True)
+            channel.queue_declare(queue=REVISION_QUEUE, durable=True)
+            channel.queue_declare(queue=DELETED_QUEUE, durable=True)
             channel.basic_qos(prefetch_count=1)
             channel.basic_consume(queue=QUEUE, on_message_callback=handle)
             channel.basic_consume(queue=EDIT_QUEUE, on_message_callback=handle_edit)
             channel.basic_consume(queue=ENRICHMENT_QUEUE, on_message_callback=handle_enrichment)
+            channel.basic_consume(queue=REVISION_QUEUE, on_message_callback=handle_revision)
+            channel.basic_consume(queue=DELETED_QUEUE, on_message_callback=handle_deleted)
             channel.start_consuming()
         except (pika.exceptions.AMQPError, psycopg2.Error, OSError):
             time.sleep(5)

@@ -3,6 +3,9 @@ services:
   api:
     environment:
       PDF_GATEWAY_ENRICHMENT_ENABLED: "true"
+    volumes:
+      # Validated clean copies, for the laptop's OCR before a document is archived (as in production).
+      - ${TEST_STORAGE}/cdr-output:/data/cdr-output:ro
   archive-worker:
     environment:
       PDF_GATEWAY_ENRICHMENT_ENABLED: "true"

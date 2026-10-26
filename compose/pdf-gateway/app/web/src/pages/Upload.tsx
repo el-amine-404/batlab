@@ -1,13 +1,13 @@
 import { useState, type ChangeEvent, type DragEvent } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { api, upload, type Session } from "../api";
+import { api, ApiError, upload, type Session } from "../api";
 import { Badge, Card, ErrorNote, Muted, Spinner, TERMINAL, cx, formatBytes } from "../components/ui";
 import { statusWord } from "../words";
 
 const MAX_BYTES = 50 * 1024 * 1024;
 
-type Item = { id: string; file: File; progress: number; scanId?: string; error?: string };
+type Item = { id: string; file: File; progress: number; scanId?: string; error?: string; duplicateOf?: string };
 
 /** Add files: drop or choose PDFs; each one starts at once and shows its progress here. */
 export function UploadPage({ session }: { session: Session }) {
@@ -30,7 +30,8 @@ export function UploadPage({ session }: { session: Session }) {
         const result = await upload(item.file, "ARCHIVE_AND_IMPORT", (progress) => update(item.id, { progress }));
         update(item.id, { progress: 1, scanId: result.scanId });
       } catch (error) {
-        update(item.id, { error: error instanceof Error ? error.message : "Upload refused" });
+        const existing = error instanceof ApiError && error.code === "DUPLICATE_UPLOAD" ? error.location?.match(/scan-[0-9A-Z]{26}$/)?.[0] : undefined;
+        update(item.id, existing ? { duplicateOf: existing, progress: 1 } : { error: error instanceof Error ? error.message : "Upload refused" });
       }
     }
   };
@@ -81,6 +82,7 @@ export function UploadPage({ session }: { session: Session }) {
                     <span className="text-xs text-slate-500 dark:text-slate-400">{formatBytes(item.file.size)}</span>
                   </span>
                   {item.error ? <Badge tone="bad">{item.error}</Badge>
+                    : item.duplicateOf ? <><Badge tone="info">Already in your archive</Badge><Link className="font-medium underline" to={`/documents/${item.duplicateOf}`} data-testid="duplicate-link">Open</Link></>
                     : !item.scanId ? <span className="flex items-center gap-2 text-slate-500"><progress className="h-2 w-24" max={1} value={item.progress} aria-label="Upload progress" /> sending</span>
                     : <>
                         {word && <Badge tone={word.tone}>{word.tone === "info" && <Spinner />}<span className={word.tone === "info" ? "ml-1" : ""}>{word.text}</span></Badge>}

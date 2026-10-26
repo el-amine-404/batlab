@@ -220,7 +220,7 @@ eq "$(api_view eicar)" '{"status": "BLOCKED", "stage": "BLOCKED", "detection": "
 # the signed original's viewing copy is unsigned; everything verifies standalone.
 invoice_doc="doc-${SCAN[invoice]:5}"
 eq "$(curl -fsS -H "Authorization: Bearer $PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN" "$base/api/v1/archive/$invoice_doc" \
-      | python3 -c 'import json,sys; v=json.load(sys.stdin); print(v["category"]+"|"+v["reviewState"]+"|"+v["archivePath"].split("/")[2])')" "Finance|RULE|Invoices"
+      | python3 -c 'import json,sys; v=json.load(sys.stdin); print(v["category"]+"|"+v["reviewState"]+"|"+v["archivePath"])')" "Finance|RULE|Finance/Example Telecom"
 curl -fsS -H "Authorization: Bearer $PDF_GATEWAY_BOOTSTRAP_ADMIN_TOKEN" -o "$scratch/invoice.pdf" "$base/api/v1/archive/$invoice_doc/file"
 docker run --rm --network none -v "$scratch/invoice.pdf:/i.pdf:ro" --entrypoint python "$project-archive-worker" -c '
 import pikepdf

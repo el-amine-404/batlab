@@ -123,40 +123,41 @@ published() {
   eq "$(q "SELECT category||','||review_state FROM archive_documents WHERE scan_id='$(scan_id "$n")'")" "$category,$review"
   eq "$(q "SELECT state FROM artifacts WHERE id='cdr-$(scan_id "$n" | cut -c6-)-1'")" PUBLISHED
   path="$TEST_ARCHIVE/archive/$(q "SELECT archive_path FROM archive_documents WHERE scan_id='$(scan_id "$n")'")"
-  [[ -f $path/metadata.json ]]
-  eq "$(sha256sum "$path/$(q "SELECT pdf_file FROM archive_documents WHERE scan_id='$(scan_id "$n")'")" | cut -d' ' -f1)" \
+  file=$(q "SELECT pdf_file FROM archive_documents WHERE scan_id='$(scan_id "$n")'")
+  [[ -f "$path/.$file.json" ]]
+  eq "$(sha256sum "$path/$file" | cut -d' ' -f1)" \
      "$(sha256sum "$TEST_STORAGE/cdr-output/$(scan_id "$n")-1.pdf" | cut -d' ' -f1)"
 }
 published 70 Finance RULE
 published 71 Unsorted FALLBACK
 published 72 Unsorted FALLBACK
 published 74 Unsorted FALLBACK
-eq "$(q "SELECT archive_path FROM archive_documents WHERE scan_id='$(scan_id 70)'")" \
-   "Finance/2026/Invoices/2026-10-15 - Example Telecom - Internet Invoice - October 2026 [doc-01J00000000000000000000070]"
-side70="$TEST_ARCHIVE/archive/$(q "SELECT archive_path FROM archive_documents WHERE scan_id='$(scan_id 70)'")"
-python3 - "$side70/metadata.json" <<'PY'
+eq "$(q "SELECT archive_path||'/'||pdf_file FROM archive_documents WHERE scan_id='$(scan_id 70)'")" \
+   "Finance/Example Telecom/2026-10-15 Internet Invoice - October 2026.pdf"
+side70="$TEST_ARCHIVE/archive/Finance/Example Telecom/.2026-10-15 Internet Invoice - October 2026.pdf"
+python3 - "$side70.json" <<'PY'
 import json,sys
 s=json.load(open(sys.argv[1]))
 assert s["textExtraction"]["method"]=="native_text" and s["textExtraction"]["source"]=="original", s.get("textExtraction")
-assert s["relativeTextPath"]=="content.txt" and s["tags"]==["finance","internet","invoice"], s
+assert s["relativeTextPath"]==".2026-10-15 Internet Invoice - October 2026.pdf.txt" and s["tags"]==["finance","internet","invoice"], s
 assert s["approval"]=={"policyVersion":"final-policy-1","decision":"ALLOW_SANITIZED","finalReportId":"validation-01J00000000000000000000070-1"}, s["approval"]
 assert s["signature"]["originalSigned"] is False and s["signature"]["viewingCopySigned"] is False
 PY
-grep -q "Total due: 29.99" "$side70/content.txt"
-python3 - "$TEST_ARCHIVE/archive/$(q "SELECT archive_path FROM archive_documents WHERE scan_id='$(scan_id 72)'")/metadata.json" <<'PY'
+grep -q "Total due: 29.99" "$side70.txt"
+python3 - "$TEST_ARCHIVE/archive/$(q "SELECT archive_path||'/.'||pdf_file||'.json' FROM archive_documents WHERE scan_id='$(scan_id 72)'")" <<'PY'
 import json,sys
 s=json.load(open(sys.argv[1]))["signature"]
 assert s["originalSigned"] is True and s["viewingCopySigned"] is False and "not signed" in s["summary"] and "SIGNED_VALID_TRUSTED" in s["summary"], s
 PY
-# Recovery after a crash between publishing and indexing: one directory, now indexed.
-eq "$(find "$TEST_ARCHIVE/archive" -type d -name "*doc-01J00000000000000000000074]" | wc -l)" 1
+# Recovery after a crash between publishing and indexing: one document, now indexed.
+eq "$(grep -rl --include='.*.pdf.json' '"documentId": "doc-01J00000000000000000000074"' "$TEST_ARCHIVE/archive" | wc -l)" 1
 eq "$(q "SELECT details->'organisation'->>'recoveredExistingPublication' FROM job_steps WHERE scan_id='$(scan_id 74)' AND step_type='ARCHIVE' AND status='SUCCEEDED'")" true
 
 # Bytes changed after validation: refused, rejected, nothing published.
 eq "$(sv 73 "status||','||policy||','||artifact_state")" "REVIEW_REQUIRED,REVIEW_REQUIRED,ORIGINAL_QUARANTINED"
 eq "$(q "SELECT error_code FROM job_steps WHERE scan_id='$(scan_id 73)' AND step_type='ARCHIVE'")" VALIDATED_BYTES_CHANGED
 eq "$(q "SELECT count(*) FROM archive_documents WHERE scan_id='$(scan_id 73)'")" 0
-eq "$(find "$TEST_ARCHIVE/archive" -name "*01J00000000000000000000073*" | wc -l)" 0
+eq "$(grep -rl --include='.*.pdf.json' '01J00000000000000000000073' "$TEST_ARCHIVE/archive" | wc -l)" 0
 
 # Replay is a no-op.
 q "INSERT INTO outbox_events(id,aggregate_type,aggregate_id,event_type,payload) VALUES (gen_random_uuid(),'SCAN','$(scan_id 70)','ARCHIVE_QUEUED',jsonb_build_object('scanId','$(scan_id 70)'))"

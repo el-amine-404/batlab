@@ -14,6 +14,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -75,6 +76,15 @@ public class UiController {
     ScanService.ScanPage quarantine(@AuthenticationPrincipal GatewayPrincipal principal,
             @RequestParam(defaultValue = "50") int limit, @RequestParam(required = false) String cursor) {
         return scans.list(principal, limit, cursor, true);
+    }
+
+    @DeleteMapping("/api/v1/scans/{scanId}")
+    @PreAuthorize("hasAnyRole('ADMIN','USER')")
+    @Transactional
+    ResponseEntity<Void> deleteEverywhere(@AuthenticationPrincipal GatewayPrincipal principal, @PathVariable String scanId,
+                                          @RequestParam(defaultValue = "false") boolean confirmSigned) throws IOException {
+        insights.deleteEverywhere(principal, scanId, confirmSigned);
+        return ResponseEntity.noContent().build();
     }
 
     @DeleteMapping("/api/v1/quarantine/{scanId}")

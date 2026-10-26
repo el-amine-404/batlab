@@ -19,8 +19,9 @@ class ProblemHandler {
     @ExceptionHandler(ApiException.class)
     ResponseEntity<Problem> api(ApiException error, HttpServletRequest request) {
         String trace = Optional.ofNullable(request.getHeader("X-Request-ID")).filter(v -> v.length() <= 80).orElse("unavailable");
-        return ResponseEntity.status(error.status).contentType(MediaType.APPLICATION_PROBLEM_JSON)
-                .body(new Problem("about:blank", error.code, error.status, error.getMessage(), error.code, trace));
+        ResponseEntity.BodyBuilder response = ResponseEntity.status(error.status).contentType(MediaType.APPLICATION_PROBLEM_JSON);
+        if (error.location != null) response.header("Location", error.location);
+        return response.body(new Problem("about:blank", error.code, error.status, error.getMessage(), error.code, trace));
     }
 
     @ExceptionHandler(NoResourceFoundException.class)
