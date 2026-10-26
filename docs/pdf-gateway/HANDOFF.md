@@ -202,18 +202,28 @@ Section/Correspondent with the metadata hidden next to the PDF.
   (`POST /archive/{id}/refile`); inline view (`?view=true`, CSP); delete everywhere (DOCUMENT_DELETED fan-out,
   each stage deletes its files; `DELETE /api/v1/scans/{id}`); duplicate upload → 409 + Location; plain
   ASCII names; no Producer; OCR before filing for scans; Paperless content, note, new versions, shared objects.
-- IMPLEMENTED, deployed, not yet observed on Lab2: Discord notifier (`pdf-gateway-notifier`, V012 marks old
-  scans as already notified), Paperless delete/notes/version (need the permissions below), un-owning existing
-  Paperless objects (`adapter.py share-created`).
+- VERIFIED on Lab2 (2026-10-26, generated StreamCo invoice, intent ARCHIVE_AND_IMPORT as the UI sends):
+  READY in 100 s, filed by the AI, in Paperless (#17) 10 s later, Discord "received" and "done" delivered
+  (Apprise "Sent Discord notification"), title edit → version 2 through final validation, Paperless got the
+  new version (185 s), delete everywhere → 204, no rows, no archive files, no stage files, empty folder
+  removed, Paperless #17 in its trash. 305 s in all, peak 72 °C. (A first run with intent ARCHIVE also
+  verified delete without Paperless.)
+- VERIFIED on Lab2: `adapter.py share-created` un-owned 5 correspondents, 3 types, 16 tags (its user ID now
+  comes from an imported document's owner: `/api/ui_settings/` is 403 for a non-admin, `fb06a0c` fix + M6 check).
+- Found on Lab2 and fixed: the model copied the prompt's example title, then (filing-4) chose a known
+  correspondent of the same topic for a new sender. Titles must now name only what the text prints
+  (`enrichment.title_named_in_text`, `filing_test.py`); filing-5 uses known correspondents for spelling only
+  (A/B on qwen3-30b with the stored context: filing-4 wrong, filing-5 right; a real invoice of the known
+  correspondent still matches). The prompt and docs no longer quote the user's document titles (they remain
+  in Git history before `8e9a962`: titles only, no contents).
 - `make up STACK=pdf-gateway` now builds via `build-pdf-gateway` and starts with `--no-build` (verified on
   Lab2, peak 70 °C).
 - Tests run 2026-10-26 (laptop), all exit 0: `test_m4_archive`, `test_m4_organize`, `test_m4_worker`,
   `test_m4_gate`, `test_m4_metadata`, `test_m5_api`, `VENV=<scratch venv> test_m5_ui`, `test_m6_paperless`,
   `test_m7_enrichment`. (`test_m5_ui` needs `playwright install firefox` in the venv.)
-- USER ACTION: Paperless permissions for `pdf-gateway` (delete_document, add_note, view_note, change_tag,
-  change_correspondent, change_documenttype), then `docker exec pdf-gateway-paperless python /opt/pdf-gateway/adapter.py share-created`.
-- NEXT: Lab2 end-to-end (upload → Discord received/done → Paperless → edit → new version in Paperless →
-  delete everywhere), then the remaining M8 items below.
+- DONE by the user 2026-10-26: Paperless permissions for `pdf-gateway` (operations.md step 4 list).
+- NEXT: the user re-runs the AI on the CNIE form and the ID card (Re-run the AI); then the remaining M8
+  items below (restic backup + restore test need the user's sudo).
 
 ## Next implementation order
 
