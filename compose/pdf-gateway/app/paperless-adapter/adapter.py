@@ -21,8 +21,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sys
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -33,6 +35,7 @@ import pika
 import psycopg2
 
 QUEUE = "pdf.gateway.paperless.v1"
+DELETED_QUEUE = "pdf.gateway.deleted.paperless.v1"
 MARKER_FIELD = "gateway_document_id"
 ARCHIVE = Path(os.getenv("PDF_GATEWAY_ARCHIVE_ROOT", "/var/lib/pdf-archive")) / "archive"
 MAX_ATTEMPTS = int(os.getenv("PDF_GATEWAY_PAPERLESS_MAX_ATTEMPTS", "20"))
@@ -112,15 +115,52 @@ class Paperless:
                       if any(f.get("field") == self._field_id and f.get("value") == document_id for f in r.get("custom_fields", [])))
 
     def named_ids(self, endpoint: str, names: list[str]) -> list[int]:
-        """IDs of tags, correspondents or document types by name, created when missing."""
+        """IDs of tags, correspondents or document types by name, created when missing.
+
+        Names match loosely ("M FITNESS" is "M-Fitness"), so one correspondent is not two.
+        New ones have no owner: everyone who uses Paperless sees them, not "Private"."""
+        existing = self.call("GET", f"/api/{endpoint}/", query={"page_size": 100000})["results"]
+        by_key = {folded(item["name"]): int(item["id"]) for item in existing}
         ids = []
         for name in names:
-            found = self.call("GET", f"/api/{endpoint}/", query={"name__iexact": name})["results"]
-            if not found:
+            key = folded(name)
+            if key not in by_key:
                 # matching_algorithm 0: Paperless never assigns it to other documents by itself.
-                found = [self.call("POST", f"/api/{endpoint}/", body={"name": name, "matching_algorithm": 0})]
-            ids.append(int(found[0]["id"]))
+                created = self.call("POST", f"/api/{endpoint}/", body={"name": name, "matching_algorithm": 0, "owner": None})
+                by_key[key] = int(created["id"])
+            ids.append(by_key[key])
         return ids
+
+    def share_created(self) -> dict:
+        """Give up ownership of the tags, correspondents and types this user created (visible to all)."""
+        changed = {}
+        for endpoint in ("tags", "correspondents", "document_types"):
+            items = self.call("GET", f"/api/{endpoint}/", query={"page_size": 100000, "full_perms": "true"})["results"]
+            mine = [item for item in items if item.get("owner") == self.user_id()]
+            for item in mine:
+                self.call("PATCH", f"/api/{endpoint}/{int(item['id'])}/", body={"owner": None})
+            changed[endpoint] = len(mine)
+        return changed
+
+    def user_id(self) -> int:
+        if not hasattr(self, "_user_id"):
+            self._user_id = int(self.call("GET", "/api/ui_settings/")["user"]["id"])
+        return self._user_id
+
+    def note(self, paperless_id: int, text: str) -> None:
+        self.call("POST", f"/api/documents/{int(paperless_id)}/notes/", body={"note": text})
+
+    def new_version(self, paperless_id: int, pdf: bytes, document_id: str, label: str) -> str:
+        """Upload a new version of an existing document (Paperless 3 keeps the earlier ones)."""
+        boundary = uuid.uuid4().hex
+        body = (f'--{boundary}\r\nContent-Disposition: form-data; name="version_label"\r\n\r\n{label}\r\n'.encode()
+                + f'--{boundary}\r\nContent-Disposition: form-data; name="document"; filename="{document_id}.pdf"\r\n'
+                  f"Content-Type: application/pdf\r\n\r\n".encode() + pdf + f"\r\n--{boundary}--\r\n".encode())
+        task = self.call("POST", f"/api/documents/{int(paperless_id)}/update_version/",
+                         multipart=(body, f"multipart/form-data; boundary={boundary}"))
+        if not isinstance(task, str) or len(task) > 100:
+            raise PaperlessError("PAPERLESS_PROTOCOL", True, "no task id")
+        return task
 
     def tag_ids(self, names: list[str]) -> list[int]:
         return self.named_ids("tags", names)
@@ -179,8 +219,39 @@ class Paperless:
             raise
         return any(f.get("field") == self.field_id() and f.get("value") == document_id for f in doc.get("custom_fields", []))
 
-    def update(self, paperless_id: int, title: str, filing: dict) -> None:
-        self.call("PATCH", f"/api/documents/{int(paperless_id)}/", body={"title": title, **filing})
+    def update(self, paperless_id: int, title: str, filing: dict, content: str | None = None) -> None:
+        body = {"title": title, **filing}
+        if content:
+            body["content"] = content
+        self.call("PATCH", f"/api/documents/{int(paperless_id)}/", body=body)
+
+
+def folded(name: str) -> str:
+    """A name with case, accents and punctuation folded away, for matching."""
+    decomposed = unicodedata.normalize("NFKD", name).casefold()
+    return re.sub(r"[^0-9a-z]+", "", "".join(ch for ch in decomposed if not unicodedata.combining(ch)))
+
+
+MAX_CONTENT = 1_000_000
+
+
+def content_of(archive_path: str, pdf_file: str) -> str | None:
+    """The document's text (hidden beside its PDF: the original's own text, or the laptop's OCR), for Paperless search."""
+    path = ARCHIVE / archive_path / f".{pdf_file}.txt"
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")[:MAX_CONTENT] if path.is_file() else None
+    except OSError:
+        return None
+
+
+def note_text(document_id: str, sidecar: dict) -> str:
+    filed = sidecar.get("organization", {}).get("reviewState")
+    by = {"AI": "filed by the local AI from the document's text", "RULE": "filed by your filing rules"}.get(filed, "not filed yet")
+    signed = " The original was digitally signed; it is kept as evidence." if sidecar.get("signature", {}).get("originalSigned") else ""
+    return (f"Checked by the PDF gateway: no threats found, rebuilt as a clean copy (each page redrawn, so scripts, links, "
+            f"forms and attachments cannot come along) and checked again; {by}.{signed} "
+            f"{PUBLIC_URL}/documents/scan-{document_id[4:]}" if PUBLIC_URL else
+            f"Checked by the PDF gateway: no threats found, rebuilt as a clean copy and checked again; {by}.{signed}")
 
 
 TYPE_LABEL = {"invoice": "Invoice", "receipt": "Receipt", "bank_statement": "Bank statement", "payslip": "Payslip",
@@ -188,6 +259,9 @@ TYPE_LABEL = {"invoice": "Invoice", "receipt": "Receipt", "bank_statement": "Ban
               "identity_document": "Identity document", "certificate": "Certificate", "letter": "Letter",
               "school_document": "School document", "presentation": "Presentation", "report": "Report",
               "manual": "Manual", "other": "Document"}
+
+
+PUBLIC_URL = os.getenv("PDF_GATEWAY_PUBLIC_URL", "").rstrip("/")
 
 
 def database():
@@ -234,14 +308,14 @@ def resolve_task(client: Paperless, task: dict | None) -> int | None:
 def project(document_id: str, client: Paperless) -> None:
     with database() as connection, connection.cursor() as cursor:
         cursor.execute("""SELECT i.status,i.task_id,i.upload_started_at,i.paperless_document_id,i.synced_revision,i.attempts,
-                                 d.archive_path,d.pdf_file,d.sha256,d.metadata_revision,d.sidecar
+                                 d.archive_path,d.pdf_file,d.sha256,d.metadata_revision,d.sidecar,i.artifact_sha256
                             FROM paperless_imports i JOIN archive_documents d USING (document_id)
                            WHERE i.document_id=%s FOR UPDATE OF i""", (document_id,))
         row = cursor.fetchone()
         if row is None or row[0] == "FAILED_FINAL":
             return
-        status, task_id, upload_started, paperless_id, synced, attempts, archive_path, pdf_file, sha, revision, sidecar = row
-        if status == "IMPORTED" and synced is not None and synced >= revision:
+        status, task_id, upload_started, paperless_id, synced, attempts, archive_path, pdf_file, sha, revision, sidecar, sent_sha = row
+        if status == "IMPORTED" and synced is not None and synced >= revision and sent_sha == sha:
             return
         syncing = status == "IMPORTED"  # already in Paperless: only title/tags need to catch up
         if attempts >= MAX_ATTEMPTS and not syncing:
@@ -279,10 +353,25 @@ def project(document_id: str, client: Paperless) -> None:
             paperless_id = wait_for_task(client, task_id)
             if paperless_id is None:
                 raise PaperlessError("PAPERLESS_TASK_PENDING", True)
+            client.update(paperless_id, sidecar["title"], client.filing(sidecar), content_of(archive_path, pdf_file))
+            try:
+                client.note(paperless_id, note_text(document_id, sidecar))
+            except PaperlessError:
+                pass  # a note is a courtesy; the import stands without it
             synced_now = revision  # uploaded with the current title and tags
         else:
+            if sent_sha != sha:
+                # The archive holds a new version of the PDF (edited metadata, re-filed): Paperless gets it as a version.
+                data = (ARCHIVE / archive_path / pdf_file).read_bytes()
+                if len(data) > MAX_UPLOAD or hashlib.sha256(data).hexdigest() != sha:
+                    raise PaperlessError("ARCHIVE_INTEGRITY", False, "archived bytes do not match the index")
+                version_task = client.new_version(paperless_id, data, document_id, f"version {sidecar.get('artifactVersion', 2)}")
+                if wait_for_task(client, version_task) is None:
+                    raise PaperlessError("PAPERLESS_TASK_PENDING", True)
+                with database() as connection, connection.cursor() as cursor:
+                    cursor.execute("UPDATE paperless_imports SET artifact_sha256=%s WHERE document_id=%s", (sha, document_id))
             # Existing Paperless document: bring its fields up to the sidecar revision.
-            client.update(paperless_id, sidecar["title"], client.filing(sidecar))
+            client.update(paperless_id, sidecar["title"], client.filing(sidecar), content_of(archive_path, pdf_file))
             synced_now = revision
         with database() as connection, connection.cursor() as cursor:
             set_state(cursor, document_id, "IMPORTED", paperless_document_id=paperless_id, synced_revision=synced_now,
@@ -358,6 +447,28 @@ def resync(client: Paperless) -> dict:
     return report
 
 
+def handle_deleted(channel, method, _properties, body: bytes, client: Paperless) -> None:
+    """A document deleted in the gateway: its Paperless copy goes to Paperless's trash
+    (restorable there until Paperless empties it), after checking it is ours."""
+    try:
+        event = json.loads(body)
+        paperless_id, document_id = event.get("paperlessDocumentId"), event.get("documentId")
+        if paperless_id is not None and (not isinstance(paperless_id, int) or not isinstance(document_id, str)):
+            raise TypeError("event")
+    except (json.JSONDecodeError, TypeError):
+        channel.basic_reject(method.delivery_tag, requeue=False)
+        return
+    try:
+        if paperless_id is not None and client.exists(paperless_id, document_id):
+            client.call("DELETE", f"/api/documents/{int(paperless_id)}/")
+        channel.basic_ack(method.delivery_tag)
+    except PaperlessError as error:
+        print(json.dumps({"event": "paperless_delete_failed", "documentId": document_id, "code": error.code}), flush=True)
+        # Only an unreachable Paperless is worth retrying; a refusal (e.g. no delete permission) is logged.
+        channel.basic_nack(method.delivery_tag, requeue=error.code == "PAPERLESS_UNAVAILABLE")
+        time.sleep(5)
+
+
 def handle(channel, method, _properties, body: bytes, client: Paperless) -> None:
     try:
         document_id = json.loads(body)["documentId"]
@@ -386,6 +497,9 @@ def main() -> None:
     if sys.argv[1:] == ["resync"]:
         print(json.dumps(resync(client), sort_keys=True))
         return
+    if sys.argv[1:] == ["share-created"]:
+        print(json.dumps(client.share_created(), sort_keys=True))
+        return
     credentials = pika.PlainCredentials(os.environ["PDF_GATEWAY_RABBITMQ_USER"], os.environ["PDF_GATEWAY_RABBITMQ_PASSWORD"])
     parameters = pika.ConnectionParameters(os.getenv("PDF_GATEWAY_RABBITMQ_HOST", "rabbitmq"), credentials=credentials,
                                            heartbeat=0, blocked_connection_timeout=60)
@@ -394,8 +508,10 @@ def main() -> None:
             connection = pika.BlockingConnection(parameters)
             channel = connection.channel()
             channel.queue_declare(queue=QUEUE, durable=True)
+            channel.queue_declare(queue=DELETED_QUEUE, durable=True)
             channel.basic_qos(prefetch_count=1)
             channel.basic_consume(queue=QUEUE, on_message_callback=lambda ch, m, p, b: handle(ch, m, p, b, client))
+            channel.basic_consume(queue=DELETED_QUEUE, on_message_callback=lambda ch, m, p, b: handle_deleted(ch, m, p, b, client))
             channel.start_consuming()
         except (pika.exceptions.AMQPError, psycopg2.Error, OSError):
             time.sleep(5)

@@ -141,6 +141,36 @@ public class InsightService {
 
     /** Remove a held original. Never for released documents; signed originals need explicit confirmation. */
     @Transactional
+    /**
+     * Delete a document everywhere: its records now, and through DOCUMENT_DELETED each stage's
+     * files (archive copy, rebuilt PDFs, reports, text) and the Paperless copy (to Paperless's trash).
+     * Its owner or an administrator; not while it is still being checked.
+     */
+    public void deleteEverywhere(GatewayPrincipal principal, String scanId, boolean confirmSigned) throws IOException {
+        List<Map<String, Object>> rows = jdbc.queryForList("""
+                SELECT s.status, s.quarantine_object, s.original_retention, d.document_id, p.paperless_document_id
+                  FROM scan_jobs s LEFT JOIN archive_documents d ON d.scan_id=s.id
+                  LEFT JOIN paperless_imports p ON p.document_id=d.document_id
+                 WHERE s.id=? AND (s.owner_id=? OR ?) FOR UPDATE OF s""", scanId, principal.userId(), principal.admin());
+        if (rows.isEmpty()) throw new ApiException(404, "SCAN_NOT_FOUND", "Scan not found");
+        Map<String, Object> row = rows.getFirst();
+        if (!List.of("READY", "REVIEW_REQUIRED", "BLOCKED", "FAILED", "CANCELLED").contains(String.valueOf(row.get("status"))))
+            throw new ApiException(409, "STILL_PROCESSING", "Wait until the checks are finished");
+        if ("SIGNED_RESTRICTED".equals(row.get("original_retention")) && !confirmSigned)
+            throw new ApiException(409, "SIGNED_ORIGINAL", "This original is retained signed evidence; confirm explicitly");
+        Object documentId = row.get("document_id");
+        jdbc.update("""
+                INSERT INTO outbox_events(id,aggregate_type,aggregate_id,event_type,payload) VALUES (?,'SCAN',?,'DOCUMENT_DELETED',
+                       jsonb_build_object('scanId',?::text,'documentId',?::text,'paperlessDocumentId',?::integer))""",
+                UUID.randomUUID(), scanId, scanId, documentId, row.get("paperless_document_id"));
+        jdbc.update("INSERT INTO audit_events(actor_id,action,resource_type,resource_id,outcome,trace_id,details) VALUES (?,'DOCUMENT_DELETED','SCAN',?,'SUCCESS',?,jsonb_build_object('documentId',?::text,'signedOriginal',?))",
+                principal.userId(), scanId, UUID.randomUUID().toString(), documentId, "SIGNED_RESTRICTED".equals(row.get("original_retention")));
+        if (documentId != null) jdbc.update("DELETE FROM archive_documents WHERE document_id=?", documentId);
+        jdbc.update("DELETE FROM scan_jobs WHERE id=?", scanId);
+        // Last, so a failed delete rolls the transaction back instead of leaving a stale record.
+        Files.deleteIfExists(properties.storageRoot().resolve("quarantine").resolve(row.get("quarantine_object") + ".bin"));
+    }
+
     public void deleteQuarantined(GatewayPrincipal principal, String scanId, boolean confirmSigned) throws IOException {
         if (!principal.admin()) throw new ApiException(403, "FORBIDDEN", "Only administrators can delete quarantined originals");
         List<Map<String, Object>> rows = jdbc.queryForList(

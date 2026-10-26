@@ -17,7 +17,7 @@ import unicodedata
 import uuid
 from datetime import date, timedelta
 
-from organize import find_dates
+from organize import find_dates, plain_punctuation
 
 OCR_MAX_PAGES = 1000
 OCR_MAX_CHARS = 2 * 1024 * 1024
@@ -182,7 +182,7 @@ def validate_filing(result: dict, text: str, taxonomy: dict) -> tuple[dict, list
             dropped.append("amount: currency not printed in the document")
         else:
             fields["amount"] = {"value": number, "currency": currency, "evidence": evidence_of("amount")}
-    title = re.sub(r"\s+", " ", value_of("title"))[:120].strip(" -–·")
+    title = plain_punctuation(value_of("title"))[:120].strip(" -")
     if title and letters(title) not in GENERIC_TITLES and len(title) >= 4:
         fields["title"] = title
     elif title:

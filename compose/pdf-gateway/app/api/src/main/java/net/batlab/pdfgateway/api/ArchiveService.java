@@ -36,7 +36,15 @@ public class ArchiveService {
     private static final Pattern TAG = Pattern.compile("^[a-z0-9][a-z0-9._-]{0,63}$");
     private static final Pattern ETAG = Pattern.compile("^(?:W/)?\"rev-([1-9][0-9]{0,8})\"$");
     private static final Pattern SIDECAR_REVISION = Pattern.compile("\"metadataRevision\": ([0-9]+)");
-    private static final Set<String> EDITABLE = Set.of("title", "tags");
+    private static final Set<String> EDITABLE = Set.of("title", "tags", "issuer", "documentType", "documentDate",
+            "reference", "amount", "section");
+    static final List<String> TYPES = List.of("invoice", "receipt", "bank_statement", "payslip", "contract", "tax_document",
+            "insurance", "medical", "identity_document", "certificate", "letter", "school_document", "presentation", "report",
+            "manual", "other");
+    static final List<String> SECTIONS = List.of("Finance", "Employment", "Identity", "Medical", "Education", "Contracts",
+            "Property", "Vehicles", "Taxes", "Personal", "Other", "Unsorted");
+    private static final Pattern AMOUNT = Pattern.compile("^-?[0-9]{1,12}(\\.[0-9]{1,4})?$");
+    private static final Pattern CURRENCY = Pattern.compile("^[A-Z]{3}$");
 
     public record DocumentView(String documentId, String title, String category, String reviewState, String archivePath,
                                int currentVersion, int metadataRevision, String sha256, long bytes,
@@ -101,7 +109,8 @@ public class ArchiveService {
 
     public Sidecar sidecar(GatewayPrincipal principal, String documentId) throws IOException {
         Located located = locate(principal, documentId);
-        Path file = regularFile(located.directory().resolve("metadata.json"));
+        // The sidecar sits hidden beside the PDF: ".<file>.pdf.json".
+        Path file = regularFile(located.directory().resolve("." + located.pdfFile() + ".json"));
         byte[] bytes = Files.readAllBytes(file);
         Matcher revision = SIDECAR_REVISION.matcher(new String(bytes, StandardCharsets.UTF_8));
         if (!revision.find() || !new String(bytes, StandardCharsets.UTF_8).contains("\"documentId\": \"" + documentId + "\""))
@@ -134,32 +143,88 @@ public class ArchiveService {
         if (current.revision() != expected)
             throw new ApiException(409, "REVISION_CONFLICT", "The metadata changed; reload and retry");
         if (changes == null || changes.isEmpty() || !EDITABLE.containsAll(changes.keySet()))
-            throw new ApiException(400, "FIELD_NOT_EDITABLE", "Only title and tags can be edited");
-        String title = null;
-        String[] tags = null;
-        if (changes.containsKey("title")) {
-            if (!(changes.get("title") instanceof String value) || value.isBlank() || value.length() > 200
-                    || value.codePoints().anyMatch(Character::isISOControl))
-                throw new ApiException(400, "INVALID_TITLE", "Title must be 1 to 200 printable characters");
-            title = value.strip();
-        }
-        if (changes.containsKey("tags")) {
-            if (!(changes.get("tags") instanceof List<?> list) || list.size() > 64
-                    || !list.stream().allMatch(tag -> tag instanceof String text && TAG.matcher(text).matches())
-                    || list.stream().distinct().count() != list.size())
-                throw new ApiException(400, "INVALID_TAGS", "Tags must be unique lowercase identifiers");
-            tags = list.stream().map(String.class::cast).toArray(String[]::new);
+            throw new ApiException(400, "FIELD_NOT_EDITABLE", "Editable: " + String.join(", ", EDITABLE.stream().sorted().toList()));
+        Map<String, Object> checked = new java.util.LinkedHashMap<>();
+        for (Map.Entry<String, Object> change : changes.entrySet()) {
+            String name = change.getKey();
+            Object value = change.getValue();
+            switch (name) {
+                case "title" -> checked.put(name, text(value, 200, false, "INVALID_TITLE"));
+                case "issuer" -> checked.put(name, text(value, 120, true, "INVALID_ISSUER"));
+                case "reference" -> checked.put(name, text(value, 60, true, "INVALID_REFERENCE"));
+                case "tags" -> {
+                    if (!(value instanceof List<?> list) || list.size() > 64
+                            || !list.stream().allMatch(tag -> tag instanceof String item && TAG.matcher(item).matches())
+                            || list.stream().distinct().count() != list.size())
+                        throw new ApiException(400, "INVALID_TAGS", "Tags must be unique lowercase identifiers");
+                    checked.put(name, list);
+                }
+                case "documentType" -> {
+                    if (value != null && !TYPES.contains(value)) throw new ApiException(400, "INVALID_TYPE", "Unknown document type");
+                    checked.put(name, value);
+                }
+                case "section" -> {
+                    if (!SECTIONS.contains(value)) throw new ApiException(400, "INVALID_SECTION", "Unknown section");
+                    checked.put(name, value);
+                }
+                case "documentDate" -> {
+                    if (value != null) {
+                        try {
+                            java.time.LocalDate date = java.time.LocalDate.parse(String.valueOf(value));
+                            if (date.getYear() < 1900 || date.getYear() > 2100) throw new java.time.DateTimeException("range");
+                        } catch (java.time.DateTimeException invalid) {
+                            throw new ApiException(400, "INVALID_DATE", "The date must be YYYY-MM-DD");
+                        }
+                    }
+                    checked.put(name, value);
+                }
+                case "amount" -> {
+                    if (value != null && !(value instanceof Map<?, ?> amount && amount.keySet().equals(Set.of("value", "currency"))
+                            && amount.get("value") instanceof String number && AMOUNT.matcher(number).matches()
+                            && amount.get("currency") instanceof String currency && CURRENCY.matcher(currency).matches()))
+                        throw new ApiException(400, "INVALID_AMOUNT", "An amount is {value: \"1015.68\", currency: \"MAD\"}");
+                    checked.put(name, value);
+                }
+                default -> throw new ApiException(400, "FIELD_NOT_EDITABLE", name);
+            }
         }
         UUID editId = UUID.randomUUID();
-        jdbc.update("""
-                INSERT INTO metadata_edits(id,document_id,actor_id,expected_revision,changes)
-                VALUES (?,?,?,?,jsonb_strip_nulls(jsonb_build_object('title',?::text,'tags',to_jsonb(?::text[]))))""",
-                editId, documentId, principal.userId(), expected, title, tags);
+        jdbc.update("INSERT INTO metadata_edits(id,document_id,actor_id,expected_revision,changes) VALUES (?,?,?,?,?::jsonb)",
+                editId, documentId, principal.userId(), expected, json(checked));
         jdbc.update("INSERT INTO outbox_events(id,aggregate_type,aggregate_id,event_type,payload) VALUES (?,'DOCUMENT',?,'METADATA_EDIT_QUEUED',jsonb_build_object('editId',?::text))",
                 UUID.randomUUID(), documentId, editId.toString());
         jdbc.update("INSERT INTO audit_events(actor_id,action,resource_type,resource_id,outcome,trace_id,details) VALUES (?,'METADATA_EDIT_REQUESTED','DOCUMENT',?,'SUCCESS',?,jsonb_build_object('editId',?::text,'expectedRevision',?))",
                 principal.userId(), documentId, editId.toString(), editId.toString(), expected);
         return edit(principal, documentId, editId.toString());
+    }
+
+    /** Printable text of at most max characters (null allowed only when clearable). */
+    private static String text(Object value, int max, boolean clearable, String code) {
+        if (value == null && clearable) return null;
+        if (!(value instanceof String text) || text.isBlank() || text.length() > max || text.codePoints().anyMatch(Character::isISOControl))
+            throw new ApiException(400, code, "Must be 1 to " + max + " printable characters");
+        return text.strip();
+    }
+
+    /** JSON for the checked edit (strings, lists of strings, a two-string map, null). */
+    static String json(Object value) {
+        if (value == null) return "null";
+        if (value instanceof String text) {
+            StringBuilder out = new StringBuilder("\"");
+            for (char ch : text.toCharArray()) {
+                switch (ch) {
+                    case '"' -> out.append("\\\"");
+                    case '\\' -> out.append("\\\\");
+                    default -> { if (ch < 0x20) out.append(String.format("\\u%04x", (int) ch)); else out.append(ch); }
+                }
+            }
+            return out.append('"').toString();
+        }
+        if (value instanceof List<?> list) return "[" + String.join(",", list.stream().map(ArchiveService::json).toList()) + "]";
+        if (value instanceof Map<?, ?> map) {
+            return "{" + String.join(",", map.entrySet().stream().map(entry -> json(String.valueOf(entry.getKey())) + ":" + json(entry.getValue())).toList()) + "}";
+        }
+        throw new IllegalArgumentException("unsupported JSON value");
     }
 
     public EditView edit(GatewayPrincipal principal, String documentId, String editId) {

@@ -345,6 +345,8 @@ services:
     profiles: [paperless]
     build:
       context: paperless-adapter
+      additional_contexts:
+        common: ../../../lib/batlab-common
     environment:
       PDF_GATEWAY_DATABASE_HOST: postgres
       PDF_GATEWAY_DATABASE_NAME: pdf_gateway

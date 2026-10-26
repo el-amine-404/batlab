@@ -117,19 +117,19 @@ eq "$(sha256sum "$TEST_STORAGE/quarantine/quar-01J00000000000000000000081.bin" |
 
 # The embedded values are exactly the allowlisted, sidecar-consistent fields.
 for n in 80 81; do
-  path="/archive/archive/$(q "SELECT archive_path FROM archive_documents WHERE scan_id='$(scan_id $n)'")"
+  path="/archive/archive/$(q "SELECT archive_path||'/.'||pdf_file||'.json' FROM archive_documents WHERE scan_id='$(scan_id $n)'")"
   as_archive --entrypoint python pdf-gateway-m4-test/archive-worker:local -c '
 import json,sys,pikepdf
-d=sys.argv[1]; s=json.load(open(d+"/metadata.json"))
+side=sys.argv[1]; d=side.rsplit("/",1)[0]; s=json.load(open(side))
 with pikepdf.open(d+"/"+s["relativePdfPath"]) as pdf:
     info={str(k):str(v) for k,v in pdf.docinfo.items()}
     assert "/Metadata" not in pdf.Root and "/Info" not in pdf.Root, "XMP or catalog Info survived"
     assert pdf.is_linearized, "published PDF is not linearized (fast web view)"
-expected={"/Title":s["title"],"/Producer":"PDF Gateway"}
+expected={"/Title":s["title"]}  # no Producer or Creator
 if s.get("issuer"): expected["/Author"]=s["issuer"]["value"]
 subject=[{"invoice":"Invoice"}.get(s.get("documentType"), s.get("documentType")), (s.get("issuer") or {}).get("value"),
          (s.get("documentDate") or {}).get("value"), ("no. "+s["reference"]["value"]) if s.get("reference") else None]
-if any(subject): expected["/Subject"]=" · ".join(x for x in subject if x)
+if any(subject): expected["/Subject"]=" - ".join(x for x in subject if x)
 if s.get("tags"): expected["/Keywords"]=", ".join(s["tags"])
 assert info==expected, (info, expected)
 assert s["embeddedMetadata"]["fields"]==sorted(k[1:] for k in expected), s["embeddedMetadata"]
@@ -153,9 +153,9 @@ import sys; sys.path.insert(0,"/opt/pdf-gateway")
 import metadata, pikepdf
 from pathlib import Path
 metadata.OUTPUT_GROUP=10005
-metadata.write(Path("/scratch/dirty.pdf"), Path("/scratch/clean.pdf"), {"/Title":"T","/Producer":metadata.PRODUCER})
+metadata.write(Path("/scratch/dirty.pdf"), Path("/scratch/clean.pdf"), {"/Title":"T"})
 info=metadata.read(Path("/scratch/clean.pdf"))
-assert info=={"/Title":"T","/Producer":metadata.PRODUCER}, info
+assert info=={"/Title":"T"}, info  # the dirty input Producer, Author and XMP are gone
 data=open("/scratch/clean.pdf","rb").read()
 assert b"Spoofed" not in data and b"EvilKey" not in data and b"MuPDF" not in data, "old metadata bytes survived"
 print("writer stripped spoofed Author/Title, custom key and catalog Info")'

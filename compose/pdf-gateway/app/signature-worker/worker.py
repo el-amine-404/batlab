@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -16,6 +17,7 @@ import pika
 import psycopg2
 
 QUEUE = "pdf.gateway.signature.v1"
+DELETED_QUEUE = "pdf.gateway.deleted.signature.v1"
 STORAGE = Path(os.getenv("PDF_GATEWAY_STORAGE_ROOT", "/var/lib/pdf-gateway"))
 MAX_ATTEMPTS = int(os.getenv("PDF_GATEWAY_SIGNATURE_MAX_ATTEMPTS", "3"))
 
@@ -142,6 +144,21 @@ def handle(channel, method, _properties, body: bytes) -> None:
         channel.basic_nack(method.delivery_tag, requeue=attempt == 0 or attempt < MAX_ATTEMPTS)
 
 
+def handle_deleted(channel, method, _properties, body: bytes) -> None:
+    """A deleted document: remove this stage's signature report."""
+    try:
+        scan_id = json.loads(body)["scanId"]
+        if not isinstance(scan_id, str) or not re.fullmatch(r"scan-[0-9A-HJKMNP-TV-Z]{26}", scan_id):
+            raise TypeError("scanId")
+    except (json.JSONDecodeError, KeyError, TypeError):
+        channel.basic_reject(method.delivery_tag, requeue=False)
+        return
+    for pattern in ["signature-reports/{scan}.json"]:
+        for found in STORAGE.glob(pattern.format(scan=scan_id)):
+            found.unlink(missing_ok=True)
+    channel.basic_ack(method.delivery_tag)
+
+
 def main() -> None:
     credentials = pika.PlainCredentials(os.environ["PDF_GATEWAY_RABBITMQ_USER"], os.environ["PDF_GATEWAY_RABBITMQ_PASSWORD"])
     parameters = pika.ConnectionParameters(os.getenv("PDF_GATEWAY_RABBITMQ_HOST", "rabbitmq"), credentials=credentials,
@@ -151,8 +168,10 @@ def main() -> None:
             connection = pika.BlockingConnection(parameters)
             channel = connection.channel()
             channel.queue_declare(queue=QUEUE, durable=True)
+            channel.queue_declare(queue=DELETED_QUEUE, durable=True)
             channel.basic_qos(prefetch_count=1)
             channel.basic_consume(queue=QUEUE, on_message_callback=handle)
+            channel.basic_consume(queue=DELETED_QUEUE, on_message_callback=handle_deleted)
             channel.start_consuming()
         except (pika.exceptions.AMQPError, psycopg2.Error, OSError):
             time.sleep(5)

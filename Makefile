@@ -326,14 +326,16 @@ setup: check-env
 # The next `make up` finds every layer cached.
 build-pdf-gateway:
 	@$(DC) -f compose/pdf-gateway/docker-compose.yml config --format json | python3 -c 'import json, sys; \
-		[print(s["image"], s["build"]["context"], s["build"].get("dockerfile", "Dockerfile")) \
+		[print(s["image"], s["build"]["context"], s["build"].get("dockerfile", "Dockerfile"), \
+		       ",".join(f"{k}={v}" for k, v in s["build"].get("additional_contexts", {}).items()) or "-") \
 		 for s in json.load(sys.stdin)["services"].values() if "build" in s]' | \
-	while read -r image context dockerfile; do \
+	while read -r image context dockerfile extra; do \
 		while [ "$$(cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null | sort -n | tail -1)" -gt 75000 ]; do \
 			echo "    CPU above 75 °C, waiting..."; sleep 20; \
 		done; \
 		echo "==> build $$image"; \
-		docker build --network host -t "$$image" -f "$$context/$$dockerfile" "$$context" || exit 1; \
+		contexts=""; [ "$$extra" = "-" ] || for item in $$(echo "$$extra" | tr , " "); do contexts="$$contexts --build-context $$item"; done; \
+		docker build --network host $$contexts -t "$$image" -f "$$context/$$dockerfile" "$$context" || exit 1; \
 	done
 
 # Only the gateway's folders (also part of setup).

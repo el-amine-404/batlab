@@ -99,13 +99,13 @@ base = {"documentId": "doc-01J000000000000000000000G1", "artifactVersion": 1, "m
 errors = schema_errors({**base, **f, "schemaVersion": "1.0.0", "relativePdfPath": "x.pdf", "integrity": {"sha256": digest, "bytes": 1}})
 check("organised sidecar valid", not errors, errors)
 published = archive.publish(pdf, digest, {**base, **f}, text=text("invoice-en"))
-check("invoice published to deterministic path", published.relative_to(archive.archive).as_posix()
-      == "Finance/2026/Invoices/2026-10-15 - Example Telecom - Internet Invoice - October 2026 [doc-01J000000000000000000000G1]", published)
+check("invoice published to deterministic path", archive.relative(published.pdf)
+      == "Finance/Example Telecom/2026-10-15 Internet Invoice - October 2026.pdf", published.pdf)
 fallback = organise(text("unfamiliar"), rules, taxonomy).fields
 path = archive.publish(DATA / "fixtures" / "unfamiliar.pdf", hashlib.sha256((DATA / "fixtures" / "unfamiliar.pdf").read_bytes()).hexdigest(),
                        {**base, **fallback, "documentId": "doc-01J000000000000000000000G2"}, text=text("unfamiliar"))
-check("unfamiliar document published to Unsorted fallback", path.relative_to(archive.archive).as_posix()
-      == "Unsorted/2026/undated - Unclassified document [doc-01J000000000000000000000G2]", path)
-check("content.txt keeps hostile text as inert data", "<script>" in (published / "content.txt").read_text()
+check("unfamiliar document published to Unsorted fallback", archive.relative(path.pdf)
+      == f"Unsorted/{NOW[:10]} Unclassified document.pdf", path.pdf)
+check("the text file keeps hostile text as inert data", "<script>" in published.text.read_text()
       and archive.verify()["ok"])
 print("M4 organisation tests passed")

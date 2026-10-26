@@ -95,7 +95,7 @@ public class EnrichmentController {
                   FROM next WHERE j.id=next.id
                 RETURNING jsonb_build_object('jobId', j.id, 'kind', j.kind, 'documentId', j.document_id, 'sha256', j.artifact_sha256,
                           'leaseUntil', j.lease_until,
-                          'documentUrl', CASE WHEN j.document_id IS NOT NULL THEN '/api/v1/enrichment/jobs/' || j.id || '/document' END,
+                          'documentUrl', CASE WHEN j.document_id IS NOT NULL OR j.kind='OCR' THEN '/api/v1/enrichment/jobs/' || j.id || '/document' END,
                           'contextUrl', '/api/v1/enrichment/jobs/' || j.id || '/context',
                           'resultUrl', '/api/v1/enrichment/jobs/' || j.id || '/result')::text""",
                 (rs, row) -> rs.getString(1), wanted.toArray(String[]::new), agentId);
@@ -123,7 +123,7 @@ public class EnrichmentController {
                 (rs, row) -> rs.getString(1), parseJob(jobId), agentId);
         if (!carried.isEmpty()) return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store").body(carried.getFirst());
         Path pdf = leasedDocument(principal, jobId, agentId);
-        Path text = pdf.getParent().resolve("content.txt");
+        Path text = pdf.resolveSibling("." + pdf.getFileName() + ".txt");
         String content = Files.isRegularFile(text, LinkOption.NOFOLLOW_LINKS) ? Files.readString(text, StandardCharsets.UTF_8) : "";
         if (content.length() > MAX_CONTEXT_CHARS) content = content.substring(0, MAX_CONTEXT_CHARS);
         Path taxonomy = properties.archiveRoot().resolve("manifests").resolve("taxonomy.json");
@@ -206,6 +206,47 @@ public class EnrichmentController {
                   FROM ai_suggestions WHERE document_id=?""", String.class, documentId));
     }
 
+    /** Ask the AI laptop to file a published document again (its answer is applied, a new PDF version follows). */
+    @PostMapping(path = "/api/v1/archive/{documentId}/refile", produces = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("hasAnyRole('ADMIN','USER')")
+    @Transactional
+    public ResponseEntity<String> refile(@AuthenticationPrincipal GatewayPrincipal principal, @PathVariable String documentId) throws IOException {
+        if (!Boolean.parseBoolean(System.getenv().getOrDefault("PDF_GATEWAY_ENRICHMENT_ENABLED", "false")))
+            throw new ApiException(409, "AI_DISABLED", "OCR and AI are not set up");
+        ArchiveService.Located located = archive.locate(principal, documentId);
+        Path text = located.directory().resolve("." + located.pdfFile() + ".txt");
+        String content = Files.isRegularFile(text, LinkOption.NOFOLLOW_LINKS) ? Files.readString(text, StandardCharsets.UTF_8) : "";
+        if (content.isBlank()) throw new ApiException(409, "NO_TEXT", "This document has no text for the AI to read");
+        if (content.length() > MAX_CONTEXT_CHARS) content = content.substring(0, MAX_CONTEXT_CHARS);
+        Path taxonomy = properties.archiveRoot().resolve("manifests").resolve("taxonomy.json");
+        String vocabulary = Files.isRegularFile(taxonomy, LinkOption.NOFOLLOW_LINKS) ? Files.readString(taxonomy, StandardCharsets.UTF_8) : "{}";
+        String sha = located.view().sha256();
+        Boolean moving = jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM enrichment_jobs WHERE document_id=? AND kind='SUGGEST' AND status IN ('WAITING_FOR_AI','LEASED','SUBMITTED'))",
+                Boolean.class, documentId);
+        if (Boolean.TRUE.equals(moving)) throw new ApiException(409, "ALREADY_ASKED", "The AI is already on it");
+        String context = jdbc.queryForObject("""
+                SELECT jsonb_build_object('text', ?::text, 'truncated', ?, 'force', true,
+                       'types', ?::jsonb, 'sections', ?::jsonb,
+                       'tags', COALESCE((SELECT jsonb_agg(t->>'id') FROM jsonb_array_elements(?::jsonb->'tags') t
+                                          WHERE NOT (t->>'blocked')::boolean AND NOT (t->>'private')::boolean), '[]'::jsonb),
+                       'correspondents', COALESCE((SELECT jsonb_agg(DISTINCT sidecar->'issuer'->>'value') FROM archive_documents
+                                                    WHERE sidecar->'issuer'->>'value' IS NOT NULL), '[]'::jsonb))::text""",
+                String.class, content, content.length() >= MAX_CONTEXT_CHARS, ArchiveService.json(ArchiveService.TYPES),
+                ArchiveService.json(ArchiveService.SECTIONS.subList(0, ArchiveService.SECTIONS.size() - 1)), vocabulary);
+        int reused = jdbc.update("""
+                UPDATE enrichment_jobs SET status='WAITING_FOR_AI', context=?::jsonb, artifact_sha256=?, result=NULL, applied=NULL,
+                       lease_agent=NULL, lease_until=NULL, attempts=0, error_code=NULL, completed_at=NULL, deadline_at=NULL,
+                       expires_at=now()+interval '30 days'
+                 WHERE id=(SELECT id FROM enrichment_jobs WHERE document_id=? AND kind='SUGGEST' ORDER BY created_at DESC LIMIT 1)""",
+                context, sha, documentId);
+        if (reused == 0)
+            jdbc.update("INSERT INTO enrichment_jobs(id,document_id,artifact_sha256,kind,context) VALUES (?,?,?,'SUGGEST',?::jsonb)",
+                    UUID.randomUUID(), documentId, sha, context);
+        jdbc.update("INSERT INTO audit_events(actor_id,action,resource_type,resource_id,outcome,trace_id) VALUES (?,'AI_REFILE_REQUESTED','DOCUMENT',?,'SUCCESS',?)",
+                principal.userId(), documentId, UUID.randomUUID().toString());
+        return ResponseEntity.accepted().body("{\"status\":\"WAITING_FOR_AI\"}");
+    }
+
     /** A scan's AI job before (and after) its document is published, for its page. */
     @GetMapping(path = "/api/v1/scans/{scanId}/enrichment", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<String> scanEnrichment(@AuthenticationPrincipal GatewayPrincipal principal, @PathVariable String scanId) {
@@ -285,6 +326,21 @@ public class EnrichmentController {
     /** The released archive PDF of a job leased by this agent, hash-checked; never a quarantine path. */
     private Path leasedDocument(GatewayPrincipal principal, String jobId, String agentId) throws IOException {
         ownAgent(principal, agentId);
+        // An OCR job before publication reads the validated clean copy (final validation PASS, exact bytes).
+        List<String[]> staged = jdbc.query("""
+                SELECT a.storage_object, a.sha256 FROM enrichment_jobs j
+                  JOIN artifacts a ON a.scan_id=j.scan_id AND a.kind='CDR_OUTPUT' AND a.state='FINAL_VALIDATED' AND a.sha256=j.artifact_sha256
+                  JOIN final_validations f ON f.artifact_id=a.id AND f.verdict='PASS' AND f.output_sha256=a.sha256
+                 WHERE j.id=? AND j.document_id IS NULL AND j.kind='OCR' AND j.status='LEASED' AND j.lease_agent=? AND j.lease_until > now()""",
+                (rs, row) -> new String[]{rs.getString(1), rs.getString(2)}, parseJob(jobId), agentId);
+        if (!staged.isEmpty()) {
+            Path root = properties.storageRoot().resolve("cdr-output").toRealPath();
+            Path file = properties.storageRoot().resolve(staged.getFirst()[0]).normalize();
+            if (!file.startsWith(root) || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) || !file.toRealPath().equals(file))
+                throw new ApiException(409, "ARCHIVE_INTEGRITY", "Validated copy is not available");
+            if (!sha256Hex(file).equals(staged.getFirst()[1])) throw new ApiException(409, "ARCHIVE_INTEGRITY", "Validated bytes changed");
+            return file;
+        }
         List<String[]> rows = jdbc.query("""
                 SELECT d.archive_path, d.pdf_file, d.sha256 FROM enrichment_jobs j JOIN archive_documents d USING (document_id)
                  WHERE j.id=? AND j.status='LEASED' AND j.lease_agent=? AND j.lease_until > now() AND j.artifact_sha256=d.sha256""",
@@ -294,14 +350,18 @@ public class EnrichmentController {
         Path file = root.resolve(rows.getFirst()[0]).resolve(rows.getFirst()[1]).normalize();
         if (!file.startsWith(root) || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) || !file.toRealPath().equals(file))
             throw new ApiException(409, "ARCHIVE_INTEGRITY", "Archived file is not available");
+        if (!sha256Hex(file).equals(rows.getFirst()[2]))
+            throw new ApiException(409, "ARCHIVE_INTEGRITY", "Archived bytes do not match the index");
+        return file;
+    }
+
+    private static String sha256Hex(Path file) throws IOException {
         MessageDigest digest;
         try { digest = MessageDigest.getInstance("SHA-256"); } catch (NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
         try (InputStream input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
             byte[] buffer = new byte[1 << 16];
             for (int read; (read = input.read(buffer)) > 0; ) digest.update(buffer, 0, read);
         }
-        if (!HexFormat.of().formatHex(digest.digest()).equals(rows.getFirst()[2]))
-            throw new ApiException(409, "ARCHIVE_INTEGRITY", "Archived bytes do not match the index");
-        return file;
+        return HexFormat.of().formatHex(digest.digest());
     }
 }

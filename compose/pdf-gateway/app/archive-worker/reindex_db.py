@@ -1,6 +1,6 @@
 """Rebuild the PostgreSQL archive index from the archive's sidecars alone.
 
-Used after database loss: every valid document directory becomes an
+Used after database loss (and after a layout migration): every valid document becomes an
 archive_documents/archive_versions row. Links to scans and artifacts are kept
 only when those rows still exist; otherwise the document is visible to
 administrators until ownership is reassigned. Invalid documents are reported,
@@ -11,19 +11,19 @@ from __future__ import annotations
 
 import json
 
-from archive import SIDECAR, Archive
+from archive import Archive
 
 
 def reindex_db(archive: Archive, connection) -> dict:
     indexed, rejected = 0, {}
     with connection, connection.cursor() as cursor:
-        for directory in archive.document_dirs():
-            relative = directory.relative_to(archive.archive).as_posix()
-            problems = archive.check_document(directory)
+        for document in archive.documents():
+            relative = archive.relative(document.pdf)
+            problems = archive.check_document(document)
             if problems:
                 rejected[relative] = problems
                 continue
-            sidecar = json.loads((directory / SIDECAR).read_text(encoding="utf-8"))
+            sidecar = document.read()
             scan_id = sidecar["derivedFrom"]["scanId"]
             cursor.execute("SELECT 1 FROM scan_jobs WHERE id=%s", (scan_id,))
             scan = scan_id if cursor.fetchone() else None
@@ -34,7 +34,7 @@ def reindex_db(archive: Archive, connection) -> dict:
                                 title=EXCLUDED.title,category=EXCLUDED.category,review_state=EXCLUDED.review_state,
                                 current_version=EXCLUDED.current_version,metadata_revision=EXCLUDED.metadata_revision,
                                 sha256=EXCLUDED.sha256,bytes=EXCLUDED.bytes,sidecar=EXCLUDED.sidecar,updated_at=now()""",
-                           (sidecar["documentId"], scan, relative, sidecar["relativePdfPath"], sidecar["title"],
+                           (sidecar["documentId"], scan, sidecar["archivePath"], sidecar["relativePdfPath"], sidecar["title"],
                             sidecar["organization"]["category"], sidecar["organization"]["reviewState"], sidecar["artifactVersion"],
                             sidecar["metadataRevision"], sidecar["integrity"]["sha256"], sidecar["integrity"]["bytes"], json.dumps(sidecar)))
             cursor.execute("SELECT id FROM artifacts WHERE sha256=%s AND scan_id=%s AND kind IN ('CDR_OUTPUT','EMBEDDED_METADATA')",

@@ -101,7 +101,7 @@ try:
     check("XSS payload rendered as text, no element created", len(listing.find_elements(By.TAG_NAME, "img")) == 0)
     check("one list with ready and held files", "Ready" in listing.text and "Held" in listing.text)
     check("archived files show their title and folder", "Internet Invoice - October 2026" in listing.text
-          and "Finance › 2026 › Invoices" in listing.text, listing.text)
+          and "Finance › Example Telecom" in listing.text, listing.text)
     driver.save_screenshot(str(SHOTS / "desktop-documents.png"))
 
     # Add files: choosing a file starts it at once (archive and Paperless, no options to pick).
@@ -139,27 +139,40 @@ try:
     check("the button is gone once requested", not driver.find_elements(By.CSS_SELECTOR, "[data-testid=send-to-paperless]"))
 
     # Edit tags (If-Match CAS via the archive worker); the PDF stays unchanged.
-    driver.find_element(By.XPATH, "//button[text()='Edit']").click()
-    fields = wait(driver, lambda d: d.find_elements(By.CSS_SELECTOR, "form input") or False)
-    fields[1].clear()
-    fields[1].send_keys("finance, internet, invoice, paid")
+    driver.find_element(By.CSS_SELECTOR, "[data-testid=edit]").click()
+    wait(driver, ec.presence_of_element_located((By.CSS_SELECTOR, "[data-testid=edit-form]")))
+
+    def field(label):
+        return driver.find_element(By.XPATH, f"//form[@data-testid='edit-form']//label[span[text()='{label}']]//input")
+    check("edit form offers every field", all(field(label) for label in ("Title", "From (correspondent)", "Date", "Number", "Amount", "Currency", "Tags"))
+          and driver.find_elements(By.CSS_SELECTOR, "select[name=documentType]") and driver.find_elements(By.CSS_SELECTOR, "select[name=section]"))
+    field("Tags").clear()
+    field("Tags").send_keys("finance, internet, invoice, paid")
+    field("Number").clear()
+    field("Number").send_keys("2026-10-4471")
     driver.find_element(By.XPATH, "//button[text()='Save']").click()
     wait(driver, lambda d: "paid" in d.find_element(By.CSS_SELECTOR, "[data-testid=copy-fields]").text, 30)
     driver.refresh()
     wait(driver, lambda d: d.find_elements(By.CSS_SELECTOR, "[data-testid=copy-fields]")
          and "paid" in d.find_element(By.CSS_SELECTOR, "[data-testid=copy-fields]").text)
-    check("tag edit persisted", True)
+    check("tag and number edit persisted", "2026-10-4471" in driver.find_element(By.CSS_SELECTOR, "[data-testid=copy-fields]").text)
+    check("edited by a person shows as filed by you", "Filed by you" in driver.find_element(By.CSS_SELECTOR, "[data-testid=filed-by]").text)
+    view = driver.find_element(By.CSS_SELECTOR, "[data-testid=view-pdf]")
+    check("view opens the clean copy inline in a new tab", view.get_attribute("href").endswith("/file?view=true")
+          and view.get_attribute("target") == "_blank" and "/quarantine" not in view.get_attribute("href"))
 
     # Held files: the list's filter, then the admin deletes the original from its page.
     driver.get(BASE + "/documents?show=held")
     text_present(driver, HOSTILE)
     driver.find_element(By.PARTIAL_LINK_TEXT, HOSTILE).click()
     text_present(driver, "Held: not released")
-    driver.find_element(By.XPATH, "//button[text()='Delete original']").click()
+    driver.find_element(By.XPATH, "//summary[contains(., 'Delete')]").click()
+    driver.find_element(By.CSS_SELECTOR, "[data-testid=delete]").click()
     wait(driver, ec.alert_is_present()).accept()
-    wait(driver, lambda d: "show=held" in d.current_url)
+    wait(driver, lambda d: d.current_url.endswith("/documents"))
+    driver.get(BASE + "/documents?show=held")
     text_present(driver, "Nothing matches.")
-    check("held original deleted from the UI", True)
+    check("held document deleted everywhere from the UI", True)
 
     # Old addresses still lead to the right pages.
     driver.get(BASE + "/archive/doc-01J00000000000000000000060")
@@ -235,7 +248,7 @@ with sync_playwright() as playwright:
     check("mobile navigation shown, desktop navigation hidden",
           page.is_visible("nav[aria-label='Main mobile']") and not page.is_visible("nav[aria-label='Main']"))
     targets = {"add": ("/", "Add PDF files"), "documents": ("/documents", "invoice-en.pdf"),
-               "document": ("/documents/scan-01J00000000000000000000060", "Download clean copy"), "system": ("/system", "Is it working?")}
+               "document": ("/documents/scan-01J00000000000000000000060", "Download"), "system": ("/system", "Is it working?")}
     for label, (path, marker) in targets.items():
         page.goto(BASE + path)
         page.wait_for_selector(f"text={marker}")

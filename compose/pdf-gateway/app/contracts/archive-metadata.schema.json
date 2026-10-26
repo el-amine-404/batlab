@@ -44,7 +44,9 @@
       "properties": {
         "writer": {"type": "string", "maxLength": 80},
         "fields": {"type": "array", "uniqueItems": true, "items": {"enum": ["Title", "Author", "Subject", "Keywords", "Producer"]}},
-        "linearized": {"type": "boolean"}
+        "linearized": {"type": "boolean"},
+        "values": {"type": "object", "maxProperties": 8, "additionalProperties": {"type": "string", "maxLength": 500},
+                   "description": "The exact values written into the PDF, by field name"}
       }
     },
     "textExtraction": {

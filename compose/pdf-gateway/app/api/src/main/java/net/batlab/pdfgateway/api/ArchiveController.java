@@ -54,8 +54,19 @@ public class ArchiveController {
     }
 
     @GetMapping("/{documentId}/file")
-    ResponseEntity<FileSystemResource> file(@AuthenticationPrincipal GatewayPrincipal principal, @PathVariable String documentId) throws IOException {
+    ResponseEntity<FileSystemResource> file(@AuthenticationPrincipal GatewayPrincipal principal, @PathVariable String documentId,
+                                            @RequestParam(defaultValue = "false") boolean view) throws IOException {
         Path pdf = archive.verifiedPdf(principal, documentId);
+        if (view) {
+            // The clean copy only (validated: page images and an invisible text layer, no scripts, links
+            // or forms), shown by the browser's own PDF viewer; never framed, sniffed or cached.
+            return ResponseEntity.ok().contentType(MediaType.APPLICATION_PDF)
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + pdf.getFileName().toString().replaceAll("[^A-Za-z0-9._ -]", "_") + "\"")
+                    .header("X-Content-Type-Options", "nosniff")
+                    .header("Content-Security-Policy", "default-src 'none'; object-src 'none'; frame-ancestors 'none'")
+                    .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                    .body(new FileSystemResource(pdf));
+        }
         return download(ResponseEntity.ok().contentType(MediaType.APPLICATION_PDF), pdf.getFileName().toString())
                 .body(new FileSystemResource(pdf));
     }
@@ -75,7 +86,7 @@ public class ArchiveController {
         return archive.edit(principal, documentId, editId);
     }
 
-    /** Approved files are only ever downloads: never rendered inline, sniffed or cached. */
+    /** Downloads: never rendered inline, sniffed or cached. */
     private static ResponseEntity.BodyBuilder download(ResponseEntity.BodyBuilder builder, String filename) {
         String ascii = filename.replaceAll("[^A-Za-z0-9._ -]", "_");
         String encoded = URLEncoder.encode(filename, StandardCharsets.UTF_8).replace("+", "%20");

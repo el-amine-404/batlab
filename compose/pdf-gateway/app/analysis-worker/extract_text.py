@@ -2,7 +2,7 @@
 """Bounded native-text extraction from a quarantined original.
 
 The text is untrusted data used only for deterministic classification and the
-archive's content.txt; it never influences security decisions. pdftotext runs
+archive's text file; it never influences security decisions. pdftotext runs
 under the same rlimits as the other analysis engines, in the networkless,
 read-only analysis container. Failure means "no text", not a scan failure.
 

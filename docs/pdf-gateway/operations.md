@@ -33,7 +33,9 @@ code in `compose/pdf-gateway/app`). It runs on lab2 with the host CDR provider.
    u, _ = User.objects.get_or_create(username="pdf-gateway")
    u.set_unusable_password(); u.is_staff = u.is_superuser = False; u.save()
    codes = ["add_document", "view_document", "change_document", "view_tag", "add_tag",
-            "view_correspondent", "add_correspondent", "view_documenttype", "add_documenttype",
+            "view_correspondent", "add_correspondent", "change_correspondent",
+            "view_documenttype", "add_documenttype", "change_documenttype", "change_tag",
+            "delete_document", "view_note", "add_note",
             "view_customfield", "add_customfield", "view_paperlesstask"]
    u.user_permissions.set(Permission.objects.filter(codename__in=codes))
    print(Token.objects.get_or_create(user=u)[0].key)'
@@ -109,6 +111,30 @@ keeps its filing; the AI's answer is then only a suggestion.
    The lighter `qwen/qwen3-4b-2507` (`PDF_GATEWAY_LLM_MODEL`, with
    `PDF_GATEWAY_LLM_CONTEXT=4096`) fits the GPU alone and takes ~17 s.
 
+## The archive folder
+
+`/mnt/storage/data/documents/pdf-archive/archive` is meant to be browsed:
+
+```text
+Finance/beIN Sports/2026-06-10 Facture beIN Sports - abonnement 12 mois.pdf
+Identity/2021-03-04 Carte nationale d'identite.pdf
+Unsorted/2026-10-26 Scanned document.pdf
+```
+
+- A section, then the correspondent (left out when there is none), then the
+  document's date and title. A document nothing filed goes to `Unsorted`, dated the
+  day it arrived. Names are plain ASCII; the same name twice gets ` (2)`.
+- Beside each PDF, two hidden files: `.<name>.pdf.json` (its metadata, hash and
+  history; the archive's source of truth) and `.<name>.pdf.txt` (its text). Keep
+  them with the PDF when copying by hand.
+- Editing the section, correspondent, date or title in the app moves the PDF.
+- Don't add, rename or move files here by hand: `verify` reports a PDF without its
+  sidecar. Upload instead.
+- An archive from before 2026-10-26 (a folder per document, named `... [doc-...]`)
+  is moved to this layout when the archive worker starts. By hand:
+  `docker exec pdf-gateway-archive python /opt/pdf-gateway/pdf_archive.py --root /var/lib/pdf-archive migrate-layout`
+  lists the moves; `--apply` makes them; then `reindex-db`.
+
 ## What the PDF carries
 
 The clean copy is each page redrawn as a lossless 150-DPI image with an invisible
@@ -118,6 +144,39 @@ Producer "PDF Gateway"; no Creator, dates or versions; saved linearized (fast we
 view). Paperless keeps such a file exactly as it is (it counts as born-digital, so
 Paperless makes no re-encoded copy of its own) and gets the title, correspondent,
 document type, date and tags.
+
+## Changing, re-running and deleting
+
+- **Edit** (a document's page) changes any field: title, correspondent, type, date,
+  number, amount, section, tags. The document is filed again (folder and file name
+  follow), Paperless is updated, and a **new version of the PDF** with those values is
+  written onto the validated clean copy, checked again by final validation, and only
+  then replaces the current one (Paperless receives it as a new version). If that
+  check fails, the current version stays.
+- **Re-run the AI** asks the laptop again; its checked answer is applied the same way.
+- **Delete everywhere** removes the archived copy, the original in quarantine, every
+  stage's files and records, and moves the Paperless copy to Paperless's trash. Your
+  own file on your computer is never touched. Each stage deletes its own files
+  (`pdf.gateway.deleted.<stage>.v1`), so no part of the gateway gets more rights.
+- The **same file uploaded again** is not a second document: the upload says "Already
+  in your archive" and links to it.
+- File and folder names are plain ASCII (accents dropped); titles keep accents with
+  plain punctuation. Nothing in the PDF names the software (no Producer or Creator).
+
+## Discord
+
+`DISCORD_WEBHOOK_DOCUMENTS` (compose/.env) is the `documents` channel in Apprise
+(`make up STACK=apprise` after changing it). The `notifier` service sends one card
+when a file arrives and one when it is done (ready with its folder and Paperless
+result, held, blocked or failed), each linking to the file's page.
+
+## In Paperless
+
+The gateway sets title, correspondent, document type, date, tags and the searchable
+content (the original's own text, or the laptop's OCR for scans), and leaves one note
+saying how the file was checked. It does not use Paperless's **storage path** (where
+Paperless keeps its own copy on disk; the gateway's archive is already organised) or
+**ASN** (archive serial number, for numbering paper documents in a binder).
 
 ## Signing in
 
@@ -129,8 +188,8 @@ and `api_tokens` (SHA-256 only), as in step 6.
 
 restic (`restic/`) keeps:
 
-- `/mnt/storage/data/documents/pdf-archive`: the archive, PDFs with
-  `metadata.json` and `content.txt`. This is the data that matters; it is readable
+- `/mnt/storage/data/documents/pdf-archive`: the archive, PDFs with their hidden
+  sidecar and text beside them. This is the data that matters; it is readable
   without the gateway.
 - `/mnt/docker-volumes/database-dumps/pdf-gateway.dump`: a `pg_dump` made before
   each snapshot (`restic/scripts/dump-databases.sh`), and the raw database folder.

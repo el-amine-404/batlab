@@ -1,12 +1,15 @@
 """Portable document archive: crash-safe publication, verification and recovery.
 
-The archive directory tree is the source of truth. Each document directory holds
-the approved PDF, an authoritative metadata.json sidecar and optional content.txt.
-PostgreSQL, the manifest and any catalog are rebuildable from sidecars alone.
+The archive directory tree is the source of truth: folders of PDFs a person can
+browse, each PDF with two hidden files beside it, its authoritative sidecar and
+(optionally) its text. PostgreSQL, the manifest and any catalog are rebuildable
+from the sidecars alone.
 
 Layout under ROOT (all on one filesystem):
-  archive/<archivePath>/{<file>.pdf, metadata.json[, content.txt]}
-  staging/        private, invisible to readers; atomically renamed into archive/
+  archive/<Section>/<Correspondent>/<YYYY-MM-DD Title>.pdf
+          ... /.<YYYY-MM-DD Title>.pdf.json   sidecar (metadata, integrity)
+          ... /.<YYYY-MM-DD Title>.pdf.txt    text (search, the AI)
+  staging/        private, invisible to readers; renamed into archive/
   manifests/      archive-manifest.jsonl (append-only event log), taxonomy.json
 """
 
@@ -32,6 +35,7 @@ from pathlib import Path
 
 import jsonschema
 
+# The first layout's names (one folder per document); migrate_layout() moves such documents.
 SIDECAR = "metadata.json"
 TEXT = "content.txt"
 SCHEMA_VERSION = "1.0.0"
@@ -42,6 +46,8 @@ MAX_COMPONENT_BYTES = 80
 MAX_ARCHIVE_PATH = 200
 MAX_TEXT_BYTES = 2 * 1024 * 1024
 STAGING_GRACE_SECONDS = 3600
+from organize import plain_punctuation  # noqa: E402  (shared with the metadata writer)
+
 RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
 UNSAFE = re.compile(r'[\x00-\x1f\x7f<>:"/\\|?*  ‪-‮⁦-⁩﻿]')
 DOCUMENT_ID = re.compile(r"^doc-[0-9A-HJKMNP-TV-Z]{26}$")
@@ -59,9 +65,17 @@ class ArchiveError(Exception):
 
 # ---------------------------------------------------------------- paths
 
+LIGATURES = {"œ": "oe", "Œ": "OE", "æ": "ae", "Æ": "AE", "ß": "ss", "ø": "o", "Ø": "O", "ł": "l", "Ł": "L", "đ": "d", "Đ": "D"}
+
+
 def safe_component(text: str | None, fallback: str, max_bytes: int = MAX_COMPONENT_BYTES) -> str:
-    """Render untrusted text as one portable path component (Linux/Windows/macOS)."""
-    value = unicodedata.normalize("NFC", text or "")
+    """Render untrusted text as one portable path component: plain ASCII letters, digits and
+    - _ ( ) & ' . , (accents dropped: "Reçu" -> "Recu"), safe on Linux, Windows and macOS."""
+    value = plain_punctuation(unicodedata.normalize("NFC", text or ""))
+    for letter, plain in LIGATURES.items():
+        value = value.replace(letter, plain)
+    value = "".join(ch for ch in unicodedata.normalize("NFKD", value) if not unicodedata.combining(ch))
+    value = re.sub(r"[^A-Za-z0-9 _\-()&'.,]", " ", value)
     value = UNSAFE.sub(" ", value)
     value = re.sub(r"\s+", " ", value).strip(" .")
     while len(value.encode("utf-8")) > max_bytes:
@@ -71,32 +85,6 @@ def safe_component(text: str | None, fallback: str, max_bytes: int = MAX_COMPONE
     if value.split(".")[0].upper() in RESERVED:
         value = f"{value}_"
     return value
-
-
-def document_paths(sidecar: dict) -> tuple[str, str]:
-    """Return (archivePath, pdf filename) from validated organisation fields."""
-    org = sidecar["organization"]
-    category = org["category"]
-    date = (sidecar.get("documentDate") or {}).get("value")
-    issuer = (sidecar.get("issuer") or {}).get("value")
-    doc_id = sidecar["documentId"]
-    folder_type = safe_component(org.get("folder") or "", "General", 40)
-    if category == "Unsorted" or not date:
-        year = (date or sidecar["createdAt"])[:4]
-        folder = f"Unsorted/{year}"
-        parts = [date or "undated"] + ([safe_component(issuer, "", 40)] if issuer else []) + [safe_component(sidecar["title"], doc_id, 60)]
-        stem = " - ".join(parts)
-    else:
-        folder = f"{category}/{date[:4]}/{folder_type}"
-        title = safe_component(sidecar["title"], "Document", 60)
-        # "2026-06-10 - beIN Sports - Facture" but not "beIN Sports - Facture beIN Sports …".
-        named = not issuer or issuer.casefold() in sidecar["title"].casefold()
-        stem = f"{date} - {title}" if named else f"{date} - {safe_component(issuer, '', 40)} - {title}"
-    stem = safe_component(stem, doc_id, 120)
-    archive_path = f"{folder}/{stem} [{doc_id}]"
-    if len(archive_path) > MAX_ARCHIVE_PATH:
-        archive_path = f"{folder}/{safe_component(stem, doc_id, MAX_ARCHIVE_PATH - len(folder) - 40)} [{doc_id}]"
-    return archive_path, f"{stem}.pdf"
 
 
 def _inside(root: Path, candidate: Path) -> bool:
@@ -159,6 +147,73 @@ def schema_errors(sidecar: dict) -> list[str]:
                   for error in validator().iter_errors(sidecar))
 
 
+def sidecar_name(pdf_name: str) -> str:
+    return f".{pdf_name}.json"
+
+
+def text_name(pdf_name: str) -> str:
+    return f".{pdf_name}.txt"
+
+
+SIDECAR_FILE = re.compile(r"^\.(.+\.pdf)\.json$")
+
+
+def document_paths(sidecar: dict) -> tuple[str, str]:
+    """(archivePath, file name) from the organisation fields, before collisions are resolved.
+
+    Section/Correspondent/YYYY-MM-DD Title.pdf; a document without a correspondent sits in
+    its section; one nothing filed goes to Unsorted. The date is the document's own, or the
+    day it arrived. Names are plain ASCII (safe_component)."""
+    category = sidecar["organization"]["category"]
+    issuer = (sidecar.get("issuer") or {}).get("value")
+    date = (sidecar.get("documentDate") or {}).get("value") or sidecar["createdAt"][:10]
+    if category == "Unsorted":
+        folder = "Unsorted"
+    elif issuer:
+        folder = f"{category}/{safe_component(issuer, 'Other', 60)}"
+    else:
+        folder = category
+    room = max(40, min(120, MAX_ARCHIVE_PATH - len(folder) - 12))
+    stem = safe_component(f"{date} {safe_component(sidecar['title'], 'Document', 100)}", date, room)
+    return folder, f"{stem}.pdf"
+
+
+@dataclass(frozen=True)
+class Document:
+    """Where one document lives: its PDF and, beside it, its hidden sidecar and text."""
+    sidecar: Path
+
+    @property
+    def folder(self) -> Path:
+        return self.sidecar.parent
+
+    @property
+    def name(self) -> str:
+        return SIDECAR_FILE.match(self.sidecar.name).group(1)
+
+    @property
+    def pdf(self) -> Path:
+        return self.folder / self.name
+
+    @property
+    def text(self) -> Path:
+        return self.folder / text_name(self.name)
+
+    @property
+    def staged_version(self) -> Path:
+        return self.folder / f".{self.name}.next"
+
+    def read(self) -> dict:
+        return json.loads(self.sidecar.read_text(encoding="utf-8"))
+
+
+def _write_replace(path: Path, data: bytes) -> None:
+    """Write a file atomically in its folder (hidden temporary, then rename)."""
+    temporary = path.with_name(f"{path.name}.tmp{secrets.token_hex(4)}")
+    write_file(temporary, data)
+    os.replace(temporary, path)
+
+
 # ---------------------------------------------------------------- archive root
 
 @dataclass
@@ -206,50 +261,105 @@ class Archive:
             handle.flush()
             os.fsync(handle.fileno())
 
-    def document_dirs(self):
-        for sidecar in sorted(self.archive.rglob(SIDECAR)):
-            if sidecar.is_file() and not sidecar.is_symlink():
-                yield sidecar.parent
+    # ------------------------------------------------------------ finding documents
 
-    def find(self, document_id: str) -> Path | None:
+    def documents(self):
+        """Every document's sidecar in the archive (whether or not its PDF is there)."""
+        for path in sorted(self.archive.rglob(".*.pdf.json")):
+            if SIDECAR_FILE.match(path.name) and path.is_file() and not path.is_symlink():
+                yield Document(path)
+
+    def find(self, document_id: str) -> Document | None:
         if not DOCUMENT_ID.match(document_id):
             raise ArchiveError("INVALID_DOCUMENT_ID")
-        # Literal suffix match: as a glob pattern "[...]" would be a character class.
-        suffix = f" [{document_id}]"
-        matches = [path for path in self.document_dirs() if path.name.endswith(suffix)]
+        matches = []
+        for document in self.documents():
+            try:
+                if document.read().get("documentId") == document_id:
+                    matches.append(document)
+            except (OSError, ValueError):
+                continue
         if len(matches) > 1:
             raise ArchiveError("DUPLICATE_DOCUMENT_ID", document_id)
         return matches[0] if matches else None
 
+    def relative(self, path: Path) -> str:
+        return path.relative_to(self.archive).as_posix()
+
+    def _staged_publication(self, document: Document) -> Path | None:
+        """The staged PDF of a publication that has not moved it in yet, if any."""
+        try:
+            sidecar = document.read()
+        except (OSError, ValueError):
+            return None
+        for stage in self.staging.glob(f"{sidecar.get('documentId')}.*"):
+            if (stage / document.name).is_file() and sha256_file(stage / document.name) == sidecar.get("integrity", {}).get("sha256"):
+                return stage / document.name
+        return None
+
+    def _place(self, folder: str, name: str, document_id: str) -> str:
+        """A free file name in folder: name, else "name (2).pdf"... A document's own files count as free."""
+        stem = name[:-4]
+        for number in range(1, 1000):
+            candidate = name if number == 1 else f"{stem} ({number}).pdf"
+            pdf, sidecar = self.archive / folder / candidate, self.archive / folder / sidecar_name(candidate)
+            owner = None
+            if sidecar.exists():
+                try:
+                    owner = json.loads(sidecar.read_text(encoding="utf-8")).get("documentId")
+                except (OSError, ValueError):
+                    owner = "?"
+            if owner == document_id or (owner is None and not pdf.exists()):
+                return candidate
+        raise ArchiveError("PATH_COLLISION", f"{folder}/{name}")
+
+    def _make_folders(self, folder: Path) -> None:
+        if not _inside(self.archive, folder):
+            raise ArchiveError("PATH_COLLISION", str(folder))
+        created = []
+        for ancestor in reversed([folder, *folder.parents]):
+            if _inside(self.archive, ancestor) and not ancestor.exists():
+                ancestor.mkdir(mode=0o755)
+                created.append(ancestor)
+        for directory in created:
+            fsync_dir(directory.parent)
+
+    def _prune(self, folder: Path) -> None:
+        """Remove folders left empty, up to the archive root."""
+        while folder != self.archive and _inside(self.archive, folder) and folder.is_dir() and not any(folder.iterdir()):
+            folder.rmdir()
+            folder = folder.parent
+        if folder.is_dir():
+            fsync_dir(folder)
+
     # ------------------------------------------------------------ publish
 
-    def publish(self, pdf: Path, expected_sha256: str, sidecar: dict, text: str | None = None) -> Path:
-        """Publish one approved PDF + sidecar. Returns the published directory.
+    def publish(self, pdf: Path, expected_sha256: str, sidecar: dict, text: str | None = None) -> Document:
+        """Publish one approved PDF + sidecar. Returns the published document.
 
-        The caller supplies organisation and provenance fields; this method fills
-        paths and integrity, validates everything, and makes the document visible
-        only through a single atomic directory rename. It never overwrites.
+        The PDF, sidecar and text are prepared in staging. The text and the sidecar move
+        into the folder first (hidden), the PDF last, so a PDF is never visible without
+        its sidecar; repair() completes or removes what a crash leaves. Never overwrites.
         """
         sidecar = json.loads(json.dumps(sidecar))
-        archive_path, filename = document_paths(sidecar)
-        sidecar.update(schemaVersion=SCHEMA_VERSION, archivePath=archive_path, relativePdfPath=filename)
         sidecar.pop("relativeTextPath", None)
         if text is not None:
-            encoded = text.encode("utf-8")[:MAX_TEXT_BYTES]
-            text = encoded.decode("utf-8", "ignore")
-            sidecar["relativeTextPath"] = TEXT
+            text = text.encode("utf-8")[:MAX_TEXT_BYTES].decode("utf-8", "ignore")
         with self.lock():
             if self.find(sidecar["documentId"]) is not None:
                 raise ArchiveError("DOCUMENT_EXISTS", sidecar["documentId"])
-            target = self.archive / archive_path
-            if target.exists() or not _inside(self.archive, target):
-                raise ArchiveError("PATH_COLLISION", archive_path)
+            folder, base = document_paths(sidecar)
+            name = self._place(folder, base, sidecar["documentId"])
+            sidecar.update(schemaVersion=SCHEMA_VERSION, archivePath=folder, relativePdfPath=name)
+            if text is not None:
+                sidecar["relativeTextPath"] = text_name(name)
+            target = self.archive / folder
             stage = self.staging / f"{sidecar['documentId']}.{secrets.token_hex(6)}"
             stage.mkdir(mode=0o700)
             try:
                 digest = hashlib.sha256()
                 size = 0
-                with pdf.open("rb") as source, (stage / filename).open("xb") as handle:
+                with pdf.open("rb") as source, (stage / name).open("xb") as handle:
                     os.fchmod(handle.fileno(), 0o644)
                     while chunk := source.read(1024 * 1024):
                         digest.update(chunk)
@@ -264,31 +374,33 @@ class Archive:
                 if errors:
                     raise ArchiveError("SIDECAR_INVALID", "; ".join(errors)[:500])
                 if text is not None:
-                    write_file(stage / TEXT, text.encode("utf-8"))
-                write_file(stage / SIDECAR, canonical_json(sidecar))
-                problems = self.check_document(stage, sidecar_location=archive_path)
+                    write_file(stage / text_name(name), text.encode("utf-8"))
+                write_file(stage / sidecar_name(name), canonical_json(sidecar))
+                problems = self.check_document(Document(stage / sidecar_name(name)), location=folder)
                 if problems:
                     raise ArchiveError("STAGED_DOCUMENT_INVALID", "; ".join(problems)[:500])
-                os.chmod(stage, 0o755)
                 fsync_dir(stage)
-                parent = target.parent
-                created = []
-                for ancestor in reversed([parent, *parent.parents]):
-                    if _inside(self.archive, ancestor) and not ancestor.exists():
-                        ancestor.mkdir(mode=0o755)
-                        created.append(ancestor)
-                for directory in created:
-                    fsync_dir(directory.parent)
-                os.rename(stage, target)  # the only step that makes the document visible
-                fsync_dir(parent)
+                self._make_folders(target)
+                if text is not None:
+                    os.rename(stage / text_name(name), target / text_name(name))
+                os.rename(stage / sidecar_name(name), target / sidecar_name(name))
+                fsync_dir(target)
+                os.rename(stage / name, target / name)  # the step that makes the document visible
+                fsync_dir(target)
+                stage.rmdir()
             except BaseException:
+                if not (target / name).exists():
+                    for leftover in (target / sidecar_name(name), target / text_name(name)):
+                        if leftover.exists() and leftover.parent == target:
+                            leftover.unlink()
                 shutil.rmtree(stage, ignore_errors=True)
                 raise
+            document = Document(target / sidecar_name(name))
             self._append_manifest({"event": "PUBLISHED", "documentId": sidecar["documentId"],
                                    "artifactVersion": sidecar["artifactVersion"],
-                                   "metadataRevision": sidecar["metadataRevision"], "archivePath": archive_path,
-                                   "sha256": expected_sha256, "sidecarSha256": sha256_file(target / SIDECAR)})
-            return target
+                                   "metadataRevision": sidecar["metadataRevision"], "archivePath": folder,
+                                   "file": name, "sha256": expected_sha256, "sidecarSha256": sha256_file(document.sidecar)})
+            return document
 
     # ------------------------------------------------------------ sidecar edits
 
@@ -300,23 +412,21 @@ class Archive:
         if immutable & set(changes):
             raise ArchiveError("IMMUTABLE_FIELD", ",".join(sorted(immutable & set(changes))))
         with self.lock():
-            directory = self.find(document_id)
-            if directory is None:
+            document = self.find(document_id)
+            if document is None:
                 raise ArchiveError("DOCUMENT_NOT_FOUND", document_id)
-            current = json.loads((directory / SIDECAR).read_text(encoding="utf-8"))
+            current = document.read()
             if current["metadataRevision"] != expected_revision:
                 raise ArchiveError("REVISION_CONFLICT", f"current revision {current['metadataRevision']}")
             updated = {**current, **changes, "metadataRevision": expected_revision + 1, "updatedAt": now()}
             errors = schema_errors(updated)
             if errors:
                 raise ArchiveError("SIDECAR_INVALID", "; ".join(errors)[:500])
-            temporary = directory / f".{SIDECAR}.{secrets.token_hex(4)}"
-            write_file(temporary, canonical_json(updated))
-            os.replace(temporary, directory / SIDECAR)
-            fsync_dir(directory)
+            _write_replace(document.sidecar, canonical_json(updated))
+            fsync_dir(document.folder)
             self._append_manifest({"event": "SIDECAR_UPDATED", "documentId": document_id,
                                    "metadataRevision": updated["metadataRevision"],
-                                   "sidecarSha256": sha256_file(directory / SIDECAR)})
+                                   "sidecarSha256": sha256_file(document.sidecar)})
             return updated
 
     # ------------------------------------------------------------ re-filing
@@ -328,105 +438,133 @@ class Archive:
                    text: str | None = None, text_extraction: dict | None = None) -> dict:
         """Re-file a document (new organisation, so possibly a new folder and file name).
 
-        Recoverable at every step: (1) the new sidecar, which records the intended
-        location and name, replaces the old one in place; (2) the PDF is renamed;
-        (3) the directory is renamed. A crash after (1) or (2) leaves a document
-        whose sidecar points elsewhere, which repair() completes. The PDF bytes
-        never change.
+        Recoverable at every step: (1) the new sidecar, which records the intended folder and
+        name, replaces the old one in place; (2) the text and the PDF move; (3) the sidecar
+        moves last. A crash after (1) or (2) leaves a sidecar that names another place, which
+        repair() completes. The PDF bytes never change.
         """
         if set(changes) - self.REORGANISE_FIELDS:
             raise ArchiveError("FIELD_NOT_REORGANISABLE", ",".join(sorted(set(changes) - self.REORGANISE_FIELDS)))
         with self.lock():
-            directory = self.find(document_id)
-            if directory is None:
+            document = self.find(document_id)
+            if document is None:
                 raise ArchiveError("DOCUMENT_NOT_FOUND", document_id)
-            current = json.loads((directory / SIDECAR).read_text(encoding="utf-8"))
+            current = document.read()
             if current["metadataRevision"] != expected_revision:
                 raise ArchiveError("REVISION_CONFLICT", f"current revision {current['metadataRevision']}")
             updated = {**current, **changes, "metadataRevision": expected_revision + 1, "updatedAt": now()}
             for key in self.REORGANISE_FIELDS - {"title", "organization", "tags"}:
                 if key in changes and changes[key] is None:
                     updated.pop(key, None)
-            archive_path, filename = document_paths(updated)
-            updated.update(archivePath=archive_path, relativePdfPath=filename)
-            if text is not None:
-                updated["relativeTextPath"] = TEXT
-                if text_extraction:
-                    updated["textExtraction"] = text_extraction
+            folder, base = document_paths(updated)
+            name = self._place(folder, base, document_id)
+            updated.update(archivePath=folder, relativePdfPath=name)
+            if text is not None or current.get("relativeTextPath"):
+                updated["relativeTextPath"] = text_name(name)
+            if text is not None and text_extraction:
+                updated["textExtraction"] = text_extraction
             errors = schema_errors(updated)
             if errors:
                 raise ArchiveError("SIDECAR_INVALID", "; ".join(errors)[:500])
-            target = self.archive / archive_path
-            if target != directory and (target.exists() or not _inside(self.archive, target)):
-                raise ArchiveError("PATH_COLLISION", archive_path)
             if text is not None:
-                temporary = directory / f".{TEXT}.{secrets.token_hex(4)}"
-                write_file(temporary, text.encode("utf-8")[:MAX_TEXT_BYTES])
-                os.replace(temporary, directory / TEXT)
-            temporary = directory / f".{SIDECAR}.{secrets.token_hex(4)}"
-            write_file(temporary, canonical_json(updated))
-            os.replace(temporary, directory / SIDECAR)          # (1) intent recorded
-            fsync_dir(directory)
-            self._complete_move(directory, updated)              # (2) and (3)
-            self._append_manifest({"event": "REORGANISED", "documentId": document_id, "archivePath": archive_path,
-                                   "metadataRevision": updated["metadataRevision"],
-                                   "sidecarSha256": sha256_file(target / SIDECAR)})
+                _write_replace(document.text, text.encode("utf-8")[:MAX_TEXT_BYTES])
+            _write_replace(document.sidecar, canonical_json(updated))       # (1) intent recorded
+            fsync_dir(document.folder)
+            moved = self._complete_move(document, updated)               # (2) and (3)
+            self._append_manifest({"event": "REORGANISED", "documentId": document_id, "archivePath": folder, "file": name,
+                                   "metadataRevision": updated["metadataRevision"], "sidecarSha256": sha256_file(moved.sidecar)})
             return updated
 
-    def _complete_move(self, directory: Path, sidecar: dict) -> Path:
-        """Finish a recorded re-filing: rename the PDF, then the directory."""
-        wanted_pdf = directory / sidecar["relativePdfPath"]
-        if not wanted_pdf.exists():
-            candidates = [entry for entry in directory.iterdir() if entry.suffix == ".pdf" and entry.is_file()
-                          and not entry.is_symlink() and sha256_file(entry) == sidecar["integrity"]["sha256"]]
-            if len(candidates) != 1:
-                raise ArchiveError("MOVE_UNRECOVERABLE", "the recorded PDF bytes are not present exactly once")
-            os.rename(candidates[0], wanted_pdf)
-            fsync_dir(directory)
+    def _complete_move(self, document: Document, sidecar: dict) -> Document:
+        """Finish a recorded re-filing: move the text and the PDF, then the sidecar."""
         target = self.archive / sidecar["archivePath"]
-        if target == directory:
-            return directory
-        if target.exists() or not _inside(self.archive, target):
-            raise ArchiveError("PATH_COLLISION", sidecar["archivePath"])
-        created = []
-        for ancestor in reversed([target.parent, *target.parent.parents]):
-            if _inside(self.archive, ancestor) and not ancestor.exists():
-                ancestor.mkdir(mode=0o755)
-                created.append(ancestor)
-        for parent in created:
-            fsync_dir(parent.parent)
-        os.rename(directory, target)
-        fsync_dir(target.parent)
-        fsync_dir(directory.parent)
-        return target
+        name = sidecar["relativePdfPath"]
+        if target / name == document.pdf:
+            return document
+        self._make_folders(target)
+        new_pdf = target / name
+        if not new_pdf.exists():
+            if not document.pdf.is_file() or sha256_file(document.pdf) != sidecar["integrity"]["sha256"]:
+                raise ArchiveError("MOVE_UNRECOVERABLE", "the recorded PDF bytes are not where the sidecar was")
+            os.rename(document.pdf, new_pdf)
+        if document.text.exists() and not (target / text_name(name)).exists():
+            os.rename(document.text, target / text_name(name))
+        fsync_dir(target)
+        moved = Document(target / sidecar_name(name))
+        os.replace(document.sidecar, moved.sidecar)
+        fsync_dir(target)
+        self._prune(document.folder)
+        return moved
+
+    # ------------------------------------------------------------ new versions and deletion
+
+    def replace_pdf(self, document_id: str, expected_revision: int, pdf: Path, expected_sha256: str, changes: dict) -> dict:
+        """Publish a new version of a document's PDF (validated elsewhere; its sha256 is given).
+
+        Recoverable: (1) the new bytes are written beside the PDF as .<name>.next; (2) the
+        sidecar, now recording the new hash and version, replaces the old one; (3) the PDF is
+        replaced. A crash after (2) leaves a sidecar that names bytes found in .next, which
+        repair() puts in place; a crash before (2) leaves the old version intact.
+        """
+        with self.lock():
+            document = self.find(document_id)
+            if document is None:
+                raise ArchiveError("DOCUMENT_NOT_FOUND", document_id)
+            current = document.read()
+            if current["metadataRevision"] != expected_revision:
+                raise ArchiveError("REVISION_CONFLICT", f"current revision {current['metadataRevision']}")
+            data = pdf.read_bytes()
+            if hashlib.sha256(data).hexdigest() != expected_sha256:
+                raise ArchiveError("INPUT_HASH_MISMATCH", "the new version is not the validated bytes")
+            if document.staged_version.exists():
+                document.staged_version.unlink()
+            write_file(document.staged_version, data)                        # (1)
+            updated = {**current, **changes, "integrity": {"sha256": expected_sha256, "bytes": len(data)},
+                       "artifactVersion": current["artifactVersion"] + 1,
+                       "metadataRevision": expected_revision + 1, "updatedAt": now()}
+            errors = schema_errors(updated)
+            if errors:
+                document.staged_version.unlink()
+                raise ArchiveError("SIDECAR_INVALID", "; ".join(errors)[:500])
+            _write_replace(document.sidecar, canonical_json(updated))         # (2)
+            os.replace(document.staged_version, document.pdf)                # (3)
+            fsync_dir(document.folder)
+            self._append_manifest({"event": "VERSIONED", "documentId": document_id,
+                                   "artifactVersion": updated["artifactVersion"], "metadataRevision": updated["metadataRevision"],
+                                   "sha256": expected_sha256, "sidecarSha256": sha256_file(document.sidecar)})
+            return updated
+
+    def delete(self, document_id: str) -> str | None:
+        """Remove a document (PDF, sidecar, text) and the folders it leaves empty. Returns its path."""
+        with self.lock():
+            document = self.find(document_id)
+            if document is None:
+                return None
+            relative = self.relative(document.pdf)
+            for path in (document.pdf, document.text, document.staged_version, document.sidecar):
+                path.unlink(missing_ok=True)
+            self._prune(document.folder)
+            self._append_manifest({"event": "DELETED", "documentId": document_id, "archivePath": relative})
+            return relative
 
     # ------------------------------------------------------------ verification
 
-    def check_document(self, directory: Path, sidecar_location: str | None = None) -> list[str]:
-        """Problems with one document directory; empty means valid.
+    def check_document(self, document: Document, location: str | None = None) -> list[str]:
+        """Problems with one document; empty means valid.
 
-        sidecar_location is given for a staged directory, whose own name is
-        random until the atomic rename gives it the canonical name."""
+        location is given for a staged document, whose folder is not its final one."""
         problems: list[str] = []
         try:
-            sidecar = json.loads((directory / SIDECAR).read_text(encoding="utf-8"))
+            sidecar = document.read()
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
             return [f"SIDECAR_UNREADABLE: {type(error).__name__}"]
         problems += [f"SIDECAR_INVALID: {item}" for item in schema_errors(sidecar)]
         if problems:
             return problems
-        location = sidecar_location or directory.relative_to(self.archive).as_posix()
-        if sidecar["archivePath"] != location:
-            problems.append(f"LOCATION_MISMATCH: sidecar says {sidecar['archivePath']!r}")
-        if sidecar_location is None and not directory.name.endswith(f" [{sidecar['documentId']}]"):
-            problems.append("DIRECTORY_ID_MISMATCH")
-        allowed = {SIDECAR, sidecar["relativePdfPath"]} | ({TEXT} if sidecar.get("relativeTextPath") else set())
-        for entry in directory.iterdir():
-            if entry.name not in allowed:
-                problems.append(f"UNEXPECTED_ENTRY: {entry.name[:80]}")
-            elif entry.is_symlink() or not entry.is_file():
-                problems.append(f"NOT_A_REGULAR_FILE: {entry.name[:80]}")
-        pdf = directory / sidecar["relativePdfPath"]
+        where = location if location is not None else self.relative(document.folder)
+        if sidecar["archivePath"] != where or sidecar["relativePdfPath"] != document.name:
+            problems.append(f"LOCATION_MISMATCH: sidecar says {sidecar['archivePath']}/{sidecar['relativePdfPath']}")
+        pdf = document.pdf
         if not pdf.is_file() or pdf.is_symlink():
             problems.append("PDF_MISSING")
         else:
@@ -435,19 +573,25 @@ class Archive:
             with pdf.open("rb") as handle:
                 if handle.read(5) != b"%PDF-":
                     problems.append("PDF_SIGNATURE_INVALID")
-        if sidecar.get("relativeTextPath") and not (directory / TEXT).is_file():
-            problems.append("TEXT_MISSING")
+        if sidecar.get("relativeTextPath"):
+            if sidecar["relativeTextPath"] != text_name(document.name) or not document.text.is_file() or document.text.is_symlink():
+                problems.append("TEXT_MISSING")
+        if document.staged_version.exists():
+            problems.append("UNFINISHED_VERSION")
         return problems
 
     def verify(self) -> dict:
         """Check every published document; report, never modify."""
-        documents, failures, seen = 0, {}, {}
-        for directory in self.document_dirs():
+        documents, failures, seen, described = 0, {}, {}, set()
+        for document in self.documents():
+            relative = self.relative(document.pdf)
+            described.add(document.pdf)
+            problems = self.check_document(document)
+            if problems == ["PDF_MISSING"] and self._staged_publication(document):
+                continue  # a publication under way (or interrupted): never visible, not damage
             documents += 1
-            relative = directory.relative_to(self.archive).as_posix()
-            problems = self.check_document(directory)
             try:
-                doc_id = json.loads((directory / SIDECAR).read_text(encoding="utf-8"))["documentId"]
+                doc_id = document.read()["documentId"]
                 if doc_id in seen:
                     problems.append(f"DUPLICATE_DOCUMENT_ID: also at {seen[doc_id]}")
                 seen[doc_id] = relative
@@ -455,12 +599,14 @@ class Archive:
                 pass
             if problems:
                 failures[relative] = problems
-        # PDFs or directories without a sidecar are damage, not documents.
+        # PDFs without a sidecar are damage (or something added by hand), not documents.
         for pdf in self.archive.rglob("*.pdf"):
-            if not (pdf.parent / SIDECAR).exists():
-                failures.setdefault(pdf.parent.relative_to(self.archive).as_posix(), []).append("SIDECAR_MISSING")
-        damaged = sum(1 for key in failures if (self.archive / key / SIDECAR).exists())
-        return {"documents": documents, "valid": documents - damaged, "failures": failures, "ok": not failures}
+            if not pdf.name.startswith(".") and pdf not in described:
+                failures.setdefault(self.relative(pdf), []).append("SIDECAR_MISSING")
+        for legacy in self.archive.rglob(SIDECAR):
+            failures.setdefault(self.relative(legacy.parent), []).append("LEGACY_LAYOUT: run migrate-layout")
+        damaged = sum(1 for key, problems in failures.items() if "SIDECAR_MISSING" not in problems)
+        return {"documents": documents, "valid": documents - min(damaged, documents), "failures": failures, "ok": not failures}
 
     # ------------------------------------------------------------ reindex
 
@@ -471,26 +617,27 @@ class Archive:
         connection = sqlite3.connect(temporary)
         try:
             connection.executescript("""
-                CREATE TABLE documents (document_id TEXT PRIMARY KEY, archive_path TEXT NOT NULL UNIQUE,
+                CREATE TABLE documents (document_id TEXT PRIMARY KEY, archive_path TEXT NOT NULL,
                     pdf_file TEXT NOT NULL, title TEXT NOT NULL, category TEXT NOT NULL, review_state TEXT NOT NULL,
                     document_type TEXT, document_date TEXT, issuer TEXT, sha256 TEXT NOT NULL, bytes INTEGER NOT NULL,
                     artifact_version INTEGER NOT NULL, metadata_revision INTEGER NOT NULL, original_signed INTEGER NOT NULL,
-                    scan_id TEXT NOT NULL, policy_version TEXT NOT NULL, sidecar TEXT NOT NULL, updated_at TEXT NOT NULL);
+                    scan_id TEXT NOT NULL, policy_version TEXT NOT NULL, sidecar TEXT NOT NULL, updated_at TEXT NOT NULL,
+                    UNIQUE (archive_path, pdf_file));
                 CREATE TABLE tags (document_id TEXT NOT NULL, tag TEXT NOT NULL, PRIMARY KEY (document_id, tag));
                 CREATE TABLE content (document_id TEXT PRIMARY KEY, text TEXT NOT NULL);
                 CREATE TABLE rejected (archive_path TEXT PRIMARY KEY, problems TEXT NOT NULL);
             """)
             indexed = 0
-            for directory in self.document_dirs():
-                relative = directory.relative_to(self.archive).as_posix()
-                problems = self.check_document(directory)
+            for document in self.documents():
+                relative = self.relative(document.pdf)
+                problems = self.check_document(document)
                 if problems:
                     connection.execute("INSERT INTO rejected VALUES (?,?)", (relative, json.dumps(problems)))
                     continue
-                sidecar = json.loads((directory / SIDECAR).read_text(encoding="utf-8"))
+                sidecar = document.read()
                 try:
                     connection.execute("INSERT INTO documents VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
-                        sidecar["documentId"], relative, sidecar["relativePdfPath"], sidecar["title"],
+                        sidecar["documentId"], sidecar["archivePath"], sidecar["relativePdfPath"], sidecar["title"],
                         sidecar["organization"]["category"], sidecar["organization"]["reviewState"],
                         sidecar.get("documentType"), (sidecar.get("documentDate") or {}).get("value"),
                         (sidecar.get("issuer") or {}).get("value"), sidecar["integrity"]["sha256"],
@@ -503,27 +650,75 @@ class Archive:
                 connection.executemany("INSERT INTO tags VALUES (?,?)", [(sidecar["documentId"], tag) for tag in sidecar.get("tags", [])])
                 if sidecar.get("relativeTextPath"):
                     connection.execute("INSERT INTO content VALUES (?,?)", (sidecar["documentId"],
-                                       (directory / TEXT).read_text(encoding="utf-8", errors="replace")))
+                                       document.text.read_text(encoding="utf-8", errors="replace")))
                 indexed += 1
             rejected = connection.execute("SELECT count(*) FROM rejected").fetchone()[0]
             connection.commit()
         finally:
             connection.close()
         os.replace(temporary, catalog)
-        return {"indexed": indexed, "rejected": rejected, "catalog": str(catalog)}
+        return {"catalog": str(catalog), "indexed": indexed, "rejected": rejected}
 
     # ------------------------------------------------------------ repair
 
     def repair(self, apply: bool = False, grace_seconds: int = STAGING_GRACE_SECONDS) -> dict:
         """Report (and with apply, fix) crash leftovers. Never touches valid documents.
 
-        Fixable: abandoned staging directories (never visible), interrupted
-        re-filings (the sidecar already records the target), and published
-        documents missing from the manifest. Everything else is reported only.
+        Fixable: publications interrupted before the PDF moved in (finished from staging, or
+        removed if never visible), new versions interrupted after the sidecar changed,
+        re-filings interrupted after the sidecar recorded the new place, abandoned staging
+        directories, and published documents missing from the manifest.
         """
-        actions = {"staleStaging": [], "manifestMissing": [], "movesCompleted": [], "reportedOnly": {}}
+        actions = {"staleStaging": [], "manifestMissing": [], "movesCompleted": [], "versionsCompleted": [],
+                   "publishesCompleted": [], "orphansRemoved": [], "reportedOnly": {}}
         with self.lock():
             cutoff = time.time() - grace_seconds
+            for document in list(self.documents()):
+                try:
+                    sidecar = document.read()
+                except (OSError, ValueError):
+                    continue
+                if schema_errors(sidecar):
+                    continue
+                doc_id = sidecar["documentId"]
+                at_place = sidecar["archivePath"] == self.relative(document.folder) and sidecar["relativePdfPath"] == document.name
+                if at_place and not document.pdf.exists():
+                    # A publication that stopped before its PDF moved in: finish it from staging, or
+                    # (the PDF is gone with its stage) remove what was never visible.
+                    staged = self._staged_publication(document)
+                    if staged:
+                        actions["publishesCompleted"].append(doc_id)
+                        if apply:
+                            os.rename(staged, document.pdf)
+                            fsync_dir(document.folder)
+                    elif document.sidecar.stat().st_mtime < cutoff:
+                        actions["orphansRemoved"].append(doc_id)
+                        if apply:
+                            document.text.unlink(missing_ok=True)
+                            document.sidecar.unlink()
+                            self._prune(document.folder)
+                    continue
+                if document.staged_version.is_file() and not document.staged_version.is_symlink():
+                    if sha256_file(document.staged_version) == sidecar["integrity"]["sha256"]:
+                        actions["versionsCompleted"].append(doc_id)
+                        if apply:
+                            os.replace(document.staged_version, document.pdf)
+                            fsync_dir(document.folder)
+                    elif apply and document.pdf.is_file() and sha256_file(document.pdf) == sidecar["integrity"]["sha256"]:
+                        document.staged_version.unlink()  # written before the sidecar changed: the old version stands
+                if not at_place:
+                    actions["movesCompleted"].append(doc_id)
+                    if apply:
+                        try:
+                            self._complete_move(document, sidecar)
+                        except ArchiveError:
+                            actions["movesCompleted"].pop()
+            # A text moved in before its sidecar, by a publication that then stopped: never part of a document.
+            for text in self.archive.rglob(".*.pdf.txt"):
+                if not (text.parent / f"{text.name[:-4]}.json").exists() and text.lstat().st_mtime < cutoff:
+                    actions["orphansRemoved"].append(self.relative(text))
+                    if apply:
+                        text.unlink()
             for entry in self.staging.iterdir():
                 if entry.lstat().st_mtime < cutoff:
                     actions["staleStaging"].append(entry.name)
@@ -539,39 +734,80 @@ class Archive:
                         event = json.loads(line)
                     except json.JSONDecodeError:
                         continue  # a torn final line from a crash is ignored, then superseded
-                    if event.get("event") == "PUBLISHED":
+                    if event.get("event") in ("PUBLISHED", "MIGRATED"):
                         recorded.add(event.get("documentId"))
-            # Re-filings interrupted after the sidecar recorded the new location.
-            actions["movesCompleted"] = []
-            for directory in list(self.document_dirs()):
-                try:
-                    sidecar = json.loads((directory / SIDECAR).read_text(encoding="utf-8"))
-                except (OSError, ValueError):
-                    continue
-                if schema_errors(sidecar) or sidecar["archivePath"] == directory.relative_to(self.archive).as_posix():
-                    continue
-                actions["movesCompleted"].append(sidecar["documentId"])
-                if apply:
-                    try:
-                        self._complete_move(directory, sidecar)
-                    except ArchiveError:
-                        actions["movesCompleted"].pop()
             report = self.verify()
             actions["reportedOnly"] = report["failures"]
-            for directory in self.document_dirs():
-                relative = directory.relative_to(self.archive).as_posix()
-                if relative in report["failures"]:
+            for document in self.documents():
+                if self.relative(document.pdf) in report["failures"]:
                     continue
-                sidecar = json.loads((directory / SIDECAR).read_text(encoding="utf-8"))
+                sidecar = document.read()
                 if sidecar["documentId"] not in recorded:
                     actions["manifestMissing"].append(sidecar["documentId"])
                     if apply:
                         self._append_manifest({"event": "PUBLISHED", "documentId": sidecar["documentId"],
                                                "artifactVersion": sidecar["artifactVersion"],
                                                "metadataRevision": sidecar["metadataRevision"],
-                                               "archivePath": relative, "sha256": sidecar["integrity"]["sha256"],
-                                               "sidecarSha256": sha256_file(directory / SIDECAR), "recovered": True})
+                                               "archivePath": sidecar["archivePath"], "file": sidecar["relativePdfPath"],
+                                               "sha256": sidecar["integrity"]["sha256"],
+                                               "sidecarSha256": sha256_file(document.sidecar), "recovered": True})
         return {"applied": apply, **actions}
+
+    # ------------------------------------------------------------ migration from folder-per-document
+
+    def migrate_layout(self, apply: bool = False) -> dict:
+        """Move documents of the first layout (one folder per document: <file>.pdf, metadata.json,
+        content.txt, named "... [doc-...]") to Section/Correspondent/YYYY-MM-DD Title.pdf with hidden
+        sidecars. Each move: new sidecar first (hidden, new place), then text, then PDF, then the old
+        folder goes. Running it again finishes an interrupted move and changes nothing else."""
+        moved = []
+        with self.lock():
+            for legacy in sorted(self.archive.rglob(SIDECAR)):
+                directory = legacy.parent
+                try:
+                    current = json.loads(legacy.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                doc_id = current.get("documentId")
+                if not isinstance(doc_id, str) or not DOCUMENT_ID.match(doc_id):
+                    continue
+                existing = self.find(doc_id)
+                if existing is None:
+                    folder, base = document_paths(current)
+                    name = self._place(folder, base, doc_id)
+                else:
+                    folder, name = self.relative(existing.folder), existing.name
+                moved.append({"documentId": doc_id, "from": self.relative(directory), "to": f"{folder}/{name}"})
+                if not apply:
+                    continue
+                target = self.archive / folder
+                updated = {**current, "archivePath": folder, "relativePdfPath": name, "updatedAt": now(),
+                           "metadataRevision": current["metadataRevision"] + (0 if existing else 1)}
+                old_text = directory / TEXT
+                if current.get("relativeTextPath"):
+                    updated["relativeTextPath"] = text_name(name)
+                errors = schema_errors(updated)
+                if errors:
+                    raise ArchiveError("SIDECAR_INVALID", "; ".join(errors)[:500])
+                self._make_folders(target)
+                document = Document(target / sidecar_name(name))
+                if existing is None:
+                    _write_replace(document.sidecar, canonical_json(updated))
+                if old_text.exists():
+                    os.replace(old_text, document.text)
+                old_pdf = directory / current["relativePdfPath"]
+                if old_pdf.exists() and not document.pdf.exists():
+                    os.rename(old_pdf, document.pdf)
+                fsync_dir(target)
+                if document.pdf.exists():
+                    legacy.unlink()
+                    for leftover in directory.iterdir():
+                        if leftover.name.startswith(".metadata.json."):
+                            leftover.unlink()  # a temporary sidecar of the first layout
+                    self._prune(directory)
+                    self._append_manifest({"event": "MIGRATED", "documentId": doc_id, "archivePath": folder, "file": name,
+                                           "sidecarSha256": sha256_file(document.sidecar)})
+        return {"applied": apply, "documents": moved}
 
     # ------------------------------------------------------------ export / import
 
@@ -582,11 +818,11 @@ class Archive:
             raise ArchiveError("ARCHIVE_NOT_CLEAN", "run verify; export only from a verified archive")
         files = []
         with tarfile.open(bundle, "x", format=tarfile.PAX_FORMAT) as tar:
-            for directory in self.document_dirs():
-                sidecar = json.loads((directory / SIDECAR).read_text(encoding="utf-8"))
+            for document in self.documents():
+                sidecar = document.read()
                 if document_ids and sidecar["documentId"] not in document_ids:
                     continue
-                for entry in sorted(directory.iterdir()):
+                for entry in (document.pdf, document.sidecar, *([document.text] if sidecar.get("relativeTextPath") else [])):
                     name = f"documents/{sidecar['documentId']}/{entry.name}"
                     files.append({"path": name, "sha256": sha256_file(entry), "bytes": entry.stat().st_size})
                     tar.add(entry, arcname=name, recursive=False, filter=_normalise_member)
@@ -626,21 +862,28 @@ class Archive:
                         shutil.copyfileobj(source, handle)
                     if sha256_file(target) != expected[name]["sha256"]:
                         raise ArchiveError("BUNDLE_HASH_MISMATCH", name[:120])
-            for document in sorted(work.iterdir()):
-                sidecar = json.loads((document / SIDECAR).read_text(encoding="utf-8"))
-                if sidecar.get("documentId") != document.name:
-                    raise ArchiveError("BUNDLE_ID_MISMATCH", document.name)
-                existing = self.find(document.name)
+            for folder in sorted(work.iterdir()):
+                sidecars = [entry for entry in folder.iterdir() if SIDECAR_FILE.match(entry.name)]
+                legacy = folder / SIDECAR
+                source = sidecars[0] if len(sidecars) == 1 else legacy if legacy.exists() else None
+                if source is None:
+                    raise ArchiveError("BUNDLE_ID_MISMATCH", folder.name)
+                sidecar = json.loads(source.read_text(encoding="utf-8"))
+                if sidecar.get("documentId") != folder.name:
+                    raise ArchiveError("BUNDLE_ID_MISMATCH", folder.name)
+                existing = self.find(folder.name)
                 if existing is not None:
-                    current = json.loads((existing / SIDECAR).read_text(encoding="utf-8"))
-                    if current["integrity"]["sha256"] == sidecar["integrity"]["sha256"]:
-                        skipped.append(document.name)
+                    if existing.read()["integrity"]["sha256"] == sidecar["integrity"]["sha256"]:
+                        skipped.append(folder.name)
                         continue
-                    raise ArchiveError("DOCUMENT_CONFLICT", document.name)
-                text = (document / TEXT).read_text(encoding="utf-8") if sidecar.get("relativeTextPath") else None
-                pdf = document / sidecar["relativePdfPath"]
+                    raise ArchiveError("DOCUMENT_CONFLICT", folder.name)
+                text_file = folder / (sidecar.get("relativeTextPath") or "") if sidecar.get("relativeTextPath") else None
+                if text_file is not None and not text_file.is_file():
+                    text_file = folder / TEXT
+                text = text_file.read_text(encoding="utf-8") if text_file is not None and text_file.is_file() else None
+                pdf = folder / sidecar["relativePdfPath"]
                 self.publish(pdf, sidecar["integrity"]["sha256"], sidecar, text)
-                imported.append(document.name)
+                imported.append(folder.name)
         finally:
             shutil.rmtree(work, ignore_errors=True)
         return {"imported": imported, "skippedIdentical": skipped}

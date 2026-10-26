@@ -8,6 +8,7 @@
   pdf-archive --root ROOT import --bundle in.tar
   pdf-archive --root ROOT publish --pdf F --sha256 H --sidecar S.json [--text T]
   pdf-archive --root ROOT reindex-db      (PDF_GATEWAY_DATABASE_* from the environment)
+  pdf-archive --root ROOT migrate-layout [--apply]   (first layout -> Section/Correspondent; then reindex-db)
 
 Prints one JSON result. Exit 0 = ok, 1 = archive problems found, 2 = refused.
 """
@@ -36,6 +37,8 @@ def main() -> int:
     imported = commands.add_parser("import")
     imported.add_argument("--bundle", type=Path, required=True)
     commands.add_parser("reindex-db")
+    migrate = commands.add_parser("migrate-layout")
+    migrate.add_argument("--apply", action="store_true")
     publish = commands.add_parser("publish")
     publish.add_argument("--pdf", type=Path, required=True)
     publish.add_argument("--sha256", required=True)
@@ -67,12 +70,14 @@ def main() -> int:
                 result = reindex_db(archive, connection)
             finally:
                 connection.close()
+        elif args.command == "migrate-layout":
+            result = {**archive.migrate_layout(apply=args.apply), "ok": True}
         elif args.command == "import":
             result = {**archive.import_bundle(args.bundle), "ok": True}
         else:
             sidecar = json.loads(args.sidecar.read_text(encoding="utf-8"))
             text = args.text.read_text(encoding="utf-8") if args.text else None
-            result = {"published": str(archive.publish(args.pdf, args.sha256, sidecar, text)), "ok": True}
+            result = {"published": str(archive.publish(args.pdf, args.sha256, sidecar, text).pdf), "ok": True}
     except ArchiveError as error:
         print(json.dumps({"ok": False, "code": error.code, "detail": error.detail}))
         return 2

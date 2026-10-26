@@ -8,7 +8,9 @@ RUN python -m pip install --no-cache-dir --require-hashes -r /tmp/requirements.t
  && rm /tmp/requirements.txt \
  && groupadd --gid 10007 paperless-adapter \
  && useradd --uid 10007 --gid 10007 --no-create-home --shell /usr/sbin/nologin paperless-adapter
-COPY --chown=10007:10007 adapter.py /opt/pdf-gateway/adapter.py
+COPY --chown=10007:10007 adapter.py notifier.py /opt/pdf-gateway/
+# batlab's shared Apprise client (standard library only), for notifier.py.
+COPY --from=common --chown=10007:10007 batlab_common/notify.py /opt/pdf-gateway/notify.py
 USER 10007:10007
 WORKDIR /work
 ENTRYPOINT ["python", "/opt/pdf-gateway/adapter.py"]

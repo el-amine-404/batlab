@@ -59,6 +59,19 @@ DEFAULT_TAGS = (
     "membership", "donation", "refund", "payment")
 
 
+# Typographic punctuation a model (or a rule) may write, as plain ASCII. Titles keep
+# their letters (accents included); only these marks are replaced.
+PUNCTUATION = {"\u2013": "-", "\u2014": "-", "\u2012": "-", "\u2212": "-", "\u00b7": "-", "\u2022": "-",
+               "\u201c": "'", "\u201d": "'", "\u201e": "'", "\u00ab": "'", "\u00bb": "'", "\u2018": "'",
+               "\u2019": "'", "\u2026": "...", "\u00a0": " ", "\u202f": " "}
+
+
+def plain_punctuation(text: str) -> str:
+    for mark, plain in PUNCTUATION.items():
+        text = text.replace(mark, plain)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def default_taxonomy(updated_at: str) -> dict:
     return {"schemaVersion": "1.0.0", "revision": DEFAULT_TAGS_REVISION, "categories": CATEGORIES, "updatedAt": updated_at, "tags": [
         {"id": tag, "label": tag.replace("-", " ").capitalize(), "aliases": [], "private": False, "blocked": False}

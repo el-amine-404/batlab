@@ -1,9 +1,9 @@
 """Allowlisted embedded metadata for new, unsigned, already-sanitized PDFs.
 
-Writes only Title, Author, Subject, Keywords and a fixed Producer into the
+Writes only Title, Author, Subject and Keywords into the
 document information dictionary of a *copy* of a validated CDR output, saved
 linearized ("fast web view"; the page images are copied, not re-encoded). No
-Creator, dates or tool versions are written. Any existing
+Producer, Creator, dates or tool versions are written. Any existing
 info dictionary, XMP stream or catalog-level /Info is removed, and the file is
 rewritten in full (no incremental update), so no earlier metadata survives in
 an older revision. The result is a new artifact that must pass final
@@ -18,9 +18,9 @@ from pathlib import Path
 
 import pikepdf
 
-WRITER_VERSION = "metadata-writer-2"
-# Names no host, person or tool version.
-PRODUCER = "PDF Gateway"
+from organize import plain_punctuation
+
+WRITER_VERSION = "metadata-writer-3"
 TYPE_LABEL = {"invoice": "Invoice", "receipt": "Receipt", "bank_statement": "Bank statement", "payslip": "Payslip",
               "contract": "Contract", "tax_document": "Tax document", "insurance": "Insurance", "medical": "Medical",
               "identity_document": "Identity document", "certificate": "Certificate", "letter": "Letter",
@@ -31,7 +31,7 @@ CONTROL = re.compile(r"[\x00-\x1f\x7f  ‪-‮⁦-⁩﻿]")
 
 
 def clean(value: str, limit: int) -> str:
-    return re.sub(r"\s+", " ", CONTROL.sub(" ", value)).strip()[:limit]
+    return plain_punctuation(re.sub(r"\s+", " ", CONTROL.sub(" ", value)))[:limit]
 
 
 def fields_for(sidecar_fields: dict) -> dict[str, str]:
@@ -49,10 +49,10 @@ def fields_for(sidecar_fields: dict) -> dict[str, str]:
                (sidecar_fields.get("documentDate") or {}).get("value"),
                f"no. {sidecar_fields['reference']['value']}" if sidecar_fields.get("reference") else None]
     if any(subject):
-        values["/Subject"] = clean(" · ".join(part for part in subject if part), 200)
+        values["/Subject"] = clean(" - ".join(part for part in subject if part), 200)
     if sidecar_fields.get("tags"):
         values["/Keywords"] = clean(", ".join(sidecar_fields["tags"]), 500)
-    values["/Producer"] = PRODUCER
+    # No Producer or Creator: they would name the software that made the file.
     return values
 
 
