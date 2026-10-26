@@ -61,8 +61,10 @@ code in `compose/pdf-gateway/app`). It runs on lab2 with the host CDR provider.
 other local apps), on the host network because lab2's bridge has no DNS for
 builders. The first build (Maven, npm, Python wheels) is minutes of CPU on lab2;
 later ones are cached. Loading images built elsewhere does not avoid it (the
-build cache is not carried over). To keep lab2 cool on the first one, build one
-image at a time: `make build-pdf-gateway`.
+build cache is not carried over). `make up STACK=pdf-gateway` builds them one at a
+time, waiting while the CPU is above 75 °C (`make build-pdf-gateway` alone builds
+without starting), then starts the stack. After a `git pull`, the same command
+deploys the new version.
 
 ## Phones and PCs: trust the local CA once
 
