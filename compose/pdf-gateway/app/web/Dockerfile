@@ -1,6 +1,9 @@
 # syntax=docker/dockerfile:1.7
 FROM node:24.21.0-alpine3.24@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS build
-WORKDIR /src
+# Where the page is in the repo, beside lib/batlab-ui (the context "ui", the
+# frame shared by batlab's apps), so the relative paths hold in both.
+WORKDIR /batlab/compose/pdf-gateway/app/web
+COPY --from=ui . /batlab/lib/batlab-ui
 COPY package.json package-lock.json ./
 # The lockfile pins every package with an integrity hash.
 RUN npm ci --no-audit --no-fund
@@ -15,7 +18,7 @@ FROM caddy:2@sha256:f2a1290d0463aad60660d4ec134943f183ee2a5f6c3eb7bf32dd984f2f02
 # copy without it (cp does not carry file capabilities).
 RUN cp /usr/bin/caddy /usr/local/bin/caddy && chmod 0755 /usr/local/bin/caddy
 COPY Caddyfile /etc/caddy/Caddyfile
-COPY --from=build /src/dist /srv
+COPY --from=build /batlab/compose/pdf-gateway/app/web/dist /srv
 USER 10006:10006
 EXPOSE 8080
 CMD ["/usr/local/bin/caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]

@@ -98,29 +98,23 @@ driver = browser(1280, 800)
 try:
     login(driver)
     check("CSS applied under CSP", driver.execute_script(
-        "return getComputedStyle(document.body).backgroundColor") not in ("rgba(0, 0, 0, 0)", "transparent"))
+        "return getComputedStyle(document.documentElement).backgroundColor") not in ("rgba(0, 0, 0, 0)", "transparent")
+          and "Inter" in driver.execute_script("return getComputedStyle(document.body).fontFamily"))
     check("nothing kept in browser storage", driver.execute_script(
         "return localStorage.length + sessionStorage.length") == 0 and PASSWORD not in driver.page_source)
     # Admins see the people and can add one with a role.
-    driver.get(BASE + "/system")
+    driver.find_element(By.CSS_SELECTOR, "aside a[href='/settings']").click()
     wait(driver, lambda d: "admin" in d.find_element(By.CSS_SELECTOR, "[data-testid=people]").text)
-    driver.find_element(By.XPATH, "//button[text()='Add a person']").click()
-    form = driver.find_element(By.XPATH, "//button[text()='Add']/ancestor::form")
-    form.find_element(By.CSS_SELECTOR, "input[autocomplete=off]").send_keys("reader")
-    form.find_element(By.CSS_SELECTOR, "input[autocomplete=new-password]").send_keys("reader-password-1")
-    form.find_element(By.CSS_SELECTOR, "select").send_keys("Read-only")
+    driver.find_element(By.XPATH, "//button[contains(., 'Add a person')]").click()
+    form = driver.find_element(By.CSS_SELECTOR, "[data-testid=add-person]")
+    form.find_element(By.NAME, "new-username").send_keys("reader")
+    form.find_element(By.NAME, "new-person-password").send_keys("reader-password-1")
+    form.find_element(By.NAME, "new-role").send_keys("Read-only")
     form.find_element(By.XPATH, ".//button[text()='Add']").click()
     wait(driver, lambda d: "reader" in d.find_element(By.CSS_SELECTOR, "[data-testid=people]").text)
     check("an admin adds a person with a role", "reader" in driver.find_element(By.CSS_SELECTOR, "[data-testid=people]").text)
     driver.save_screenshot(str(SHOTS / "desktop-system-accounts.png"))
-    # The theme switch stores only an explicit choice, and only that.
-    driver.find_element(By.CSS_SELECTOR, "[data-testid=theme]").click()
-    stored = driver.execute_script("return Object.keys(localStorage).map(k => [k, localStorage.getItem(k)])")
-    check("theme choice is the only thing stored", stored == [["pgw-theme", "light"]], stored)
-    driver.find_element(By.CSS_SELECTOR, "[data-testid=theme]").click()
-    check("dark theme applies", driver.execute_script("return document.documentElement.classList.contains('dark')"))
-    driver.find_element(By.CSS_SELECTOR, "[data-testid=theme]").click()
-    check("back to the system theme stores nothing", driver.execute_script("return localStorage.length") == 0)
+    check("an admin's action is confirmed by a toast", wait(driver, lambda d: "reader can sign in now" in d.find_element(By.CSS_SELECTOR, "[data-sonner-toaster]").text))
     check("session cookie not readable by scripts", driver.execute_script("return document.cookie") == "")
 
     # Documents: one list for every upload; the hostile file name is shown as text, never interpreted.
@@ -137,14 +131,15 @@ try:
     driver.save_screenshot(str(SHOTS / "desktop-documents.png"))
 
     # The logo and the name lead to the main page.
-    driver.find_element(By.CSS_SELECTOR, "[data-testid=home-link]").click()
+    driver.find_element(By.CSS_SELECTOR, "aside a[href='/']").click()
     wait(driver, lambda d: d.current_url.rstrip("/") == BASE.rstrip("/"))
     check("logo and name go to the main page", "Add PDF files" in body(driver))
 
-    # Sidebar: the archive's sections and correspondents, with counts; picking one filters the list.
+    # Beside the documents: the archive's sections and correspondents, with counts; picking one filters the list.
+    driver.find_element(By.CSS_SELECTOR, "aside a[href='/documents']").click()
     tree = wait(driver, ec.presence_of_element_located((By.CSS_SELECTOR, "[data-testid=browse-tree]")))
     wait(driver, lambda d: "Finance" in d.find_element(By.CSS_SELECTOR, "[data-testid=browse-tree]").text)
-    check("sidebar lists the sections with counts", "Finance" in tree.text and "Everything" in tree.text, tree.text)
+    check("the documents' tree lists the sections with counts", "Finance" in tree.text and "Everything" in tree.text, tree.text)
     finance = tree.find_element(By.CSS_SELECTOR, "[data-section=Finance]")
     finance.find_element(By.CSS_SELECTOR, "button[aria-expanded]").click()
     finance.find_element(By.PARTIAL_LINK_TEXT, "Example Telecom").click()
@@ -168,9 +163,9 @@ try:
     check("text search finds a phrase in the document", "29.99" in snippet.text or "Total" in snippet.text, snippet.text)
 
     # Needs attention: the held file, counted in the navigation.
-    count = driver.find_element(By.CSS_SELECTOR, "[data-testid=attention-count]")
+    count = driver.find_element(By.CSS_SELECTOR, "aside a[href='/attention'] span[title]")
     check("navigation counts what needs attention", int(count.text) >= 1, count.text)
-    driver.find_element(By.CSS_SELECTOR, "[data-testid=nav-attention]").click()
+    driver.find_element(By.CSS_SELECTOR, "aside a[href='/attention']").click()
     held = wait(driver, ec.presence_of_element_located((By.CSS_SELECTOR, "[data-testid=attention-held]")))
     check("attention lists the held file", HOSTILE in held.text, held.text)
 
@@ -218,7 +213,7 @@ try:
     wait(driver, ec.presence_of_element_located((By.CSS_SELECTOR, "[data-testid=edit-form]")))
 
     def field(label):
-        return driver.find_element(By.XPATH, f"//form[@data-testid='edit-form']//label[span[text()='{label}']]//input")
+        return driver.find_element(By.XPATH, f"//form[@data-testid='edit-form']//label[text()='{label}']/following-sibling::input")
     check("edit form offers every field", all(field(label) for label in ("Title", "From (correspondent)", "Date", "Number", "Amount", "Currency", "Tags"))
           and driver.find_elements(By.CSS_SELECTOR, "select[name=documentType]") and driver.find_elements(By.CSS_SELECTOR, "select[name=section]"))
     field("Tags").clear()
@@ -273,7 +268,9 @@ try:
     text_present(driver, "Held: not released")
     driver.find_element(By.XPATH, "//summary[contains(., 'Delete')]").click()
     driver.find_element(By.CSS_SELECTOR, "[data-testid=delete]").click()
-    wait(driver, ec.alert_is_present()).accept()
+    dialog = wait(driver, ec.presence_of_element_located((By.CSS_SELECTOR, "[data-testid=delete-dialog]")))
+    check("deleting asks first, in the page (no browser dialog)", "Delete it everywhere?" in dialog.text)
+    dialog.find_element(By.CSS_SELECTOR, "[data-testid=confirm-delete]").click()
     wait(driver, lambda d: d.current_url.endswith("/documents"))
     driver.get(BASE + "/documents?show=held")
     text_present(driver, "Nothing matches.")
@@ -288,7 +285,13 @@ try:
     driver.get(BASE + "/system")
     text_present(driver, "Is it working?")
     check("system says checking and archiving work", "Working." in driver.find_element(By.CSS_SELECTOR, "[data-testid=health]").text)
-    check("AI line says it is not set up", "Not set up" in driver.find_element(By.CSS_SELECTOR, "[data-testid=ai]").text)
+    check("AI says it is not set up", "Not set up" in body(driver))
+    setup = driver.find_element(By.CSS_SELECTOR, "[data-testid=ai-setup]")
+    check("AI not set up: the commands to turn it on, each with a copy button", "PDF_GATEWAY_ENRICHMENT_ENABLED=true" in setup.text
+          and len(setup.find_elements(By.CSS_SELECTOR, "[data-testid=code-block] button")) >= 2, setup.text)
+    block = setup.find_element(By.CSS_SELECTOR, "[data-testid=code-block]")
+    check("commands wrap instead of scrolling", block.size["width"] <= setup.size["width"]
+          and driver.execute_script("const c = arguments[0].querySelector('code'); return c.scrollWidth <= c.clientWidth", block))
     driver.save_screenshot(str(SHOTS / "desktop-system.png"))
 
     # The service worker never caches API data.
@@ -305,7 +308,7 @@ try:
     check("service worker cache holds no API responses", cached is not None and not any("/api/" in url for url in cached), cached)
 
     # Sign out ends the session server-side.
-    driver.find_element(By.XPATH, "//button[text()='Sign out']").click()
+    driver.find_element(By.CSS_SELECTOR, "button[aria-label='Sign out']").click()
     wait(driver, ec.presence_of_element_located((By.NAME, "password")))
     status = driver.execute_async_script("""const done = arguments[arguments.length - 1];
         fetch('/api/v1/scans', {credentials: 'same-origin'}).then(r => done(r.status));""")
@@ -330,9 +333,8 @@ try:
     login(driver)
     driver.get(BASE + "/documents/scan-01J00000000000000000000060")
     wait(driver, lambda d: d.find_elements(By.CSS_SELECTOR, "[data-testid=download-pdf]"))
-    background = driver.execute_script("return getComputedStyle(document.body).backgroundColor")
-    check("dark system gives a dark page", driver.execute_script("return document.documentElement.classList.contains('dark')")
-          and background != "oklch(0.984 0.003 247.858)", background)
+    background = driver.execute_script("return getComputedStyle(document.documentElement).backgroundColor")
+    check("the page is dark", background.startswith("oklch(0.14") or background.startswith("rgb(1"), background)
     schemes = driver.execute_script("""const frame = document.createElement('iframe'); document.body.appendChild(frame);
         const value = [getComputedStyle(document.documentElement).colorScheme, getComputedStyle(document.body).colorScheme,
                        getComputedStyle(frame).colorScheme]; frame.remove(); return value;""")
@@ -347,6 +349,17 @@ finally:
 # is checked with Playwright's Firefox, which emulates the exact viewport.
 from playwright.sync_api import sync_playwright  # noqa: E402
 
+
+def drawer_at(page, open_):
+    """The phone's sidebar slid in (open_) or out; the CSP refuses Playwright's string waits, so poll."""
+    for _ in range(50):
+        right, left = page.eval_on_selector("nav[aria-label='Main']", "n => [n.getBoundingClientRect().right, n.getBoundingClientRect().left]")
+        if (left >= 0) if open_ else (right <= 0):
+            return
+        time.sleep(0.1)
+    raise AssertionError(f"the drawer did not {'open' if open_ else 'close'}")
+
+
 with sync_playwright() as playwright:
     phone_browser = playwright.firefox.launch()
     phone = phone_browser.new_context(viewport={"width": 390, "height": 844}, device_scale_factor=3, has_touch=True,
@@ -359,8 +372,8 @@ with sync_playwright() as playwright:
     page.click("button[type=submit]")
     page.wait_for_selector("text=Add PDF files")
     check("phone viewport is 390 CSS px", page.evaluate("window.innerWidth") == 390, page.evaluate("window.innerWidth"))
-    check("mobile navigation shown, desktop navigation hidden",
-          page.is_visible("nav[aria-label='Main mobile']") and not page.is_visible("nav[aria-label='Main']"))
+    check("phone: the menu button shown, the sidebar hidden",
+          page.is_visible("button[aria-label='Open the menu']") and page.eval_on_selector("nav[aria-label='Main']", "n => n.getBoundingClientRect().right <= 0"))
     targets = {"add": ("/", "Add PDF files"), "documents": ("/documents", "invoice-en.pdf"),
                "document": ("/documents/scan-01J00000000000000000000060", "Download"), "system": ("/system", "Is it working?")}
     for label, (path, marker) in targets.items():
@@ -369,13 +382,13 @@ with sync_playwright() as playwright:
         width, scroll = page.evaluate("[document.documentElement.clientWidth, document.documentElement.scrollWidth]")
         check(f"iPhone {label}: no horizontal overflow", scroll <= width, f"scrollWidth {scroll} > {width}")
         page.screenshot(path=str(SHOTS / f"iphone-{label}.png"), full_page=True)
-    heights = page.eval_on_selector_all("nav[aria-label='Main mobile'] a", "links => links.map(l => l.getBoundingClientRect().height)")
-    check("mobile tap targets at least 44 px tall", heights and min(heights) >= 44, heights)
-    # Tapping works with touch emulation: navigate via the bottom bar.
-    page.tap("nav[aria-label='Main mobile'] >> text=Documents")
+    # Tapping works with touch emulation: the menu opens the sidebar as a drawer.
+    page.tap("button[aria-label='Open the menu']")
+    drawer_at(page, open_=True)
+    page.tap("nav[aria-label='Main'] >> text=Documents")
     page.wait_for_url(BASE + "/documents")
-    check("bottom navigation tap", page.url.endswith("/documents"))
-    check("phone: no sidebar", not page.is_visible("aside[aria-label=Sidebar]"))
+    drawer_at(page, open_=False)
+    check("phone: the drawer navigates and closes", page.url.endswith("/documents"))
     page.tap("[data-testid=browse]")
     page.wait_for_selector("[data-testid=browse-sheet] [data-testid=browse-tree]")
     check("phone: Browse opens the sections", "Finance" in page.inner_text("[data-testid=browse-sheet]"))

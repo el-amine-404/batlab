@@ -17,6 +17,8 @@ export type ShellProps = {
   width?: string | ((pathname: string) => string);
   /** Shown while a screen's code loads. */
   loading: ReactNode;
+  /** Handed to the screens (useOutletContext): the PDF Gateway's signed-in person. */
+  context?: unknown;
 };
 
 /**
@@ -24,7 +26,7 @@ export type ShellProps = {
  * bar) and the screen. Back finds a page where it was left; a new page opens
  * at the top.
  */
-export function Shell({ name, logo, sidebar, header, width = "max-w-5xl", loading }: ShellProps) {
+export function Shell({ name, logo, sidebar, header, width = "max-w-5xl", loading, context }: ShellProps) {
   const [open, setOpen] = useState(false);
   const { pathname } = useLocation();
 
@@ -70,7 +72,7 @@ export function Shell({ name, logo, sidebar, header, width = "max-w-5xl", loadin
         <main className={cn("px-4 pt-6 pb-[max(4rem,env(safe-area-inset-bottom))] sm:px-6 lg:px-10", header ? "lg:pt-8" : "lg:pt-10")}>
           <div className={cn("mx-auto w-full", typeof width === "function" ? width(pathname) : width)}>
             <Suspense fallback={loading}>
-              <Outlet />
+              <Outlet context={context} />
             </Suspense>
           </div>
         </main>

@@ -1,16 +1,136 @@
 @import "tailwindcss";
+@import "@fontsource-variable/inter";
+/* Sonner would add its styles with a <style> tag, which the CSP (style-src 'self') refuses: its file instead. */
+@import "sonner/dist/styles.css";
+/* The frame shared by batlab's apps uses this theme's classes too. */
+@source "../../../../../lib/batlab-ui/src";
 
-/* Dark mode follows the `dark` class that /theme.js sets from the system or the person's choice. */
-@custom-variant dark (&:where(.dark, .dark *));
+/* shadcn/ui tokens, dark only like batlab's other apps; the gateway's accent is emerald to cyan (its check mark). */
+:root {
+  --radius: 0.875rem;
+  --background: oklch(0.14 0.012 200);
+  --foreground: oklch(0.97 0.005 200);
+  --card: oklch(0.19 0.014 200 / 0.66);
+  --card-foreground: var(--foreground);
+  --popover: oklch(0.2 0.016 200);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.76 0.15 168);
+  --primary-foreground: oklch(0.16 0.03 175);
+  --secondary: oklch(0.25 0.014 200);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(0.24 0.012 200);
+  --muted-foreground: oklch(0.72 0.02 200);
+  --accent: oklch(0.27 0.018 200);
+  --accent-foreground: var(--foreground);
+  --destructive: oklch(0.66 0.2 22);
+  --success: oklch(0.76 0.15 155);
+  --warning: oklch(0.8 0.15 80);
+  --info: oklch(0.75 0.12 230);
+  --border: oklch(1 0 0 / 0.09);
+  --input: oklch(1 0 0 / 0.12);
+  --ring: oklch(0.76 0.15 168 / 0.6);
+}
 
-/* Dark from the body down, not on the page itself (as songdrop and clipseerr do): a password
-   manager's frame (Bitwarden's "Save login") is light, and browsers paint a frame white where it
-   is see-through when the page or the frame's element says dark and its document doesn't. The
-   page's own scrollbar, which would follow the page's scheme, has its colours said instead. */
-html { background: #f8fafc; }
-html.dark { background: #020617; scrollbar-color: oklch(1 0 0 / 0.2) #020617; }
-.dark body { color-scheme: dark; }
-iframe { color-scheme: normal; }
+@theme inline {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 6px);
+  --radius-md: calc(var(--radius) - 3px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
 
-/* Respect the iPhone home indicator in the fixed mobile navigation. */
-.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  /* Dark from the body down, not on the page itself (as clipseerr): a password manager's frame
+     (Bitwarden's "Save login") is light, and Firefox paints a frame white where it is see-through
+     when the page or the frame's element says dark and its document doesn't. The page's own
+     scrollbar, which would follow the page's scheme, has its colours said instead. */
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    background: var(--background);
+    scrollbar-color: oklch(1 0 0 / 0.2) var(--background);
+  }
+  body {
+    color-scheme: dark;
+    /* No background of its own: html has it, and one here would cover the glows behind. */
+    @apply min-h-dvh font-sans text-foreground antialiased;
+  }
+  iframe {
+    color-scheme: normal;
+  }
+}
+
+/* Two soft glows and a faint grid, like paper on a light table; nothing moves. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(60rem 40rem at 10% -10%, oklch(0.6 0.15 168 / 0.2), transparent 60%),
+    radial-gradient(50rem 36rem at 100% 0%, oklch(0.62 0.12 220 / 0.14), transparent 60%),
+    var(--background);
+}
+.backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(oklch(1 0 0 / 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, oklch(1 0 0 / 0.025) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black, transparent 75%);
+}
+
+/* The sign-in screen's page that is checked: a beam passes over it, again and again. */
+@keyframes scan {
+  0%, 15% { transform: translateY(-10%); opacity: 0; }
+  25% { opacity: 1; }
+  75% { opacity: 1; }
+  85%, 100% { transform: translateY(1100%); opacity: 0; }
+}
+.scan-beam {
+  animation: scan 4.5s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .scan-beam { animation: none; opacity: 0; }
+}
+
+/* Toasts in the theme's colours. */
+[data-sonner-toaster] {
+  --normal-bg: var(--popover);
+  --normal-text: var(--popover-foreground);
+  --normal-border: var(--border);
+  font-family: var(--font-sans);
+}
+
+/* A wrong password: the form shakes once. */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}

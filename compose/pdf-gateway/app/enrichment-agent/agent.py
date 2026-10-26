@@ -146,7 +146,9 @@ def ensure_loaded() -> None:
 def tesseract_ready() -> tuple[bool, list[str], str]:
     try:
         version = subprocess.run(["tesseract", "--version"], capture_output=True, text=True, timeout=10).stdout.splitlines()[0]
-        langs = subprocess.run(["tesseract", "--list-langs"], capture_output=True, text=True, timeout=10).stdout.split()[1:]
+        # The first line is a heading ("List of available languages in ... (4):"), one language per line after it.
+        langs = [line.strip() for line in subprocess.run(["tesseract", "--list-langs"], capture_output=True, text=True,
+                                                          timeout=10).stdout.splitlines()[1:] if line.strip()]
         return all(lang in langs for lang in LANGUAGES.split("+")), langs, version
     except (OSError, IndexError, subprocess.TimeoutExpired):
         return False, [], "unavailable"
