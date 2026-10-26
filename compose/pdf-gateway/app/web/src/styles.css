@@ -3,8 +3,14 @@
 /* Dark mode follows the `dark` class that /theme.js sets from the system or the person's choice. */
 @custom-variant dark (&:where(.dark, .dark *));
 
-:root { color-scheme: light; }
-:root.dark { color-scheme: dark; }
+/* Dark from the body down, not on the page itself (as songdrop and clipseerr do): a password
+   manager's frame (Bitwarden's "Save login") is light, and browsers paint a frame white where it
+   is see-through when the page or the frame's element says dark and its document doesn't. The
+   page's own scrollbar, which would follow the page's scheme, has its colours said instead. */
+html { background: #f8fafc; }
+html.dark { background: #020617; scrollbar-color: oklch(1 0 0 / 0.2) #020617; }
+.dark body { color-scheme: dark; }
+iframe { color-scheme: normal; }
 
 /* Respect the iPhone home indicator in the fixed mobile navigation. */
 .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
