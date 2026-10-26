@@ -713,15 +713,23 @@ def ensure_taxonomy() -> None:
 
 
 def migrate_layout() -> None:
-    """Documents of the first layout (a folder per document) move to the browsable one; the
-    index follows. Idempotent, so it runs at every start."""
-    result = ARCHIVE.migrate_layout(apply=True)
-    if result["documents"]:
-        from reindex_db import reindex_db
-        with database() as connection:
+    """Documents of the first layout (a folder per document) move to the browsable one, and
+    the index follows. Runs at every start: it also rebuilds an index that names files that
+    are not there (a start that stopped between the move and the index)."""
+    from reindex_db import reindex_db
+    moved = ARCHIVE.migrate_layout(apply=True)["documents"]
+    connection = database()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT archive_path, pdf_file FROM archive_documents")
+            stale = [row for row in cursor.fetchall() if not (ARCHIVE.archive / row[0] / row[1]).is_file()]
+        connection.rollback()
+        if moved or stale:
             indexed = reindex_db(ARCHIVE, connection)
-        print(json.dumps({"event": "archive_layout_migrated", "documents": len(result["documents"]),
-                          "indexed": indexed["indexed"], "rejected": len(indexed["rejected"])}), flush=True)
+            print(json.dumps({"event": "archive_index_rebuilt", "moved": len(moved), "stale": len(stale),
+                              "indexed": indexed["indexed"], "rejected": len(indexed["rejected"])}), flush=True)
+    finally:
+        connection.close()
 
 
 def main() -> None:
