@@ -24,7 +24,7 @@ import urllib.request
 from pathlib import Path
 
 VERSION = "enrichment-agent-2"
-PROMPT_VERSION = "filing-4"
+PROMPT_VERSION = "filing-5"
 GATEWAY = os.environ["PDF_GATEWAY_URL"].rstrip("/")
 TOKEN = os.environ["PDF_GATEWAY_AGENT_TOKEN"]
 AGENT = os.getenv("PDF_GATEWAY_AGENT_ID", "t1000-laptop")
@@ -66,7 +66,10 @@ SYSTEM_PROMPT = (
     "receipts): the correspondent is the issuing authority (e.g. DGSN, a ministry, a commune), never the person "
     "the document is about; documentDate is the issue or application date, never a birth date.\n"
     "- Names of people and companies: copy them exactly as printed; never correct or guess a spelling.\n"
-    "- If the correspondent is one of the known correspondents, use exactly that spelling and its section.\n"
+    "- Known correspondents are for spelling only: use one only when this document itself prints that name "
+    "(header, logo text, web address, legal name). Never choose one because the topic is similar; a document "
+    "from a new sender gets the name it prints. When you do use one, keep its spelling and its section.\n"
+    "- Every name in the title (company, brand, person) must be printed in this document.\n"
     "- tags: 2 to 5 from the allowed tags, about what the document concerns (e.g. subscription, tv, football, "
     "rent, electricity); not its type or correspondent again.\n"
     "- For correspondent, documentDate, reference and amount, 'evidence' is an exact quote copied from the text. "
