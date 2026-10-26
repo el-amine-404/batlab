@@ -1,11 +1,12 @@
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "../api";
+import { api, type Session } from "../api";
+import { AccountsCard, PasswordCard } from "./Accounts";
 import { Badge, Card, ErrorNote, Muted, formatDate, formatWhen, type Tone } from "../components/ui";
 import { AI_STATE } from "../words";
 
 /** Is everything working, in words; numbers for the curious. */
-export function SystemPage() {
+export function SystemPage({ session }: { session: Session }) {
   const summary = useQuery({ queryKey: ["summary"], queryFn: api.summary, refetchInterval: 30_000 });
   const health = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 30_000 });
   const ai = useQuery({ queryKey: ["ai"], queryFn: api.ai, refetchInterval: 60_000 });
@@ -58,6 +59,8 @@ export function SystemPage() {
         {h && h.outbox.pending > 0 && <Muted className="mt-1 text-xs">{h.outbox.pending} internal messages waiting (oldest {Math.round(h.outbox.oldestSeconds)} s).</Muted>}
         {h && <Muted className="mt-1 text-xs">Updated {formatDate(new Date().toISOString())}</Muted>}
       </Card>
+      <PasswordCard />
+      {session.role === "ADMIN" && <AccountsCard me={session.username} />}
     </>
   );
 }

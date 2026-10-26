@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
+import { useId, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
 
 // Small, dependency-free primitives in the shadcn/ui style. Text props are
 // rendered as React text nodes only; nothing here accepts HTML.
@@ -106,6 +106,33 @@ export function Field({ label, hint, ...props }: InputHTMLAttributes<HTMLInputEl
       <input {...props} className="block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base focus:border-slate-500 focus:outline-none sm:text-sm dark:border-slate-700 dark:bg-slate-950" />
       {hint && <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">{hint}</span>}
     </label>
+  );
+}
+
+/** A password box with an eye to show what is typed, and a word when Caps Lock is on. */
+export function PasswordField({ label, hint, ...props }: Omit<InputHTMLAttributes<HTMLInputElement>, "type"> & { label: string; hint?: string }) {
+  const [shown, setShown] = useState(false);
+  const [caps, setCaps] = useState(false);
+  const id = useId();
+  const watch = (event: KeyboardEvent<HTMLInputElement>) => setCaps(event.getModifierState("CapsLock"));
+  return (
+    <div className="block text-sm">
+      <label htmlFor={props.id ?? id} className="mb-1 block font-medium">{label}</label>
+      <div className="relative">
+        <input id={id} {...props} type={shown ? "text" : "password"} onKeyUp={watch} onKeyDown={watch} onBlur={() => setCaps(false)}
+          className="block min-h-11 w-full rounded-lg border border-slate-300 bg-white pl-3 pr-11 text-base focus:border-slate-500 focus:outline-none sm:text-sm dark:border-slate-700 dark:bg-slate-950" />
+        <button type="button" onClick={() => setShown(!shown)} aria-pressed={shown} aria-label={shown ? "Hide the password" : "Show the password"}
+          title={shown ? "Hide it" : "Show it"}
+          className="absolute right-1.5 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white">
+          <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden>
+            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" />
+            {shown && <path d="M3 3l18 18" />}
+          </svg>
+        </button>
+      </div>
+      {caps && <span className="mt-1 block text-xs text-amber-700 dark:text-amber-400" role="status">Caps Lock is on.</span>}
+      {hint && <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">{hint}</span>}
+    </div>
   );
 }
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """M5 slice 3: the real web UI in headless Firefox, desktop and iPhone sizes.
 
-Usage: ui_test.py BASE_URL ADMIN_TOKEN FIXTURE_PDF SCREENSHOT_DIR
+Usage: ui_test.py BASE_URL SETUP_CODE FIXTURE_PDF SCREENSHOT_DIR
 Expects the stack from test_m5_ui.sh (two released documents, one held
 document whose display name is an XSS payload).
 """
@@ -18,7 +18,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
 
-BASE, TOKEN, FIXTURE, SHOTS = sys.argv[1], sys.argv[2], sys.argv[3], Path(sys.argv[4])
+BASE, SETUP_CODE, FIXTURE, SHOTS = sys.argv[1], sys.argv[2], sys.argv[3], Path(sys.argv[4])
+PASSWORD = "admin-password-1"
 HOSTILE = "<img src=x onerror=alert(1)>.pdf"
 
 
@@ -51,13 +52,25 @@ def text_present(driver, text, seconds=20):
 
 
 def login(driver):
+    """The first time, the setup form makes the admin (signing in); afterwards a name and a password."""
     driver.get(BASE + "/")
-    field = wait(driver, ec.presence_of_element_located((By.NAME, "token")))
-    # A login of its own for password managers: a fixed username plus the token as the password.
-    username = driver.find_element(By.NAME, "username")
-    check("sign-in form is a distinct login for password managers", username.get_attribute("autocomplete") == "username"
-          and username.get_attribute("value") == "PDF Gateway" and field.get_attribute("autocomplete") == "current-password")
-    field.send_keys(TOKEN)
+    wait(driver, lambda d: d.find_elements(By.NAME, "setup-code") or d.find_elements(By.NAME, "password"))
+    if driver.find_elements(By.NAME, "setup-code"):
+        username = driver.find_element(By.NAME, "username")
+        check("setup offers the admin that had only a token", username.get_attribute("value") == "admin")
+        driver.save_screenshot(str(SHOTS / "setup.png"))
+        driver.find_element(By.NAME, "setup-code").send_keys(SETUP_CODE.lower().replace("-", ""))
+        check("setup code formatted as typed", driver.find_element(By.NAME, "setup-code").get_attribute("value") == SETUP_CODE)
+        driver.find_element(By.NAME, "new-password").send_keys(PASSWORD)
+        driver.find_element(By.NAME, "new-password-again").send_keys(PASSWORD)
+    else:
+        username = driver.find_element(By.NAME, "username")
+        password = driver.find_element(By.NAME, "password")
+        # A real login for password managers: a visible name, and the password as the current one.
+        check("sign-in form is a plain name and password", username.is_displayed() and username.get_attribute("autocomplete") == "username"
+              and password.get_attribute("type") == "password" and password.get_attribute("autocomplete") == "current-password")
+        username.send_keys("admin")
+        password.send_keys(PASSWORD)
     driver.find_element(By.CSS_SELECTOR, "button[type=submit]").click()
     text_present(driver, "Add PDF files")
 
@@ -86,8 +99,20 @@ try:
     login(driver)
     check("CSS applied under CSP", driver.execute_script(
         "return getComputedStyle(document.body).backgroundColor") not in ("rgba(0, 0, 0, 0)", "transparent"))
-    check("API token not kept in browser storage", driver.execute_script(
-        "return localStorage.length + sessionStorage.length") == 0 and TOKEN not in driver.page_source)
+    check("nothing kept in browser storage", driver.execute_script(
+        "return localStorage.length + sessionStorage.length") == 0 and PASSWORD not in driver.page_source)
+    # Admins see the people and can add one with a role.
+    driver.get(BASE + "/system")
+    wait(driver, lambda d: "admin" in d.find_element(By.CSS_SELECTOR, "[data-testid=people]").text)
+    driver.find_element(By.XPATH, "//button[text()='Add a person']").click()
+    form = driver.find_element(By.XPATH, "//button[text()='Add']/ancestor::form")
+    form.find_element(By.CSS_SELECTOR, "input[autocomplete=off]").send_keys("reader")
+    form.find_element(By.CSS_SELECTOR, "input[autocomplete=new-password]").send_keys("reader-password-1")
+    form.find_element(By.CSS_SELECTOR, "select").send_keys("Read-only")
+    form.find_element(By.XPATH, ".//button[text()='Add']").click()
+    wait(driver, lambda d: "reader" in d.find_element(By.CSS_SELECTOR, "[data-testid=people]").text)
+    check("an admin adds a person with a role", "reader" in driver.find_element(By.CSS_SELECTOR, "[data-testid=people]").text)
+    driver.save_screenshot(str(SHOTS / "desktop-system-accounts.png"))
     # The theme switch stores only an explicit choice, and only that.
     driver.find_element(By.CSS_SELECTOR, "[data-testid=theme]").click()
     stored = driver.execute_script("return Object.keys(localStorage).map(k => [k, localStorage.getItem(k)])")
@@ -281,7 +306,7 @@ try:
 
     # Sign out ends the session server-side.
     driver.find_element(By.XPATH, "//button[text()='Sign out']").click()
-    wait(driver, ec.presence_of_element_located((By.NAME, "token")))
+    wait(driver, ec.presence_of_element_located((By.NAME, "password")))
     status = driver.execute_async_script("""const done = arguments[arguments.length - 1];
         fetch('/api/v1/scans', {credentials: 'same-origin'}).then(r => done(r.status));""")
     check("signed out: API refuses the old cookie", status == 401, status)
@@ -299,6 +324,9 @@ finally:
 # not reach pages served with this CSP, so it can't stand in for a real device).
 driver = browser(1280, 800, dark=True)
 try:
+    driver.get(BASE + "/")
+    wait(driver, ec.presence_of_element_located((By.NAME, "password")))
+    driver.save_screenshot(str(SHOTS / "desktop-sign-in-dark.png"))
     login(driver)
     driver.get(BASE + "/documents/scan-01J00000000000000000000060")
     wait(driver, lambda d: d.find_elements(By.CSS_SELECTOR, "[data-testid=download-pdf]"))
@@ -326,7 +354,8 @@ with sync_playwright() as playwright:
     page = phone.new_page()
     page.on("dialog", lambda dialog: (_ for _ in ()).throw(AssertionError(f"unexpected dialog: {dialog.message}")))
     page.goto(BASE + "/")
-    page.fill("input[name=token]", TOKEN)
+    page.fill("input[name=username]", "admin")
+    page.fill("input[name=password]", PASSWORD)
     page.click("button[type=submit]")
     page.wait_for_selector("text=Add PDF files")
     check("phone viewport is 390 CSS px", page.evaluate("window.innerWidth") == 390, page.evaluate("window.innerWidth"))

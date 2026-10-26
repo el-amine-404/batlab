@@ -23,7 +23,8 @@ public class SecurityConfig {
                         // SSE completes on an async dispatch; the request was authorised on entry.
                         .dispatcherTypeMatchers(jakarta.servlet.DispatcherType.ASYNC).permitAll()
                         .requestMatchers("/internal/actuator/health/**").permitAll()
-                        .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/session").permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/session", "/api/v1/session/setup").permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/session/setup").permitAll()
                         // Allow Spring to render the original failure. Otherwise an
                         // ERROR dispatch without the bearer header masks a 500 as 401.
                         .requestMatchers("/error").permitAll()
