@@ -53,6 +53,10 @@ def text_present(driver, text, seconds=20):
 def login(driver):
     driver.get(BASE + "/")
     field = wait(driver, ec.presence_of_element_located((By.NAME, "token")))
+    # A login of its own for password managers: a fixed username plus the token as the password.
+    username = driver.find_element(By.NAME, "username")
+    check("sign-in form is a distinct login for password managers", username.get_attribute("autocomplete") == "username"
+          and username.get_attribute("value") == "PDF Gateway" and field.get_attribute("autocomplete") == "current-password")
     field.send_keys(TOKEN)
     driver.find_element(By.CSS_SELECTOR, "button[type=submit]").click()
     text_present(driver, "Add PDF files")
