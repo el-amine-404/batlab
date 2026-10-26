@@ -85,7 +85,7 @@ export const PaperlessImport = z.object({
 export type PaperlessImport = z.infer<typeof PaperlessImport>;
 export const EnrichmentJob = z.object({ kind: z.enum(["OCR", "SUGGEST"]), status: z.string(), errorCode: z.string().nullable(),
   createdAt: z.string(), completedAt: z.string().nullable(), deadlineAt: z.string().nullish(),
-  applied: z.record(z.string(), z.unknown()).nullish() });
+  applied: z.record(z.string(), z.unknown()).nullish(), model: z.string().nullish(), engine: z.string().nullish(), agent: z.string().nullish() });
 export type EnrichmentJob = z.infer<typeof EnrichmentJob>;
 export const DocumentPage = z.object({ items: z.array(Document), nextCursor: z.string().nullable() });
 export const SearchHit = z.object({ documentId: z.string(), snippet: z.string() });
@@ -133,7 +133,8 @@ export const Health = z.object({
 
 export const Ai = z.object({
   enabled: z.boolean(), state: z.string(), agent: z.string().nullable(), model: z.string().nullable(),
-  ocrReady: z.boolean().nullable(), lastSeenAt: z.string().nullable(), lastSuccessAt: z.string().nullable(),
+  ocrReady: z.boolean().nullable(), ocrEngine: z.string().nullish(), ocrLanguages: z.array(z.string()).nullish(), llmService: z.string().nullish(),
+  lastSeenAt: z.string().nullable(), lastSuccessAt: z.string().nullable(),
   reason: z.string().nullable(), queue: z.object({ waiting: z.number(), running: z.number(), failed: z.number() }),
 });
 const Evidenced = z.object({ value: z.string(), evidence: z.string() });

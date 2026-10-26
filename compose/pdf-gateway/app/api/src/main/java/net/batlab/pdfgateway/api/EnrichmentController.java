@@ -189,6 +189,8 @@ public class EnrichmentController {
                                 ELSE 'AVAILABLE' END,
                   'agent', (SELECT agent_id FROM a), 'model', (SELECT report->'llm'->>'configuredModel' FROM a),
                   'ocrReady', (SELECT (report->'ocr'->>'ready')::boolean FROM a),
+                  'ocrEngine', (SELECT report->'ocr'->>'engine' FROM a), 'ocrLanguages', (SELECT report->'ocr'->'languages' FROM a),
+                  'llmService', (SELECT report->'llm'->>'service' FROM a),
                   'lastSeenAt', (SELECT last_seen_at FROM a), 'lastSuccessAt', (SELECT last_success_at FROM a),
                   'reason', (SELECT last_error FROM a),
                   'queue', (SELECT jsonb_build_object('waiting', waiting, 'running', running, 'failed', failed) FROM q),
@@ -256,7 +258,8 @@ public class EnrichmentController {
         return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "private, no-store").body(jdbc.queryForObject("""
                 SELECT COALESCE(jsonb_agg(jsonb_build_object('kind', j.kind, 'status', j.status, 'errorCode', j.error_code,
                          'createdAt', j.created_at, 'completedAt', j.completed_at, 'deadlineAt', j.deadline_at,
-                         'applied', j.applied) ORDER BY j.created_at), '[]'::jsonb)::text
+                         'applied', j.applied, 'model', j.result->>'model', 'engine', j.result->>'engine',
+                         'agent', j.lease_agent) ORDER BY j.created_at), '[]'::jsonb)::text
                   FROM enrichment_jobs j LEFT JOIN archive_documents d ON d.document_id=j.document_id
                  WHERE j.scan_id=? OR d.scan_id=?""", String.class, scanId, scanId));
     }

@@ -11,7 +11,11 @@
     "noFallthroughCasesInSwitch": true,
     "isolatedModules": true,
     "skipLibCheck": true,
-    "types": []
+    "types": [],
+    "paths": {
+      "@batlab/ui": ["../../../../lib/batlab-ui/src/index.ts"],
+      "*": ["./node_modules/@types/*", "./node_modules/*"]
+    }
   },
-  "include": ["src"]
+  "include": ["src", "../../../../lib/batlab-ui/src"]
 }

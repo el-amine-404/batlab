@@ -33,7 +33,7 @@ mkdir -p "$TEST_STORAGE"/{fixtures,cdr-output,text-extracts,api/quarantine,api/m
 chmod 0777 "$TEST_ARCHIVE" "$TEST_ARCHIVE/manifests" "$TEST_STORAGE/api" "$TEST_STORAGE/api/quarantine" "$TEST_STORAGE/api/multipart"
 for image in api analysis-worker; do docker build -q -t "pdf-gateway-m4-test/$image:local" "$root/compose/pdf-gateway/app/$image" >/dev/null; done
 docker build -q -f "$root/compose/pdf-gateway/app/archive-worker/Dockerfile" -t pdf-gateway-m4-test/archive-worker:local "$root/compose/pdf-gateway/app" >/dev/null
-docker build -q -t pdf-gateway-m5-test/web:local "$root/compose/pdf-gateway/app/web" >/dev/null
+docker build -q --build-context ui="$root/lib/batlab-ui" -t pdf-gateway-m5-test/web:local "$root/compose/pdf-gateway/app/web" >/dev/null
 python3 -I "$root/compose/pdf-gateway/app/tests/make_fixtures.py" "$TEST_STORAGE/fixtures"
 chmod 0755 "$TEST_STORAGE/fixtures" "$TEST_STORAGE/cdr-output" "$TEST_STORAGE/text-extracts"; chmod 0644 "$TEST_STORAGE/fixtures"/*
 cat >"$TEST_ARCHIVE/manifests/rules.json" <<'JSON'

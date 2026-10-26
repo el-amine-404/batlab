@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { Link, useSearchParams } from "react-router-dom";
+import { FolderTree, LayoutGrid, List, Search, X } from "lucide-react";
+import { Link, useSearchParams } from "react-router";
 import { api, type Document, type Scan } from "../api";
 import { BrowseTree } from "../components/BrowseTree";
 import { Preview } from "../components/progress";
-import { Badge, Button, Card, ErrorNote, Muted, Spinner, TERMINAL, cx, formatWhen } from "../components/ui";
+import { Badge, Button, ErrorNote, Muted, PageHeader, Segmented, Select, Spinner, TERMINAL, cx, formatWhen, inputClass, primaryLink } from "../components/ui";
 import { useLibrary } from "../library";
 import { TYPE_LABEL, statusWord } from "../words";
 
@@ -104,80 +105,88 @@ export function DocumentsPage() {
   };
   const narrowed = !!(section || from || type || year || tag || folded || show !== "all");
   const heading = from ? from : section ? section : "Documents";
-  const select = "min-h-9 rounded-full border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-950";
+  const loaded = scans.data && library.data;
 
   return (
-    <Card>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-xl font-semibold" data-testid="documents-heading">
-          {section && from && <span className="text-slate-500 dark:text-slate-400">{section} › </span>}{heading}
-        </h1>
-        <div className="flex items-center gap-1">
-          <Button variant="secondary" className="min-h-9 lg:hidden" onClick={() => setBrowsing(true)} data-testid="browse">Browse</Button>
-          <div className="flex rounded-lg ring-1 ring-slate-300 dark:ring-slate-700" role="group" aria-label="Layout">
-            {(["list", "grid"] as const).map((value) => (
-              <button key={value} type="button" aria-pressed={view === value} data-testid={`view-${value}`}
-                onClick={() => { setView(value); try { localStorage.setItem("pgw-view", value); } catch { /* storage blocked */ } }}
-                className={cx("min-h-9 px-3 text-sm first:rounded-l-lg last:rounded-r-lg", view === value ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900" : "hover:bg-slate-100 dark:hover:bg-slate-800")}>
-                {value === "list" ? "List" : "Grid"}
-              </button>
-            ))}
+    <div>
+      <PageHeader testId="documents-heading"
+        title={<>{section && from && <span className="text-muted-foreground">{section} › </span>}{heading}</>}
+        description={loaded ? `${filtered.length} of ${rows.length} · checked, rebuilt clean and filed` : undefined}
+        actions={<>
+          <Button variant="secondary" size="sm" className="lg:hidden" onClick={() => setBrowsing(true)} data-testid="browse"><FolderTree /> Browse</Button>
+          <Segmented label="Layout" value={view} onChange={(value) => { setView(value); try { localStorage.setItem("pgw-view", value); } catch { /* storage blocked */ } }}
+            options={[{ value: "list", label: <><List /> List</>, testId: "view-list" }, { value: "grid", label: <><LayoutGrid /> Grid</>, testId: "view-grid" }]} />
+        </>} />
+
+      <div className="lg:grid lg:grid-cols-[14rem_minmax(0,1fr)] lg:gap-8">
+        <aside className="hidden lg:block" aria-label="Your archive">
+          <div className="sticky top-6">
+            <p className="mb-2 px-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">Your archive</p>
+            <BrowseTree />
           </div>
+        </aside>
+
+        <div className="min-w-0 space-y-4">
+          <div className="relative">
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+            <input type="search" placeholder="Search titles, names and the documents' text" value={search} onChange={(event) => setSearch(event.target.value)}
+              aria-label="Search" data-testid="search" className={cx(inputClass, "h-11 pl-9")} />
+            {textSearch.isFetching && <Spinner className="absolute top-3.5 right-3 text-muted-foreground" />}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Show">
+              {FILTERS.map((filter) => (
+                <button key={filter.id} onClick={() => set("show", filter.id === "all" ? null : filter.id)}
+                  className={cx("h-8 rounded-full border px-3 text-sm transition", filter.id === show
+                    ? "border-primary/50 bg-primary/15 font-medium text-primary" : "border-border text-muted-foreground hover:bg-accent hover:text-foreground")}>
+                  {filter.label}
+                </button>
+              ))}
+            </div>
+            <span className="mx-1 hidden h-5 w-px bg-border sm:block" aria-hidden />
+            <Select className="h-8 w-auto rounded-full text-sm" value={type ?? ""} onChange={(event) => set("type", event.target.value || null)} aria-label="Type" data-testid="filter-type">
+              <option value="">Any type</option>
+              {types.map((value) => <option key={value} value={value}>{TYPE_LABEL[value] ?? value}</option>)}
+            </Select>
+            <Select className="h-8 w-auto rounded-full text-sm" value={year ?? ""} onChange={(event) => set("year", event.target.value || null)} aria-label="Year" data-testid="filter-year">
+              <option value="">Any year</option>
+              {years.map((value) => <option key={value} value={value}>{value}</option>)}
+            </Select>
+            <Select className="h-8 w-auto rounded-full text-sm" value={tag ?? ""} onChange={(event) => set("tag", event.target.value || null)} aria-label="Tag" data-testid="filter-tag">
+              <option value="">Any tag</option>
+              {tags.map((value) => <option key={value} value={value}>{value}</option>)}
+            </Select>
+            {narrowed && <Button variant="ghost" size="sm" onClick={() => { setSearch(""); setParams({}); }}><X /> Clear</Button>}
+          </div>
+          <ErrorNote error={scans.error ?? library.error ?? textSearch.error} />
+          {loaded && filtered.length === 0 && (
+            <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border py-16 text-center">
+              <Muted>{narrowed ? "Nothing matches." : "Nothing here yet."}</Muted>
+              {!narrowed && <Link to="/" className={primaryLink}>Add your first PDF</Link>}
+            </div>
+          )}
+          {view === "list" ? (
+            <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card backdrop-blur-xl" data-testid="document-list">
+              {filtered.map((row) => <ListRow key={row.key} row={row} snippet={row.doc ? hits.get(row.doc.documentId) : undefined} />)}
+            </ul>
+          ) : (
+            <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4" data-testid="document-grid">
+              {filtered.map((row) => <GridCard key={row.key} row={row} />)}
+            </ul>
+          )}
+          {scans.hasNextPage && !narrowed && <Button variant="secondary" className="w-full" onClick={() => scans.fetchNextPage()} disabled={scans.isFetchingNextPage}>Show more</Button>}
         </div>
       </div>
-      <div className="mb-2 flex flex-wrap gap-2" role="group" aria-label="Show">
-        {FILTERS.map((filter) => (
-          <button key={filter.id} onClick={() => set("show", filter.id === "all" ? null : filter.id)}
-            className={cx("min-h-9 rounded-full px-3 text-sm ring-1", filter.id === show
-              ? "bg-slate-900 text-white ring-slate-900 dark:bg-slate-100 dark:text-slate-900 dark:ring-slate-100"
-              : "ring-slate-300 hover:bg-slate-100 dark:ring-slate-700 dark:hover:bg-slate-800")}>
-            {filter.label}
-          </button>
-        ))}
-      </div>
-      <div className="mb-3 flex flex-wrap gap-2">
-        <select className={select} value={type ?? ""} onChange={(event) => set("type", event.target.value || null)} aria-label="Type" data-testid="filter-type">
-          <option value="">Any type</option>
-          {types.map((value) => <option key={value} value={value}>{TYPE_LABEL[value] ?? value}</option>)}
-        </select>
-        <select className={select} value={year ?? ""} onChange={(event) => set("year", event.target.value || null)} aria-label="Year" data-testid="filter-year">
-          <option value="">Any year</option>
-          {years.map((value) => <option key={value} value={value}>{value}</option>)}
-        </select>
-        <select className={select} value={tag ?? ""} onChange={(event) => set("tag", event.target.value || null)} aria-label="Tag" data-testid="filter-tag">
-          <option value="">Any tag</option>
-          {tags.map((value) => <option key={value} value={value}>{value}</option>)}
-        </select>
-        {narrowed && <Button variant="ghost" className="min-h-9" onClick={() => { setSearch(""); setParams({}); }}>Clear</Button>}
-      </div>
-      <div className="relative mb-2">
-        <input type="search" placeholder="Search titles, names and the documents' text" value={search} onChange={(event) => setSearch(event.target.value)}
-          aria-label="Search" data-testid="search" className="block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base sm:text-sm dark:border-slate-700 dark:bg-slate-950" />
-        {textSearch.isFetching && <span className="absolute right-3 top-3 text-slate-400"><Spinner /></span>}
-      </div>
-      <ErrorNote error={scans.error ?? library.error ?? textSearch.error} />
-      {scans.data && library.data && filtered.length === 0 && (
-        <Muted className="py-6 text-center">{narrowed ? "Nothing matches." : "Nothing here yet. Add a PDF to start."}</Muted>
-      )}
-      {view === "list" ? (
-        <ul className="divide-y divide-slate-100 dark:divide-slate-800" data-testid="document-list">
-          {filtered.map((row) => <ListRow key={row.key} row={row} snippet={row.doc ? hits.get(row.doc.documentId) : undefined} />)}
-        </ul>
-      ) : (
-        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4" data-testid="document-grid">
-          {filtered.map((row) => <GridCard key={row.key} row={row} />)}
-        </ul>
-      )}
-      {scans.hasNextPage && !narrowed && <Button variant="secondary" className="mt-3 w-full" onClick={() => scans.fetchNextPage()} disabled={scans.isFetchingNextPage}>Show more</Button>}
+
       {browsing && (
-        <div className="fixed inset-0 z-40 flex items-end bg-slate-900/40 lg:hidden" onClick={() => setBrowsing(false)} data-testid="browse-sheet">
-          <div className="max-h-[80dvh] w-full overflow-y-auto rounded-t-2xl bg-white p-4 pb-8 dark:bg-slate-900" onClick={(event) => event.stopPropagation()} role="dialog" aria-label="Browse the archive">
-            <div className="mb-2 flex items-center justify-between"><h2 className="font-semibold">Browse</h2><Button variant="ghost" onClick={() => setBrowsing(false)}>Close</Button></div>
+        <div className="fixed inset-0 z-50 flex items-end bg-black/60 lg:hidden" onClick={() => setBrowsing(false)} data-testid="browse-sheet">
+          <div className="max-h-[80dvh] w-full overflow-y-auto rounded-t-2xl border-t border-border bg-popover p-4 pb-8" onClick={(event) => event.stopPropagation()} role="dialog" aria-label="Browse the archive">
+            <div className="mb-2 flex items-center justify-between"><h2 className="font-semibold">Browse</h2><Button variant="ghost" size="sm" onClick={() => setBrowsing(false)}>Close</Button></div>
             <BrowseTree onPick={() => setBrowsing(false)} />
           </div>
         </div>
       )}
-    </Card>
+    </div>
   );
 }
 
@@ -187,7 +196,7 @@ function rowTitle(row: Row) {
 
 function StatusBadge({ row }: { row: Row }) {
   const word = statusWord(row.scan?.status ?? "READY");
-  return <Badge tone={word.tone}>{word.tone === "info" && <Spinner />}<span className={word.tone === "info" ? "ml-1" : ""}>{word.text}</span></Badge>;
+  return <Badge tone={word.tone}>{word.tone === "info" && <Spinner />}{word.text}</Badge>;
 }
 
 function RowLink({ row, className, children }: { row: Row; className: string; children: ReactNode }) {
@@ -198,15 +207,16 @@ function ListRow({ row, snippet }: { row: Row; snippet?: string }) {
   const doc = row.doc;
   return (
     <li>
-      <RowLink row={row} className="-mx-2 flex items-center gap-3 rounded-lg px-2 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/60">
+      <RowLink row={row} className="flex items-center gap-4 px-4 py-3 transition hover:bg-accent/60">
         <Preview documentId={doc?.documentId} version={doc?.currentVersion} size="small" className="h-14 w-10 shrink-0" />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium" title={rowTitle(row)}>{rowTitle(row)}</span>
-          <span className="block truncate text-xs text-slate-500 dark:text-slate-400">
+          <span className="block truncate text-xs text-muted-foreground">
             {doc ? <>{folderOf(doc.archivePath)}{doc.documentDate ? ` · ${doc.documentDate}` : ""}</> : row.scan?.displayName} · {formatWhen(row.when)}
           </span>
-          {snippet && <span className="mt-0.5 block truncate text-xs italic text-slate-500 dark:text-slate-400" data-testid="snippet">…{snippet}…</span>}
+          {snippet && <span className="mt-0.5 block truncate text-xs text-muted-foreground italic" data-testid="snippet">…{snippet}…</span>}
         </span>
+        {doc?.tags && doc.tags.length > 0 && <span className="hidden gap-1 xl:flex">{doc.tags.slice(0, 2).map((value) => <Badge key={value}>{value}</Badge>)}</span>}
         <StatusBadge row={row} />
       </RowLink>
     </li>
@@ -218,13 +228,15 @@ function GridCard({ row }: { row: Row }) {
   const ready = (row.scan?.status ?? "READY") === "READY";
   return (
     <li>
-      <RowLink row={row} className="block rounded-xl p-2 ring-1 ring-slate-200 hover:bg-slate-50 dark:ring-slate-800 dark:hover:bg-slate-800/60">
-        <Preview documentId={doc?.documentId} version={doc?.currentVersion} size="small" className="aspect-[3/4] w-full" />
-        <span className="mt-2 block truncate text-sm font-medium" title={rowTitle(row)}>{rowTitle(row)}</span>
-        <span className="flex items-center justify-between gap-1 text-xs text-slate-500 dark:text-slate-400">
-          <span className="truncate">{doc?.issuer ?? doc?.category ?? formatWhen(row.when)}</span>
-          {!ready && <StatusBadge row={row} />}
-        </span>
+      <RowLink row={row} className="group block overflow-hidden rounded-xl border border-border bg-card backdrop-blur-xl transition hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-xl hover:shadow-emerald-950/30">
+        <div className="relative bg-white/5 p-3">
+          <Preview documentId={doc?.documentId} version={doc?.currentVersion} size="small" className="aspect-[3/4] w-full shadow-lg" />
+          {!ready && <span className="absolute top-5 right-5"><StatusBadge row={row} /></span>}
+        </div>
+        <div className="border-t border-border p-3">
+          <span className="block truncate text-sm font-medium" title={rowTitle(row)}>{rowTitle(row)}</span>
+          <span className="block truncate text-xs text-muted-foreground">{doc?.issuer ?? doc?.category ?? formatWhen(row.when)}</span>
+        </div>
       </RowLink>
     </li>
   );

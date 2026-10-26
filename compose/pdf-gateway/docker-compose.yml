@@ -140,6 +140,8 @@ services:
     image: local/pdf-gateway-web
     build:
       context: ./app/web
+      additional_contexts:
+        ui: ../../lib/batlab-ui
       # lab2's bridge has no DNS for builders (as stanzarr, musicguard).
       network: host
     pull_policy: build
