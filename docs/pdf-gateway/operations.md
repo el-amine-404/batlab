@@ -147,6 +147,24 @@ view). Paperless keeps such a file exactly as it is (it counts as born-digital, 
 Paperless makes no re-encoded copy of its own) and gets the title, correspondent,
 document type, date and tags.
 
+## Using the app
+
+- **Add files** (also the logo): drop PDFs here, or on any page. Each file shows a bar with
+  five stages (checks, clean copy, AI filing, saved, Paperless), the time in the current
+  stage, and an estimate. The estimate is the median of this gateway's last 50 runs of each
+  step, scaled by page count, plus the files ahead. Uploads carry on while you browse.
+- **Documents**: a list or grid with first-page pictures. The sidebar (or **Browse** on a
+  phone) shows sections and correspondents with counts. Filter by type, year or tag. The
+  search box matches titles, names and the documents' own text, ignoring case, accents and
+  spacing ("m fitness" finds "MFITNESS").
+- **Needs attention**: held, blocked or failed files, and documents nothing could file. The
+  count is in the navigation.
+- On a document's page, click a value to change it. **Undo** puts the previous value back
+  (an edit like any other, so it also makes a new version).
+- The pictures are made by the archive worker from the clean copy, never the original, into
+  `pdf-archive/previews/` (beside `archive/`, not in the folders you browse). Missing ones
+  are made again when the worker starts.
+
 ## Changing, re-running and deleting
 
 - **Edit** (a document's page) changes any field: title, correspondent, type, date,

@@ -20,7 +20,7 @@ cleanup() {
   if [[ $status -ne 0 ]]; then "${dc[@]}" logs --no-color --tail=40 api >&2 || true; fi
   "${dc[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
   docker run --rm --network none --user 10005:10005 -v "$TEST_ARCHIVE:/archive" --entrypoint sh \
-    pdf-gateway-m4-test/archive-worker:local -c 'rm -rf /archive/archive /archive/staging /archive/manifests/*' >/dev/null 2>&1 || true
+    pdf-gateway-m4-test/archive-worker:local -c 'rm -rf /archive/archive /archive/previews /archive/staging /archive/manifests/*' >/dev/null 2>&1 || true
   docker run --rm --network none -v "$TEST_STORAGE/api:/data" --entrypoint sh pdf-gateway-m4-test/archive-worker:local -c 'rm -rf /data/*' >/dev/null 2>&1 || true
   chmod -R u+rwX "$scratch" 2>/dev/null || true
   rm -rf -- "$scratch"
@@ -149,6 +149,11 @@ eq "$(json 'v["code"]' <"$scratch/upload.json")" DUPLICATE_UPLOAD
 grep -qi "^location: /api/v1/scans/$first" "$scratch/upload.headers"
 eq "$(q "SELECT count(*) FROM scan_jobs")" "$before"                              # nothing stored or queued
 eq "$(upload "$user_token" dup-other-000000001)" 202                              # another person's archive is theirs
+# What the progress bar needs: usual step times, the page count, files ahead.
+api() { curl -sS -H "Authorization: Bearer ${TOKEN:-$TEST_ADMIN_TOKEN}" "$@"; }
+api "$base/api/v1/scans/$first/progress" | json '[k for k in ("now","pages","ahead","typical") if k not in v] == [] and isinstance(v["typical"], dict) and v["ahead"] >= 0' | grep -qx True
+api "$base/api/v1/scans/$(scan_id 50)/progress" | json 'v["typical"].get("ARCHIVE") is not None' | grep -qx True
+eq "$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $user_token" "$base/api/v1/scans/$first/progress")" 404   # not theirs
 q "UPDATE scan_jobs SET status='FAILED' WHERE id='$first'"
 eq "$(upload "$TEST_ADMIN_TOKEN" dup-retry-00000001)" 202                         # a failed attempt can be retried
 

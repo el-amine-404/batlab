@@ -19,7 +19,7 @@ cleanup() {
   if [[ $status -ne 0 ]]; then "${dc[@]}" logs --no-color --tail=30 api web >&2 || true; fi
   "${dc[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
   docker run --rm --network none --user 10005:10005 -v "$TEST_ARCHIVE:/archive" --entrypoint sh \
-    pdf-gateway-m4-test/archive-worker:local -c 'rm -rf /archive/archive /archive/staging /archive/manifests/*' >/dev/null 2>&1 || true
+    pdf-gateway-m4-test/archive-worker:local -c 'rm -rf /archive/archive /archive/previews /archive/staging /archive/manifests/*' >/dev/null 2>&1 || true
   docker run --rm --network none -v "$TEST_STORAGE/api:/data" --entrypoint sh pdf-gateway-m4-test/archive-worker:local -c 'rm -rf /data/*' >/dev/null 2>&1 || true
   chmod -R u+rwX "$scratch" 2>/dev/null || true
   rm -rf -- "$scratch"
@@ -55,5 +55,7 @@ for _ in $(seq 1 60); do [[ "$(q "SELECT count(*) FROM scan_jobs WHERE status='R
 
 "$python" "$root/compose/pdf-gateway/app/tests/ui_test.py" http://localhost:18290 "$TEST_ADMIN_TOKEN" "$TEST_STORAGE/fixtures/invoice-en.pdf" "$shots"
 [[ ! -e $TEST_STORAGE/api/quarantine/quar-held62.bin ]]
-[[ "$(q "SELECT metadata_revision FROM archive_documents WHERE scan_id='$(scan_id 60)'")" == 2 ]]
+# Three edits through the UI: the form, an inline change, and its Undo.
+[[ "$(q "SELECT metadata_revision FROM archive_documents WHERE scan_id='$(scan_id 60)'")" == 4 ]]
+[[ "$(q "SELECT sidecar->'reference'->>'value' FROM archive_documents WHERE scan_id='$(scan_id 60)'")" == 2026-10-4471 ]]
 echo "M5 UI end-to-end in Firefox passed (screenshots: $shots)"

@@ -21,7 +21,7 @@ cleanup() {
   "${dc[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
   # Archive files belong to the archive UID; remove them as that UID.
   docker run --rm --network none --user 10005:10005 -v "$TEST_ARCHIVE:/archive" --entrypoint sh \
-    pdf-gateway-m4-test/archive-worker:local -c 'rm -rf /archive/archive /archive/staging /archive/manifests/*' >/dev/null 2>&1 || true
+    pdf-gateway-m4-test/archive-worker:local -c 'rm -rf /archive/archive /archive/previews /archive/staging /archive/manifests/*' >/dev/null 2>&1 || true
   chmod -R u+rwX "$scratch" 2>/dev/null || true
   rm -rf -- "$scratch"
   exit "$status"

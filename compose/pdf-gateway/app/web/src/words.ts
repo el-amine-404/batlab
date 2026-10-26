@@ -88,3 +88,10 @@ export const AI_STATE: Record<string, string> = {
 };
 
 export const FIELD_LABEL: Record<string, string> = { title: "Title", issuer: "From", documentType: "Type", documentDate: "Date" };
+
+export const TYPE_LABEL: Record<string, string> = {
+  invoice: "Invoice", receipt: "Receipt", bank_statement: "Bank statement", payslip: "Payslip", contract: "Contract",
+  tax_document: "Tax document", insurance: "Insurance", medical: "Medical", identity_document: "Identity document",
+  certificate: "Certificate", letter: "Letter", school_document: "School document", presentation: "Presentation",
+  report: "Report", manual: "Manual", other: "Document",
+};

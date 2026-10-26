@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import net.batlab.pdfgateway.security.GatewayPrincipal;
 import org.springframework.core.io.FileSystemResource;
@@ -31,6 +32,22 @@ public class ArchiveController {
     ArchiveService.DocumentPage list(@AuthenticationPrincipal GatewayPrincipal principal,
             @RequestParam(defaultValue = "50") int limit, @RequestParam(required = false) String cursor) {
         return archive.list(principal, limit, cursor);
+    }
+
+    @GetMapping("/search")
+    ResponseEntity<List<ArchiveService.SearchHit>> search(@AuthenticationPrincipal GatewayPrincipal principal,
+                                                          @RequestParam String q) throws IOException {
+        return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "private, no-store").body(archive.search(principal, q));
+    }
+
+    @GetMapping("/{documentId}/preview")
+    ResponseEntity<FileSystemResource> preview(@AuthenticationPrincipal GatewayPrincipal principal, @PathVariable String documentId,
+                                               @RequestParam(defaultValue = "small") String size) throws IOException {
+        // A picture rendered by the gateway from the clean copy; the file name carries the version, so it may be cached.
+        return ResponseEntity.ok().contentType(MediaType.IMAGE_PNG).header("X-Content-Type-Options", "nosniff")
+                .header("Content-Security-Policy", "default-src 'none'")
+                .header(HttpHeaders.CACHE_CONTROL, "private, max-age=300")
+                .body(new FileSystemResource(archive.preview(principal, documentId, size)));
     }
 
     @GetMapping("/{documentId}")

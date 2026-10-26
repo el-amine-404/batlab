@@ -62,6 +62,8 @@ export const Document = z.object({
   documentId: z.string(), title: z.string(), category: z.string(), reviewState: z.string(), archivePath: z.string(),
   currentVersion: z.number(), metadataRevision: z.number(), sha256: z.string(), bytes: z.number(),
   publishedAt: z.string(), updatedAt: z.string(), scanId: z.string().nullable().optional(),
+  issuer: z.string().nullish(), documentType: z.string().nullish(), documentDate: z.string().nullish(),
+  tags: z.array(z.string()).nullish(),
 });
 export type Document = z.infer<typeof Document>;
 export const PaperlessImport = z.object({
@@ -74,6 +76,13 @@ export const EnrichmentJob = z.object({ kind: z.enum(["OCR", "SUGGEST"]), status
   applied: z.record(z.string(), z.unknown()).nullish() });
 export type EnrichmentJob = z.infer<typeof EnrichmentJob>;
 export const DocumentPage = z.object({ items: z.array(Document), nextCursor: z.string().nullable() });
+export const SearchHit = z.object({ documentId: z.string(), snippet: z.string() });
+/** What an estimate needs: usual step times here (seconds), the page count, files ahead in the queue. */
+export const Progress = z.object({
+  now: z.string(), pages: z.number().nullable(), ahead: z.number(),
+  typical: z.record(z.string(), z.number().nullable()),
+});
+export type Progress = z.infer<typeof Progress>;
 export const Sidecar = z.object({
   documentId: z.string(), title: z.string(), metadataRevision: z.number(), tags: z.array(z.string()).optional(),
   documentType: z.string().optional(),
@@ -162,7 +171,21 @@ export const api = {
   quarantine: () => request(ScanPage, "/api/v1/quarantine?limit=100"),
   deleteQuarantined: (id: string, confirmSigned: boolean) =>
     request(z.undefined(), `/api/v1/quarantine/${encodeURIComponent(id)}?confirmSigned=${confirmSigned}`, { method: "DELETE" }),
-  documents: (cursor?: string) => request(DocumentPage, `/api/v1/archive?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`),
+  documents: (cursor?: string) => request(DocumentPage, `/api/v1/archive?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`),
+  /** Every document (a personal archive: a few pages of 100). */
+  async allDocuments(): Promise<Document[]> {
+    const items: Document[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 50; page += 1) {
+      const result = await api.documents(cursor);
+      items.push(...result.items);
+      if (!result.nextCursor) break;
+      cursor = result.nextCursor;
+    }
+    return items;
+  },
+  search: (q: string) => request(z.array(SearchHit), `/api/v1/archive/search?q=${encodeURIComponent(q)}`),
+  progress: (scanId: string) => request(Progress, `/api/v1/scans/${encodeURIComponent(scanId)}/progress`),
   document: (id: string) => request(Document, `/api/v1/archive/${encodeURIComponent(id)}`),
   paperless: (scanId: string) => request(PaperlessImport, `/api/v1/scans/${encodeURIComponent(scanId)}/paperless-import`),
   sendToPaperless: (scanId: string) =>
@@ -213,4 +236,9 @@ export function upload(file: File, intent: string, onProgress: (fraction: number
     form.append("cdrMode", "RASTER");
     xhr.send(form);
   });
+}
+
+/** The first-page picture of a document's current version (rendered by the gateway from the clean copy). */
+export function previewUrl(documentId: string, version: number, size: "small" | "large") {
+  return `/api/v1/archive/${encodeURIComponent(documentId)}/preview?size=${size}&v=${version}`;
 }

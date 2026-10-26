@@ -21,7 +21,7 @@ cleanup() {
   docker rm -f -v pgw-m7-agent >/dev/null 2>&1 || true
   "${dc[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
   docker run --rm --network none --user 10005:10005 -v "$TEST_ARCHIVE:/archive" --entrypoint sh pdf-gateway-m4-test/archive-worker:local \
-    -c 'rm -rf /archive/archive /archive/staging /archive/manifests/*' >/dev/null 2>&1 || true
+    -c 'rm -rf /archive/archive /archive/previews /archive/staging /archive/manifests/*' >/dev/null 2>&1 || true
   docker run --rm --network none -v "$TEST_STORAGE/api:/data" --entrypoint sh pdf-gateway-m4-test/archive-worker:local -c 'rm -rf /data/*' >/dev/null 2>&1 || true
   chmod -R u+rwX "$scratch" 2>/dev/null || true
   rm -rf -- "$scratch"

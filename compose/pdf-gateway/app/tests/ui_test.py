@@ -98,11 +98,52 @@ try:
     driver.get(BASE + "/documents")
     text_present(driver, HOSTILE)
     listing = driver.find_element(By.CSS_SELECTOR, "[data-testid=document-list]")
-    check("XSS payload rendered as text, no element created", len(listing.find_elements(By.TAG_NAME, "img")) == 0)
+    images = listing.find_elements(By.TAG_NAME, "img")
+    check("XSS payload rendered as text, no element created",
+          all((image.get_attribute("data-testid") or "").startswith("preview-") and "/preview?" in image.get_attribute("src") for image in images)
+          and not driver.execute_script("return !!window.__xss"), [image.get_attribute("outerHTML") for image in images])
     check("one list with ready and held files", "Ready" in listing.text and "Held" in listing.text)
     check("archived files show their title and folder", "Internet Invoice - October 2026" in listing.text
           and "Finance › Example Telecom" in listing.text, listing.text)
     driver.save_screenshot(str(SHOTS / "desktop-documents.png"))
+
+    # The logo and the name lead to the main page.
+    driver.find_element(By.CSS_SELECTOR, "[data-testid=home-link]").click()
+    wait(driver, lambda d: d.current_url.rstrip("/") == BASE.rstrip("/"))
+    check("logo and name go to the main page", "Add PDF files" in body(driver))
+
+    # Sidebar: the archive's sections and correspondents, with counts; picking one filters the list.
+    tree = wait(driver, ec.presence_of_element_located((By.CSS_SELECTOR, "[data-testid=browse-tree]")))
+    wait(driver, lambda d: "Finance" in d.find_element(By.CSS_SELECTOR, "[data-testid=browse-tree]").text)
+    check("sidebar lists the sections with counts", "Finance" in tree.text and "Everything" in tree.text, tree.text)
+    finance = tree.find_element(By.CSS_SELECTOR, "[data-section=Finance]")
+    finance.find_element(By.CSS_SELECTOR, "button[aria-expanded]").click()
+    finance.find_element(By.PARTIAL_LINK_TEXT, "Example Telecom").click()
+    wait(driver, lambda d: "from=Example" in d.current_url)
+    heading = wait(driver, ec.presence_of_element_located((By.CSS_SELECTOR, "[data-testid=documents-heading]")))
+    rows = driver.find_element(By.CSS_SELECTOR, "[data-testid=document-list]").text
+    check("a correspondent shows only its documents", "Example Telecom" in heading.text and "Internet Invoice" in rows and HOSTILE not in rows, rows)
+
+    # Thumbnails: the gateway's pictures of the clean copies (rendered by the archive worker).
+    wait(driver, lambda d: d.execute_script(
+        "return [...document.querySelectorAll('[data-testid=document-list] img')].some(i => i.complete && i.naturalWidth > 0)"), 30)
+    check("list shows first-page thumbnails", True)
+    driver.find_element(By.CSS_SELECTOR, "[data-testid=view-grid]").click()
+    check("grid view", driver.find_elements(By.CSS_SELECTOR, "[data-testid=document-grid] img"))
+    driver.find_element(By.CSS_SELECTOR, "[data-testid=view-list]").click()
+
+    # Search reads the documents' own text too (case, accents and spacing aside).
+    driver.get(BASE + "/documents")
+    wait(driver, ec.presence_of_element_located((By.CSS_SELECTOR, "[data-testid=search]"))).send_keys("TOTAL due")
+    snippet = wait(driver, ec.presence_of_element_located((By.CSS_SELECTOR, "[data-testid=snippet]")), 20)
+    check("text search finds a phrase in the document", "29.99" in snippet.text or "Total" in snippet.text, snippet.text)
+
+    # Needs attention: the held file, counted in the navigation.
+    count = driver.find_element(By.CSS_SELECTOR, "[data-testid=attention-count]")
+    check("navigation counts what needs attention", int(count.text) >= 1, count.text)
+    driver.find_element(By.CSS_SELECTOR, "[data-testid=nav-attention]").click()
+    held = wait(driver, ec.presence_of_element_located((By.CSS_SELECTOR, "[data-testid=attention-held]")))
+    check("attention lists the held file", HOSTILE in held.text, held.text)
 
     # Add files: choosing a file starts it at once (archive and Paperless, no options to pick).
     driver.get(BASE + "/")
@@ -113,6 +154,11 @@ try:
     # No workers run in this stack, so the new upload waits (live status shown in words).
     text_present(driver, "Checking your file")
     check("upload accepted and tracked on its document page", "/documents/scan-" in driver.current_url)
+    progress = wait(driver, ec.presence_of_element_located((By.CSS_SELECTOR, "[data-testid=progress]")))
+    check("progress shows five stages, at the checks", progress.get_attribute("data-stage") == "check"
+          and len(progress.find_elements(By.CSS_SELECTOR, "li[data-stage]")) == 5, progress.get_attribute("outerHTML")[:300])
+    line = driver.find_element(By.CSS_SELECTOR, "[data-testid=progress-line]").text
+    check("progress says what is happening and how long is left", "Checking" in line and "left" in line, line)
     text_present(driver, "After the checks.")
     check("a new upload is headed for Paperless", "Added to Paperless" in body(driver))
 
@@ -157,6 +203,36 @@ try:
          and "paid" in d.find_element(By.CSS_SELECTOR, "[data-testid=copy-fields]").text)
     check("tag and number edit persisted", "2026-10-4471" in driver.find_element(By.CSS_SELECTOR, "[data-testid=copy-fields]").text)
     check("edited by a person shows as filed by you", "Filed by you" in driver.find_element(By.CSS_SELECTOR, "[data-testid=filed-by]").text)
+    # Click a value to change it; Undo puts it back.
+    driver.find_element(By.CSS_SELECTOR, "[data-testid=inline-reference]").click()
+    box = driver.find_element(By.CSS_SELECTOR, "[data-testid=inline-form-reference] input")
+    box.clear()
+    box.send_keys("INV-INLINE-7")
+    driver.find_element(By.CSS_SELECTOR, "[data-testid=inline-form-reference] button[type=submit]").click()
+    wait(driver, lambda d: "INV-INLINE-7" in d.find_element(By.CSS_SELECTOR, "[data-testid=copy-fields]").text, 30)
+    check("inline edit saves", driver.find_elements(By.CSS_SELECTOR, "[data-testid=saved-note]"))
+    driver.find_element(By.CSS_SELECTOR, "[data-testid=undo]").click()
+    wait(driver, lambda d: "2026-10-4471" in d.find_element(By.CSS_SELECTOR, "[data-testid=copy-fields]").text, 30)
+    check("undo restores the previous value", "INV-INLINE-7" not in driver.find_element(By.CSS_SELECTOR, "[data-testid=copy-fields]").text)
+    preview = driver.find_element(By.CSS_SELECTOR, "[data-testid=large-preview] img")
+    wait(driver, lambda d: d.execute_script("return arguments[0].complete && arguments[0].naturalWidth > 0", preview), 30)
+    check("document page shows a large first-page picture", "size=large" in preview.get_attribute("src"))
+
+    # Files dropped on any page are added (and shown on the main page).
+    driver.execute_script("""
+        const file = new File(['%PDF-1.4\\n%%EOF\\n'], 'dropped.pdf', {type: 'application/pdf'});
+        const data = new DataTransfer(); data.items.add(file);
+        document.body.dispatchEvent(new DragEvent('dragenter', {bubbles: true, dataTransfer: data}));""")
+    check("dragging files over a page shows the drop area", driver.find_elements(By.CSS_SELECTOR, "[data-testid=drop-overlay]"))
+    driver.execute_script("""
+        const file = new File(['%PDF-1.4\\n%%EOF\\n'], 'dropped.pdf', {type: 'application/pdf'});
+        const data = new DataTransfer(); data.items.add(file);
+        document.body.dispatchEvent(new DragEvent('drop', {bubbles: true, cancelable: true, dataTransfer: data}));""")
+    wait(driver, lambda d: d.current_url.rstrip("/") == BASE.rstrip("/"))
+    text_present(driver, "dropped.pdf")
+    check("a file dropped anywhere is added", True)
+    driver.get(BASE + "/documents/scan-01J00000000000000000000060")
+    wait(driver, lambda d: d.find_elements(By.CSS_SELECTOR, "[data-testid=view-pdf]"))
     view = driver.find_element(By.CSS_SELECTOR, "[data-testid=view-pdf]")
     check("view opens the clean copy inline in a new tab", view.get_attribute("href").endswith("/file?view=true")
           and view.get_attribute("target") == "_blank" and "/quarantine" not in view.get_attribute("href"))
@@ -261,6 +337,13 @@ with sync_playwright() as playwright:
     page.tap("nav[aria-label='Main mobile'] >> text=Documents")
     page.wait_for_url(BASE + "/documents")
     check("bottom navigation tap", page.url.endswith("/documents"))
+    check("phone: no sidebar", not page.is_visible("aside[aria-label=Sidebar]"))
+    page.tap("[data-testid=browse]")
+    page.wait_for_selector("[data-testid=browse-sheet] [data-testid=browse-tree]")
+    check("phone: Browse opens the sections", "Finance" in page.inner_text("[data-testid=browse-sheet]"))
+    page.tap("[data-testid=browse-sheet] >> text=Finance")
+    page.wait_for_url("**/documents?section=Finance")
+    check("phone: picking a section filters and closes", not page.is_visible("[data-testid=browse-sheet]"))
 
     phone_browser.close()
 
