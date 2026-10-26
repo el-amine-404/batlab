@@ -227,6 +227,22 @@ Section/Correspondent with the metadata hidden next to the PDF.
 - NEXT: the user re-runs the AI on the CNIE form and the ID card (Re-run the AI); then the remaining M8
   items below (restic backup + restore test need the user's sudo).
 
+## UI/UX round (2026-10-26): commit `0593cdf` (main `94af1e9`)
+
+User request: "Do all of them" (sidebar, previews, estimated time, better progress, and the smaller ideas),
+logo and name link to the main page, a Discord message when done.
+- VERIFIED by `test_m5_ui` (Firefox desktop + Playwright iPhone): logo/name → main page; sidebar sections and
+  correspondents with counts filter the list; thumbnails load; grid view; text search with snippet; attention
+  count and list; five-stage progress with "left" estimate on a new upload; inline edit + Undo (revision 4);
+  large preview; drop anywhere adds the file; phone Browse sheet. `test_m4_gate`: preview PNG, 400/404 rules,
+  search (spacing aside, owner only), list fields. `test_m5_api`: progress endpoint, 404 for others.
+  `test_m4_worker`, `test_m6_paperless`, `test_m7_enrichment` pass.
+- VERIFIED on Lab2: deployed (peak 66 °C), previews backfilled 6/6, every preview 200 image/png, search
+  "m fitness"/"mfitness" → 2 hits, progress medians from Lab2's own runs, web 200.
+- Previews live in `pdf-archive/previews/` (archive root, not the browsable tree; rebuilt at worker start).
+- NOT DONE: content search is a linear scan of the hidden text files (fine for a personal archive; an index
+  would be needed for many thousands of documents). Small previews are PNG (30-190 KB each).
+
 ## Next implementation order
 
 1. M8 hardening and operations: adversarial/fuzz/load/disk-full tests; measured host budget (Paperless,
