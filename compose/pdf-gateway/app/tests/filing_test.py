@@ -70,5 +70,12 @@ try:
 except (enrichment.InvalidResult, AttributeError, TypeError) as error:
     check("a malformed answer is an invalid result", isinstance(error, enrichment.InvalidResult), type(error).__name__)
 
+# A title naming what the document does not (the prompt's example, another document) is refused;
+# plain words and month names need not be printed.
+borrowed, why = run({"title": "Facture Acme Mobile - forfait 12 mois"})
+check("a title naming a company the text doesn't print is refused", "title" not in borrowed and any(r.startswith("title") for r in why), why)
+check("a title in plain words passes", run({"title": "Facture abonnement football - Mars"})[0].get("title") == "Facture abonnement football - Mars")
+check("a mixed-case name the text doesn't print is refused", "title" not in run({"title": "Facture eBay StreamCo"})[0])
+
 print("filing checks " + ("passed" if not failures else f"FAILED: {failures}"))
 sys.exit(1 if failures else 0)

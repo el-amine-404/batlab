@@ -91,7 +91,7 @@ SECTIONS = ["Finance", "Employment", "Identity", "Medical", "Education", "Contra
 LANGUAGES = {"fr", "en", "ar", "es"}
 GENERIC_TITLES = {"facture", "invoice", "document", "receipt", "reçu", "recu", "contrat", "contract", "letter", "lettre"}
 NAME_STOPWORDS = {"the", "and", "les", "des", "sarl", "ltd", "inc"}
-# Words that describe rather than name ("beIN Sports", "Maroc Telecom"): they need not be printed,
+# Words that describe rather than name ("Acme Sports", "Northwind Telecom"): they need not be printed,
 # but every other word of a correspondent's name must be.
 GENERIC_NAME_WORDS = {"sports", "sport", "telecom", "telecoms", "bank", "banque", "group", "groupe", "company", "societe",
                       "maroc", "morocco", "france", "international", "services", "service", "online", "store", "shop"}
@@ -102,6 +102,23 @@ def letters(text: str) -> str:
     """Case, accents and punctuation folded away: what a quote check compares."""
     decomposed = unicodedata.normalize("NFKD", clean(text)).casefold()
     return re.sub(r"[^0-9a-z]+", " ", "".join(ch for ch in decomposed if not unicodedata.combining(ch))).strip()
+
+
+MONTHS = {"january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
+          "november", "december", "janvier", "fevrier", "mars", "avril", "mai", "juin", "juillet", "aout",
+          "septembre", "octobre", "novembre", "decembre"}
+
+
+def title_named_in_text(title: str, haystack: str) -> bool:
+    """Names in a title must be printed in the document: a word written as a name (capitalised
+    after the first word, or mixed case like "eBay") that the text never says means the title
+    was borrowed (from an example, another document) or guessed."""
+    for position, word in enumerate(re.findall(r"[^\W_]+", title)):
+        named = (position > 0 and word[0].isupper()) or any(ch.isupper() for ch in word[1:])
+        folded = letters(word)
+        if named and len(folded) >= 2 and folded not in MONTHS and f" {folded} " not in haystack:
+            return False
+    return True
 
 
 def validate_filing(result: dict, text: str, taxonomy: dict) -> tuple[dict, list[str]]:
@@ -128,8 +145,8 @@ def validate_filing(result: dict, text: str, taxonomy: dict) -> tuple[dict, list
         return clean(item.get("evidence", ""))[:300] if isinstance(item, dict) and isinstance(item.get("evidence"), str) else ""
 
     def named_in_text(name: str) -> bool:
-        # "beIN Sports" passes on "beIN" (in "www.bein.com"); "Orange Maroc" fails on a text that only
-        # says "Maroc" in an address.
+        # "Acme Sports" passes on "Acme" (in "www.acme.example"); "Northwind Maroc" fails on a text that
+        # only says "Maroc" in an address.
         words = [word for word in letters(name).split() if len(word) >= 3 and word not in NAME_STOPWORDS]
         distinctive = [word for word in words if word not in GENERIC_NAME_WORDS] or words
         return bool(distinctive) and all(f" {word} " in haystack for word in distinctive)
@@ -183,10 +200,12 @@ def validate_filing(result: dict, text: str, taxonomy: dict) -> tuple[dict, list
         else:
             fields["amount"] = {"value": number, "currency": currency, "evidence": evidence_of("amount")}
     title = plain_punctuation(value_of("title"))[:120].strip(" -")
-    if title and letters(title) not in GENERIC_TITLES and len(title) >= 4:
-        fields["title"] = title
-    elif title:
+    if title and (letters(title) in GENERIC_TITLES or len(title) < 4):
         dropped.append("title: too generic")
+    elif title and not title_named_in_text(title, haystack):
+        dropped.append("title: names something the document does not")
+    elif title:
+        fields["title"] = title
     language = value_of("language")
     if language in LANGUAGES:
         fields["language"] = language

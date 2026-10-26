@@ -118,8 +118,8 @@ keeps its filing; the AI's answer is then only a suggestion.
 `/mnt/storage/data/documents/pdf-archive/archive` is meant to be browsed:
 
 ```text
-Finance/beIN Sports/2026-06-10 Facture beIN Sports - abonnement 12 mois.pdf
-Identity/2021-03-04 Carte nationale d'identite.pdf
+Finance/Acme Mobile/2026-06-10 Facture Acme Mobile - forfait 12 mois.pdf
+Identity/Prefecture/2021-03-04 Titre de sejour.pdf
 Unsorted/2026-10-26 Scanned document.pdf
 ```
 

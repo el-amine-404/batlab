@@ -180,7 +180,7 @@ User decisions: the AI's answers apply automatically; a new file waits up to 10 
   existing archives).
 - The Paperless adapter sends the correspondent, document type, date and tags. Its Paperless user needs
   view/add for correspondents and document types (operations.md step 4; the user must grant them).
-- Model evaluation on the user's beIN invoice: old prompt (4B) date "1062-20-20", tag "internet";
+- Model evaluation on one of the user's invoices: old prompt (4B) date "1062-20-20", tag "internet";
   new prompt with layout text: 4B ≈17 s, all fields right; 30B ≈61 s, best; qwen2.5-vl-3b with the page
   image was worse (wrong date and amount), so no vision model is used.
 
