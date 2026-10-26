@@ -117,7 +117,7 @@ class Paperless:
     def named_ids(self, endpoint: str, names: list[str]) -> list[int]:
         """IDs of tags, correspondents or document types by name, created when missing.
 
-        Names match loosely ("M FITNESS" is "M-Fitness"), so one correspondent is not two.
+        Names match loosely ("ACME GYM" is "Acme-Gym"), so one correspondent is not two.
         New ones have no owner: everyone who uses Paperless sees them, not "Private"."""
         existing = self.call("GET", f"/api/{endpoint}/", query={"page_size": 100000})["results"]
         by_key = {folded(item["name"]): int(item["id"]) for item in existing}
