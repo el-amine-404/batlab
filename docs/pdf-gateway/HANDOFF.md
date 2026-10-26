@@ -200,7 +200,9 @@ Section/Correspondent with the metadata hidden next to the PDF.
 - VERIFIED by tests: edit every field (UI form), edits re-file and produce a new PDF version through final
   validation (REVISION_VALIDATION_QUEUED → REVISION_PUBLISH_QUEUED, `Archive.replace_pdf`); re-run the AI
   (`POST /archive/{id}/refile`); inline view (`?view=true`, CSP); delete everywhere (DOCUMENT_DELETED fan-out,
-  each stage deletes its files; `DELETE /api/v1/scans/{id}`); duplicate upload → 409 + Location; plain
+  each stage deletes its files; `DELETE /api/v1/scans/{id}`); duplicate upload → 409 + Location (test added
+  to `test_m5_api` only on 2026-10-26, it had been untested; on Lab2 a re-upload of an archived file → 409,
+  no scan stored); plain
   ASCII names; no Producer; OCR before filing for scans; Paperless content, note, new versions, shared objects.
 - VERIFIED on Lab2 (2026-10-26, generated StreamCo invoice, intent ARCHIVE_AND_IMPORT as the UI sends):
   READY in 100 s, filed by the AI, in Paperless (#17) 10 s later, Discord "received" and "done" delivered
