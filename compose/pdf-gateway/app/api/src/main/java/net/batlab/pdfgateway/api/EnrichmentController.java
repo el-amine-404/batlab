@@ -254,11 +254,12 @@ public class EnrichmentController {
         Boolean moving = jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM enrichment_jobs WHERE document_id=? AND status IN ('WAITING_FOR_AI','LEASED','SUBMITTED'))",
                 Boolean.class, documentId);
         if (Boolean.TRUE.equals(moving)) throw new ApiException(409, "ALREADY_ASKED", "The AI is already on it");
-        // A scan whose text is the sandbox's own OCR (one language, the page's layout as it found it): the
-        // laptop reads the pages again first (French, English and Arabic, scattered text too), then files it.
-        Boolean sandboxText = jdbc.queryForObject("SELECT sidecar->'textExtraction'->>'engine' = 'dangerzone-ocr' FROM archive_documents WHERE document_id=?",
+        // A scan (its text came from OCR: the sandbox's, one language, or an earlier reading on the laptop): the
+        // laptop reads the pages again first with its current OCR (French, English and Arabic, scattered text
+        // too, small pages enlarged), then files it.
+        Boolean ocrText = jdbc.queryForObject("SELECT sidecar->'textExtraction'->>'method' = 'ocr' FROM archive_documents WHERE document_id=?",
                 Boolean.class, documentId);
-        if (Boolean.TRUE.equals(sandboxText)) {
+        if (Boolean.TRUE.equals(ocrText)) {
             int again = jdbc.update("""
                     UPDATE enrichment_jobs SET status='WAITING_FOR_AI', context='{"force": true}'::jsonb, artifact_sha256=?, result=NULL, applied=NULL,
                            lease_agent=NULL, lease_until=NULL, attempts=0, error_code=NULL, completed_at=NULL, deadline_at=NULL,

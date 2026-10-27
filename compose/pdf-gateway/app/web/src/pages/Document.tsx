@@ -127,7 +127,7 @@ export function DocumentPage() {
           onRefile={async () => {
             const asked = await api.refile(documentId!);
             toast.success(asked.reading ? "Reading the pages again on the laptop, then filing it." : "Asked the AI to file it again.",
-              { description: asked.reading ? "Its text came from the sandbox's quick French-only reading; the laptop reads French, English and Arabic. About a minute; this page updates by itself."
+              { description: asked.reading ? "It's a scan: the laptop reads its pages again (French, English and Arabic) before the AI files it. About a minute; this page updates by itself."
                 : "It takes about a minute; this page updates by itself." });
             await client.invalidateQueries({ queryKey: ["enrichment", scanId] });
           }} />
