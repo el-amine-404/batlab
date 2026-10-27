@@ -38,7 +38,9 @@ export function DocumentPage() {
   const documentId = findings.data?.archive?.documentId ?? null;
   const ready = status === "READY" && !!documentId;
   const doc = useQuery({ queryKey: ["document", documentId], queryFn: () => api.document(documentId!), enabled: ready });
-  const meta = useQuery({ queryKey: ["sidecar", documentId], queryFn: () => api.sidecar(documentId!), enabled: ready });
+  // While a saved change is being written into a new version of the PDF, look again until it is there.
+  const meta = useQuery({ queryKey: ["sidecar", documentId], queryFn: () => api.sidecar(documentId!), enabled: ready,
+    refetchInterval: (query) => query.state.data && pdfBehind(query.state.data.sidecar) ? 3_000 : false });
   const paperless = useQuery({
     queryKey: ["paperless", scanId], queryFn: () => api.paperless(scanId), enabled: !!scan.data,
     refetchInterval: (query) => ["PENDING", "IMPORTING", "FAILED_RETRYABLE"].includes(query.state.data?.status ?? "") ? 3_000 : false,
@@ -62,18 +64,28 @@ export function DocumentPage() {
     return () => source.close();
   }, [scanId, scan.data?.status, client]);
 
-  // The AI finishing while the page is open: say so, and show what it filled in.
-  const suggest = jobs.data?.filter((job) => job.kind === "SUGGEST").at(-1);
-  const [watched, setWatched] = useState<string | null>(null);
+  // The laptop finishing while the page is open: say so, and show what it filled in.
+  const active = jobs.data?.filter((job) => MOVING.has(job.status)).at(-1) ?? null;
+  const latest = jobs.data?.at(-1);
+  const [wasActive, setWasActive] = useState(false);
   useEffect(() => {
-    if (!suggest) return;
-    if (watched && MOVING.has(watched) && !MOVING.has(suggest.status)) {
-      if (suggest.status === "COMPLETED") toast.success("The AI filed it.", { description: suggest.model ? `By ${suggest.model}.` : undefined });
-      else toast.error("The AI's answer couldn't be used.", { description: suggest.errorCode ?? undefined });
+    if (wasActive && !active && latest) {
+      if (latest.status === "COMPLETED") toast.success("Done: the laptop read it and it's filed.", { description: latest.model ? `By ${latest.model}.` : undefined });
+      else toast.error("The AI's answer couldn't be used.", { description: latest.errorCode ?? undefined });
       void Promise.all(["sidecar", "document", "documents", "suggestions"].map((key) => client.invalidateQueries({ queryKey: [key] })));
     }
-    setWatched(suggest.status);
-  }, [suggest?.status]);
+    setWasActive(!!active);
+  }, [active?.status, active?.kind]);
+  // The new version reaching the PDF: its picture and file follow.
+  const behind = meta.data ? pdfBehind(meta.data.sidecar) : false;
+  const [wasBehind, setWasBehind] = useState(false);
+  useEffect(() => {
+    if (wasBehind && !behind) {
+      toast.success("The PDF now carries the new details.");
+      void client.invalidateQueries({ queryKey: ["document", documentId] });
+    }
+    setWasBehind(behind);
+  }, [behind]);
 
   if (scan.error) return <ErrorNote error={scan.error instanceof ApiError && scan.error.status === 404 ? new Error("This document doesn't exist or isn't yours.") : scan.error} />;
   if (!scan.data) return <Muted className="flex items-center gap-2"><Spinner /> Loading…</Muted>;
@@ -87,7 +99,7 @@ export function DocumentPage() {
   const steps = [
     ...safety.slice(0, -1),
     // The AI files the document before it is saved, so its step comes first.
-    ...aiStep(view, ai.data?.state, ai.data?.enabled, sidecar?.organization.reviewState, jobs.data, suggestions.data),
+    ...aiStep(view, ai.data?.state, ai.data?.enabled, sidecar?.organization, jobs.data, suggestions.data),
     safety[safety.length - 1],
     paperlessStep(view, paperless.data, canEdit, async () => {
       try { await api.sendToPaperless(scanId); toast.success("Sending the clean copy to Paperless."); }
@@ -95,7 +107,7 @@ export function DocumentPage() {
       await client.invalidateQueries({ queryKey: ["paperless", scanId] });
     }),
   ];
-  const aiWorking = suggest && MOVING.has(suggest.status) ? suggest.status : null;
+  const aiWorking = active ? (active.kind === "OCR" && active.status !== "WAITING_FOR_AI" ? "READING" : active.status) : null;
 
   return (
     <div className="space-y-6">
@@ -113,8 +125,10 @@ export function DocumentPage() {
         <CopyCard documentId={documentId!} doc={doc.data} sidecar={sidecar} etag={meta.data.etag} paperless={paperless.data}
           canEdit={canEdit} onSaved={reload} ai={ai.data} aiWorking={aiWorking}
           onRefile={async () => {
-            await api.refile(documentId!);
-            toast.success("Asked the AI to file it again.", { description: aiUp(ai.data?.state) ? "It takes about a minute; this page updates by itself." : "It starts when the laptop is back." });
+            const asked = await api.refile(documentId!);
+            toast.success(asked.reading ? "Reading the pages again on the laptop, then filing it." : "Asked the AI to file it again.",
+              { description: asked.reading ? "Its text came from the sandbox's quick French-only reading; the laptop reads French, English and Arabic. About a minute; this page updates by itself."
+                : "It takes about a minute; this page updates by itself." });
             await client.invalidateQueries({ queryKey: ["enrichment", scanId] });
           }} />
       )}
@@ -151,6 +165,7 @@ export function DocumentPage() {
 
 /** What the AI button says and whether it can be pressed, from the AI's state and this document's job. */
 function aiButton(ai: { state: string; enabled: boolean } | undefined, working: string | null): { label: ReactNode; disabled: boolean; title: string } {
+  if (working === "READING") return { label: <><Spinner /> Reading the pages…</>, disabled: true, title: "The laptop's OCR, then the AI files it." };
   if (working === "LEASED" || working === "SUBMITTED") return { label: <><Spinner /> The AI is reading it…</>, disabled: true, title: "About a minute." };
   if (working === "WAITING_FOR_AI") {
     return aiUp(ai?.state) ? { label: <><Spinner /> Queued for the AI…</>, disabled: true, title: "It starts within a minute." }
@@ -175,23 +190,31 @@ function CopyCard({ documentId, doc, sidecar, etag, paperless, canEdit, onSaved,
     setUndo({ changes: previous(sidecar, changes), text: Object.keys(changes).length === 1 ? `${FIELD_NAME[Object.keys(changes)[0]] ?? "Change"} saved.` : "Changes saved." });
     await onSaved();
   };
-  const rows: [string, ReactNode, InlineSpec | null][] = [
+  const identity = sidecar.documentType === "identity_document" || !!sidecar.holder;
+  type Row = [string, ReactNode, InlineSpec | null];
+  const rows: Row[] = [
     ["Title", sidecar.title, { key: "title", value: sidecar.title, required: true }],
     ["From", sidecar.issuer?.value, { key: "issuer", value: sidecar.issuer?.value ?? "" }],
+    ...(identity ? [["Holder", sidecar.holder?.value, { key: "holder", value: sidecar.holder?.value ?? "" }] as Row,
+      ["Valid until", sidecar.validUntil?.value, { key: "validUntil", value: sidecar.validUntil?.value ?? "", type: "date" }] as Row] : []),
     ["Type", sidecar.documentType ? TYPE_LABEL[sidecar.documentType] ?? sidecar.documentType : undefined,
       { key: "documentType", value: sidecar.documentType ?? "", options: Object.entries(TYPE_LABEL) }],
     ["Date", sidecar.documentDate?.value, { key: "documentDate", value: sidecar.documentDate?.value ?? "", type: "date" }],
     ["Number", sidecar.reference?.value, { key: "reference", value: sidecar.reference?.value ?? "" }],
     ["Amount", sidecar.amount ? `${sidecar.amount.value} ${sidecar.amount.currency}` : undefined, null],
     ["Folder", folderOf(doc.archivePath), { key: "section", value: sidecar.organization.category, options: SECTIONS.map((value) => [value, value]), required: true }],
-    ["Tags", sidecar.tags?.length ? sidecar.tags.map((tag) => <Badge key={tag}>{tag}</Badge>) : undefined,
-      { key: "tags", value: (sidecar.tags ?? []).join(", "), hint: "separated by commas" }],
+    ["File name", <span className="font-mono text-xs break-all" data-testid="file-name" title="It follows the title and the date: change those to rename it.">{sidecar.relativePdfPath}</span>, null],
+    ["Tags", sidecar.tags?.length ? sidecar.tags.map((tag) => (
+      <Link key={tag} to={`/documents?tag=${encodeURIComponent(tag)}`} title={`Every document tagged ${tag}`} data-testid="tag-link"
+        className="rounded-full focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"><Badge className="hover:border-primary/50 hover:text-primary">{tag}</Badge></Link>
+    )) : undefined, { key: "tags", value: (sidecar.tags ?? []).join(", "), hint: "separated by commas", links: true }],
   ];
   const state = sidecar.organization.reviewState;
   const byAi = state === "AI";
   const embedded = sidecar.embeddedMetadata?.values ?? {};
   // A saved change reaches the PDF through a new version, checked again first: show it until then.
-  const updating = Object.keys(embedded).length > 0 && embedded.Title !== plain(sidecar.title);
+  const updating = pdfBehind(sidecar);
+  const rewritten = (sidecar.artifactVersion ?? 1) - 1;
   const file = `/api/v1/archive/${encodeURIComponent(documentId)}/file`;
   const button = aiButton(ai, aiWorking);
   const aiOff = !aiUp(ai?.state);
@@ -214,7 +237,7 @@ function CopyCard({ documentId, doc, sidecar, etag, paperless, canEdit, onSaved,
             <a className={cx(buttonVariants({ variant: "outline", size: "sm" }), "w-full")} href={paperless.paperlessUrl} target="_blank" rel="noopener noreferrer" data-testid="open-paperless">
               <ExternalLink /> Open in Paperless</a>
           )}
-          <p className="text-center text-xs text-muted-foreground">{formatBytes(doc.bytes)} · version {sidecar.artifactVersion ?? 1}</p>
+          <p className="text-center text-xs text-muted-foreground">{formatBytes(doc.bytes)}</p>
         </div>
 
         <div className="min-w-0">
@@ -285,7 +308,11 @@ function CopyCard({ documentId, doc, sidecar, etag, paperless, canEdit, onSaved,
                   <div key={key} className="contents"><dt className="text-muted-foreground">{key}</dt><dd className="break-words">{embedded[key]}</dd></div>
                 ))}
               </dl>
-              <Muted className="mt-1 text-xs">No producer, creator or dates are written. Fast web view is on.</Muted>
+              <Muted className="mt-1 text-xs">
+                These details are written inside the PDF too, so they travel with the file. When they change, a new copy of the PDF is
+                made with them and checked again before it replaces this one; the pages themselves never change.
+                {rewritten > 0 && ` Updated ${rewritten} ${rewritten === 1 ? "time" : "times"} since it was saved.`} No producer, creator or dates are written.
+              </Muted>
             </details>
           )}
           <Muted className="mt-4 text-xs">
@@ -295,6 +322,12 @@ function CopyCard({ documentId, doc, sidecar, etag, paperless, canEdit, onSaved,
       </div>
     </section>
   );
+}
+
+/** A saved change not yet in the PDF itself (its new version is being written and checked). */
+function pdfBehind(sidecar: SidecarData) {
+  const embedded = sidecar.embeddedMetadata?.values ?? {};
+  return Object.keys(embedded).length > 0 && embedded.Title !== plain(sidecar.title);
 }
 
 /** The same plain punctuation the archive writes into the PDF. */
@@ -343,7 +376,9 @@ function previous(sidecar: SidecarData, changes: MetadataChanges): MetadataChang
   return out;
 }
 
-type InlineSpec = { key: keyof MetadataChanges; value: string; type?: string; options?: [string, string][]; required?: boolean; hint?: string };
+type InlineSpec = { key: keyof MetadataChanges; value: string; type?: string; options?: [string, string][]; required?: boolean; hint?: string;
+  /** The value holds links (tags): a pencil beside it edits, instead of a click on the value. */
+  links?: boolean };
 
 /** A field that becomes an input when clicked; Enter saves, Escape cancels. */
 function InlineField({ label, display, spec, documentId, etag, onSaved }: {
@@ -355,6 +390,17 @@ function InlineField({ label, display, spec, documentId, etag, onSaved }: {
   const [error, setError] = useState<unknown>(null);
   useEffect(() => { if (!open) setValue(spec.value); }, [spec.value, open]);
   const empty = display === undefined || display === "";
+  if (!open && spec.links && !empty) {
+    return (
+      <div className="group -mx-2 flex w-full flex-wrap items-center gap-1 rounded-md px-2 py-1.5">
+        {display}
+        <button type="button" onClick={() => setOpen(true)} data-testid={`inline-${spec.key}`} title={`Change ${label.toLowerCase()}`} aria-label={`Change ${label.toLowerCase()}`}
+          className="ml-auto flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
+          <Pencil className="size-3.5" />
+        </button>
+      </div>
+    );
+  }
   if (!open) {
     return (
       <button type="button" onClick={() => setOpen(true)} data-testid={`inline-${spec.key}`} title={`Change ${label.toLowerCase()}`}
@@ -527,12 +573,22 @@ function aiWho(job: EnrichmentJob, ocr: EnrichmentJob | undefined) {
   return <span className="mt-1 flex items-start gap-1.5 text-xs"><Bot className="mt-px size-3.5 shrink-0" /><span>{parts || "A model on your laptop"}, {text}; a text model, no vision.{job.completedAt && ` ${formatWhen(job.completedAt)}.`}</span></span>;
 }
 
-function aiStep(scan: Scan, state: string | undefined, enabled: boolean | undefined, reviewState: string | undefined,
+function aiStep(scan: Scan, state: string | undefined, enabled: boolean | undefined, organization: { reviewState: string; reason?: string } | undefined,
                 jobs: EnrichmentJob[] | undefined, suggestions: Suggestion[] | undefined): Step[] {
-  if (enabled === false) return [];
-  const label = "Filed by the AI (on your laptop)";
+  const reviewState = organization?.reviewState;
   const job = jobs?.filter((item) => item.kind === "SUGGEST").at(-1);
   const ocr = jobs?.filter((item) => item.kind === "OCR").at(-1);
+  if (reviewState === "RULE" && organization?.reason?.includes("machine-readable zone") && !(ocr && MOVING.has(ocr.status))) {
+    return [{ key: "ai", label: "Read from the card's machine-readable zone", state: "done",
+      detail: "Holder, number and expiry from the lines of <<< at the bottom, kept because every check digit agrees. No AI needed." }];
+  }
+  if (enabled === false) return [];
+  const label = "Filed by the AI (on your laptop)";
+  if (ocr && MOVING.has(ocr.status)) {
+    return [{ key: "ai", label, state: aiUp(state) ? "running" : "waiting",
+      detail: aiUp(state) ? "Reading the pages again on the laptop (French, English and Arabic), then the AI files it…"
+        : `It reads the pages again when the laptop is back.${state ? ` ${AI_STATE[state] ?? state}.` : ""}` }];
+  }
   const away = state && !aiUp(state) ? ` ${AI_STATE[state] ?? state}.` : "";
   if (["REVIEW_REQUIRED", "BLOCKED", "FAILED", "CANCELLED"].includes(scan.status)) return [{ key: "ai", label, state: "skipped" }];
   if (!job) {

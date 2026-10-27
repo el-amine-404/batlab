@@ -28,12 +28,15 @@ def edit_changes(changes: dict, current: dict) -> dict:
         out.update(title=changes["title"], titleSource="user_verified")
     if "tags" in changes:
         out["tags"] = changes["tags"]
-    for name in ("issuer", "reference"):
+    for name in ("issuer", "reference", "holder"):
         if name in changes:
             out[name] = {"value": changes[name], "source": "user_verified", "reviewState": "VERIFIED"} if changes[name] else None
     if "documentDate" in changes:
         out["documentDate"] = ({"value": changes["documentDate"], "source": "user_verified", "reviewState": "VERIFIED"}
                                if changes["documentDate"] else None)
+    if "validUntil" in changes:
+        out["validUntil"] = ({"value": changes["validUntil"], "source": "user_verified", "reviewState": "VERIFIED"}
+                             if changes["validUntil"] else None)
     if "documentType" in changes:
         out["documentType"] = changes["documentType"] or None
     if "amount" in changes:

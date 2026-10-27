@@ -40,7 +40,7 @@ public class ArchiveService {
     private static final Pattern ETAG = Pattern.compile("^(?:W/)?\"rev-([1-9][0-9]{0,8})\"$");
     private static final Pattern SIDECAR_REVISION = Pattern.compile("\"metadataRevision\": ([0-9]+)");
     private static final Set<String> EDITABLE = Set.of("title", "tags", "issuer", "documentType", "documentDate",
-            "reference", "amount", "section");
+            "reference", "amount", "section", "holder", "validUntil");
     static final List<String> TYPES = List.of("invoice", "receipt", "bank_statement", "payslip", "contract", "tax_document",
             "insurance", "medical", "identity_document", "certificate", "letter", "school_document", "presentation", "report",
             "manual", "other");
@@ -160,6 +160,7 @@ public class ArchiveService {
                 case "title" -> checked.put(name, text(value, 200, false, "INVALID_TITLE"));
                 case "issuer" -> checked.put(name, text(value, 120, true, "INVALID_ISSUER"));
                 case "reference" -> checked.put(name, text(value, 60, true, "INVALID_REFERENCE"));
+                case "holder" -> checked.put(name, text(value, 120, true, "INVALID_HOLDER"));
                 case "tags" -> {
                     if (!(value instanceof List<?> list) || list.size() > 64
                             || !list.stream().allMatch(tag -> tag instanceof String item && TAG.matcher(item).matches())
@@ -175,7 +176,7 @@ public class ArchiveService {
                     if (!SECTIONS.contains(value)) throw new ApiException(400, "INVALID_SECTION", "Unknown section");
                     checked.put(name, value);
                 }
-                case "documentDate" -> {
+                case "documentDate", "validUntil" -> {
                     if (value != null) {
                         try {
                             java.time.LocalDate date = java.time.LocalDate.parse(String.valueOf(value));
