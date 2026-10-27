@@ -351,12 +351,18 @@ build-pdf-gateway:
 
 build-scanloom:
 	@echo "==> build Scanloom server and PWA (serially)"
-	@for service in api web; do \
+	@$(DC) -f compose/scanloom/docker-compose.yml config --format json | python3 -c 'import json, sys; data=json.load(sys.stdin); \
+		[print(name, service["image"], service["build"]["context"], service["build"].get("dockerfile", "Dockerfile"), \
+		       service["build"]["target"], *(f"{key}={value}" for key, value in service["build"]["args"].items())) \
+		 for name in ("api", "web") for service in (data["services"][name],)]' | \
+	while read -r service image context dockerfile target arg_one arg_two arg_three; do \
 		while [ "$$(cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null | sort -n | tail -1)" -gt 75000 ]; do \
 			echo "    CPU above 75 °C, waiting..."; sleep 20; \
 		done; \
 		echo "==> build Scanloom $$service"; \
-		COMPOSE_PARALLEL_LIMIT=1 $(DC) -f compose/scanloom/docker-compose.yml build $$service || exit 1; \
+		docker build --network host --target "$$target" \
+			--build-arg "$$arg_one" --build-arg "$$arg_two" --build-arg "$$arg_three" \
+			-t "$$image" -f "$$context/$$dockerfile" "$$context" || exit 1; \
 	done
 
 setup-scanloom:
