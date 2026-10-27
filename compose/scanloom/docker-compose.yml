@@ -1,0 +1,157 @@
+name: ${SCANLOOM_PROJECT_NAME:-scanloom}
+services:
+  db:
+    image: postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
+    container_name: scanloom-db
+    environment:
+      POSTGRES_DB: scanloom
+      POSTGRES_USER: scanloom
+      POSTGRES_PASSWORD: ${SCANLOOM_DATABASE_PASSWORD:?set in compose/.env}
+    volumes:
+      - ${VOLUMES_ROOT}/scanloom/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scanloom -d scanloom"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+    networks: [backend]
+    mem_limit: ${SCANLOOM_DB_MEM_LIMIT:-512m}
+    cpus: ${SCANLOOM_DB_CPUS:-0.35}
+    security_opt: [no-new-privileges:true]
+
+  clamav:
+    image: clamav/clamav:1.4@sha256:3bba6dd5ac6663d55b80f86a3126e146612d93b593cc2617188d13f637d91260
+    container_name: scanloom-clamav
+    volumes:
+      - ${VOLUMES_ROOT}/scanloom/clamav:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdscan", "--ping", "3"]
+      interval: 30s
+      timeout: 5s
+      retries: 12
+      start_period: 120s
+    restart: unless-stopped
+    networks: [backend, updates]
+    mem_limit: ${SCANLOOM_CLAMAV_MEM_LIMIT:-3g}
+    cpus: ${SCANLOOM_CLAMAV_CPUS:-0.5}
+    pids_limit: 128
+
+  api:
+    image: local/batlab-scanloom:0.1.0
+    build:
+      context: ./app
+      target: server
+      network: host
+      args:
+        PYTHON_IMAGE: ${IMAGE_SCANLOOM_PYTHON}:${TAG_SCANLOOM_PYTHON}
+        NODE_IMAGE: ${IMAGE_SCANLOOM_NODE}:${TAG_SCANLOOM_NODE}
+        CADDY_IMAGE: ${IMAGE_CADDY}:${TAG_CADDY}
+    pull_policy: build
+    container_name: scanloom-api
+    user: "11000:11000"
+    environment:
+      SCANLOOM_DATABASE_URL: postgresql://scanloom:${SCANLOOM_DATABASE_PASSWORD}@db:5432/scanloom
+      SCANLOOM_STORAGE: /var/lib/scanloom
+      SCANLOOM_CLAMD_HOST: clamav
+      SCANLOOM_PUBLIC_URL: http://scanloom.homelab.lan
+      SCANLOOM_PORT: 8850
+      TZ: ${TZ}
+    depends_on:
+      db: {condition: service_healthy}
+    volumes:
+      - ${VOLUMES_ROOT}/scanloom/incoming:/var/lib/scanloom/incoming
+      - ${VOLUMES_ROOT}/scanloom/work:/var/lib/scanloom/work:ro
+      - ${VOLUMES_ROOT}/scanloom/exports:/var/lib/scanloom/exports:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8850/api/v1/health',timeout=5)"]
+      interval: 20s
+      timeout: 6s
+      retries: 6
+      start_period: 20s
+    restart: unless-stopped
+    networks: [backend]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${SCANLOOM_API_MEM_LIMIT:-512m}
+    cpus: ${SCANLOOM_API_CPUS:-0.5}
+    pids_limit: 96
+
+  worker:
+    image: local/batlab-scanloom:0.1.0
+    pull_policy: never
+    container_name: scanloom-worker
+    command: ["worker"]
+    user: "11000:11000"
+    environment:
+      SCANLOOM_DATABASE_URL: postgresql://scanloom:${SCANLOOM_DATABASE_PASSWORD}@db:5432/scanloom
+      SCANLOOM_STORAGE: /var/lib/scanloom
+      SCANLOOM_CLAMD_HOST: clamav
+      VIPS_BLOCK_UNTRUSTED: "1"
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      TZ: ${TZ}
+    depends_on:
+      db: {condition: service_healthy}
+      clamav: {condition: service_healthy}
+    volumes:
+      - ${VOLUMES_ROOT}/scanloom/incoming:/var/lib/scanloom/incoming
+      - ${VOLUMES_ROOT}/scanloom/work:/var/lib/scanloom/work
+      - ${VOLUMES_ROOT}/scanloom/exports:/var/lib/scanloom/exports
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.kill(1,0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks: [backend]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${SCANLOOM_WORKER_MEM_LIMIT:-2g}
+    cpus: ${SCANLOOM_WORKER_CPUS:-1.5}
+    pids_limit: 128
+
+  web:
+    image: local/batlab-scanloom-web:0.1.0
+    build:
+      context: ./app
+      target: web
+      network: host
+      args:
+        PYTHON_IMAGE: ${IMAGE_SCANLOOM_PYTHON}:${TAG_SCANLOOM_PYTHON}
+        NODE_IMAGE: ${IMAGE_SCANLOOM_NODE}:${TAG_SCANLOOM_NODE}
+        CADDY_IMAGE: ${IMAGE_CADDY}:${TAG_CADDY}
+    pull_policy: build
+    container_name: scanloom
+    depends_on:
+      api: {condition: service_healthy}
+    read_only: true
+    tmpfs:
+      - /config:size=1m,mode=0700,uid=11001,gid=11001
+      - /data:size=1m,mode=0700,uid=11001,gid=11001
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/manifest.webmanifest"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks: [backend, home_server]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${SCANLOOM_WEB_MEM_LIMIT:-96m}
+    cpus: ${SCANLOOM_WEB_CPUS:-0.25}
+    pids_limit: 32
+
+networks:
+  backend:
+    internal: true
+  updates: {}
+  home_server:
+    external: true
+    name: home_server

@@ -169,6 +169,24 @@
               format: number
 
 - Photos & files:
+    - Scanloom:
+        icon: mdi-scanner
+        href: http://scanloom.homelab.lan
+        description: Turn document photos into clean pages
+        siteMonitor: http://scanloom:8080/api/v1/health
+        widget:
+          type: customapi
+          url: http://scanloom:8080/api/v1/system/status
+          refreshInterval: 30000
+          mappings:
+            - field: processing
+              label: Processing
+            - field: ready
+              label: Ready
+            - field: pages
+              label: Pages
+            - field: failed
+              label: Failed
     - Immich:
         icon: immich
         href: http://immich.homelab.lan

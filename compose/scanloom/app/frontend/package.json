@@ -1,0 +1,34 @@
+{
+  "name": "scanloom-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && vite build && node scripts/copy-scalar.mjs"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "5.3.0",
+    "@scalar/api-reference": "1.72.3",
+    "@tanstack/react-query": "5.104.1",
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
+    "lucide-react": "1.56.0",
+    "radix-ui": "1.8.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-router": "7.18.3",
+    "sonner": "2.0.8",
+    "tailwind-merge": "3.7.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "tailwindcss": "4.3.3",
+    "typescript": "7.0.2",
+    "vite": "8.3.4"
+  }
+}

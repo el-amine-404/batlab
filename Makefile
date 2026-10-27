@@ -39,7 +39,7 @@ SITES_ROOT   ?= /srv/sites
 PUID := $(shell id -u)
 PGID := $(shell id -g)
 
-.PHONY: help list setup setup-pdf-gateway build-pdf-gateway network up down restart pull config logs ps check-stack check-all-confirm
+.PHONY: help list setup setup-pdf-gateway setup-scanloom build-pdf-gateway build-scanloom network up down restart pull config logs ps check-stack check-all-confirm
 
 # The gateway's images build only through build-pdf-gateway (host network, one at a
 # time, temperature-gated); `up` builds them that way, then starts with --no-build.
@@ -48,6 +48,8 @@ define compose-loop
 	nobuild=""; \
 	if [ "$(1)" = "up" ] && [ "$$s" = "pdf-gateway" ]; then \
 		$(MAKE) --no-print-directory build-pdf-gateway || exit 1; nobuild="--no-build"; \
+	elif [ "$(1)" = "up" ] && [ "$$s" = "scanloom" ]; then \
+		$(MAKE) --no-print-directory build-scanloom || exit 1; nobuild="--no-build"; \
 	fi; \
 	if [ -n "$(SERVICE)" ]; then \
 		if [ "$(1)" = "down" ]; then \
@@ -73,6 +75,8 @@ help:
 	@echo "  make setup      - Create base directories and symlinks"
 	@echo "  make setup-pdf-gateway - Create only the PDF gateway's directories"
 	@echo "  make build-pdf-gateway - Build the PDF gateway's images one at a time (keeps lab2 cool)"
+	@echo "  make setup-scanloom - Create Scanloom's private PostgreSQL and temporary image directories"
+	@echo "  make build-scanloom - Build Scanloom's tested server and PWA images serially"
 	@echo "  make up         - Start stacks (STACK=<name> [SERVICE=<name>])"
 	@echo "  make down       - Stop and remove stacks (STACK=<name> [SERVICE=<name>])"
 	@echo "  make restart    - Restart stacks (STACK=<name> [SERVICE=<name>])"
@@ -314,6 +318,7 @@ setup: check-env
 	sudo chown 10001:10001 $(VOLUMES_ROOT)/frigate/carwatch
 
 	$(MAKE) --no-print-directory setup-pdf-gateway
+	$(MAKE) --no-print-directory setup-scanloom
 
 	@echo "==> Symlinking .env to all stacks..."
 	@for d in compose/*; do \
@@ -343,6 +348,25 @@ build-pdf-gateway:
 		contexts=""; [ "$$extra" = "-" ] || for item in $$(echo "$$extra" | tr , " "); do contexts="$$contexts --build-context $$item"; done; \
 		docker build --network host $$contexts -t "$$image" -f "$$context/$$dockerfile" "$$context" || exit 1; \
 	done
+
+build-scanloom:
+	@echo "==> build Scanloom server and PWA (serially)"
+	@for service in api web; do \
+		while [ "$$(cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null | sort -n | tail -1)" -gt 75000 ]; do \
+			echo "    CPU above 75 °C, waiting..."; sleep 20; \
+		done; \
+		echo "==> build Scanloom $$service"; \
+		COMPOSE_PARALLEL_LIMIT=1 $(DC) -f compose/scanloom/docker-compose.yml build $$service || exit 1; \
+	done
+
+setup-scanloom:
+	@echo "==> Creating Scanloom directories..."
+	sudo install -d -m 0755 $(VOLUMES_ROOT)/scanloom
+	sudo install -d -m 0700 $(VOLUMES_ROOT)/scanloom/postgres $(VOLUMES_ROOT)/scanloom/clamav
+	sudo install -d -m 0700 -o 11000 -g 11000 \
+		$(VOLUMES_ROOT)/scanloom/incoming \
+		$(VOLUMES_ROOT)/scanloom/work \
+		$(VOLUMES_ROOT)/scanloom/exports
 
 # Only the gateway's folders (also part of setup).
 setup-pdf-gateway:

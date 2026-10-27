@@ -58,3 +58,4 @@ dump_postgres() {
 dump_postgres Paperless "${PAPERLESS_DB_CONTAINER:-paperless-db}" "$DUMP_DIR/paperless.dump"
 dump_postgres Immich "${IMMICH_DB_CONTAINER:-immich-db}" "$DUMP_DIR/immich.dump"
 dump_postgres "PDF gateway" "${PDF_GATEWAY_DB_CONTAINER:-pdf-gateway-db}" "$DUMP_DIR/pdf-gateway.dump"
+dump_postgres Scanloom "${SCANLOOM_DB_CONTAINER:-scanloom-db}" "$DUMP_DIR/scanloom.dump"

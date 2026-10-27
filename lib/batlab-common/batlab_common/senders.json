@@ -8,6 +8,7 @@
   "videodrop": {"name": "videodrop", "link": "http://videodrop.homelab.lan"},
   "camwatch": {"name": "camwatch"},
   "pdf-gateway": {"name": "PDF gateway", "link": "https://pdf.homelab.lan"},
+  "scanloom": {"name": "Scanloom", "link": "http://scanloom.homelab.lan"},
   "carwatch": {"name": "carwatch", "link": "http://frigate.homelab.lan"},
   "diun": {"name": "diun", "avatar": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/diun.png"},
   "netalertx": {"name": "netalertx"},

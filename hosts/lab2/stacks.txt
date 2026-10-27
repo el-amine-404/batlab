@@ -28,6 +28,7 @@ nodecast
 open-webui
 paperless
 pdf-gateway
+scanloom
 portainer
 seerr
 speed_test

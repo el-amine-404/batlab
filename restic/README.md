@@ -19,7 +19,8 @@ password in an independent password manager: the copy inside the encrypted
 repository cannot unlock that repository after a total host loss.
 
 Before every snapshot, `scripts/dump-databases.sh` creates consistent custom
-format PostgreSQL dumps from `paperless-db`, `immich-db` and `pdf-gateway-db`.
+format PostgreSQL dumps from `paperless-db`, `immich-db`, `pdf-gateway-db` and
+`scanloom-db`.
 The restore test also restores one archived PDF and checks it against the
 SHA-256 in its sidecar. The raw database
 volumes remain in the backup as secondary recovery paths.

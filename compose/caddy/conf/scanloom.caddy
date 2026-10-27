@@ -1,0 +1,10 @@
+http://scanloom.homelab.lan {
+  import localSubnets
+  request_body {
+    # 30 files × the default 25 MiB limit, plus multipart overhead.
+    max_size 800MB
+  }
+  reverse_proxy @localSubnets http://scanloom:8080 {
+    flush_interval -1
+  }
+}
