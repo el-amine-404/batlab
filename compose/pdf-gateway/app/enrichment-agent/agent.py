@@ -12,8 +12,11 @@ is never probed or woken. One job at a time; everything is bounded.
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -42,6 +45,13 @@ MAX_PAGES = int(os.getenv("PDF_GATEWAY_OCR_MAX_PAGES", "30"))
 # The clean copy's pages are 150-DPI images; Tesseract reads them better enlarged.
 DPI = int(os.getenv("PDF_GATEWAY_OCR_DPI", "300"))
 SPARSE_BELOW = int(os.getenv("PDF_GATEWAY_OCR_SPARSE_BELOW", "1500"))
+# A small page (a card, a receipt, a screenshot) is rendered larger: its long side gets about this many pixels.
+TARGET_PIXELS = int(os.getenv("PDF_GATEWAY_OCR_TARGET_PIXELS", "4300"))
+MAX_DPI = int(os.getenv("PDF_GATEWAY_OCR_MAX_DPI", "600"))
+# Tesseract wraps right-to-left text (Arabic) in invisible direction marks: noise in search and in Paperless.
+BIDI = re.compile("[\u200e\u200f\u202a-\u202e\u2066-\u2069]")
+# A machine-readable zone line (ID cards, passports): kept whatever Tesseract's confidence, the gateway checks it.
+ZONE_LINE = re.compile(r"(?=(?:[A-Z0-9]*<){3})[A-Z0-9<]{20,}")
 MAX_DOCUMENT = 64 * 1024 * 1024
 LLM_TIMEOUT = int(os.getenv("PDF_GATEWAY_LLM_TIMEOUT_SECONDS", "420"))
 LLM_CONTEXT = int(os.getenv("PDF_GATEWAY_LLM_CONTEXT", "8192"))
@@ -191,6 +201,64 @@ def heartbeat(busy: bool, llm_state: tuple[str, bool, list[dict]], ocr_state: tu
         chosen["model"] = picked
 
 
+def render_dpi(source: Path) -> int:
+    """An enlarged rendering for a small page (a card, a screenshot): its long side gets about TARGET_PIXELS."""
+    try:
+        info = subprocess.run(["pdfinfo", "-f", "1", "-l", "1", str(source)], capture_output=True, text=True, timeout=30).stdout
+        width, height = (float(v) for v in re.search(r"Page.*size:\s+([\d.]+) x ([\d.]+)", info).groups())
+    except (AttributeError, ValueError, OSError, subprocess.SubprocessError):
+        return DPI
+    return max(DPI, min(MAX_DPI, round(TARGET_PIXELS * 72 / max(width, height, 1))))
+
+
+def reading(image: Path, psm: str) -> tuple[str, float]:
+    """One Tesseract reading: its lines without the ones that are only noise, and how much of it Tesseract
+    is sure of (the confidence of its confident words, summed). A line stays when Tesseract is fairly sure
+    of it on average or sure of one word; a machine-readable zone line always stays (the gateway checks
+    its check digits)."""
+    tsv = subprocess.run(["tesseract", str(image), "-", "-l", LANGUAGES, "--psm", psm, "tsv"],
+                         capture_output=True, text=True, timeout=180).stdout
+    lines: dict[tuple, list[tuple[str, float]]] = {}
+    for row in csv.DictReader(io.StringIO(tsv), delimiter="\t", quoting=csv.QUOTE_NONE):
+        word = BIDI.sub("", row.get("text") or "").strip()
+        if row.get("level") == "5" and word:
+            try:
+                confidence = float(row["conf"])
+            except (TypeError, ValueError):
+                continue
+            lines.setdefault((row["block_num"], row["par_num"], row["line_num"]), []).append((word, confidence))
+    kept, sure = [], 0.0
+    for words in lines.values():
+        text = " ".join(word for word, _ in words)
+        confidences = [confidence for _, confidence in words]
+        sure += sum(confidence for confidence in confidences if confidence >= 60)
+        if ZONE_LINE.search(text.replace(" ", "")) or (
+                sum(ch.isalnum() for ch in text) >= 3
+                and (sum(confidences) / len(confidences) >= 55 or max(confidences) >= 85)):
+            kept.append(text)
+    return "\n".join(kept), sure
+
+
+def short_page(page: Path, source: Path, number: int, directory: str, dpi: int) -> str:
+    """A page with little text (a card, a photo, a receipt, a form): several readings, the one Tesseract is
+    surest of wins. Enlarging helps a blurry card and hurts a sharp scan; the page layout pass reads a
+    receipt in order and skips a card's scattered blocks. The other readings' zone lines are kept too
+    (a second reading of a zone lets the gateway pick the spelling the card agrees with)."""
+    candidates = [reading(page, "3"), reading(page, "11")]
+    if dpi > DPI:
+        stem = f"{directory}/large-{number}"
+        subprocess.run(["pdftoppm", "-r", str(dpi), "-gray", "-f", str(number), "-l", str(number), "-singlefile", str(source), stem],
+                       check=True, timeout=300, capture_output=True)
+        candidates.append(reading(Path(f"{stem}.pgm"), "11"))
+    best = max(candidates, key=lambda candidate: candidate[1])[0]
+    extra = []
+    for text, _ in candidates:
+        for line in text.splitlines():
+            if ZONE_LINE.search(line.replace(" ", "")) and line not in best and line not in extra:
+                extra.append(line)
+    return best + ("\n\n" + "\n".join(extra) if extra else "")
+
+
 def ocr(job: dict, engine: str) -> dict:
     pdf = gateway("GET", job["documentUrl"], raw=True, timeout=120)
     with tempfile.TemporaryDirectory(prefix="ocr-") as directory:
@@ -199,17 +267,13 @@ def ocr(job: dict, engine: str) -> dict:
         subprocess.run(["pdftoppm", "-r", str(DPI), "-gray", "-l", str(MAX_PAGES), str(source), f"{directory}/page"],
                        check=True, timeout=300, capture_output=True)
         pages = sorted(Path(directory).glob("page-*.pgm"), key=lambda p: int(p.stem.split("-")[-1]))
+        large = render_dpi(source)
         texts = []
         for page in pages:
-            result = subprocess.run(["tesseract", str(page), "-", "-l", LANGUAGES, "--psm", "3"],
-                                    capture_output=True, text=True, timeout=120)
-            text = result.stdout
-            # Little found (a card, a photo, a form): the page layout analysis skipped blocks. Read the
-            # scattered text too; the gateway checks every value against all of it.
+            text = BIDI.sub("", subprocess.run(["tesseract", str(page), "-", "-l", LANGUAGES, "--psm", "3"],
+                                               capture_output=True, text=True, timeout=180).stdout)
             if len(text.strip()) < SPARSE_BELOW:
-                sparse = subprocess.run(["tesseract", str(page), "-", "-l", LANGUAGES, "--psm", "11"],
-                                        capture_output=True, text=True, timeout=120).stdout
-                text = f"{text.rstrip()}\n\n{sparse}"
+                text = short_page(page, source, len(texts) + 1, directory, large)
             texts.append({"page": len(texts) + 1, "text": text[:200_000]})
         truncated = len(pages) >= MAX_PAGES
     return {"kind": "OCR", "engine": engine[:80], "languages": LANGUAGES.split("+"), "pages": texts, "truncated": truncated}
