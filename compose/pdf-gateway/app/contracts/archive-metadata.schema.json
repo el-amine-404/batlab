@@ -17,6 +17,8 @@
     "issuer": {"$ref": "#/$defs/sourcedText"},
     "author": {"$ref": "#/$defs/sourcedText"},
     "reference": {"$ref": "#/$defs/sourcedText", "description": "The document's own number (invoice, contract, statement)"},
+    "holder": {"$ref": "#/$defs/sourcedText", "description": "The person an identity document is about (the issuer is the state); its folder"},
+    "validUntil": {"$ref": "#/$defs/datedValue", "description": "The day an identity document or permit expires"},
     "amount": {
       "type": "object", "additionalProperties": false, "required": ["value", "currency", "source"],
       "description": "The total paid or due, as printed",

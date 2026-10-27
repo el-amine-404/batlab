@@ -25,6 +25,7 @@ import pika
 import psycopg2
 
 import enrichment
+import identity
 import metadata
 import previews
 import revisions
@@ -605,13 +606,20 @@ def handle_enrichment(channel, method, _properties, body: bytes) -> None:
                         changes = {}
                         if organisation.fields["organization"]["reviewState"] == "RULE":
                             changes = dict(organisation.fields)
-                            if "documentDate" in changes:
+                            zone = identity.read(text)
+                            if zone:
+                                changes = identity.refiled(zone) | {"tags": changes.get("tags", [])}
+                            if changes.get("documentDate"):
                                 changes["documentDate"] = dict(changes["documentDate"], source="ocr")
                         updated = ARCHIVE.reorganise(document_id, revision, changes, text=text, text_extraction=meta)
                         index_update(cursor, updated)
+                        if changes and EMBED_METADATA:
+                            revisions.queue_revision(cursor, STORAGE, updated)
                         enrichment.record_success(cursor, job_id, agent)
-                        if updated["organization"]["reviewState"] in ("FALLBACK", "REVIEW_REQUIRED"):
-                            enrichment.queue(cursor, document_id, current_sha, "SUGGEST")
+                        forced = bool((context or {}).get("force"))
+                        if updated["organization"]["reviewState"] in ("FALLBACK", "REVIEW_REQUIRED") or (forced and not changes):
+                            # Asked again ("Re-run the AI"): read first, now the AI files it from the better text.
+                            enrichment.queue(cursor, document_id, current_sha, "SUGGEST", {"force": True} if forced else None)
                         audit_document(cursor, document_id, "OCR_APPLIED", "SUCCESS",
                               {"jobId": job_id, "refiled": bool(changes), "category": updated["organization"]["category"]})
                     else:
@@ -623,11 +631,16 @@ def handle_enrichment(channel, method, _properties, body: bytes) -> None:
                         fields, dropped = enrichment.validate_filing(result if isinstance(result, dict) else {}, text, taxonomy)
                         cursor.execute("UPDATE enrichment_jobs SET applied=%s::jsonb WHERE id=%s", (json.dumps(fields), job_id))
                         forced = bool((context or {}).get("force"))
-                        if fields and (review in ("FALLBACK", "REVIEW_REQUIRED", "AI") or forced):
+                        zone = identity.read(text)
+                        if (fields or zone) and (review in ("FALLBACK", "REVIEW_REQUIRED", "AI") or forced):
                             # Published before the answer came (the laptop was away), or asked again: file it now.
                             current = document.read()
                             base = {**current, "tags": []} if forced else current  # asked again: its tags, not old ones
-                            updated = ARCHIVE.reorganise(document_id, revision, enrichment.sidecar_changes(fields, base))
+                            changes = enrichment.sidecar_changes(fields, base) if fields else {}
+                            if zone:
+                                # An identity document's machine-readable zone (check digits) beats any reading of it.
+                                changes.update(identity.refiled(zone))
+                            updated = ARCHIVE.reorganise(document_id, revision, changes)
                             index_update(cursor, updated)
                             if EMBED_METADATA:
                                 revisions.queue_revision(cursor, STORAGE, updated)

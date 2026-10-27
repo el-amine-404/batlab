@@ -120,6 +120,13 @@ compose/pdf-gateway/app/tests/test_m5_api.sh
 VENV=… PLAYWRIGHT_BROWSERS_PATH=… compose/pdf-gateway/app/tests/test_m5_ui.sh [SCREENSHOT_DIR]
 ```
 
+## Identity documents
+
+Cards and passports file themselves from their machine-readable zone (`archive-worker/identity.py`),
+kept only when its check digits agree: Identity › the holder, from the issuing state, with the
+number and the expiry (`holder`, `validUntil` in the sidecar). `python3 tests/identity_test.py`
+(from `archive-worker/`, with `PDF_ARCHIVE_SCHEMA=../contracts/archive-metadata.schema.json`).
+
 ## M7: optional OCR and AI (laptop agent)
 
 Enrichment is off unless `PDF_GATEWAY_ENRICHMENT_ENABLED=true`. When on, documents

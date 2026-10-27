@@ -189,6 +189,13 @@ eq "$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $user_to
 q "UPDATE scan_jobs SET status='FAILED' WHERE id='$first'"
 eq "$(upload "$TEST_ADMIN_TOKEN" dup-retry-00000001)" 202                         # a failed attempt can be retried
 
+# Activity (own files; admins all) and the AI model (admins; only a model the laptop reported).
+eq "$(web "$base/api/v1/system/activity" | json '",".join(sorted(v))')" "ai,files,now,paperless"
+eq "$(code curl -sS -b "$scratch/other.jar" "$base/api/v1/system/activity")" 200
+eq "$(code web -X PUT -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d '{"model":"not/installed"}' "$base/api/v1/system/ai/model")" 422
+eq "$(code curl -sS -b "$scratch/other.jar" -X PUT -H "X-CSRF-Token: $other_csrf" -H 'Content-Type: application/json' -d '{"model":null}' "$base/api/v1/system/ai/model")" 403
+eq "$(web -X PUT -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d '{"model":null}' "$base/api/v1/system/ai/model" | json 'v["chosenModel"]')" None
+
 # --- Expiry and logout ---------------------------------------------------------
 q "UPDATE web_sessions SET last_seen_at=now()-interval '3 hours' WHERE user_id='00000000-0000-0000-0000-0000000000b2'"
 eq "$(code curl -sS -b "$scratch/other.jar" "$base/api/v1/scans")" 401

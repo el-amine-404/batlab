@@ -161,11 +161,12 @@ SIDECAR_FILE = re.compile(r"^\.(.+\.pdf)\.json$")
 def document_paths(sidecar: dict) -> tuple[str, str]:
     """(archivePath, file name) from the organisation fields, before collisions are resolved.
 
-    Section/Correspondent/YYYY-MM-DD Title.pdf; a document without a correspondent sits in
-    its section; one nothing filed goes to Unsorted. The date is the document's own, or the
-    day it arrived. Names are plain ASCII (safe_component)."""
+    Section/Correspondent/YYYY-MM-DD Title.pdf; an identity document sits under its holder
+    (Identity/Amine El Houjjaji: the issuer is the same state for everyone); a document
+    without a correspondent sits in its section; one nothing filed goes to Unsorted. The date
+    is the document's own, or the day it arrived. Names are plain ASCII (safe_component)."""
     category = sidecar["organization"]["category"]
-    issuer = (sidecar.get("issuer") or {}).get("value")
+    issuer = (sidecar.get("holder") or {}).get("value") or (sidecar.get("issuer") or {}).get("value")
     date = (sidecar.get("documentDate") or {}).get("value") or sidecar["createdAt"][:10]
     if category == "Unsorted":
         folder = "Unsorted"
@@ -432,7 +433,7 @@ class Archive:
     # ------------------------------------------------------------ re-filing
 
     REORGANISE_FIELDS = {"title", "titleSource", "organization", "documentType", "documentDate", "issuer", "tags",
-                         "reference", "amount", "language"}
+                         "reference", "amount", "language", "holder", "validUntil"}
 
     def reorganise(self, document_id: str, expected_revision: int, changes: dict,
                    text: str | None = None, text_extraction: dict | None = None) -> dict:

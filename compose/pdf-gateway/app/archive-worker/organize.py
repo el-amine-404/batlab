@@ -20,6 +20,8 @@ from pathlib import Path
 
 import jsonschema
 
+import identity
+
 ORGANIZER_VERSION = "organizer-1"
 MAX_TEXT = 64 * 1024
 CATEGORIES = ["Finance", "Employment", "Identity", "Medical", "Education", "Contracts", "Property", "Vehicles",
@@ -168,6 +170,14 @@ def organise(text: str, rules: dict, taxonomy: dict) -> Organisation:
 
     if not text.strip():
         return fallback("NO_TEXT: no native text; OCR not run, classification needs review", "FALLBACK")
+    # An identity card or passport files itself from its machine-readable zone (check digits agree).
+    zone = identity.read(text)
+    if zone:
+        evidence["decision"] = f"MRZ:{zone.kind}:{zone.state}"
+        fields = identity.fields(zone)
+        fields["tags"] = sorted(tag for tag in ("identity", "government", "personal")
+                                if tag in known_tags and not known_tags[tag].get("blocked"))
+        return Organisation(fields, evidence)
     if not matched:
         return fallback("NO_RULE_MATCHED", "FALLBACK")
     categories = {rule["category"] for rule, _ in matched}

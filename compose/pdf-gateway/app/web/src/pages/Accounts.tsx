@@ -128,14 +128,16 @@ function PersonRow({ account, self, onChange }: { account: Account; self: boolea
   });
   return (
     <li className="py-4 first:pt-0 last:pb-0">
-      <div className="flex flex-wrap items-center gap-3">
-        <Avatar name={account.username} />
-        <div className="min-w-0 flex-1">
-          <p className="flex flex-wrap items-center gap-2 font-medium">{account.username}
-            {self && <Badge>you</Badge>}{!account.enabled && <Badge tone="warn">off</Badge>}</p>
-          <p className="text-xs text-muted-foreground">{ROLE[account.role].text} · {account.lastLoginAt ? `signed in ${formatWhen(account.lastLoginAt)}` : "never signed in"}</p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <Avatar name={account.username} />
+          <div className="min-w-0">
+            <p className="flex flex-wrap items-center gap-2 font-medium">{account.username}
+              {self && <Badge>you</Badge>}{!account.enabled && <Badge tone="warn">off</Badge>}</p>
+            <p className="text-xs text-muted-foreground">{ROLE[account.role].text} · {account.lastLoginAt ? `signed in ${formatWhen(account.lastLoginAt)}` : "never signed in"}</p>
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 pl-12 sm:pl-0">
           <RoleSelect label={`Role of ${account.username}`} value={account.role} roles={PERSON_ROLES} onChange={(role) => update.mutate({ role })} />
           <Button size="sm" variant="secondary" onClick={() => setPassword(password === null ? "" : null)}>Password</Button>
           {!self && <Button size="sm" variant="ghost" onClick={() => update.mutate({ enabled: !account.enabled })}>{account.enabled ? "Turn off" : "Turn on"}</Button>}
@@ -173,13 +175,15 @@ function AppRow({ account, onChange, onKey }: { account: Account; onChange: () =
   });
   return (
     <li className="py-4 first:pt-0 last:pb-0">
-      <div className="flex flex-wrap items-center gap-3">
-        <Avatar name={account.username} app />
-        <div className="min-w-0 flex-1">
-          <p className="flex flex-wrap items-center gap-2 font-medium">{account.username}{!account.enabled && <Badge tone="warn">off</Badge>}</p>
-          <p className="text-xs text-muted-foreground">{ROLE[account.role].text}</p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <Avatar name={account.username} app />
+          <div className="min-w-0">
+            <p className="flex flex-wrap items-center gap-2 font-medium break-all">{account.username}{!account.enabled && <Badge tone="warn">off</Badge>}</p>
+            <p className="text-xs text-muted-foreground">{ROLE[account.role].text}</p>
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 pl-12 sm:pl-0">
           <RoleSelect label={`Role of ${account.username}`} value={account.role} roles={APP_ROLES} onChange={(role) => update.mutate({ role })} />
           <Button size="sm" variant="ghost" onClick={() => update.mutate({ enabled: !account.enabled })}>{account.enabled ? "Turn off" : "Turn on"}</Button>
         </div>

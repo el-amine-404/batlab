@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Shell, Sidebar, useConnection } from "@batlab/ui";
-import { Activity, FilePlus2, Files, FileUp, Inbox } from "lucide-react";
+import { Activity, FilePlus2, Files, FileUp, Inbox, ListTodo } from "lucide-react";
 import { createBrowserRouter, Navigate, useLocation, useNavigate, useOutletContext, useParams } from "react-router";
 import { api, ApiError, setCsrf, type Session } from "./api";
 import { Spinner } from "./components/ui";
@@ -14,6 +14,7 @@ import { DocumentPage } from "./pages/Document";
 import { AttentionPage } from "./pages/Attention";
 import { SystemPage } from "./pages/System";
 import { SettingsPage } from "./pages/Settings";
+import { ActivityPage } from "./pages/Activity";
 
 const ROLE: Record<Session["role"], string> = { ADMIN: "Admin", USER: "User", READ_ONLY: "Read-only" };
 
@@ -70,6 +71,9 @@ function Root() {
 
 function Frame({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const attention = useAttention();
+  // Files being checked and jobs for the AI laptop: counted beside Activity while there are any.
+  const activity = useQuery({ queryKey: ["activity"], queryFn: api.activity, refetchInterval: 15_000 });
+  const busy = (activity.data?.files.length ?? 0) + (activity.data?.ai.filter((job) => job.active).length ?? 0);
   // Any public, cheap answer says the page reaches the gateway.
   const live = useConnection("/api/v1/session/setup");
   return (
@@ -84,6 +88,8 @@ function Frame({ session, onLogout }: { session: Session; onLogout: () => void }
               { to: "/documents", label: "Documents", icon: Files },
               { to: "/attention", label: "Needs attention", icon: Inbox,
                 badge: attention.count ? { count: attention.count, tone: "warning", title: `${attention.count} need attention` } : undefined },
+              { to: "/activity", label: "Activity", icon: ListTodo,
+                badge: busy ? { count: busy, tone: "active", title: `${busy} in progress` } : undefined },
               { to: "/system", label: "System", icon: Activity },
             ]} />
         )} />
@@ -146,6 +152,7 @@ export const router = createBrowserRouter([
       { path: "/documents", element: <DocumentsPage /> },
       { path: "/documents/:scanId", element: <DocumentPage /> },
       { path: "/attention", element: <AttentionPage /> },
+      { path: "/activity", element: <ActivityPage /> },
       { path: "/system", element: <SystemPage /> },
       { path: "/settings", element: <SettingsPage /> },
       // Addresses of the first version of this UI.

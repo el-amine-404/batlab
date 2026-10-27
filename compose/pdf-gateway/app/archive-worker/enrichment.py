@@ -47,14 +47,14 @@ def queue_initial(cursor, document_id: str, sha256: str, review_state: str, has_
     return queue(cursor, document_id, sha256, "SUGGEST" if has_text else "OCR")
 
 
-def queue(cursor, document_id: str, sha256: str, kind: str) -> str | None:
+def queue(cursor, document_id: str, sha256: str, kind: str, context: dict | None = None) -> str | None:
     cursor.execute("SELECT count(*) FROM enrichment_jobs WHERE status='WAITING_FOR_AI'")
     if cursor.fetchone()[0] >= BACKLOG_CAP:
         cursor.execute("INSERT INTO audit_events(action,resource_type,resource_id,outcome,trace_id,details) VALUES ('ENRICHMENT_SKIPPED','DOCUMENT',%s,'FAILURE',%s,'{\"code\":\"BACKLOG_FULL\"}'::jsonb)",
                        (document_id, str(uuid.uuid4())))
         return None
-    cursor.execute("INSERT INTO enrichment_jobs(id,document_id,artifact_sha256,kind) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING",
-                   (str(uuid.uuid4()), document_id, sha256, kind))
+    cursor.execute("INSERT INTO enrichment_jobs(id,document_id,artifact_sha256,kind,context) VALUES (%s,%s,%s,%s,%s::jsonb) ON CONFLICT DO NOTHING",
+                   (str(uuid.uuid4()), document_id, sha256, kind, json.dumps(context) if context else None))
     return kind
 
 
@@ -151,7 +151,7 @@ def validate_filing(result: dict, text: str, taxonomy: dict) -> tuple[dict, list
         distinctive = [word for word in words if word not in GENERIC_NAME_WORDS] or words
         return bool(distinctive) and all(f" {word} " in haystack for word in distinctive)
 
-    for name in ("correspondent", "correspondentLegalName"):
+    for name in ("correspondent", "correspondentLegalName", "holder"):
         value = value_of(name)
         if value:
             if len(value) > 80 or not named_in_text(value):
@@ -252,7 +252,12 @@ def sidecar_changes(fields: dict, base: dict) -> dict:
         changes["language"] = [fields["language"]]
     if "tags" in fields:
         changes["tags"] = sorted(set(base.get("tags", [])) | set(fields["tags"]))[:64]
-    if "section" in fields and "documentType" in fields and "documentDate" in fields:
+    holder = fields.get("holder")
+    if holder and fields.get("documentType") == "identity_document":
+        changes["holder"] = {"value": holder["value"], "source": "ai", "reviewState": "UNVERIFIED",
+                             **({"evidence": holder["evidence"]} if holder.get("evidence") else {})}
+    # An identity document often prints no issue date: its holder files it instead.
+    if "section" in fields and "documentType" in fields and ("documentDate" in fields or "holder" in changes):
         changes["organization"] = {"category": fields["section"], "reviewState": "AI", "folder": TYPES[fields["documentType"]],
                                    "reason": "Filed by the local AI from the document's text"}
     return changes

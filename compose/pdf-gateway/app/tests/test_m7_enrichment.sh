@@ -168,7 +168,7 @@ docker rm -f -v pgw-m7-agent >/dev/null
 
 # --- Malformed or hostile results trip the breaker ----------------------------------------
 H=(-H "Authorization: Bearer $agent_token" -H "X-Agent-Id: rogue" -H 'Content-Type: application/json')
-eq "$(code "${H[@]}" -X POST -d '{"version":"rogue"}' "$base/api/v1/enrichment/agents/rogue/heartbeat")" 204
+eq "$(code "${H[@]}" -X POST -d '{"version":"rogue"}' "$base/api/v1/enrichment/agents/rogue/heartbeat")" 200
 for attempt in 1 2 3; do
   q "INSERT INTO enrichment_jobs(id,document_id,artifact_sha256,kind) SELECT gen_random_uuid(),document_id,sha256,'SUGGEST' FROM archive_documents WHERE document_id='$(doc_id 81)' ON CONFLICT DO NOTHING" >/dev/null
   q "UPDATE enrichment_jobs SET status='WAITING_FOR_AI', result=NULL, attempts=0 WHERE document_id='$(doc_id 81)' AND kind='SUGGEST'"
@@ -180,7 +180,8 @@ done
 eq "$(code "${H[@]}" -X POST "$base/api/v1/enrichment/agents/rogue/lease")" 429
 eq "$(ai_state)" DEGRADED
 eq "$(code "${H[@]}" -X POST -d 'not json' "$base/api/v1/enrichment/jobs/$job/result")" 409                       # no lease any more
-eq "$(code -H "Authorization: Bearer $agent_token" -H 'Content-Type: application/json' -X POST -d '{}' "$base/api/v1/enrichment/agents/t1000-laptop/heartbeat")" 204
+eq "$(code -H "Authorization: Bearer $agent_token" -H 'Content-Type: application/json' -X POST -d '{}' "$base/api/v1/enrichment/agents/t1000-laptop/heartbeat")" 200
+eq "$(curl -sS -H "Authorization: Bearer $agent_token" -H 'Content-Type: application/json' -X POST -d '{}' "$base/api/v1/enrichment/agents/t1000-laptop/heartbeat" | json '"model" in v')" True   # the answer names the chosen model (none: the default)
 eq "$(code -H "Authorization: Bearer $user_token" -H 'Content-Type: application/json' -X POST -d '{}' "$base/api/v1/enrichment/agents/t1000-laptop/heartbeat")" 403
 
 # --- Model missing, service down, offline and resume ---------------------------------------

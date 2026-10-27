@@ -62,8 +62,8 @@ public class EnrichmentController {
     @PostMapping(path = "/api/v1/enrichment/agents/{agentId}/heartbeat", consumes = MediaType.APPLICATION_JSON_VALUE)
     @PreAuthorize("hasRole('ENRICHMENT')")
     @Transactional
-    public ResponseEntity<Void> heartbeat(@AuthenticationPrincipal GatewayPrincipal principal, @PathVariable String agentId,
-                                          @RequestBody String report) {
+    public ResponseEntity<String> heartbeat(@AuthenticationPrincipal GatewayPrincipal principal, @PathVariable String agentId,
+                                            @RequestBody String report) {
         requireAgentName(agentId);
         if (report.length() > MAX_REPORT) throw new ApiException(413, "REPORT_TOO_LARGE", "Heartbeat report is too large");
         int updated = jdbc.update("""
@@ -71,7 +71,31 @@ public class EnrichmentController {
                 ON CONFLICT (agent_id) DO UPDATE SET version=EXCLUDED.version, last_seen_at=now(), report=EXCLUDED.report
                  WHERE ai_agents.user_id=EXCLUDED.user_id""", agentId, principal.userId(), report, report);
         if (updated == 0) throw new ApiException(403, "AGENT_OWNED_ELSEWHERE", "This agent name belongs to another account");
-        return ResponseEntity.noContent().build();
+        // The answer names the model an admin picked (null: the laptop's own default).
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(jdbc.queryForObject(
+                "SELECT jsonb_build_object('model', (SELECT value FROM gateway_settings WHERE key='ai_model'))::text", String.class));
+    }
+
+    /** An admin picks the model the laptop files with, among those it reported installed; null goes back to its default. */
+    @org.springframework.web.bind.annotation.PutMapping(path = "/api/v1/system/ai/model", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("hasRole('ADMIN')")
+    @Transactional
+    public ResponseEntity<String> chooseModel(@AuthenticationPrincipal GatewayPrincipal principal, @RequestBody Map<String, Object> body) {
+        Object model = body == null ? null : body.get("model");
+        if (model == null) {
+            jdbc.update("DELETE FROM gateway_settings WHERE key='ai_model'");
+        } else {
+            Boolean installed = model instanceof String name && name.length() <= 120 && Boolean.TRUE.equals(jdbc.queryForObject("""
+                    SELECT EXISTS (SELECT 1 FROM ai_agents a, jsonb_array_elements(COALESCE(a.report->'llm'->'models','[]'::jsonb)) m
+                                    WHERE m->>'key' = ?)""", Boolean.class, name));
+            if (!installed) throw new ApiException(422, "MODEL_NOT_INSTALLED", "That model isn't installed in LM Studio on the laptop.");
+            jdbc.update("""
+                    INSERT INTO gateway_settings(key,value,updated_by) VALUES ('ai_model',?,?)
+                    ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_by=EXCLUDED.updated_by, updated_at=now()""", model, principal.userId());
+        }
+        jdbc.update("INSERT INTO audit_events(actor_id,action,resource_type,resource_id,outcome,trace_id) VALUES (?,'AI_MODEL_CHOSEN','SETTING','ai_model','SUCCESS',?)",
+                principal.userId(), UUID.randomUUID().toString());
+        return availability();
     }
 
     @PostMapping(path = "/api/v1/enrichment/agents/{agentId}/lease", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -187,7 +211,11 @@ public class EnrichmentController {
                                 WHEN (SELECT (report->>'busy')::boolean FROM a) THEN 'BUSY'
                                 WHEN (SELECT last_success_at > now() - interval '1 hour' FROM a) THEN 'READY'
                                 ELSE 'AVAILABLE' END,
-                  'agent', (SELECT agent_id FROM a), 'model', (SELECT report->'llm'->>'configuredModel' FROM a),
+                  'agent', (SELECT agent_id FROM a),
+                  'model', COALESCE((SELECT value FROM gateway_settings WHERE key='ai_model'), (SELECT report->'llm'->>'configuredModel' FROM a)),
+                  'chosenModel', (SELECT value FROM gateway_settings WHERE key='ai_model'),
+                  'activeModel', (SELECT report->'llm'->>'configuredModel' FROM a),
+                  'models', COALESCE((SELECT report->'llm'->'models' FROM a), '[]'::jsonb),
                   'ocrReady', (SELECT (report->'ocr'->>'ready')::boolean FROM a),
                   'ocrEngine', (SELECT report->'ocr'->>'engine' FROM a), 'ocrLanguages', (SELECT report->'ocr'->'languages' FROM a),
                   'llmService', (SELECT report->'llm'->>'service' FROM a),
@@ -223,9 +251,26 @@ public class EnrichmentController {
         Path taxonomy = properties.archiveRoot().resolve("manifests").resolve("taxonomy.json");
         String vocabulary = Files.isRegularFile(taxonomy, LinkOption.NOFOLLOW_LINKS) ? Files.readString(taxonomy, StandardCharsets.UTF_8) : "{}";
         String sha = located.view().sha256();
-        Boolean moving = jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM enrichment_jobs WHERE document_id=? AND kind='SUGGEST' AND status IN ('WAITING_FOR_AI','LEASED','SUBMITTED'))",
+        Boolean moving = jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM enrichment_jobs WHERE document_id=? AND status IN ('WAITING_FOR_AI','LEASED','SUBMITTED'))",
                 Boolean.class, documentId);
         if (Boolean.TRUE.equals(moving)) throw new ApiException(409, "ALREADY_ASKED", "The AI is already on it");
+        // A scan whose text is the sandbox's own OCR (one language, the page's layout as it found it): the
+        // laptop reads the pages again first (French, English and Arabic, scattered text too), then files it.
+        Boolean sandboxText = jdbc.queryForObject("SELECT sidecar->'textExtraction'->>'engine' = 'dangerzone-ocr' FROM archive_documents WHERE document_id=?",
+                Boolean.class, documentId);
+        if (Boolean.TRUE.equals(sandboxText)) {
+            int again = jdbc.update("""
+                    UPDATE enrichment_jobs SET status='WAITING_FOR_AI', context='{"force": true}'::jsonb, artifact_sha256=?, result=NULL, applied=NULL,
+                           lease_agent=NULL, lease_until=NULL, attempts=0, error_code=NULL, completed_at=NULL, deadline_at=NULL,
+                           expires_at=now()+interval '30 days'
+                     WHERE id=(SELECT id FROM enrichment_jobs WHERE document_id=? AND kind='OCR' ORDER BY created_at DESC LIMIT 1)""", sha, documentId);
+            if (again == 0)
+                jdbc.update("INSERT INTO enrichment_jobs(id,document_id,artifact_sha256,kind,context) VALUES (?,?,?,'OCR','{\"force\": true}'::jsonb)",
+                        UUID.randomUUID(), documentId, sha);
+            jdbc.update("INSERT INTO audit_events(actor_id,action,resource_type,resource_id,outcome,trace_id) VALUES (?,'AI_REFILE_REQUESTED','DOCUMENT',?,'SUCCESS',?)",
+                    principal.userId(), documentId, UUID.randomUUID().toString());
+            return ResponseEntity.accepted().body("{\"status\":\"WAITING_FOR_AI\",\"reading\":true}");
+        }
         String context = jdbc.queryForObject("""
                 SELECT jsonb_build_object('text', ?::text, 'truncated', ?, 'force', true,
                        'types', ?::jsonb, 'sections', ?::jsonb,

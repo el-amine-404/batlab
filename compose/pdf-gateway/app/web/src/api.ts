@@ -101,6 +101,8 @@ export const Sidecar = z.object({
   documentDate: z.object({ value: z.string(), source: z.string(), reviewState: z.string() }).optional(),
   issuer: z.object({ value: z.string(), source: z.string(), reviewState: z.string() }).optional(),
   reference: z.object({ value: z.string(), source: z.string() }).optional(),
+  holder: z.object({ value: z.string(), source: z.string() }).optional(),
+  validUntil: z.object({ value: z.string(), source: z.string() }).optional(),
   amount: z.object({ value: z.string(), currency: z.string(), source: z.string() }).optional(),
   titleSource: z.string().optional(),
   artifactVersion: z.number().optional(),
@@ -113,6 +115,7 @@ export type Sidecar = z.infer<typeof Sidecar>;
 export type MetadataChanges = {
   title?: string; tags?: string[]; issuer?: string | null; documentType?: string | null; documentDate?: string | null;
   reference?: string | null; amount?: { value: string; currency: string } | null; section?: string;
+  holder?: string | null; validUntil?: string | null;
 };
 export const Edit = z.object({ editId: z.string(), status: z.enum(["PENDING", "APPLIED", "CONFLICT", "INVALID"]),
   resultRevision: z.number().nullable(), errorCode: z.string().nullable(), statusUrl: z.string() });
@@ -134,10 +137,24 @@ export const Health = z.object({
 export const Ai = z.object({
   enabled: z.boolean(), state: z.string(), agent: z.string().nullable(), model: z.string().nullable(),
   ocrReady: z.boolean().nullable(), ocrEngine: z.string().nullish(), ocrLanguages: z.array(z.string()).nullish(), llmService: z.string().nullish(),
+  chosenModel: z.string().nullish(), activeModel: z.string().nullish(),
+  models: z.array(z.object({ key: z.string(), bytes: z.number().nullish(), vision: z.boolean().nullish(), loaded: z.boolean().nullish() })).nullish(),
   lastSeenAt: z.string().nullable(), lastSuccessAt: z.string().nullable(),
   reason: z.string().nullable(), queue: z.object({ waiting: z.number(), running: z.number(), failed: z.number() }),
 });
 const Evidenced = z.object({ value: z.string(), evidence: z.string() });
+const ActivityJob = z.object({ kind: z.enum(["OCR", "SUGGEST"]), status: z.string(), scanId: z.string(), title: z.string().nullish(),
+  model: z.string().nullish(), engine: z.string().nullish(), agent: z.string().nullish(), attempts: z.number(), errorCode: z.string().nullish(),
+  createdAt: z.string(), completedAt: z.string().nullish(), leaseUntil: z.string().nullish(), active: z.boolean() });
+export type ActivityJob = z.infer<typeof ActivityJob>;
+export const Activity = z.object({
+  files: z.array(z.object({ scanId: z.string(), title: z.string(), status: z.string(), createdAt: z.string(), updatedAt: z.string() })),
+  ai: z.array(ActivityJob),
+  paperless: z.array(z.object({ scanId: z.string(), title: z.string().nullish(), status: z.string(), attempts: z.number(),
+    lastError: z.string().nullish(), paperlessDocumentId: z.number().nullish(), updatedAt: z.string() })),
+  now: z.string(),
+});
+export type Activity = z.infer<typeof Activity>;
 export const Suggestion = z.object({
   id: z.string(), model: z.string(), promptVersion: z.string(), status: z.enum(["PROPOSED", "APPLIED", "DISMISSED"]), createdAt: z.string(),
   fields: z.object({ title: Evidenced.optional(), issuer: Evidenced.optional(), documentType: Evidenced.optional(),
@@ -227,12 +244,14 @@ export const api = {
   summary: () => request(Summary, "/api/v1/dashboard/summary"),
   health: () => request(Health, "/api/v1/system/health"),
   ai: () => request(Ai, "/api/v1/system/ai"),
+  chooseModel: (model: string | null) => request(Ai, "/api/v1/system/ai/model", { method: "PUT", ...json({ model }) }),
+  activity: () => request(Activity, "/api/v1/system/activity"),
   suggestions: (id: string) => request(z.array(Suggestion), `/api/v1/archive/${encodeURIComponent(id)}/suggestions`),
   enrichment: (id: string) => request(z.array(EnrichmentJob), `/api/v1/archive/${encodeURIComponent(id)}/enrichment`),
   scanEnrichment: (scanId: string) => request(z.array(EnrichmentJob), `/api/v1/scans/${encodeURIComponent(scanId)}/enrichment`),
   applySuggestion: (id: string, suggestion: string, etag: string) =>
     request(Edit, `/api/v1/archive/${encodeURIComponent(id)}/suggestions/${encodeURIComponent(suggestion)}/apply`, { method: "POST", headers: { "If-Match": etag } }),
-  refile: (id: string) => request(z.object({ status: z.string() }), `/api/v1/archive/${encodeURIComponent(id)}/refile`, { method: "POST" }),
+  refile: (id: string) => request(z.object({ status: z.string(), reading: z.boolean().optional() }), `/api/v1/archive/${encodeURIComponent(id)}/refile`, { method: "POST" }),
   deleteEverywhere: (scanId: string, confirmSigned: boolean) =>
     request(z.undefined(), `/api/v1/scans/${encodeURIComponent(scanId)}?confirmSigned=${confirmSigned}`, { method: "DELETE" }),
   dismissSuggestion: (id: string, suggestion: string) =>

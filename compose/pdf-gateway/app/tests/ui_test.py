@@ -241,6 +241,12 @@ try:
     preview = driver.find_element(By.CSS_SELECTOR, "[data-testid=large-preview] img")
     wait(driver, lambda d: d.execute_script("return arguments[0].complete && arguments[0].naturalWidth > 0", preview), 30)
     check("document page shows a large first-page picture", "size=large" in preview.get_attribute("src"))
+    check("the file name is shown", driver.find_element(By.CSS_SELECTOR, "[data-testid=file-name]").text.endswith(".pdf"))
+    check("no version number to puzzle over", "version 4" not in body(driver).lower() and "version 3" not in body(driver).lower())
+    driver.find_element(By.CSS_SELECTOR, "[data-testid=tag-link]").click()
+    wait(driver, lambda d: "/documents?tag=" in d.current_url)
+    wait(driver, lambda d: "Internet Invoice" in d.find_element(By.CSS_SELECTOR, "[data-testid=document-list]").text)
+    check("a tag opens the documents that have it", HOSTILE not in driver.find_element(By.CSS_SELECTOR, "[data-testid=document-list]").text)
 
     # Files dropped on any page are added (and shown on the main page).
     driver.execute_script("""
@@ -293,6 +299,15 @@ try:
     check("commands wrap instead of scrolling", block.size["width"] <= setup.size["width"]
           and driver.execute_script("const c = arguments[0].querySelector('code'); return c.scrollWidth <= c.clientWidth", block))
     driver.save_screenshot(str(SHOTS / "desktop-system.png"))
+
+    # Activity: what is being checked now (the upload above waits: no workers in this stack).
+    driver.find_element(By.CSS_SELECTOR, "aside a[href='/activity']").click()
+    text_present(driver, "Being checked")
+    check("activity shows the file being checked", "invoice-en.pdf" in body(driver))
+    marks = driver.execute_script("return ['/activity', '/system'].map(h => document.querySelector(`aside a[href='${h}']`).getAttribute('aria-current'))")
+    check("the sidebar marks the current page", marks == ["page", None], marks)
+    check("the sidebar counts what is in progress", int(driver.find_element(By.CSS_SELECTOR, "aside a[href='/activity'] span[title]").text) >= 1)
+    driver.save_screenshot(str(SHOTS / "desktop-activity.png"))
 
     # The service worker never caches API data.
     driver.get(BASE + "/documents")
@@ -375,7 +390,8 @@ with sync_playwright() as playwright:
     check("phone: the menu button shown, the sidebar hidden",
           page.is_visible("button[aria-label='Open the menu']") and page.eval_on_selector("nav[aria-label='Main']", "n => n.getBoundingClientRect().right <= 0"))
     targets = {"add": ("/", "Add PDF files"), "documents": ("/documents", "invoice-en.pdf"),
-               "document": ("/documents/scan-01J00000000000000000000060", "Download"), "system": ("/system", "Is it working?")}
+               "document": ("/documents/scan-01J00000000000000000000060", "Download"), "system": ("/system", "Is it working?"),
+               "settings": ("/settings", "Apps and API keys"), "activity": ("/activity", "Lately")}
     for label, (path, marker) in targets.items():
         page.goto(BASE + path)
         page.wait_for_selector(f"text={marker}")
