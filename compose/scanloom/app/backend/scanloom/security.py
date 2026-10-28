@@ -56,7 +56,46 @@ def inspect_container(path: Path) -> tuple[str, dict]:
             if declared != size:
                 raise Refused("WebP size does not match its container")
             return "image/webp", {"container": "webp", "trailing_bytes": 0}
-    raise Refused("Only genuine JPEG, PNG, and WebP images are accepted")
+        if len(head) >= 12 and head[4:8] == b"ftyp":
+            # HEIC/HEIF use ISO-BMFF. Walk every top-level box to ensure the
+            # declared container ends exactly at EOF; libvips then performs the
+            # full decode in its restricted worker and rewrites a metadata-free
+            # PNG before OpenCV sees any pixels.
+            source.seek(0)
+            brands: set[bytes] = set()
+            boxes = 0
+            offset = 0
+            while offset < size:
+                source.seek(offset)
+                header = source.read(8)
+                if len(header) != 8:
+                    raise Refused("HEIC contains a truncated box header")
+                length, kind = struct.unpack(">I4s", header)
+                header_size = 8
+                if length == 1:
+                    extended = source.read(8)
+                    if len(extended) != 8:
+                        raise Refused("HEIC contains a truncated extended box")
+                    length = struct.unpack(">Q", extended)[0]
+                    header_size = 16
+                elif length == 0:
+                    length = size - offset
+                if length < header_size or offset + length > size:
+                    raise Refused("HEIC box size is outside the file")
+                if kind == b"ftyp":
+                    payload = source.read(length - header_size)
+                    if len(payload) < 8 or (len(payload) - 8) % 4:
+                        raise Refused("HEIC has an invalid file-type box")
+                    brands.update(payload[index:index + 4] for index in range(0, len(payload), 4) if index != 4)
+                offset += length
+                boxes += 1
+                if boxes > 100000:
+                    raise Refused("HEIC contains too many boxes")
+            heif_brands = {b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"hevm", b"hevs", b"mif1", b"msf1"}
+            if not brands.intersection(heif_brands):
+                raise Refused("ISO media file is not a supported HEIC or HEIF image")
+            return "image/heic", {"container": "heif", "boxes": boxes, "trailing_bytes": 0}
+    raise Refused("Only genuine JPEG, PNG, WebP, HEIC, and HEIF images are accepted")
 
 
 def clamav(path: Path, host: str, port: int, maximum: int) -> str:

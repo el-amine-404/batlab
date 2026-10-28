@@ -1,6 +1,6 @@
 import { Dialog as DialogPrimitive, Select as SelectPrimitive } from "radix-ui";
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
-import { X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import { cx } from "./lib";
 
 export function Button({ className, variant = "primary", ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "ghost" | "danger" }) {
@@ -12,7 +12,7 @@ export function Select({ value, onValueChange, options, label }: { value: string
   return <SelectPrimitive.Root value={value} onValueChange={onValueChange}>
     <SelectPrimitive.Trigger className="select" aria-label={label}><SelectPrimitive.Value /></SelectPrimitive.Trigger>
     <SelectPrimitive.Portal><SelectPrimitive.Content className="select-menu" position="popper"><SelectPrimitive.Viewport>
-      {options.map(([key, name]) => <SelectPrimitive.Item key={key} value={key} className="select-item"><SelectPrimitive.ItemText>{name}</SelectPrimitive.ItemText></SelectPrimitive.Item>)}
+      {options.map(([key, name]) => <SelectPrimitive.Item key={key} value={key} className="select-item"><SelectPrimitive.ItemText>{name}</SelectPrimitive.ItemText><SelectPrimitive.ItemIndicator><Check/></SelectPrimitive.ItemIndicator></SelectPrimitive.Item>)}
     </SelectPrimitive.Viewport></SelectPrimitive.Content></SelectPrimitive.Portal>
   </SelectPrimitive.Root>;
 }

@@ -1,4 +1,5 @@
 import os
+import struct
 import sys
 import tempfile
 import unittest
@@ -107,6 +108,19 @@ class ContainerTest(unittest.TestCase):
             path = Path(folder) / "photo.png"
             path.write_bytes(cv2.imencode(".png", np.zeros((64,64,3),np.uint8))[1].tobytes())
             self.assertEqual(inspect_container(path)[0], "image/png")
+
+    def test_heic_box_boundaries_and_brand(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "photo.heic"
+            ftyp = b"heic" + b"\0\0\0\0" + b"mif1" + b"heic"
+            path.write_bytes(struct.pack(">I4s", len(ftyp) + 8, b"ftyp") + ftyp
+                             + struct.pack(">I4s", 12, b"free") + b"safe")
+            media, report = inspect_container(path)
+            self.assertEqual(media, "image/heic")
+            self.assertEqual(report["trailing_bytes"], 0)
+            path.write_bytes(path.read_bytes() + b"hidden")
+            with self.assertRaisesRegex(Refused, "truncated|box size"):
+                inspect_container(path)
 
 
 class SettingsTest(unittest.TestCase):
