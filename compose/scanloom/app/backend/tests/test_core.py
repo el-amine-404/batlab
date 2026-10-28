@@ -47,6 +47,20 @@ class ImagingTest(unittest.TestCase):
         self.assertLess(found[:, 1].min(), 445)
         self.assertGreater(found[:, 1].max(), 885)
 
+    def test_dark_color_card_wins_over_bright_background(self):
+        image = np.full((720, 1280, 3), (225, 225, 215), np.uint8)
+        # Dark foreground at the top and bottom makes the bright wall own only
+        # the side edges, matching a card held in front of a lit room.
+        image[:105] = (35, 35, 35)
+        image[675:] = (45, 45, 45)
+        quad = np.array([[245, 140], [1040, 75], [1080, 655], [270, 625]], np.int32)
+        cv2.fillConvexPoly(image, quad, (85, 35, 15))
+        cv2.fillConvexPoly(image, np.array([[270, 475], [1065, 455], [1080, 655], [270, 625]]), (55, 150, 80))
+        found, confidence, method = detect(image)
+        self.assertEqual(method, "color foreground")
+        self.assertGreater(confidence, .8)
+        self.assertLess(np.abs(found - quad).mean(), 45)
+
     def test_corner_validation(self):
         points = pixel_corners([[0.1, .1], [.9, .1], [.9, .9], [.1, .9]], 1000, 800)
         self.assertEqual(points.shape, (4, 2))

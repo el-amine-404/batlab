@@ -6,6 +6,7 @@ import os
 import secrets
 import shutil
 import socket
+import tempfile
 import time
 import zipfile
 from pathlib import Path
@@ -173,6 +174,9 @@ class Processor:
         if not export:
             return
         pages = self.db.all("SELECT * FROM pages WHERE project_id=%s AND status='ready' ORDER BY position", (job["project_id"],))
+        selected_ids = set(payload.get("page_ids") or [])
+        if selected_ids:
+            pages = [page for page in pages if str(page["id"]) in selected_ids]
         if not pages:
             raise Refused("Project has no corrected pages to export")
         self.db.execute("UPDATE exports SET status='building' WHERE id=%s", (export["id"],))
@@ -189,7 +193,32 @@ class Processor:
                 for index, source in enumerate(sources, 1):
                     archive.write(source, f"page-{index:03d}{source.suffix.lower()}")
         else:
-            destination.write_bytes(img2pdf.convert([str(source) for source in sources], rotation=img2pdf.Rotation.ifvalid))
+            pdf_sources = sources
+            pdf_quality = payload.get("quality", "lossless")
+            if pdf_quality != "lossless":
+                maximum, jpeg_quality = ((2400, 88) if pdf_quality == "balanced" else (1600, 74))
+                with tempfile.TemporaryDirectory(prefix="scanloom-pdf-") as temporary:
+                    converted = []
+                    for index, source in enumerate(sources, 1):
+                        image = cv2.imread(str(source), cv2.IMREAD_UNCHANGED)
+                        if image is None:
+                            raise RuntimeError("Corrected page could not be read for PDF export")
+                        if image.ndim == 3 and image.shape[2] == 4:
+                            alpha = image[:, :, 3:4].astype(np.float32) / 255
+                            image = (image[:, :, :3] * alpha + 255 * (1 - alpha)).astype(np.uint8)
+                        scale = min(1.0, maximum / max(image.shape[:2]))
+                        if scale < 1:
+                            image = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+                        path = Path(temporary) / f"page-{index:03d}.jpg"
+                        if not cv2.imwrite(str(path), image, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality,
+                                                              cv2.IMWRITE_JPEG_OPTIMIZE, 1]):
+                            raise RuntimeError("Could not prepare a PDF page")
+                        converted.append(path)
+                    destination.write_bytes(img2pdf.convert([str(source) for source in converted],
+                                                             rotation=img2pdf.Rotation.ifvalid))
+            else:
+                destination.write_bytes(img2pdf.convert([str(source) for source in pdf_sources],
+                                                         rotation=img2pdf.Rotation.ifvalid))
         digest = sha256(destination)
         with self.db.transaction() as cursor:
             cursor.execute("UPDATE exports SET status='ready',object_name=%s,bytes=%s,sha256=%s,ready_at=now() WHERE id=%s",

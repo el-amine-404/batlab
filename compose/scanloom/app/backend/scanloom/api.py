@@ -41,6 +41,10 @@ class PageEdit(BaseModel):
 
 class ExportRequest(BaseModel):
     kind: str
+    page_ids: list[uuid.UUID] | None = None
+    page_from: int | None = Field(None, ge=1)
+    page_to: int | None = Field(None, ge=1)
+    quality: str = "lossless"
 
 
 class SettingsEdit(BaseModel):
@@ -203,6 +207,20 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
     @app.get("/api/v1/projects/{public_id}", tags=["Projects"])
     def get_project(public_id: str): return project_view(db, public_id)
 
+    @app.get("/api/v1/projects", tags=["Projects"])
+    def list_projects(limit: int = 50):
+        limit = max(1, min(100, limit))
+        rows = db.all("""SELECT pr.public_id,pr.title,pr.profile,pr.status,pr.page_count,
+                               pr.completed_count,pr.warning_count,pr.expires_at,pr.created_at,
+                               (SELECT p.id FROM pages p WHERE p.project_id=pr.id AND p.result_object IS NOT NULL
+                                ORDER BY p.position LIMIT 1) AS thumbnail_page_id
+                        FROM projects pr WHERE pr.expires_at>now() AND pr.status<>'deleting'
+                        ORDER BY pr.created_at DESC LIMIT %s""", (limit,))
+        return {"items": [jsonable(dict(row)) | {
+            "thumbnail_url": (f"/api/v1/projects/{row['public_id']}/pages/{row['thumbnail_page_id']}/result"
+                              if row["thumbnail_page_id"] else None)
+        } for row in rows]}
+
     @app.patch("/api/v1/projects/{public_id}", tags=["Projects"])
     def edit_project(public_id: str, edit: ProjectEdit):
         project = db.one("SELECT * FROM projects WHERE public_id=%s", (public_id,))
@@ -259,9 +277,28 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
     @app.post("/api/v1/projects/{public_id}/exports", status_code=202, tags=["Exports"])
     def create_export(public_id: str, request: ExportRequest):
         if request.kind not in {"image", "zip", "pdf"}: raise HTTPException(422, "kind must be image, zip, or pdf")
+        if request.quality not in {"lossless", "balanced", "small"}:
+            raise HTTPException(422, "quality must be lossless, balanced, or small")
+        if request.page_ids is not None and (request.page_from is not None or request.page_to is not None):
+            raise HTTPException(422, "Use page_ids or a page range, not both")
         project = db.one("SELECT * FROM projects WHERE public_id=%s", (public_id,))
         if not project: raise HTTPException(404, "Project not found or expired")
         if project["status"] != "ready": raise HTTPException(409, "Project is not ready")
+        pages = db.all("SELECT id,position FROM pages WHERE project_id=%s AND status='ready' ORDER BY position", (project["id"],))
+        if request.page_ids is not None:
+            wanted = set(request.page_ids)
+            if not wanted or not wanted.issubset({page["id"] for page in pages}):
+                raise HTTPException(422, "page_ids must identify ready pages in this project")
+            selected = [page["id"] for page in pages if page["id"] in wanted]
+        elif request.page_from is not None or request.page_to is not None:
+            first, last = request.page_from or 1, request.page_to or len(pages)
+            if first > last or last > len(pages):
+                raise HTTPException(422, "Page range is outside this project")
+            selected = [page["id"] for page in pages[first - 1:last]]
+        else:
+            selected = [page["id"] for page in pages]
+        if request.kind == "image" and len(selected) != 1:
+            raise HTTPException(422, "An image export needs exactly one selected page")
         settings = dict(db.one("SELECT values FROM settings WHERE singleton=true")["values"])
         token = secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(token.encode()).hexdigest()
@@ -273,9 +310,12 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
                            (project["id"], request.kind, token_hash, filename, expires))
             export_id = cursor.fetchone()["id"]
             cursor.execute("INSERT INTO jobs(project_id,kind,payload) VALUES (%s,'build_export',%s::jsonb)",
-                           (project["id"], json.dumps({"export_id": str(export_id)})))
+                           (project["id"], json.dumps({"export_id": str(export_id),
+                                                       "page_ids": [str(value) for value in selected],
+                                                       "quality": request.quality})))
             event(cursor, project["id"], "export_queued", {"export_id": str(export_id), "kind": request.kind})
         return {"id": str(export_id), "kind": request.kind, "status": "queued", "expires_at": expires,
+                "page_count": len(selected), "quality": request.quality,
                 "download_url": f"/api/v1/downloads/{token}"}
 
     def page_file(public_id: str, page_id: uuid.UUID, result: bool, download: bool = False):

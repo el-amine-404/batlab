@@ -57,6 +57,23 @@ def _score_quad(quad: np.ndarray, width: int, height: int) -> float:
     return float(min(0.99, 0.35 + ratio * 0.55 + opposite * 0.18))
 
 
+def _background_edge_penalty(quad: np.ndarray, width: int, height: int) -> float:
+    """Penalize a background region that owns one frame edge but not the photo.
+
+    Bright walls behind dark cards commonly form a large three-corner polygon
+    along the left/right frame. A real full-page scan may touch every frame
+    edge, so complete near-full-image quadrilaterals remain valid.
+    """
+    span_x, span_y = np.ptp(quad[:, 0]), np.ptp(quad[:, 1])
+    if span_x > width * .9 and span_y > height * .9:
+        return 0.0
+    near_left = np.count_nonzero(quad[:, 0] < width * .015)
+    near_right = np.count_nonzero(quad[:, 0] > width * .985)
+    near_top = np.count_nonzero(quad[:, 1] < height * .015)
+    near_bottom = np.count_nonzero(quad[:, 1] > height * .985)
+    return .35 if max(near_left, near_right, near_top, near_bottom) >= 2 else 0.0
+
+
 def _intersection(horizontal: np.ndarray, vertical: np.ndarray) -> list[float] | None:
     """Intersect y=ax+b with x=cy+d, returning None for parallel fits."""
     a, b = horizontal
@@ -140,12 +157,12 @@ def _foreground_quad(gray: np.ndarray, robust: bool = False) -> np.ndarray | Non
 def detect(image: np.ndarray) -> tuple[np.ndarray, float, str]:
     height, width = image.shape[:2]
     full_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     # Fit clean high-contrast boundaries at source resolution. This preserves
     # thin text and matches the final warp more precisely than a reduced copy.
     foreground = _foreground_quad(full_gray)
     foreground_method = "full-resolution foreground"
     if foreground is None:
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
         green = cv2.inRange(hsv, (35, 60, 60), (95, 255, 255))
         combined = cv2.bitwise_or(full_gray, cv2.inRange(green, 1, 255))
         foreground = _foreground_quad(combined, robust=True)
@@ -161,8 +178,17 @@ def detect(image: np.ndarray) -> tuple[np.ndarray, float, str]:
     if foreground is not None:
         # A complete external silhouette is stronger evidence than internal
         # printed lines, while the capped bonus keeps cluttered scenes safe.
-        candidates.append((min(.99, _score_quad(foreground, width, height) + .16),
+        candidates.append((min(.99, _score_quad(foreground, width, height) + .16)
+                           - _background_edge_penalty(foreground, width, height),
                            foreground, foreground_method))
+    # A saturated blue/green card can be darker than the wall or hand behind
+    # it. Its connected color surface is better evidence than the bright
+    # background and remains a deterministic OpenCV fallback (no AI content).
+    color_mask = cv2.inRange(hsv, (45, 70, 15), (145, 255, 255))
+    color_foreground = _foreground_quad(color_mask, robust=True)
+    if color_foreground is not None:
+        candidates.append((min(.99, _score_quad(color_foreground, width, height) + .18),
+                           color_foreground, "color foreground"))
     small_area = small.shape[0] * small.shape[1]
     for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:40]:
         if cv2.contourArea(contour) < small_area * 0.08:

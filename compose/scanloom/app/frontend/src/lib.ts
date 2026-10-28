@@ -11,6 +11,11 @@ export type Project = {
   completed_count: number; warning_count: number; error?: string | null; expires_at: string;
   pages: Page[]; exports: Export[];
 };
+export type ProjectSummary = {
+  public_id: string; title: string; status: string; page_count: number; completed_count: number;
+  warning_count: number; expires_at: string; created_at: string; thumbnail_url?: string | null;
+};
+export type ProjectList = { items: ProjectSummary[] };
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
@@ -26,6 +31,12 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body), headers: { "Content-Type": "application/json" } });
 export const cx = (...values: Array<string | false | null | undefined>) => values.filter(Boolean).join(" ");
 export const expires = (value: string) => new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(value));
+export function remaining(value: string, now = Date.now()) {
+  const seconds = Math.max(0, Math.floor((new Date(value).getTime() - now) / 1000));
+  if (!seconds) return "expired";
+  const hours = Math.floor(seconds / 3600), minutes = Math.floor(seconds % 3600 / 60), secs = seconds % 60;
+  return hours ? `${hours}h ${minutes}m remaining` : minutes ? `${minutes}m ${secs}s remaining` : `${secs}s remaining`;
+}
 
 export type RecentScan = { id: string; title: string; createdAt: string; expiresAt: string; pages: number };
 const RECENT_KEY = "scanloom.recent.v1";
