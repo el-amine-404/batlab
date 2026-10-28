@@ -214,6 +214,23 @@ function render() {
   renderMedia();
   $("#tv-now").hidden = !(on && state.app);
   $("#tv-now").textContent = state.app ? `Now: ${state.app}` : "";
+
+  // Update voice button state based on TV power
+  const voiceBtn = $("#voice-open");
+  if (voiceBtn) {
+    voiceBtn.setAttribute("aria-disabled", String(!on));
+    voiceBtn.title = on ? "Voice control" : "TV is powered off";
+    voiceBtn.setAttribute("aria-label", on ? "Voice control" : "TV is powered off");
+    const use = voiceBtn.querySelector("use");
+    if (use) use.setAttribute("href", on ? "#i-mic" : "#i-mic-off");
+  }
+
+  // If TV powers off while voice modal is open, close it cleanly
+  if (!on) {
+    const dlg = $("#voice");
+    if (dlg && dlg.open) closeVoice();
+  }
+
   updateVoiceTvDot();
 }
 
@@ -684,8 +701,6 @@ function updateVoiceTvDot() {
   const on = state.power === "on";
   dot.className = "dot " + (busy ? "busy" : on ? "on" : state.power ? "off" : "");
   dot.title = busy ? "Working…" : on ? "TV is on" : "TV is off";
-  const banner = $("#voice-tv-banner");
-  if (banner) banner.hidden = on || !state.power;
 }
 
 function normalizeVoiceText(str) {
@@ -831,14 +846,8 @@ async function executeVoiceIntent(intent, target) {
 
   // Other TV actions require TV to be ON
   if (!isTvOn) {
-    $("#voice-title").textContent = "TV is currently off";
-    const banner = $("#voice-tv-banner");
-    if (banner) banner.hidden = false;
-    const badge = $("#voice-action-badge");
-    badge.hidden = false;
-    badge.className = "voice-badge error";
-    badge.textContent = "Turn on the TV first";
-    buzz([30, 40, 30]);
+    closeVoice();
+    toast("TV is powered off. Turn it on first.");
     return;
   }
 
@@ -930,6 +939,11 @@ function setVoiceLang(lang) {
 }
 
 function openVoice(target = "assistant") {
+  if (state.power !== "on") {
+    toast("TV is powered off. Turn it on first.");
+    buzz([20, 30, 20]);
+    return;
+  }
   voiceTarget = target;
   hasRetriedAbort = false;
   clearTimeout(abortRetryTimer);
@@ -1160,15 +1174,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#voice").addEventListener("click", (e) => { if (e.target === $("#voice")) closeVoice(); });
   const voiceDlg = $("#voice");
   if (voiceDlg) voiceDlg.addEventListener("close", () => cancelListening(true));
-  const wakeQuick = $("#voice-wake-quick");
-  if (wakeQuick) {
-    wakeQuick.addEventListener("click", async () => {
-      $("#voice-tv-banner").hidden = true;
-      $("#voice-title").textContent = "Turning TV on…";
-      await power();
-      updateVoiceTvDot();
-    });
-  }
   document.querySelectorAll(".voice-lang-picker .lang-pill").forEach((b) =>
     b.addEventListener("click", () => setVoiceLang(b.dataset.lang)));
 
