@@ -984,10 +984,12 @@ class Handler(BaseHTTPRequestHandler):
                 time.sleep(1)
                 return self._json(401, {"error": "wrong password"})
             _fails.pop(who, None)
-            cookie = f"tvr={make_session()}; Max-Age={SESSION_DAYS * 86400}; Path=/; HttpOnly; SameSite=Lax"
+            sec = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
+            cookie = f"tvr={make_session()}; Max-Age={SESSION_DAYS * 86400}; Path=/; HttpOnly; SameSite=Lax{sec}"
             return self._json(200, {"ok": True}, cookie)
         if path == "/api/logout":
-            return self._json(200, {"ok": True}, "tvr=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax")
+            sec = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
+            return self._json(200, {"ok": True}, f"tvr=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax{sec}")
         if not self._authed():
             return self._json(401, {"error": "log in"})
         try:

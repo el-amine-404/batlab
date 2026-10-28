@@ -1,7 +1,7 @@
 name: tv-remote
 # A web remote for the Samsung TVs on the LAN (app/server.py). Host networking
 # lets it scan the subnet for TVs and send Wake-on-LAN broadcasts; it listens
-# only on the home_server gateway, where Caddy serves it at tv.homelab.lan with
+# only on the home_server gateway, where Caddy serves it at https://tv.homelab.lan with
 # a password (like Netdata). Pairing tokens live in /data, one per TV.
 services:
   tv-remote:

@@ -1,6 +1,21 @@
 # The remote has its own login (compose/tv-remote): a phone's home-screen app
-# cannot show basic auth's prompt.
-http://tv.homelab.lan {
-  import localSubnets
+# cannot show basic auth's prompt. HTTPS enables browser secure context for
+# microphone speech recognition and PWA installation.
+https://tv.homelab.lan {
+	tls internal
+	import localSubnets
 	reverse_proxy @localSubnets 172.19.0.1:{$TV_REMOTE_PORT}
+}
+
+http://tv.homelab.lan {
+	import localSubnets
+	handle /ca.crt {
+		header Content-Type application/x-x509-ca-cert
+		root * /data/caddy/pki/authorities/local
+		rewrite * /root.crt
+		file_server
+	}
+	handle {
+		redir https://{host}{uri} 308
+	}
 }
