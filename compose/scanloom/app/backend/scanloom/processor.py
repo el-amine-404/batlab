@@ -17,7 +17,7 @@ import numpy as np
 from .config import Config
 from .db import Database
 from .imaging import (detect, normalize, normalized_corners, pixel_corners,
-                      quality, warp, write_jpeg)
+                      quality, warp, write_png)
 from .security import Refused, clamav, inspect_container, sha256
 
 
@@ -128,7 +128,7 @@ class Processor:
         if appearance == "auto":
             appearance = {"faithful": "color", "paper": "gray", "mono": "mono"}[page["profile"]]
         self.db.execute("UPDATE pages SET status='rendering' WHERE id=%s", (page_id,))
-        corrected = warp(image, found, int(page["rotation"]), appearance)
+        corrected = warp(image, found, int(page["rotation"]), appearance, float(page["corner_radius"]))
         report = quality(corrected, confidence) | {"detection_method": method}
         outside = int(np.count_nonzero((found[:, 0] < 0) | (found[:, 0] >= image.shape[1])
                                        | (found[:, 1] < 0) | (found[:, 1] >= image.shape[0])))
@@ -137,9 +137,9 @@ class Processor:
             report["warnings"].append(
                 f"{outside} detected corner{'s' if outside != 1 else ''} extend beyond the photo; missing pixels cannot be recovered."
             )
-        result_name = f"{page_id}.jpg"
+        result_name = f"{page_id}.png"
         result = object_path(project_dir, result_name)
-        write_jpeg(corrected, result, int(settings["jpeg_quality"]))
+        write_png(corrected, result)
         result_hash, result_bytes = sha256(result), result.stat().st_size
         with self.db.transaction() as cursor:
             cursor.execute("""UPDATE pages SET status='ready',corners=%s::jsonb,confidence=%s,quality=%s::jsonb,
@@ -172,7 +172,7 @@ class Processor:
             raise Refused("Project has no corrected pages to export")
         self.db.execute("UPDATE exports SET status='building' WHERE id=%s", (export["id"],))
         sources = [object_path(self.config.work / str(job["project_id"]), row["result_object"]) for row in pages]
-        destination_name = f"{export['id']}.{export['kind'] if export['kind'] != 'image' else 'jpg'}"
+        destination_name = f"{export['id']}.{export['kind'] if export['kind'] != 'image' else 'png'}"
         destination = object_path(self.config.exports, destination_name)
         destination.parent.mkdir(parents=True, exist_ok=True)
         if export["kind"] == "image":
@@ -182,7 +182,7 @@ class Processor:
         elif export["kind"] == "zip":
             with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
                 for index, source in enumerate(sources, 1):
-                    archive.write(source, f"page-{index:03d}.jpg")
+                    archive.write(source, f"page-{index:03d}{source.suffix.lower()}")
         else:
             destination.write_bytes(img2pdf.convert([str(source) for source in sources], rotation=img2pdf.Rotation.ifvalid))
         digest = sha256(destination)

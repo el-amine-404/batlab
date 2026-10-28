@@ -5,8 +5,9 @@ services:
     container_name: caddy
     restart: unless-stopped
     ports:
-      # Sites are plain http:// on the LAN, except pdf.caddy: its session cookie
-      # needs HTTPS, from Caddy's own local CA (no public certificate).
+      # Most sites are plain HTTP on the LAN. PDF Gateway uses HTTPS for its
+      # secure session cookie, and Scanloom uses it for browser camera/PWA APIs.
+      # Both use Caddy's local CA (no public certificate).
       - ${CADDY_HTTP_PORT}:80
       - ${CADDY_HTTPS_PORT:-443}:443
     volumes:

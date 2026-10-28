@@ -11,9 +11,10 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import cv2
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.datastructures import MutableHeaders
@@ -35,6 +36,7 @@ class PageEdit(BaseModel):
     corners: list[list[float]] | None = None
     rotation: int | None = None
     appearance: str | None = None
+    corner_radius: float | None = Field(None, ge=0, le=.25)
 
 
 class ExportRequest(BaseModel):
@@ -72,6 +74,7 @@ def project_view(db: Database, public_id: str) -> dict:
         "preview_url": f"/api/v1/projects/{public_id}/pages/{page['id']}/preview?v={page['version']}" if page["normalized_object"] else None,
         "result_url": f"/api/v1/projects/{public_id}/pages/{page['id']}/result?v={page['version']}" if page["result_object"] else None,
         "download_url": f"/api/v1/projects/{public_id}/pages/{page['id']}/download?v={page['version']}" if page["result_object"] else None,
+        "jpeg_download_url": f"/api/v1/projects/{public_id}/pages/{page['id']}/download?format=jpeg&v={page['version']}" if page["result_object"] else None,
     } for page in pages]
     answer["exports"] = [jsonable(dict(item)) for item in exports]
     answer.pop("id", None)
@@ -229,13 +232,14 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
         rotation = page["rotation"] if edit.rotation is None else edit.rotation
         appearance = page["appearance"] if edit.appearance is None else edit.appearance
         corners = page["corners"] if edit.corners is None else edit.corners
+        corner_radius = page["corner_radius"] if edit.corner_radius is None else edit.corner_radius
         if rotation not in {0, 90, 180, 270} or appearance not in {"auto", "color", "gray", "mono"}:
             raise HTTPException(422, "Invalid page correction")
         if corners is not None and (len(corners) != 4 or any(len(point) != 2 or any(not -.05 <= float(value) <= 1.05 for value in point) for point in corners)):
             raise HTTPException(422, "Corners are four [x,y] points no more than 5% outside the image")
         with db.transaction() as cursor:
-            cursor.execute("UPDATE pages SET corners=%s::jsonb,rotation=%s,appearance=%s,status='queued',error=NULL WHERE id=%s",
-                           (json.dumps(corners), rotation, appearance, page_id))
+            cursor.execute("UPDATE pages SET corners=%s::jsonb,rotation=%s,appearance=%s,corner_radius=%s,status='queued',error=NULL WHERE id=%s",
+                           (json.dumps(corners), rotation, appearance, corner_radius, page_id))
             cursor.execute("INSERT INTO jobs(project_id,page_id,kind) VALUES (%s,%s,'render_page') ON CONFLICT DO NOTHING", (page["project_id"], page_id))
             cursor.execute("UPDATE projects SET status='processing',error=NULL WHERE id=%s", (page["project_id"],))
             event(cursor, page["project_id"], "page_edit_queued", {"page_id": str(page_id)})
@@ -263,7 +267,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         expires = min(project["expires_at"], datetime.now(timezone.utc) + timedelta(minutes=int(settings["link_ttl_minutes"])))
         filename = re.sub(r"[^A-Za-z0-9._-]+", "-", project["title"]).strip("-") or "scanloom"
-        filename += {"image": ".jpg", "zip": ".zip", "pdf": ".pdf"}[request.kind]
+        filename += {"image": ".png", "zip": ".zip", "pdf": ".pdf"}[request.kind]
         with db.transaction() as cursor:
             cursor.execute("INSERT INTO exports(project_id,kind,token_hash,filename,expires_at) VALUES (%s,%s,%s,%s,%s) RETURNING id",
                            (project["id"], request.kind, token_hash, filename, expires))
@@ -281,11 +285,13 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
         if not name: raise HTTPException(404, "Image is not ready")
         path = object_path(config.work / str(page["project_id"]), name)
         if not path.is_file(): raise HTTPException(404, "Image is not ready")
+        extension = path.suffix.lower()
+        media_type = "image/png" if extension == ".png" else "image/jpeg"
         filename = None
         if download:
             stem = Path(clean_name(page["original_name"])).stem or f"page-{page['position'] + 1}"
-            filename = f"{stem}-scanloom.jpg"
-        return FileResponse(path, media_type="image/jpeg" if result else "image/png",
+            filename = f"{stem}-scanloom{extension}"
+        return FileResponse(path, media_type=media_type if result else "image/png",
                             filename=filename, content_disposition_type="attachment" if download else "inline")
 
     @app.get("/api/v1/projects/{public_id}/pages/{page_id}/preview", tags=["Pages"])
@@ -295,7 +301,30 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
     def result(public_id: str, page_id: uuid.UUID): return page_file(public_id, page_id, True)
 
     @app.get("/api/v1/projects/{public_id}/pages/{page_id}/download", tags=["Pages"])
-    def page_download(public_id: str, page_id: uuid.UUID): return page_file(public_id, page_id, True, True)
+    def page_download(public_id: str, page_id: uuid.UUID, format: str = "png"):
+        if format not in {"png", "jpeg", "jpg"}:
+            raise HTTPException(422, "format must be png or jpeg")
+        if format == "png":
+            return page_file(public_id, page_id, True, True)
+        page = db.one("SELECT p.* FROM pages p JOIN projects pr ON pr.id=p.project_id WHERE pr.public_id=%s AND p.id=%s", (public_id, page_id))
+        if not page or not page["result_object"]:
+            raise HTTPException(404, "Image is not ready")
+        path = object_path(config.work / str(page["project_id"]), page["result_object"])
+        image = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+        if image is None:
+            raise HTTPException(404, "Image is not ready")
+        if image.ndim == 3 and image.shape[2] == 4:
+            alpha = image[:, :, 3:4].astype("float32") / 255
+            image = (image[:, :, :3] * alpha + 255 * (1 - alpha)).astype("uint8")
+        settings = dict(db.one("SELECT values FROM settings WHERE singleton=true")["values"])
+        ok, encoded = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, int(settings["jpeg_quality"])])
+        if not ok:
+            raise HTTPException(500, "Could not create JPEG")
+        stem = Path(clean_name(page["original_name"])).stem or f"page-{page['position'] + 1}"
+        stem = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("-.") or f"page-{page['position'] + 1}"
+        return Response(encoded.tobytes(), media_type="image/jpeg", headers={
+            "Content-Disposition": f'attachment; filename="{stem}-scanloom-small.jpg"',
+        })
 
     @app.get("/api/v1/downloads/{token}", tags=["Exports"])
     def download(token: str):
@@ -304,7 +333,8 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
         if not item: raise HTTPException(404, "Download link not found or expired")
         if item["status"] != "ready": raise HTTPException(409, "Export is still being prepared")
         path = object_path(config.exports, item["object_name"])
-        media = {"image": "image/jpeg", "zip": "application/zip", "pdf": "application/pdf"}[item["kind"]]
+        media = ({".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}.get(path.suffix.lower(), "image/png")
+                 if item["kind"] == "image" else {"zip": "application/zip", "pdf": "application/pdf"}[item["kind"]])
         return FileResponse(path, media_type=media, filename=item["filename"])
 
     @app.delete("/api/v1/projects/{public_id}", status_code=204, tags=["Projects"])

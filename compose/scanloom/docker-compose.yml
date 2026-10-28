@@ -54,7 +54,7 @@ services:
       SCANLOOM_DATABASE_URL: postgresql://scanloom:${SCANLOOM_DATABASE_PASSWORD}@db:5432/scanloom
       SCANLOOM_STORAGE: /var/lib/scanloom
       SCANLOOM_CLAMD_HOST: clamav
-      SCANLOOM_PUBLIC_URL: http://scanloom.homelab.lan
+      SCANLOOM_PUBLIC_URL: https://scanloom.homelab.lan
       SCANLOOM_PORT: 8850
       TZ: ${TZ}
     depends_on:

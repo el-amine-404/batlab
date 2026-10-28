@@ -11,8 +11,9 @@ images, an ordered ZIP, or a PDF, and may send that PDF anywhere they choose.
 - Every page is malware-scanned before an image decoder sees it, decoded with
   strict size/type limits, normalized to a new metadata-free raster, detected,
   perspective-corrected, and quality-scored.
-- The automatic result is the primary screen. Fine-tuning corners, rotation,
-  appearance, order, or page membership is optional and creates a new result.
+- The automatic lossless PNG is the primary result; a smaller JPEG, ordered ZIP,
+  and PDF are optional. Fine-tuning corners, rounded-card transparency, rotation,
+  appearance, order, or page membership creates a new result.
 - Originals and derivatives are temporary. A project and all of its capability
   links expire; cleanup is automatic. There is no account or API authentication
   in the first release, so Caddy restricts the app to the trusted LAN.
@@ -46,13 +47,19 @@ ID below a configured root.
 - `POST /api/v1/projects` — multipart images; returns the project immediately.
 - `GET /api/v1/projects/{id}` and `/events` — state and live progress.
 - `PATCH /api/v1/projects/{id}` — title, profile, and page order.
-- `PATCH /api/v1/projects/{id}/pages/{pageId}` — corners, rotation, appearance.
+- `PATCH /api/v1/projects/{id}/pages/{pageId}` — corners, rounded radius, rotation, appearance.
 - `POST /api/v1/projects/{id}/render` — rerender after optional edits.
 - `POST /api/v1/projects/{id}/exports` — image, ZIP, or PDF expiring link.
 - `GET/PUT /api/v1/settings` — every operational/product setting.
 - `GET /api/v1/system/status` and `/health` — Homepage and health checks.
 
 OpenAPI at `/docs` is the authoritative request/response reference.
+
+The PWA is served at `https://scanloom.homelab.lan`; trusted HTTPS is required
+by browsers for direct camera access and service-worker installation. The local
+CA certificate is available at `http://scanloom.homelab.lan/ca.crt`. Recent
+projects are remembered only in that browser, not exposed through a server-wide
+listing while the app has no user authentication.
 
 ## Data lifecycle
 

@@ -29,5 +29,5 @@ def load() -> Config:
         port=int(os.getenv("SCANLOOM_PORT", "8850")),
         clamd_host=os.getenv("SCANLOOM_CLAMD_HOST", "clamav"),
         clamd_port=int(os.getenv("SCANLOOM_CLAMD_PORT", "3310")),
-        public_url=os.getenv("SCANLOOM_PUBLIC_URL", "http://scanloom.homelab.lan").rstrip("/"),
+        public_url=os.getenv("SCANLOOM_PUBLIC_URL", "https://scanloom.homelab.lan").rstrip("/"),
     )

@@ -9,7 +9,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
-from scanloom.imaging import detect, normalize, order_corners, pixel_corners, quality, warp
+from scanloom.imaging import detect, normalize, order_corners, pixel_corners, quality, warp, write_png
 from scanloom.security import Refused, inspect_container
 from scanloom.settings import DEFAULTS, validate
 
@@ -29,7 +29,7 @@ class ImagingTest(unittest.TestCase):
         cv2.fillConvexPoly(image, quad, (245, 245, 238))
         cv2.putText(image, "SCANLOOM", (330, 450), cv2.FONT_HERSHEY_SIMPLEX, 2, (20, 40, 35), 5)
         found, confidence, method = detect(image)
-        self.assertIn(method, {"contour", "contrast foreground"})
+        self.assertIn(method, {"contour", "full-resolution foreground"})
         self.assertGreater(confidence, 0.75)
         result = warp(image, found, 0, "color")
         self.assertGreater(result.shape[1], result.shape[0])
@@ -40,7 +40,7 @@ class ImagingTest(unittest.TestCase):
         cv2.rectangle(image, (70, 430), (640, 900), (145, 145, 145), -1)
         cv2.rectangle(image, (70, 430), (640, 590), (245, 245, 245), -1)
         found, confidence, method = detect(image)
-        self.assertEqual(method, "contrast foreground")
+        self.assertEqual(method, "full-resolution foreground")
         self.assertGreater(confidence, .75)
         self.assertLess(found[:, 0].min(), 85)
         self.assertGreater(found[:, 0].max(), 625)
@@ -61,6 +61,19 @@ class ImagingTest(unittest.TestCase):
         image = np.full((1000, 1000, 3), 180, np.uint8)
         report = quality(image, .95)
         self.assertTrue(any("blurry" in warning for warning in report["warnings"]))
+
+    def test_rounded_card_is_written_as_lossless_alpha_png(self):
+        image = np.full((500, 800, 3), (40, 180, 220), np.uint8)
+        corners = np.array([[0, 0], [799, 0], [799, 499], [0, 499]], np.float32)
+        result = warp(image, corners, 0, "color", .08)
+        self.assertEqual(result.shape[2], 4)
+        self.assertEqual(result[0, 0, 3], 0)
+        self.assertEqual(result[250, 400, 3], 255)
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "rounded.png"
+            write_png(result, path)
+            decoded = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+            self.assertEqual(decoded.shape, result.shape)
 
 
 class ContainerTest(unittest.TestCase):

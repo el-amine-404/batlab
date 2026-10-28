@@ -1,4 +1,5 @@
-http://scanloom.homelab.lan {
+https://scanloom.homelab.lan {
+  tls internal
   import localSubnets
   request_body {
     # 30 files × the default 25 MiB limit, plus multipart overhead.
@@ -6,5 +7,18 @@ http://scanloom.homelab.lan {
   }
   reverse_proxy @localSubnets http://scanloom:8080 {
     flush_interval -1
+  }
+}
+
+http://scanloom.homelab.lan {
+  import localSubnets
+  handle /ca.crt {
+    header Content-Type application/x-x509-ca-cert
+    root * /data/caddy/pki/authorities/local
+    rewrite * /root.crt
+    file_server
+  }
+  handle {
+    redir https://{host}{uri} 308
   }
 }
