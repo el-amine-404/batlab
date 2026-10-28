@@ -41,8 +41,8 @@ function toast(msg, error = false) {
   toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
 }
 
-function buzz() {
-  if (navigator.vibrate) navigator.vibrate(8);
+function buzz(pattern = 8) {
+  if (navigator.vibrate) navigator.vibrate(pattern);
 }
 
 function el(tag, attrs = {}, ...children) {
@@ -664,6 +664,312 @@ document.addEventListener("keydown", (e) => {
   send(key);
 });
 
+// ------------------------------------------------------------------- voice
+
+let recognition = null;
+let voiceActive = false;
+let voiceLang = "auto";
+try { voiceLang = localStorage.getItem("tv-remote:voice-lang") || "auto"; } catch {}
+let voiceTarget = "assistant"; // "assistant" | "youtube" | "keyboard"
+let pendingVoiceIntent = null;
+let voiceCloseTimer = null;
+
+function normalizeVoiceText(str) {
+  return (str || "")
+    .toLowerCase()
+    .replace(/[\.,\/#!$%\^&\*;:{}=\-_`~()?]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseVoiceIntent(rawText) {
+  const text = normalizeVoiceText(rawText);
+  if (!text) return null;
+
+  // 1. App Launching (YouTube, Netflix, Jellyfin, Spotify, Prime Video, Disney+, Internet)
+  const appKeywords = [
+    { id: "111299001912", name: "YouTube", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح\s+ل?)\s+)?(?:you\s*tube|يوتيوب)$/i },
+    { id: "3201907018807", name: "Netflix", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح\s+ل?)\s+)?(?:net\s*flix|نتفليكس|نتفلكس)$/i },
+    { id: "AprZAARz4r.Jellyfin", name: "Jellyfin", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح\s+ل?)\s+)?(?:jelly\s*fin|جيليفين)$/i },
+    { id: "3201606009684", name: "Spotify", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح\s+ل?)\s+)?(?:spotify|سبوتيفاي)$/i },
+    { id: "3201910019365", name: "Prime Video", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح\s+ل?)\s+)?(?:prime\s*video|amazon\s*prime|برايم)$/i },
+    { id: "3201901017640", name: "Disney+", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح\s+ل?)\s+)?(?:disney\s*(?:plus|\+)?|ديزني)$/i },
+    { id: "3202010022079", name: "Internet", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح\s+ل?)\s+)?(?:internet|browser|navigateur|المتصفح|انترنت)$/i },
+  ];
+
+  for (const a of appKeywords) {
+    if (a.match.test(text)) {
+      return { type: "app", app: { id: a.id, name: a.name }, label: `Open ${a.name}` };
+    }
+  }
+
+  // 2. Power Toggle / Off / On
+  if (/^(?:turn\s+off|power\s+off|shut\s+down|switch\s+off|éteins|éteindre|arrête|coupe|طفي|اطفي|اقفل|إغلاق)(?:\s+(?:the\s+)?(?:tv|télé|téléviseur|التلفزيون|التلفاز|الشاشة))?$/i.test(text)) {
+    return { type: "power", action: "off", label: "Power Off" };
+  }
+  if (/^(?:turn\s+on|power\s+on|wake\s+up|allume|allumer|شغل|ولع)(?:\s+(?:the\s+)?(?:tv|télé|téléviseur|التلفزيون|التلفاز|الشاشة))$/i.test(text)) {
+    return { type: "power", action: "on", label: "Power On" };
+  }
+
+  // 3. Volume Up
+  if (/^(?:volume\s*up|turn\s*up|louder|increase\s+volume|sound\s*up|monte\s+le\s+son|augmente\s+le\s+son|plus\s+fort|monter\s+le\s+volume|علي\s+الصوت|علّي|علّي\s+الصوت|ارفع\s+الصوت|صوت\s+اعلى)$/i.test(text)) {
+    return { type: "volume", dir: 1, label: "Volume Up" };
+  }
+
+  // 4. Volume Down
+  if (/^(?:volume\s*down|turn\s*down|quieter|decrease\s+volume|sound\s*down|lower\s+volume|baisse\s+le\s+son|diminue\s+le\s+son|moins\s+fort|baisser\s+le\s+volume|وطي\s+الصوت|وطّي|وطّي\s+الصوت|اخفض\s+الصوت|نزل\s+الصوت|صوت\s+اوطى)$/i.test(text)) {
+    return { type: "volume", dir: -1, label: "Volume Down" };
+  }
+
+  // 5. Mute / Unmute
+  if (/^(?:mute|unmute|silence|coupe\s+le\s+son|mets\s+en\s+sourdine|sourdine|remets\s+le\s+son|démute|كتم|كتم\s+الصوت|صامت|الغاء\s+الكتم|فك\s+الكتم)$/i.test(text)) {
+    return { type: "mute", label: "Toggle Mute" };
+  }
+
+  // 6. Play / Pause
+  if (/^(?:pause|freeze|mets\s+en\s+pause|وقف|ايقاف\s+مؤقت|لحظة)$/i.test(text)) {
+    return { type: "media", action: "pause", label: "Pause" };
+  }
+  if (/^(?:play|resume|continue|lecture|reprends|continuer|relance|شغل|استئناف|كمل)$/i.test(text)) {
+    return { type: "media", action: "play", label: "Play" };
+  }
+
+  // 7. Navigation
+  if (/^(?:home|go\s+home|main\s+menu|accueil|page\s+d'accueil|الرئيسية|الصفحة\s+الرئيسية)$/i.test(text)) {
+    return { type: "key", key: "KEY_HOME", label: "Home" };
+  }
+  if (/^(?:back|go\s+back|return|retour|en\s+arrière|رجوع|ارجع|للخلف)$/i.test(text)) {
+    return { type: "key", key: "KEY_RETURN", label: "Back" };
+  }
+  if (/^(?:menu|settings|paramètres|réglages|القائمة|الإعدادات)$/i.test(text)) {
+    return { type: "key", key: "KEY_MENU", label: "Menu" };
+  }
+  if (/^(?:input|source|switch\s+input|changer\s+de\s+source|المصدر|المدخل)$/i.test(text)) {
+    return { type: "key", key: "KEY_SOURCE", label: "Source" };
+  }
+
+  // 8. Search query stripping: "search for xyz", "cherche xyz", "ابحث عن xyz"
+  const searchMatch = rawText.trim().match(/^(?:search(?:\s+for)?|find|cherche|recherche|trouve|ابحث\s+عن|دور\s+على|بحث)\s+(.+)$/i);
+  const query = (searchMatch ? searchMatch[1] : rawText).trim();
+
+  return { type: "search", query, label: `Search: "${query}"` };
+}
+
+async function executeVoiceIntent(intent, target) {
+  if (!intent) return;
+  buzz([15, 40, 15]);
+
+  if (intent.type === "app") {
+    await launch(intent.app);
+    return;
+  }
+  if (intent.type === "power") {
+    await power();
+    return;
+  }
+  if (intent.type === "volume") {
+    await send(intent.dir > 0 ? "KEY_VOLUP" : "KEY_VOLDOWN");
+    return;
+  }
+  if (intent.type === "mute") {
+    await toggleMute();
+    return;
+  }
+  if (intent.type === "media") {
+    await mediaAction(intent.action);
+    return;
+  }
+  if (intent.type === "key") {
+    await send(intent.key);
+    return;
+  }
+  if (intent.type === "search") {
+    if (target === "youtube" || state.app === "YouTube") {
+      const input = $("#yt-text");
+      input.value = intent.query;
+      syncClear();
+      await sendYoutube();
+      toast(`YouTube: "${intent.query}"`);
+    } else if (target === "keyboard" || !$("#kb").hidden) {
+      if (current) {
+        await api(`/api/tv/${current.mac}/text`, { text: intent.query }).catch(() => {});
+        toast(`Typed: "${intent.query}"`);
+      }
+    } else {
+      // Default fallback: search YouTube if installed, else send as TV text
+      const input = $("#yt-text");
+      input.value = intent.query;
+      syncClear();
+      await sendYoutube();
+      toast(`YouTube: "${intent.query}"`);
+    }
+  }
+}
+
+function setVoiceLang(lang) {
+  voiceLang = lang;
+  try { localStorage.setItem("tv-remote:voice-lang", lang); } catch {}
+  document.querySelectorAll(".voice-lang-picker .lang-pill").forEach((b) => {
+    b.setAttribute("aria-checked", String(b.dataset.lang === lang));
+  });
+  if (voiceActive) {
+    stopListening();
+    setTimeout(startListening, 200);
+  }
+}
+
+function openVoice(target = "assistant") {
+  voiceTarget = target;
+  clearTimeout(voiceCloseTimer);
+  pendingVoiceIntent = null;
+
+  const SpeechClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechClass) {
+    toast("Speech recognition is not supported in this browser. Use your mobile keyboard mic in the text field.", true);
+    return;
+  }
+
+  const dlg = $("#voice");
+  const title = $("#voice-title");
+  const transcript = $("#voice-transcript");
+  const badge = $("#voice-action-badge");
+
+  title.textContent = target === "youtube" ? "YouTube Voice Search" : target === "keyboard" ? "Voice Dictation" : "Listening…";
+  transcript.textContent = target === "youtube" ? "Say what you want to watch…" : "Say a command, app, or search…";
+  transcript.className = "voice-transcript";
+  badge.hidden = true;
+
+  setVoiceLang(voiceLang);
+  if (!dlg.open) dlg.showModal();
+  startListening();
+}
+
+function startListening() {
+  const SpeechClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechClass) return;
+
+  stopListening();
+
+  recognition = new SpeechClass();
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.maxAlternatives = 1;
+
+  if (voiceLang === "auto") {
+    recognition.lang = navigator.language || "en-US";
+  } else {
+    recognition.lang = voiceLang;
+  }
+
+  const ring = $("#voice-ring");
+  const btn = $("#voice-toggle-btn");
+  const title = $("#voice-title");
+  const transcript = $("#voice-transcript");
+  const badge = $("#voice-action-badge");
+
+  recognition.onstart = () => {
+    voiceActive = true;
+    ring.classList.add("active");
+    btn.classList.add("listening");
+    title.textContent = "Listening…";
+    badge.hidden = true;
+    buzz(10);
+  };
+
+  recognition.onresult = (event) => {
+    let interim = "";
+    let final = "";
+
+    for (let i = event.resultIndex; i < event.results.length; ++i) {
+      const part = event.results[i][0].transcript;
+      if (event.results[i].isFinal) final += part;
+      else interim += part;
+    }
+
+    const spoken = final || interim;
+    if (spoken) {
+      transcript.textContent = `"${spoken}"`;
+      transcript.className = "voice-transcript" + (final ? "" : " interim");
+
+      const intent = parseVoiceIntent(spoken);
+      if (intent) {
+        badge.hidden = false;
+        badge.className = "voice-badge";
+        badge.textContent = intent.label;
+        if (final) pendingVoiceIntent = intent;
+      }
+    }
+  };
+
+  recognition.onerror = (event) => {
+    voiceActive = false;
+    ring.classList.remove("active");
+    btn.classList.remove("listening");
+
+    buzz([30, 40, 30]);
+    title.textContent = "Voice error";
+    badge.hidden = false;
+    badge.className = "voice-badge error";
+
+    if (event.error === "not-allowed") {
+      badge.textContent = "Microphone blocked";
+      transcript.textContent = "Please allow microphone access in your browser settings.";
+    } else if (event.error === "no-speech") {
+      badge.textContent = "No speech detected";
+      transcript.textContent = "Tap the microphone icon to try speaking again.";
+    } else {
+      badge.textContent = `Error: ${event.error}`;
+      transcript.textContent = "Speech recognition encountered an issue. Tap to retry.";
+    }
+  };
+
+  recognition.onend = () => {
+    voiceActive = false;
+    ring.classList.remove("active");
+    btn.classList.remove("listening");
+
+    if (pendingVoiceIntent) {
+      title.textContent = "Executing…";
+      const intentToRun = pendingVoiceIntent;
+      const targetToRun = voiceTarget;
+      pendingVoiceIntent = null;
+
+      clearTimeout(voiceCloseTimer);
+      voiceCloseTimer = setTimeout(async () => {
+        closeVoice();
+        await executeVoiceIntent(intentToRun, targetToRun);
+      }, 750);
+    } else if (title.textContent === "Listening…") {
+      title.textContent = "Tap mic to speak";
+    }
+  };
+
+  try {
+    recognition.start();
+  } catch {
+    voiceActive = false;
+  }
+}
+
+function stopListening() {
+  if (recognition) {
+    try { recognition.abort(); } catch {}
+    recognition = null;
+  }
+  voiceActive = false;
+  const ring = $("#voice-ring");
+  const btn = $("#voice-toggle-btn");
+  if (ring) ring.classList.remove("active");
+  if (btn) btn.classList.remove("listening");
+}
+
+function closeVoice() {
+  clearTimeout(voiceCloseTimer);
+  stopListening();
+  const dlg = $("#voice");
+  if (dlg && dlg.open) dlg.close();
+}
+
 // ------------------------------------------------------------------- wiring
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -676,6 +982,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   bindPad($("#pad-area"));
   bindScrollStrip($("#pad-scroll"));
   bindSlider($("#vol-slider"));
+
+  // Voice assistant bindings
+  $("#voice-open").addEventListener("click", () => openVoice("assistant"));
+  $("#yt-voice").addEventListener("click", () => openVoice("youtube"));
+  $("#kb-voice").addEventListener("click", () => openVoice("keyboard"));
+  $("#voice-close").addEventListener("click", closeVoice);
+  $("#voice-toggle-btn").addEventListener("click", () => voiceActive ? stopListening() : startListening());
+  $("#voice").addEventListener("click", (e) => { if (e.target === $("#voice")) closeVoice(); });
+  document.querySelectorAll(".voice-lang-picker .lang-pill").forEach((b) =>
+    b.addEventListener("click", () => setVoiceLang(b.dataset.lang)));
+
   $("#yt").addEventListener("submit", sendYoutube);
   $("#yt-text").addEventListener("input", syncClear);
   $("#yt-clear").addEventListener("click", () => {

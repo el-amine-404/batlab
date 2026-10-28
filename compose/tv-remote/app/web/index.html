@@ -44,6 +44,7 @@
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
     <symbol id="i-tv" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8"/></symbol>
     <symbol id="i-swap" viewBox="0 0 24 24"><path d="M7 4 3 8l4 4"/><path d="M3 8h13"/><path d="m17 12 4 4-4 4"/><path d="M21 16H8"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3M8 22h8"/></symbol>
     <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4 20-7z"/></symbol>
   </svg>
 
@@ -82,7 +83,10 @@
             <p id="tv-now" class="small now" hidden></p>
           </div>
         </div>
-        <button id="switch" class="btn btn-ghost btn-icon" aria-label="Switch TV"><svg class="ic"><use href="#i-swap"/></svg></button>
+        <div class="bar-actions">
+          <button id="voice-open" class="btn btn-ghost btn-icon" aria-label="Voice control" title="Voice control"><svg class="ic"><use href="#i-mic"/></svg></button>
+          <button id="switch" class="btn btn-ghost btn-icon" aria-label="Switch TV" title="Switch TV"><svg class="ic"><use href="#i-swap"/></svg></button>
+        </div>
       </header>
 
       <section id="media" class="card media" hidden aria-label="Now playing">
@@ -146,6 +150,7 @@
         <label for="kb-text" class="small muted">Sends text to the keyboard open on the TV (browser, Jellyfin, settings).</label>
         <div class="kb-row">
           <input id="kb-text" type="text" placeholder="Type here" enterkeyhint="send" autocapitalize="off" spellcheck="false">
+          <button class="btn btn-ghost btn-icon" type="button" id="kb-voice" aria-label="Voice dictation" title="Voice dictation"><svg class="ic"><use href="#i-mic"/></svg></button>
           <button class="btn btn-primary btn-icon" type="submit" aria-label="Send text"><svg class="ic"><use href="#i-send"/></svg></button>
         </div>
         <button id="kb-done" class="btn btn-ghost btn-wide small" type="button">Done: close the TV keyboard</button>
@@ -188,6 +193,7 @@
             <input id="yt-text" type="text" placeholder="Paste a link or type a search" enterkeyhint="go" autocapitalize="off" spellcheck="false">
             <button type="button" id="yt-clear" class="field-clear" aria-label="Clear" hidden><svg class="ic ic-sm"><use href="#i-x"/></svg></button>
           </div>
+          <button class="btn btn-ghost btn-icon" type="button" id="yt-voice" aria-label="Voice search on YouTube" title="Voice search"><svg class="ic"><use href="#i-mic"/></svg></button>
           <button class="btn btn-primary btn-icon" type="submit" aria-label="Send to YouTube"><svg class="ic"><use href="#i-send"/></svg></button>
         </div>
         <div id="yt-results" class="results" hidden></div>
@@ -210,6 +216,38 @@
     <h2>Look at the TV</h2>
     <p class="muted">Choose <b>Allow</b> with the TV's remote. This is asked once per TV.</p>
     <div class="spinner" aria-hidden="true"></div>
+  </dialog>
+
+  <dialog id="voice" class="card voice-dialog" aria-labelledby="voice-title">
+    <div class="voice-top">
+      <div class="voice-lang-picker" role="radiogroup" aria-label="Speech recognition language">
+        <button type="button" class="lang-pill" data-lang="auto" aria-checked="true">Auto</button>
+        <button type="button" class="lang-pill" data-lang="en-US" aria-checked="false">EN</button>
+        <button type="button" class="lang-pill" data-lang="fr-FR" aria-checked="false">FR</button>
+        <button type="button" class="lang-pill" data-lang="ar-SA" aria-checked="false">AR</button>
+      </div>
+      <button type="button" id="voice-close" class="btn btn-ghost btn-icon btn-sm voice-close" aria-label="Close voice control">
+        <svg class="ic"><use href="#i-x"/></svg>
+      </button>
+    </div>
+
+    <div class="voice-center">
+      <div class="voice-orb-wrap">
+        <div class="voice-pulse-ring" id="voice-ring" aria-hidden="true"></div>
+        <button type="button" id="voice-toggle-btn" class="btn btn-round btn-voice" aria-label="Tap to speak or stop">
+          <svg class="ic ic-lg"><use href="#i-mic"/></svg>
+        </button>
+      </div>
+      <h2 id="voice-title" class="voice-title">Listening…</h2>
+      <div class="voice-transcript-card">
+        <p id="voice-transcript" class="voice-transcript" aria-live="polite">Say an app, command, or search…</p>
+      </div>
+      <div id="voice-action-badge" class="voice-badge" hidden></div>
+    </div>
+
+    <div class="voice-hints small muted center">
+      <span>Try: <i>"Open YouTube"</i> · <i>"Monte le son"</i> · <i>"شغل نتفليكس"</i> · <i>"Pause"</i></span>
+    </div>
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
