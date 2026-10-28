@@ -823,24 +823,33 @@ function openVoice(target = "assistant") {
   clearTimeout(voiceCloseTimer);
   pendingVoiceIntent = null;
 
-  const SpeechClass = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechClass) {
-    toast("Speech recognition is not supported in this browser. Use your mobile keyboard mic in the text field.", true);
-    return;
-  }
-
   const dlg = $("#voice");
   const title = $("#voice-title");
   const transcript = $("#voice-transcript");
   const badge = $("#voice-action-badge");
+  const btn = $("#voice-toggle-btn");
+
+  const SpeechClass = window.SpeechRecognition || window.webkitSpeechRecognition;
 
   title.textContent = target === "youtube" ? "YouTube Voice Search" : target === "keyboard" ? "Voice Dictation" : "Listening…";
   transcript.textContent = target === "youtube" ? "Say what you want to watch…" : "Say a command, app, or search…";
   transcript.className = "voice-transcript";
   badge.hidden = true;
+  btn.disabled = false;
 
   setVoiceLang(voiceLang);
   if (!dlg.open) dlg.showModal();
+
+  if (!SpeechClass) {
+    title.textContent = "Voice Assistant";
+    transcript.textContent = "Speech recognition is supported in Chrome, iOS Safari, and Android. In this browser, dictate directly using your keyboard mic.";
+    badge.hidden = false;
+    badge.className = "voice-badge error";
+    badge.textContent = "Speech API unavailable";
+    btn.disabled = true;
+    return;
+  }
+
   startListening();
 }
 
