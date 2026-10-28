@@ -688,6 +688,7 @@ document.addEventListener("keydown", (e) => {
 let recognition = null;
 let voiceActive = false;
 let startWatchdog = null;
+let silenceTimer = null;
 let voiceLang = "auto";
 try { voiceLang = localStorage.getItem("tv-remote:voice-lang") || "auto"; } catch {}
 let voiceTarget = "assistant"; // "assistant" | "youtube" | "keyboard"
@@ -898,6 +899,8 @@ async function executeVoiceIntent(intent, target) {
 function teardownVoice() {
   clearTimeout(voiceCloseTimer);
   clearTimeout(startWatchdog);
+  clearTimeout(silenceTimer);
+  silenceTimer = null;
   if (recognition) {
     const r = recognition;
     recognition = null;
@@ -968,11 +971,15 @@ function openVoice(target = "assistant") {
   if (!dlg.open) dlg.showModal();
 
   if (!SpeechClass) {
+    const isStandalone = ("standalone" in navigator && navigator.standalone) ||
+                         window.matchMedia("(display-mode: standalone)").matches;
     title.textContent = "Voice Assistant";
-    transcript.textContent = "Speech recognition is supported in Chrome, iOS Safari, and Android. In this browser, dictate directly using your keyboard mic.";
+    transcript.textContent = isStandalone
+      ? "Apple restricts speech recognition inside Home Screen apps. Open tv.homelab.lan directly in Safari to use your microphone."
+      : "Speech recognition is supported in Chrome, iOS Safari, and Android. In this browser, dictate directly using your keyboard mic.";
     badge.hidden = false;
     badge.className = "voice-badge error";
-    badge.textContent = "Speech API unavailable";
+    badge.textContent = isStandalone ? "Open in Safari for voice" : "Speech API unavailable";
     btn.disabled = true;
     return;
   }
@@ -1004,7 +1011,12 @@ function startListening() {
     recognition.continuous = false;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
-    recognition.lang = voiceLang === "auto" ? (navigator.language || "en-US") : voiceLang;
+
+    let lang = voiceLang === "auto" ? (navigator.language || "en-US") : voiceLang;
+    if (lang.startsWith("fr")) lang = "fr-FR";
+    else if (lang.startsWith("ar")) lang = "ar-SA";
+    else if (lang.startsWith("en")) lang = "en-US";
+    recognition.lang = lang;
 
     recognition.onstart = () => {
       clearTimeout(startWatchdog);
@@ -1034,27 +1046,54 @@ function startListening() {
         transcript.className = "voice-transcript" + (final ? "" : " interim");
 
         const intent = parseVoiceIntent(spoken);
-        if (intent) {
+        if (intent && intent.type !== "unknown") {
           badge.hidden = false;
-          if (intent.type === "unknown") {
-            badge.className = "voice-badge muted";
-            badge.textContent = intent.label;
-            pendingVoiceIntent = null;
-          } else {
-            badge.className = "voice-badge";
-            badge.textContent = intent.label;
-            if (final) pendingVoiceIntent = intent;
-          }
+          badge.className = "voice-badge";
+          badge.textContent = intent.label;
+          pendingVoiceIntent = intent; // Store intent even if isFinal is false (critical for iOS WebKit!)
+
+          // Auto-execute after 1s of pause in speech
+          clearTimeout(silenceTimer);
+          silenceTimer = setTimeout(() => {
+            if (pendingVoiceIntent && voiceActive) {
+              const toRun = pendingVoiceIntent;
+              const targetRun = voiceTarget;
+              pendingVoiceIntent = null;
+              title.textContent = "Executing…";
+              teardownVoice();
+              executeVoiceIntent(toRun, targetRun);
+            }
+          }, 1000);
+        } else if (intent && intent.type === "unknown") {
+          badge.hidden = false;
+          badge.className = "voice-badge muted";
+          badge.textContent = intent.label;
+          pendingVoiceIntent = null;
+          clearTimeout(silenceTimer);
         }
       }
     };
 
     recognition.onspeechend = () => {
       title.textContent = "Processing…";
+      if (pendingVoiceIntent) {
+        clearTimeout(silenceTimer);
+        silenceTimer = setTimeout(() => {
+          if (pendingVoiceIntent && voiceActive) {
+            const toRun = pendingVoiceIntent;
+            const targetRun = voiceTarget;
+            pendingVoiceIntent = null;
+            title.textContent = "Executing…";
+            teardownVoice();
+            executeVoiceIntent(toRun, targetRun);
+          }
+        }, 400);
+      }
     };
 
     recognition.onerror = (event) => {
       clearTimeout(startWatchdog);
+      clearTimeout(silenceTimer);
       const isAborted = event.error === "aborted";
       teardownVoice();
       buzz([30, 40, 30]);
@@ -1070,12 +1109,20 @@ function startListening() {
       badge.className = "voice-badge error";
       heardLabel.hidden = true;
 
+      const isStandalone = ("standalone" in navigator && navigator.standalone) ||
+                           window.matchMedia("(display-mode: standalone)").matches;
+
       if (event.error === "not-allowed") {
         badge.textContent = "Microphone blocked";
-        transcript.textContent = "Please allow microphone access in your browser / iOS settings.";
+        transcript.textContent = isStandalone
+          ? "Microphone access blocked. Apple restricts voice in Home Screen web apps. Please open in Safari directly."
+          : "Microphone blocked. Please allow microphone access in Safari settings.";
+      } else if (event.error === "service-not-allowed") {
+        badge.textContent = "Dictation disabled";
+        transcript.textContent = "Please enable Dictation in iPhone Settings > General > Keyboard > Enable Dictation.";
       } else if (event.error === "no-speech") {
         badge.textContent = "No speech detected";
-        transcript.textContent = "Didn't hear anything. Tap the microphone orb to try again.";
+        transcript.textContent = "Didn't hear anything. Speak closer or tap the microphone orb to try again.";
       } else {
         badge.textContent = `Notice: ${event.error}`;
         transcript.textContent = "Tap the microphone orb to try speaking again.";
@@ -1084,18 +1131,18 @@ function startListening() {
 
     recognition.onend = () => {
       clearTimeout(startWatchdog);
+      clearTimeout(silenceTimer);
+      const intentToRun = pendingVoiceIntent;
+      const targetToRun = voiceTarget;
+      pendingVoiceIntent = null;
       teardownVoice();
 
-      if (pendingVoiceIntent) {
+      if (intentToRun) {
         title.textContent = "Executing…";
-        const intentToRun = pendingVoiceIntent;
-        const targetToRun = voiceTarget;
-        pendingVoiceIntent = null;
-
         clearTimeout(voiceCloseTimer);
         voiceCloseTimer = setTimeout(async () => {
           await executeVoiceIntent(intentToRun, targetToRun);
-        }, 350);
+        }, 300);
       } else {
         title.textContent = "Tap mic to speak";
       }
@@ -1147,6 +1194,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#voice-close").addEventListener("click", closeVoice);
   $("#voice-toggle-btn").addEventListener("click", () => {
     if (voiceActive) {
+      if (pendingVoiceIntent) {
+        clearTimeout(silenceTimer);
+        const toRun = pendingVoiceIntent;
+        const targetRun = voiceTarget;
+        pendingVoiceIntent = null;
+        title.textContent = "Executing…";
+        teardownVoice();
+        executeVoiceIntent(toRun, targetRun);
+        return;
+      }
       stopListening();
     } else {
       startListening();
