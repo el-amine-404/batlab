@@ -69,8 +69,9 @@ def project_view(db: Database, public_id: str) -> dict:
     exports = db.all("SELECT id,kind,status,filename,bytes,sha256,error,expires_at,created_at,ready_at FROM exports WHERE project_id=%s ORDER BY created_at DESC", (project["id"],))
     answer = jsonable(dict(project))
     answer["pages"] = [jsonable(dict(page)) | {
-        "preview_url": f"/api/v1/projects/{public_id}/pages/{page['id']}/preview" if page["normalized_object"] else None,
-        "result_url": f"/api/v1/projects/{public_id}/pages/{page['id']}/result" if page["result_object"] else None,
+        "preview_url": f"/api/v1/projects/{public_id}/pages/{page['id']}/preview?v={page['version']}" if page["normalized_object"] else None,
+        "result_url": f"/api/v1/projects/{public_id}/pages/{page['id']}/result?v={page['version']}" if page["result_object"] else None,
+        "download_url": f"/api/v1/projects/{public_id}/pages/{page['id']}/download?v={page['version']}" if page["result_object"] else None,
     } for page in pages]
     answer["exports"] = [jsonable(dict(item)) for item in exports]
     answer.pop("id", None)
@@ -230,8 +231,8 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
         corners = page["corners"] if edit.corners is None else edit.corners
         if rotation not in {0, 90, 180, 270} or appearance not in {"auto", "color", "gray", "mono"}:
             raise HTTPException(422, "Invalid page correction")
-        if corners is not None and (len(corners) != 4 or any(len(point) != 2 or any(not 0 <= float(value) <= 1 for value in point) for point in corners)):
-            raise HTTPException(422, "Corners are four [x,y] points between 0 and 1")
+        if corners is not None and (len(corners) != 4 or any(len(point) != 2 or any(not -.05 <= float(value) <= 1.05 for value in point) for point in corners)):
+            raise HTTPException(422, "Corners are four [x,y] points no more than 5% outside the image")
         with db.transaction() as cursor:
             cursor.execute("UPDATE pages SET corners=%s::jsonb,rotation=%s,appearance=%s,status='queued',error=NULL WHERE id=%s",
                            (json.dumps(corners), rotation, appearance, page_id))
@@ -273,21 +274,28 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
         return {"id": str(export_id), "kind": request.kind, "status": "queued", "expires_at": expires,
                 "download_url": f"/api/v1/downloads/{token}"}
 
-    def page_file(public_id: str, page_id: uuid.UUID, result: bool):
+    def page_file(public_id: str, page_id: uuid.UUID, result: bool, download: bool = False):
         page = db.one("SELECT p.* FROM pages p JOIN projects pr ON pr.id=p.project_id WHERE pr.public_id=%s AND p.id=%s", (public_id, page_id))
         if not page: raise HTTPException(404, "Page not found")
         name = page["result_object"] if result else page["normalized_object"]
         if not name: raise HTTPException(404, "Image is not ready")
         path = object_path(config.work / str(page["project_id"]), name)
         if not path.is_file(): raise HTTPException(404, "Image is not ready")
+        filename = None
+        if download:
+            stem = Path(clean_name(page["original_name"])).stem or f"page-{page['position'] + 1}"
+            filename = f"{stem}-scanloom.jpg"
         return FileResponse(path, media_type="image/jpeg" if result else "image/png",
-                            filename=f"page-{page['position']+1}.{'jpg' if result else 'png'}" if result else None)
+                            filename=filename, content_disposition_type="attachment" if download else "inline")
 
     @app.get("/api/v1/projects/{public_id}/pages/{page_id}/preview", tags=["Pages"])
     def preview(public_id: str, page_id: uuid.UUID): return page_file(public_id, page_id, False)
 
     @app.get("/api/v1/projects/{public_id}/pages/{page_id}/result", tags=["Pages"])
     def result(public_id: str, page_id: uuid.UUID): return page_file(public_id, page_id, True)
+
+    @app.get("/api/v1/projects/{public_id}/pages/{page_id}/download", tags=["Pages"])
+    def page_download(public_id: str, page_id: uuid.UUID): return page_file(public_id, page_id, True, True)
 
     @app.get("/api/v1/downloads/{token}", tags=["Exports"])
     def download(token: str):

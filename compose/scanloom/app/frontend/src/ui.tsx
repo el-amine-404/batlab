@@ -16,9 +16,9 @@ export function Select({ value, onValueChange, options, label }: { value: string
     </SelectPrimitive.Viewport></SelectPrimitive.Content></SelectPrimitive.Portal>
   </SelectPrimitive.Root>;
 }
-export function Dialog({ open, onOpenChange, title, children }: { open: boolean; onOpenChange: (open: boolean) => void; title: string; children: ReactNode }) {
+export function Dialog({ open, onOpenChange, title, children, className }: { open: boolean; onOpenChange: (open: boolean) => void; title: string; children: ReactNode; className?: string }) {
   return <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}><DialogPrimitive.Portal>
     <DialogPrimitive.Overlay className="dialog-overlay" />
-    <DialogPrimitive.Content className="dialog-content"><div className="dialog-head"><DialogPrimitive.Title>{title}</DialogPrimitive.Title><DialogPrimitive.Close className="icon-button"><X /></DialogPrimitive.Close></div>{children}</DialogPrimitive.Content>
+    <DialogPrimitive.Content className={cx("dialog-content", className)}><div className="dialog-head"><DialogPrimitive.Title>{title}</DialogPrimitive.Title><DialogPrimitive.Close className="icon-button"><X /></DialogPrimitive.Close></div>{children}</DialogPrimitive.Content>
   </DialogPrimitive.Portal></DialogPrimitive.Root>;
 }

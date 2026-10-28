@@ -12,6 +12,7 @@ from pathlib import Path
 
 import cv2
 import img2pdf
+import numpy as np
 
 from .config import Config
 from .db import Database
@@ -129,6 +130,13 @@ class Processor:
         self.db.execute("UPDATE pages SET status='rendering' WHERE id=%s", (page_id,))
         corrected = warp(image, found, int(page["rotation"]), appearance)
         report = quality(corrected, confidence) | {"detection_method": method}
+        outside = int(np.count_nonzero((found[:, 0] < 0) | (found[:, 0] >= image.shape[1])
+                                       | (found[:, 1] < 0) | (found[:, 1] >= image.shape[0])))
+        report["outside_corner_count"] = outside
+        if outside:
+            report["warnings"].append(
+                f"{outside} detected corner{'s' if outside != 1 else ''} extend beyond the photo; missing pixels cannot be recovered."
+            )
         result_name = f"{page_id}.jpg"
         result = object_path(project_dir, result_name)
         write_jpeg(corrected, result, int(settings["jpeg_quality"]))

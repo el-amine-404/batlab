@@ -1,9 +1,9 @@
 export type Point = [number, number];
 export type Page = {
-  id: string; position: number; original_name: string; status: string; malware_status: string;
+  id: string; position: number; original_name: string; status: string; malware_status: string; version: number;
   corners: Point[] | null; rotation: number; appearance: string; confidence: number | null;
   quality: { warnings?: string[]; blur_score?: number; glare_fraction?: number; width?: number; height?: number };
-  error?: string | null; preview_url?: string | null; result_url?: string | null;
+  error?: string | null; preview_url?: string | null; result_url?: string | null; download_url?: string | null;
 };
 export type Export = { id: string; kind: string; status: string; filename?: string; error?: string; expires_at: string };
 export type Project = {
