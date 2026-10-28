@@ -216,17 +216,18 @@ function render() {
   $("#tv-now").textContent = state.app ? `Now: ${state.app}` : "";
 
   // Update voice button state based on TV power
+  const isOff = state.power === "off" || state.power === "standby";
   const voiceBtn = $("#voice-open");
   if (voiceBtn) {
-    voiceBtn.setAttribute("aria-disabled", String(!on));
-    voiceBtn.title = on ? "Voice control" : "TV is powered off";
-    voiceBtn.setAttribute("aria-label", on ? "Voice control" : "TV is powered off");
+    voiceBtn.setAttribute("aria-disabled", String(isOff));
+    voiceBtn.title = isOff ? "TV is powered off" : "Voice control";
+    voiceBtn.setAttribute("aria-label", isOff ? "TV is powered off" : "Voice control");
     const use = voiceBtn.querySelector("use");
-    if (use) use.setAttribute("href", on ? "#i-mic" : "#i-mic-off");
+    if (use) use.setAttribute("href", isOff ? "#i-mic-off" : "#i-mic");
   }
 
   // If TV powers off while voice modal is open, close it cleanly
-  if (!on) {
+  if (isOff) {
     const dlg = $("#voice");
     if (dlg && dlg.open) closeVoice();
   }
@@ -687,8 +688,6 @@ document.addEventListener("keydown", (e) => {
 let recognition = null;
 let voiceActive = false;
 let startWatchdog = null;
-let hasRetriedAbort = false;
-let abortRetryTimer = null;
 let voiceLang = "auto";
 try { voiceLang = localStorage.getItem("tv-remote:voice-lang") || "auto"; } catch {}
 let voiceTarget = "assistant"; // "assistant" | "youtube" | "keyboard"
@@ -895,8 +894,8 @@ async function executeVoiceIntent(intent, target) {
   }
 }
 
-// Cancels active recognition. Only calls abort() if it was actively running.
-function cancelListening(abortActive = false) {
+// Tears down speech recognition and explicitly forces WebKit/iOS to release the microphone audio lock
+function teardownVoice() {
   clearTimeout(voiceCloseTimer);
   clearTimeout(startWatchdog);
   if (recognition) {
@@ -907,11 +906,9 @@ function cancelListening(abortActive = false) {
     r.onerror = null;
     r.onspeechend = null;
     r.onend = null;
-    if (abortActive && voiceActive) {
-      try {
-        r.abort();
-      } catch {}
-    }
+    try {
+      r.abort();
+    } catch {}
   }
   voiceActive = false;
   const ring = $("#voice-ring");
@@ -921,7 +918,7 @@ function cancelListening(abortActive = false) {
 }
 
 function stopListening() {
-  cancelListening(true);
+  teardownVoice();
   const title = $("#voice-title");
   if (title) title.textContent = "Tap mic to speak";
 }
@@ -933,21 +930,20 @@ function setVoiceLang(lang) {
     b.setAttribute("aria-checked", String(b.dataset.lang === lang));
   });
   if (voiceActive) {
-    cancelListening(true);
+    teardownVoice();
     startListening();
   }
 }
 
 function openVoice(target = "assistant") {
-  if (state.power !== "on") {
+  const isOff = state.power === "off" || state.power === "standby";
+  if (isOff) {
     toast("TV is powered off. Turn it on first.");
     buzz([20, 30, 20]);
     return;
   }
   voiceTarget = target;
-  hasRetriedAbort = false;
-  clearTimeout(abortRetryTimer);
-  cancelListening(true);
+  teardownVoice();
   pendingVoiceIntent = null;
 
   const dlg = $("#voice");
@@ -988,7 +984,7 @@ function startListening() {
   const SpeechClass = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechClass) return;
 
-  cancelListening(true);
+  teardownVoice();
 
   const ring = $("#voice-ring");
   const btn = $("#voice-toggle-btn");
@@ -1055,28 +1051,15 @@ function startListening() {
 
     recognition.onspeechend = () => {
       title.textContent = "Processing…";
-      if (recognition) {
-        try { recognition.stop(); } catch {}
-      }
     };
 
     recognition.onerror = (event) => {
       clearTimeout(startWatchdog);
       const isAborted = event.error === "aborted";
-      cancelListening(false);
+      teardownVoice();
       buzz([30, 40, 30]);
 
       if (isAborted) {
-        // iOS WebKit transient abort error when restarting/reloading audio sessions
-        if (!hasRetriedAbort) {
-          hasRetriedAbort = true;
-          title.textContent = "Connecting…";
-          clearTimeout(abortRetryTimer);
-          abortRetryTimer = setTimeout(() => {
-            startListening();
-          }, 350);
-          return;
-        }
         title.textContent = "Tap mic to speak";
         transcript.textContent = "Tap the microphone orb to speak.";
         return;
@@ -1101,7 +1084,7 @@ function startListening() {
 
     recognition.onend = () => {
       clearTimeout(startWatchdog);
-      cancelListening(false);
+      teardownVoice();
 
       if (pendingVoiceIntent) {
         title.textContent = "Executing…";
@@ -1112,7 +1095,7 @@ function startListening() {
         clearTimeout(voiceCloseTimer);
         voiceCloseTimer = setTimeout(async () => {
           await executeVoiceIntent(intentToRun, targetToRun);
-        }, 400);
+        }, 350);
       } else {
         title.textContent = "Tap mic to speak";
       }
@@ -1120,18 +1103,18 @@ function startListening() {
 
     recognition.start();
 
-    // Watchdog: If WebKit onstart doesn't fire within 4s, recover gracefully
+    // Guard watchdog: if onstart does not fire within 4s, reset cleanly
     clearTimeout(startWatchdog);
     startWatchdog = setTimeout(() => {
       if (!voiceActive) {
-        cancelListening(true);
+        teardownVoice();
         title.textContent = "Tap mic to speak";
         transcript.textContent = "Ready. Tap the microphone orb to speak.";
       }
     }, 4000);
   } catch (err) {
     clearTimeout(startWatchdog);
-    cancelListening(false);
+    teardownVoice();
     title.textContent = "Voice Assistant";
     transcript.textContent = "Tap the microphone orb to speak.";
   }
@@ -1139,7 +1122,7 @@ function startListening() {
 
 function closeVoice() {
   clearTimeout(voiceCloseTimer);
-  cancelListening(true);
+  teardownVoice();
   const dlg = $("#voice");
   if (dlg && dlg.open) dlg.close();
 }
@@ -1163,8 +1146,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#kb-voice").addEventListener("click", () => openVoice("keyboard"));
   $("#voice-close").addEventListener("click", closeVoice);
   $("#voice-toggle-btn").addEventListener("click", () => {
-    hasRetriedAbort = false;
-    clearTimeout(abortRetryTimer);
     if (voiceActive) {
       stopListening();
     } else {
@@ -1173,7 +1154,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   $("#voice").addEventListener("click", (e) => { if (e.target === $("#voice")) closeVoice(); });
   const voiceDlg = $("#voice");
-  if (voiceDlg) voiceDlg.addEventListener("close", () => cancelListening(true));
+  if (voiceDlg) voiceDlg.addEventListener("close", closeVoice);
   document.querySelectorAll(".voice-lang-picker .lang-pill").forEach((b) =>
     b.addEventListener("click", () => setVoiceLang(b.dataset.lang)));
 
