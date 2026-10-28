@@ -669,6 +669,7 @@ document.addEventListener("keydown", (e) => {
 
 let recognition = null;
 let voiceActive = false;
+let startWatchdog = null;
 let voiceLang = "auto";
 try { voiceLang = localStorage.getItem("tv-remote:voice-lang") || "auto"; } catch {}
 let voiceTarget = "assistant"; // "assistant" | "youtube" | "keyboard"
@@ -879,19 +880,23 @@ async function executeVoiceIntent(intent, target) {
   }
 }
 
-// Cleanly tears down speech recognition and releases the audio hardware immediately (kills iOS orange indicator)
-function teardownVoice() {
+// Cancels active recognition. Only calls abort() if it was actively running.
+function cancelListening(abortActive = false) {
   clearTimeout(voiceCloseTimer);
+  clearTimeout(startWatchdog);
   if (recognition) {
-    recognition.onstart = null;
-    recognition.onresult = null;
-    recognition.onerror = null;
-    recognition.onspeechend = null;
-    recognition.onend = null;
-    try {
-      recognition.abort();
-    } catch {}
+    const r = recognition;
     recognition = null;
+    r.onstart = null;
+    r.onresult = null;
+    r.onerror = null;
+    r.onspeechend = null;
+    r.onend = null;
+    if (abortActive && voiceActive) {
+      try {
+        r.abort();
+      } catch {}
+    }
   }
   voiceActive = false;
   const ring = $("#voice-ring");
@@ -901,7 +906,7 @@ function teardownVoice() {
 }
 
 function stopListening() {
-  teardownVoice();
+  cancelListening(true);
   const title = $("#voice-title");
   if (title) title.textContent = "Tap mic to speak";
 }
@@ -913,14 +918,14 @@ function setVoiceLang(lang) {
     b.setAttribute("aria-checked", String(b.dataset.lang === lang));
   });
   if (voiceActive) {
-    teardownVoice();
+    cancelListening(true);
     startListening();
   }
 }
 
 function openVoice(target = "assistant") {
   voiceTarget = target;
-  teardownVoice();
+  cancelListening(true);
   pendingVoiceIntent = null;
 
   const dlg = $("#voice");
@@ -934,7 +939,7 @@ function openVoice(target = "assistant") {
 
   const SpeechClass = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-  title.textContent = target === "youtube" ? "YouTube Voice Search" : target === "keyboard" ? "Voice Dictation" : "Listening…";
+  title.textContent = "Connecting…";
   transcript.textContent = target === "youtube" ? "Say what you want to watch…" : "Say an app, command, or search…";
   transcript.className = "voice-transcript";
   heardLabel.hidden = true;
@@ -961,7 +966,7 @@ function startListening() {
   const SpeechClass = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechClass) return;
 
-  teardownVoice();
+  cancelListening(true);
 
   const ring = $("#voice-ring");
   const btn = $("#voice-toggle-btn");
@@ -969,6 +974,12 @@ function startListening() {
   const transcript = $("#voice-transcript");
   const heardLabel = $("#voice-heard-label");
   const badge = $("#voice-action-badge");
+
+  title.textContent = "Connecting…";
+  transcript.textContent = "Say an app, command, or search…";
+  transcript.className = "voice-transcript";
+  heardLabel.hidden = true;
+  badge.hidden = true;
 
   try {
     recognition = new SpeechClass();
@@ -978,6 +989,7 @@ function startListening() {
     recognition.lang = voiceLang === "auto" ? (navigator.language || "en-US") : voiceLang;
 
     recognition.onstart = () => {
+      clearTimeout(startWatchdog);
       voiceActive = true;
       ring.classList.add("active");
       btn.classList.add("listening");
@@ -1027,7 +1039,8 @@ function startListening() {
     };
 
     recognition.onerror = (event) => {
-      teardownVoice();
+      clearTimeout(startWatchdog);
+      cancelListening(false);
       buzz([30, 40, 30]);
 
       title.textContent = "Voice Assistant";
@@ -1042,14 +1055,14 @@ function startListening() {
         badge.textContent = "No speech detected";
         transcript.textContent = "Didn't hear anything. Tap the microphone orb to try again.";
       } else {
-        badge.textContent = `Error: ${event.error}`;
+        badge.textContent = `Notice: ${event.error}`;
         transcript.textContent = "Tap the microphone orb to try speaking again.";
       }
     };
 
     recognition.onend = () => {
-      // Release hardware audio unit immediately so iOS mic indicator vanishes
-      teardownVoice();
+      clearTimeout(startWatchdog);
+      cancelListening(false);
 
       if (pendingVoiceIntent) {
         title.textContent = "Executing…";
@@ -1060,23 +1073,34 @@ function startListening() {
         clearTimeout(voiceCloseTimer);
         voiceCloseTimer = setTimeout(async () => {
           await executeVoiceIntent(intentToRun, targetToRun);
-        }, 550);
+        }, 400);
       } else {
         title.textContent = "Tap mic to speak";
       }
     };
 
     recognition.start();
+
+    // Watchdog: If WebKit onstart doesn't fire within 4s, recover gracefully
+    clearTimeout(startWatchdog);
+    startWatchdog = setTimeout(() => {
+      if (!voiceActive) {
+        cancelListening(true);
+        title.textContent = "Tap mic to speak";
+        transcript.textContent = "Ready. Tap the microphone orb to speak.";
+      }
+    }, 4000);
   } catch (err) {
-    teardownVoice();
+    clearTimeout(startWatchdog);
+    cancelListening(false);
     title.textContent = "Voice Assistant";
-    transcript.textContent = "Could not initialize microphone. Tap to retry.";
+    transcript.textContent = "Tap the microphone orb to speak.";
   }
 }
 
 function closeVoice() {
   clearTimeout(voiceCloseTimer);
-  teardownVoice();
+  cancelListening(true);
   const dlg = $("#voice");
   if (dlg && dlg.open) dlg.close();
 }
@@ -1102,7 +1126,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#voice-toggle-btn").addEventListener("click", () => voiceActive ? stopListening() : startListening());
   $("#voice").addEventListener("click", (e) => { if (e.target === $("#voice")) closeVoice(); });
   const voiceDlg = $("#voice");
-  if (voiceDlg) voiceDlg.addEventListener("close", () => teardownVoice());
+  if (voiceDlg) voiceDlg.addEventListener("close", () => cancelListening(true));
   const wakeQuick = $("#voice-wake-quick");
   if (wakeQuick) {
     wakeQuick.addEventListener("click", async () => {
