@@ -670,6 +670,8 @@ document.addEventListener("keydown", (e) => {
 let recognition = null;
 let voiceActive = false;
 let startWatchdog = null;
+let hasRetriedAbort = false;
+let abortRetryTimer = null;
 let voiceLang = "auto";
 try { voiceLang = localStorage.getItem("tv-remote:voice-lang") || "auto"; } catch {}
 let voiceTarget = "assistant"; // "assistant" | "youtube" | "keyboard"
@@ -721,33 +723,33 @@ function parseVoiceIntent(rawText, target = voiceTarget) {
   }
 
   // 2. Power Toggle / Off / On
-  if (/^(?:turn\s+off|power\s+off|shut\s+down|switch\s+off|éteins|éteindre|arrête|coupe|طفي|اطفي|اقفل|إغلاق)(?:\s+(?:the|la|le|l')?\s*(?:tv|télé|téléviseur|التلفزيون|التلفاز|الشاشة))?$/i.test(text)) {
+  if (/^(?:turn\s+off|power\s+off|shut\s+down|switch\s+off|éteins|éteindre|arrête|arrêter|coupe|couper|طفي|اطفي|اقفل|إغلاق)(?:\s+(?:the|la|le|l')?\s*(?:tv|télé|téléviseur|التلفزيون|التلفاز|الشاشة))?$/i.test(text)) {
     return { type: "power", action: "off", label: "⏻ Turn Off TV" };
   }
-  if (/^(?:turn\s+on|power\s+on|wake\s+up|allume|allumer|شغل|ولع)(?:\s+(?:the|la|le|l')?\s*(?:tv|télé|téléviseur|التلفزيون|التلفاز|الشاشة))?$/i.test(text)) {
+  if (/^(?:turn\s+on|power\s+on|wake\s+up|allume|allumer|démarre|démarrer|شغل|ولع)(?:\s+(?:the|la|le|l')?\s*(?:tv|télé|téléviseur|التلفزيون|التلفاز|الشاشة))?$/i.test(text)) {
     return { type: "power", action: "on", label: "⏻ Turn On TV" };
   }
 
   // 3. Volume Up
-  if (/^(?:volume\s*up|turn\s*up|louder|increase\s+volume|sound\s*up|monte\s+le\s+son|augmente\s+le\s+son|plus\s+fort|monter\s+le\s+volume|علي\s+الصوت|علّي|علّي\s+الصوت|ارفع\s+الصوت|صوت\s+اعلى)$/i.test(text)) {
+  if (/^(?:volume\s*up|turn\s*(?:it\s*)?up|louder|increase\s+volume|sound\s*up|monte(?:r)?(?:\s+(?:le\s+)?(?:son|volume))?|augmente(?:r)?(?:\s+(?:le\s+)?(?:son|volume))?|plus\s+fort|un\s+peu\s+plus\s+fort|علي\s+الصوت|علّي|علّي\s+الصوت|ارفع\s+الصوت|صوت\s+اعلى|زيد\s+الصوت)$/i.test(text)) {
     return { type: "volume", dir: 1, label: "🔊 Volume Up" };
   }
 
   // 4. Volume Down
-  if (/^(?:volume\s*down|turn\s*down|quieter|decrease\s+volume|sound\s*down|lower\s+volume|baisse\s+le\s+son|diminue\s+le\s+son|moins\s+fort|baisser\s+le\s+volume|وطي\s+الصوت|وطّي|وطّي\s+الصوت|اخفض\s+الصوت|نزل\s+الصوت|صوت\s+اوطى)$/i.test(text)) {
+  if (/^(?:volume\s*down|turn\s*(?:it\s*)?down|quieter|decrease\s+volume|sound\s*down|lower\s+volume|baisse(?:r)?(?:\s+(?:le\s+)?(?:son|volume))?|diminue(?:r)?(?:\s+(?:le\s+)?(?:son|volume))?|moins\s+fort|un\s+peu\s+moins\s+fort|وطي\s+الصوت|وطّي|وطّي\s+الصوت|اخفض\s+الصوت|نزل\s+الصوت|صوت\s+اوطى|نقص\s+الصوت)$/i.test(text)) {
     return { type: "volume", dir: -1, label: "🔉 Volume Down" };
   }
 
   // 5. Mute / Unmute
-  if (/^(?:mute|unmute|silence|coupe\s+le\s+son|mets\s+en\s+sourdine|sourdine|remets\s+le\s+son|démute|كتم|كتم\s+الصوت|صامت|الغاء\s+الكتم|فك\s+الكتم)$/i.test(text)) {
+  if (/^(?:mute|unmute|silence|coupe(?:r)?\s+(?:le\s+)?son|mets?\s+en\s+sourdine|mettre\s+en\s+sourdine|sourdine|remets?\s+(?:le\s+)?son|remettre\s+(?:le\s+)?son|démute|كتم|كتم\s+الصوت|صامت|الغاء\s+الكتم|فك\s+الكتم)$/i.test(text)) {
     return { type: "mute", label: "🔇 Toggle Mute" };
   }
 
   // 6. Play / Pause
-  if (/^(?:pause|freeze|mets\s+en\s+pause|وقف|ايقاف\s+مؤقت|لحظة)$/i.test(text)) {
+  if (/^(?:pause|freeze|stop|mets?\s+en\s+pause|mettre\s+en\s+pause|arrêt|وقف|ايقاف\s+مؤقت|لحظة)$/i.test(text)) {
     return { type: "media", action: "pause", label: "⏸ Pause" };
   }
-  if (/^(?:play|resume|continue|lecture|reprends|continuer|relance|شغل|استئناف|كمل)$/i.test(text)) {
+  if (/^(?:play|resume|continue|continuer|lecture|reprends|reprendre|relance|relancer|شغل|استئناف|كمل)$/i.test(text)) {
     return { type: "media", action: "play", label: "▶ Play" };
   }
 
@@ -844,18 +846,22 @@ async function executeVoiceIntent(intent, target) {
 
   if (intent.type === "volume") {
     await send(intent.dir > 0 ? "KEY_VOLUP" : "KEY_VOLDOWN");
+    toast(intent.dir > 0 ? "Volume Up" : "Volume Down");
     return;
   }
   if (intent.type === "mute") {
     await toggleMute();
+    toast("Mute toggled");
     return;
   }
   if (intent.type === "media") {
     await mediaAction(intent.action);
+    toast(intent.action === "pause" ? "Paused" : "Playing");
     return;
   }
   if (intent.type === "key") {
     await send(intent.key);
+    toast(intent.label);
     return;
   }
   if (intent.type === "search") {
@@ -925,6 +931,8 @@ function setVoiceLang(lang) {
 
 function openVoice(target = "assistant") {
   voiceTarget = target;
+  hasRetriedAbort = false;
+  clearTimeout(abortRetryTimer);
   cancelListening(true);
   pendingVoiceIntent = null;
 
@@ -1040,8 +1048,25 @@ function startListening() {
 
     recognition.onerror = (event) => {
       clearTimeout(startWatchdog);
+      const isAborted = event.error === "aborted";
       cancelListening(false);
       buzz([30, 40, 30]);
+
+      if (isAborted) {
+        // iOS WebKit transient abort error when restarting/reloading audio sessions
+        if (!hasRetriedAbort) {
+          hasRetriedAbort = true;
+          title.textContent = "Connecting…";
+          clearTimeout(abortRetryTimer);
+          abortRetryTimer = setTimeout(() => {
+            startListening();
+          }, 350);
+          return;
+        }
+        title.textContent = "Tap mic to speak";
+        transcript.textContent = "Tap the microphone orb to speak.";
+        return;
+      }
 
       title.textContent = "Voice Assistant";
       badge.hidden = false;
@@ -1123,7 +1148,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#yt-voice").addEventListener("click", () => openVoice("youtube"));
   $("#kb-voice").addEventListener("click", () => openVoice("keyboard"));
   $("#voice-close").addEventListener("click", closeVoice);
-  $("#voice-toggle-btn").addEventListener("click", () => voiceActive ? stopListening() : startListening());
+  $("#voice-toggle-btn").addEventListener("click", () => {
+    hasRetriedAbort = false;
+    clearTimeout(abortRetryTimer);
+    if (voiceActive) {
+      stopListening();
+    } else {
+      startListening();
+    }
+  });
   $("#voice").addEventListener("click", (e) => { if (e.target === $("#voice")) closeVoice(); });
   const voiceDlg = $("#voice");
   if (voiceDlg) voiceDlg.addEventListener("close", () => cancelListening(true));
