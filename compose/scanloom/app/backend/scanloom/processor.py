@@ -115,6 +115,11 @@ class Processor:
             width, height = normalize(source, normalized, int(settings["max_pixels"]))
             self.db.execute("UPDATE pages SET width=%s,height=%s,normalized_object=%s,status='detecting' WHERE id=%s",
                             (width, height, normalized_name, page_id))
+        elif page["result_object"] == normalized_name:
+            # The first PNG release briefly gave the normalized source and the
+            # rendered result the same object name. Rebuild the metadata-free
+            # source before an edit so rotate/crop never compounds a prior warp.
+            normalize(source, normalized, int(settings["max_pixels"]))
         image = cv2.imread(str(normalized), cv2.IMREAD_COLOR)
         if image is None:
             raise RuntimeError("Normalized image could not be read")
@@ -137,7 +142,7 @@ class Processor:
             report["warnings"].append(
                 f"{outside} detected corner{'s' if outside != 1 else ''} extend beyond the photo; missing pixels cannot be recovered."
             )
-        result_name = f"{page_id}.png"
+        result_name = f"{page_id}-result.png"
         result = object_path(project_dir, result_name)
         write_png(corrected, result)
         result_hash, result_bytes = sha256(result), result.stat().st_size
