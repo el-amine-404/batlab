@@ -226,9 +226,17 @@
         <button type="button" class="lang-pill" data-lang="fr-FR" aria-checked="false">FR</button>
         <button type="button" class="lang-pill" data-lang="ar-SA" aria-checked="false">AR</button>
       </div>
-      <button type="button" id="voice-close" class="btn btn-ghost btn-icon btn-sm voice-close" aria-label="Close voice control">
-        <svg class="ic"><use href="#i-x"/></svg>
-      </button>
+      <div class="voice-top-right">
+        <span id="voice-tv-dot" class="dot" title="TV status"></span>
+        <button type="button" id="voice-close" class="btn btn-ghost btn-icon btn-sm voice-close" aria-label="Close voice control">
+          <svg class="ic"><use href="#i-x"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div id="voice-tv-banner" class="voice-banner" hidden>
+      <span>TV is off</span>
+      <button type="button" id="voice-wake-quick" class="btn btn-primary btn-sm">Turn on TV</button>
     </div>
 
     <div class="voice-center">
@@ -239,9 +247,12 @@
         </button>
       </div>
       <h2 id="voice-title" class="voice-title">Listening…</h2>
+      
       <div class="voice-transcript-card">
+        <div id="voice-heard-label" class="voice-heard-label" hidden>You said:</div>
         <p id="voice-transcript" class="voice-transcript" aria-live="polite">Say an app, command, or search…</p>
       </div>
+
       <div id="voice-action-badge" class="voice-badge" hidden></div>
     </div>
 

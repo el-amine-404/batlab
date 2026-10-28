@@ -307,7 +307,7 @@ _apps_cache: dict[str, tuple[float, list[dict]]] = {}
 def installed_apps(mac: str) -> list[dict]:
     """KNOWN_APPS present on the TV; asked again every 10 minutes."""
     hit = _apps_cache.get(mac)
-    if hit and time.monotonic() - hit[0] < 600:
+    if hit and time.monotonic() - hit[0] < 600 and hit[1]:
         return hit[1]
     ip = load_tvs()[mac]["ip"]
 
@@ -321,8 +321,12 @@ def installed_apps(mac: str) -> list[dict]:
 
     with ThreadPoolExecutor(max_workers=len(KNOWN_APPS)) as pool:
         apps = [a for a in pool.map(check, KNOWN_APPS.items()) if a]
-    _apps_cache[mac] = (time.monotonic(), apps)
-    return apps
+    if apps:
+        _apps_cache[mac] = (time.monotonic(), apps)
+        return apps
+    if hit and hit[1]:
+        return hit[1]
+    return [{"id": k, "name": v} for k, v in KNOWN_APPS.items()]
 
 
 def app_in_front(mac: str) -> str | None:
@@ -1020,6 +1024,13 @@ class Handler(BaseHTTPRequestHandler):
                 app_id = str(body.get("id", ""))
                 if app_id not in KNOWN_APPS:
                     return self._json(400, {"error": "unknown app"})
+                st = status(mac)
+                if st.get("power") != "on":
+                    try:
+                        power(mac)
+                        time.sleep(2.0)
+                    except Exception as err:
+                        log.warning(f"Failed to auto-wake TV before launching {app_id}: {err}")
                 try:
                     rest(load_tvs()[mac]["ip"], f"applications/{app_id}", "POST", timeout=6)
                 except (OSError, urllib.error.URLError) as err:

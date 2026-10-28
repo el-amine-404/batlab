@@ -313,6 +313,16 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(2px); }
 }
 .voice-close { min-width: 32px; min-height: 32px; color: var(--muted); }
 .voice-close:hover { color: var(--fg); }
+.voice-top-right { display: flex; align-items: center; gap: 8px; }
+
+.voice-tv-banner {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
+  color: var(--fg); padding: 6px 12px; border-radius: 10px; font-size: 13px; font-weight: 500;
+}
+.voice-tv-banner .btn { min-height: 28px; padding: 0 10px; font-size: 12px; }
+.voice-heard-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 2px; }
 
 .voice-center {
   display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%;
@@ -369,6 +379,18 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(2px); }
 .voice-badge.error {
   background: color-mix(in srgb, var(--danger) 12%, transparent);
   color: var(--danger); border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+}
+.voice-badge.muted {
+  background: var(--key);
+  color: var(--muted);
+  border-color: var(--border);
+}
+.voice-transcript-card::-webkit-scrollbar {
+  width: 4px;
+}
+.voice-transcript-card::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
 }
 @keyframes badge-pop {
   0% { transform: scale(0.8); opacity: 0; }

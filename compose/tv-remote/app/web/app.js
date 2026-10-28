@@ -214,6 +214,7 @@ function render() {
   renderMedia();
   $("#tv-now").hidden = !(on && state.app);
   $("#tv-now").textContent = state.app ? `Now: ${state.app}` : "";
+  updateVoiceTvDot();
 }
 
 async function refreshStatus() {
@@ -674,6 +675,16 @@ let voiceTarget = "assistant"; // "assistant" | "youtube" | "keyboard"
 let pendingVoiceIntent = null;
 let voiceCloseTimer = null;
 
+function updateVoiceTvDot() {
+  const dot = $("#voice-tv-dot");
+  if (!dot) return;
+  const on = state.power === "on";
+  dot.className = "dot " + (busy ? "busy" : on ? "on" : state.power ? "off" : "");
+  dot.title = busy ? "Working…" : on ? "TV is on" : "TV is off";
+  const banner = $("#voice-tv-banner");
+  if (banner) banner.hidden = on || !state.power;
+}
+
 function normalizeVoiceText(str) {
   return (str || "")
     .toLowerCase()
@@ -682,91 +693,154 @@ function normalizeVoiceText(str) {
     .trim();
 }
 
-function parseVoiceIntent(rawText) {
+function parseVoiceIntent(rawText, target = voiceTarget) {
   const text = normalizeVoiceText(rawText);
   if (!text) return null;
 
   // 1. App Launching (YouTube, Netflix, Jellyfin, Spotify, Prime Video, Disney+, Internet)
   const appKeywords = [
-    { id: "111299001912", name: "YouTube", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح\s+ل?)\s+)?(?:you\s*tube|يوتيوب)$/i },
-    { id: "3201907018807", name: "Netflix", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح\s+ل?)\s+)?(?:net\s*flix|نتفليكس|نتفلكس)$/i },
-    { id: "AprZAARz4r.Jellyfin", name: "Jellyfin", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح\s+ل?)\s+)?(?:jelly\s*fin|جيليفين)$/i },
-    { id: "3201606009684", name: "Spotify", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح\s+ل?)\s+)?(?:spotify|سبوتيفاي)$/i },
-    { id: "3201910019365", name: "Prime Video", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح\s+ل?)\s+)?(?:prime\s*video|amazon\s*prime|برايم)$/i },
-    { id: "3201901017640", name: "Disney+", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح\s+ل?)\s+)?(?:disney\s*(?:plus|\+)?|ديزني)$/i },
-    { id: "3202010022079", name: "Internet", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح\s+ل?)\s+)?(?:internet|browser|navigateur|المتصفح|انترنت)$/i },
+    { id: "111299001912", name: "YouTube", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|play|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح)\s+)?(?:ال|ل|لل)?(?:you\s*tube|يوتيوب)(?:\s+(?:app|application|تطبيق))?$/i },
+    { id: "3201907018807", name: "Netflix", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح)\s+)?(?:ال|ل|لل)?(?:net\s*flix|نتفليكس|نتفلكس)(?:\s+(?:app|application|تطبيق))?$/i },
+    { id: "AprZAARz4r.Jellyfin", name: "Jellyfin", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح)\s+)?(?:ال|ل|لل)?(?:jelly\s*fin|جيليفين)(?:\s+(?:app|application|تطبيق))?$/i },
+    { id: "3201606009684", name: "Spotify", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح)\s+)?(?:ال|ل|لل)?(?:spotify|سبوتيفاي)(?:\s+(?:app|application|تطبيق))?$/i },
+    { id: "3201910019365", name: "Prime Video", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح)\s+)?(?:ال|ل|لل)?(?:prime\s*video|amazon\s*prime|برايم)(?:\s+(?:app|application|تطبيق))?$/i },
+    { id: "3201901017640", name: "Disney+", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح)\s+)?(?:ال|ل|لل)?(?:disney\s*(?:plus|\+)?|ديزني)(?:\s+(?:app|application|تطبيق))?$/i },
+    { id: "3202010022079", name: "Internet", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح)\s+)?(?:ال|ل|لل)?(?:internet|browser|navigateur|المتصفح|انترنت)(?:\s+(?:app|application|تطبيق))?$/i },
   ];
 
   for (const a of appKeywords) {
     if (a.match.test(text)) {
-      return { type: "app", app: { id: a.id, name: a.name }, label: `Open ${a.name}` };
+      const isOff = state.power !== "on";
+      return {
+        type: "app",
+        app: { id: a.id, name: a.name },
+        label: isOff ? `⚡ Wake TV & Open ${a.name}` : `▶ Launch ${a.name}`,
+      };
     }
   }
 
   // 2. Power Toggle / Off / On
-  if (/^(?:turn\s+off|power\s+off|shut\s+down|switch\s+off|éteins|éteindre|arrête|coupe|طفي|اطفي|اقفل|إغلاق)(?:\s+(?:the\s+)?(?:tv|télé|téléviseur|التلفزيون|التلفاز|الشاشة))?$/i.test(text)) {
-    return { type: "power", action: "off", label: "Power Off" };
+  if (/^(?:turn\s+off|power\s+off|shut\s+down|switch\s+off|éteins|éteindre|arrête|coupe|طفي|اطفي|اقفل|إغلاق)(?:\s+(?:the|la|le|l')?\s*(?:tv|télé|téléviseur|التلفزيون|التلفاز|الشاشة))?$/i.test(text)) {
+    return { type: "power", action: "off", label: "⏻ Turn Off TV" };
   }
-  if (/^(?:turn\s+on|power\s+on|wake\s+up|allume|allumer|شغل|ولع)(?:\s+(?:the\s+)?(?:tv|télé|téléviseur|التلفزيون|التلفاز|الشاشة))$/i.test(text)) {
-    return { type: "power", action: "on", label: "Power On" };
+  if (/^(?:turn\s+on|power\s+on|wake\s+up|allume|allumer|شغل|ولع)(?:\s+(?:the|la|le|l')?\s*(?:tv|télé|téléviseur|التلفزيون|التلفاز|الشاشة))?$/i.test(text)) {
+    return { type: "power", action: "on", label: "⏻ Turn On TV" };
   }
 
   // 3. Volume Up
   if (/^(?:volume\s*up|turn\s*up|louder|increase\s+volume|sound\s*up|monte\s+le\s+son|augmente\s+le\s+son|plus\s+fort|monter\s+le\s+volume|علي\s+الصوت|علّي|علّي\s+الصوت|ارفع\s+الصوت|صوت\s+اعلى)$/i.test(text)) {
-    return { type: "volume", dir: 1, label: "Volume Up" };
+    return { type: "volume", dir: 1, label: "🔊 Volume Up" };
   }
 
   // 4. Volume Down
   if (/^(?:volume\s*down|turn\s*down|quieter|decrease\s+volume|sound\s*down|lower\s+volume|baisse\s+le\s+son|diminue\s+le\s+son|moins\s+fort|baisser\s+le\s+volume|وطي\s+الصوت|وطّي|وطّي\s+الصوت|اخفض\s+الصوت|نزل\s+الصوت|صوت\s+اوطى)$/i.test(text)) {
-    return { type: "volume", dir: -1, label: "Volume Down" };
+    return { type: "volume", dir: -1, label: "🔉 Volume Down" };
   }
 
   // 5. Mute / Unmute
   if (/^(?:mute|unmute|silence|coupe\s+le\s+son|mets\s+en\s+sourdine|sourdine|remets\s+le\s+son|démute|كتم|كتم\s+الصوت|صامت|الغاء\s+الكتم|فك\s+الكتم)$/i.test(text)) {
-    return { type: "mute", label: "Toggle Mute" };
+    return { type: "mute", label: "🔇 Toggle Mute" };
   }
 
   // 6. Play / Pause
   if (/^(?:pause|freeze|mets\s+en\s+pause|وقف|ايقاف\s+مؤقت|لحظة)$/i.test(text)) {
-    return { type: "media", action: "pause", label: "Pause" };
+    return { type: "media", action: "pause", label: "⏸ Pause" };
   }
   if (/^(?:play|resume|continue|lecture|reprends|continuer|relance|شغل|استئناف|كمل)$/i.test(text)) {
-    return { type: "media", action: "play", label: "Play" };
+    return { type: "media", action: "play", label: "▶ Play" };
   }
 
   // 7. Navigation
   if (/^(?:home|go\s+home|main\s+menu|accueil|page\s+d'accueil|الرئيسية|الصفحة\s+الرئيسية)$/i.test(text)) {
-    return { type: "key", key: "KEY_HOME", label: "Home" };
+    return { type: "key", key: "KEY_HOME", label: "⌂ Home" };
   }
   if (/^(?:back|go\s+back|return|retour|en\s+arrière|رجوع|ارجع|للخلف)$/i.test(text)) {
-    return { type: "key", key: "KEY_RETURN", label: "Back" };
+    return { type: "key", key: "KEY_RETURN", label: "↩ Back" };
   }
   if (/^(?:menu|settings|paramètres|réglages|القائمة|الإعدادات)$/i.test(text)) {
-    return { type: "key", key: "KEY_MENU", label: "Menu" };
+    return { type: "key", key: "KEY_MENU", label: "☰ Menu" };
   }
   if (/^(?:input|source|switch\s+input|changer\s+de\s+source|المصدر|المدخل)$/i.test(text)) {
-    return { type: "key", key: "KEY_SOURCE", label: "Source" };
+    return { type: "key", key: "KEY_SOURCE", label: "⎘ Source" };
   }
 
   // 8. Search query stripping: "search for xyz", "cherche xyz", "ابحث عن xyz"
   const searchMatch = rawText.trim().match(/^(?:search(?:\s+for)?|find|cherche|recherche|trouve|ابحث\s+عن|دور\s+على|بحث)\s+(.+)$/i);
-  const query = (searchMatch ? searchMatch[1] : rawText).trim();
+  if (searchMatch) {
+    const query = searchMatch[1].trim();
+    return { type: "search", query, label: `🔍 Search: "${query}"` };
+  }
 
-  return { type: "search", query, label: `Search: "${query}"` };
+  // 9. Contextual targets
+  if (target === "youtube") {
+    return { type: "search", query: rawText.trim(), label: `🔍 YouTube: "${rawText.trim()}"` };
+  }
+  if (target === "keyboard") {
+    return { type: "search", query: rawText.trim(), label: `⌨ Type: "${rawText.trim()}"` };
+  }
+
+  // General assistant unrecognized command
+  return { type: "unknown", raw: rawText.trim(), label: "Say an app, volume, or power command" };
 }
 
 async function executeVoiceIntent(intent, target) {
   if (!intent) return;
   buzz([15, 40, 15]);
 
+  const isTvOn = state.power === "on";
+
+  // Handle app launch: if TV is off, wake the TV first then launch!
   if (intent.type === "app") {
+    if (!isTvOn) {
+      $("#voice-title").textContent = `Waking TV for ${intent.app.name}…`;
+      toast(`Waking TV and opening ${intent.app.name}…`);
+      closeVoice();
+      try {
+        await power(); // wakes TV via WOL & power toggle
+        await new Promise((r) => setTimeout(r, 1500));
+        await launch(intent.app);
+      } catch (err) {
+        toast(err.message, true);
+      }
+      return;
+    }
+    closeVoice();
     await launch(intent.app);
     return;
   }
+
+  // Handle power commands
   if (intent.type === "power") {
+    if (intent.action === "off" && !isTvOn) {
+      toast("TV is already off");
+      closeVoice();
+      return;
+    }
+    if (intent.action === "on" && isTvOn) {
+      toast("TV is already on");
+      closeVoice();
+      return;
+    }
+    closeVoice();
     await power();
     return;
   }
+
+  // Other TV actions require TV to be ON
+  if (!isTvOn) {
+    $("#voice-title").textContent = "TV is currently off";
+    const banner = $("#voice-tv-banner");
+    if (banner) banner.hidden = false;
+    const badge = $("#voice-action-badge");
+    badge.hidden = false;
+    badge.className = "voice-badge error";
+    badge.textContent = "Turn on the TV first";
+    buzz([30, 40, 30]);
+    return;
+  }
+
+  closeVoice();
+
   if (intent.type === "volume") {
     await send(intent.dir > 0 ? "KEY_VOLUP" : "KEY_VOLDOWN");
     return;
@@ -796,7 +870,6 @@ async function executeVoiceIntent(intent, target) {
         toast(`Typed: "${intent.query}"`);
       }
     } else {
-      // Default fallback: search YouTube if installed, else send as TV text
       const input = $("#yt-text");
       input.value = intent.query;
       syncClear();
@@ -806,6 +879,33 @@ async function executeVoiceIntent(intent, target) {
   }
 }
 
+// Cleanly tears down speech recognition and releases the audio hardware immediately (kills iOS orange indicator)
+function teardownVoice() {
+  clearTimeout(voiceCloseTimer);
+  if (recognition) {
+    recognition.onstart = null;
+    recognition.onresult = null;
+    recognition.onerror = null;
+    recognition.onspeechend = null;
+    recognition.onend = null;
+    try {
+      recognition.abort();
+    } catch {}
+    recognition = null;
+  }
+  voiceActive = false;
+  const ring = $("#voice-ring");
+  const btn = $("#voice-toggle-btn");
+  if (ring) ring.classList.remove("active");
+  if (btn) btn.classList.remove("listening");
+}
+
+function stopListening() {
+  teardownVoice();
+  const title = $("#voice-title");
+  if (title) title.textContent = "Tap mic to speak";
+}
+
 function setVoiceLang(lang) {
   voiceLang = lang;
   try { localStorage.setItem("tv-remote:voice-lang", lang); } catch {}
@@ -813,27 +913,31 @@ function setVoiceLang(lang) {
     b.setAttribute("aria-checked", String(b.dataset.lang === lang));
   });
   if (voiceActive) {
-    stopListening();
-    setTimeout(startListening, 200);
+    teardownVoice();
+    startListening();
   }
 }
 
 function openVoice(target = "assistant") {
   voiceTarget = target;
-  clearTimeout(voiceCloseTimer);
+  teardownVoice();
   pendingVoiceIntent = null;
 
   const dlg = $("#voice");
   const title = $("#voice-title");
   const transcript = $("#voice-transcript");
+  const heardLabel = $("#voice-heard-label");
   const badge = $("#voice-action-badge");
   const btn = $("#voice-toggle-btn");
+
+  updateVoiceTvDot();
 
   const SpeechClass = window.SpeechRecognition || window.webkitSpeechRecognition;
 
   title.textContent = target === "youtube" ? "YouTube Voice Search" : target === "keyboard" ? "Voice Dictation" : "Listening…";
-  transcript.textContent = target === "youtube" ? "Say what you want to watch…" : "Say a command, app, or search…";
+  transcript.textContent = target === "youtube" ? "Say what you want to watch…" : "Say an app, command, or search…";
   transcript.className = "voice-transcript";
+  heardLabel.hidden = true;
   badge.hidden = true;
   btn.disabled = false;
 
@@ -857,124 +961,122 @@ function startListening() {
   const SpeechClass = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechClass) return;
 
-  stopListening();
-
-  recognition = new SpeechClass();
-  recognition.continuous = false;
-  recognition.interimResults = true;
-  recognition.maxAlternatives = 1;
-
-  if (voiceLang === "auto") {
-    recognition.lang = navigator.language || "en-US";
-  } else {
-    recognition.lang = voiceLang;
-  }
+  teardownVoice();
 
   const ring = $("#voice-ring");
   const btn = $("#voice-toggle-btn");
   const title = $("#voice-title");
   const transcript = $("#voice-transcript");
+  const heardLabel = $("#voice-heard-label");
   const badge = $("#voice-action-badge");
 
-  recognition.onstart = () => {
-    voiceActive = true;
-    ring.classList.add("active");
-    btn.classList.add("listening");
-    title.textContent = "Listening…";
-    badge.hidden = true;
-    buzz(10);
-  };
-
-  recognition.onresult = (event) => {
-    let interim = "";
-    let final = "";
-
-    for (let i = event.resultIndex; i < event.results.length; ++i) {
-      const part = event.results[i][0].transcript;
-      if (event.results[i].isFinal) final += part;
-      else interim += part;
-    }
-
-    const spoken = final || interim;
-    if (spoken) {
-      transcript.textContent = `"${spoken}"`;
-      transcript.className = "voice-transcript" + (final ? "" : " interim");
-
-      const intent = parseVoiceIntent(spoken);
-      if (intent) {
-        badge.hidden = false;
-        badge.className = "voice-badge";
-        badge.textContent = intent.label;
-        if (final) pendingVoiceIntent = intent;
-      }
-    }
-  };
-
-  recognition.onerror = (event) => {
-    voiceActive = false;
-    ring.classList.remove("active");
-    btn.classList.remove("listening");
-
-    buzz([30, 40, 30]);
-    title.textContent = "Voice error";
-    badge.hidden = false;
-    badge.className = "voice-badge error";
-
-    if (event.error === "not-allowed") {
-      badge.textContent = "Microphone blocked";
-      transcript.textContent = "Please allow microphone access in your browser settings.";
-    } else if (event.error === "no-speech") {
-      badge.textContent = "No speech detected";
-      transcript.textContent = "Tap the microphone icon to try speaking again.";
-    } else {
-      badge.textContent = `Error: ${event.error}`;
-      transcript.textContent = "Speech recognition encountered an issue. Tap to retry.";
-    }
-  };
-
-  recognition.onend = () => {
-    voiceActive = false;
-    ring.classList.remove("active");
-    btn.classList.remove("listening");
-
-    if (pendingVoiceIntent) {
-      title.textContent = "Executing…";
-      const intentToRun = pendingVoiceIntent;
-      const targetToRun = voiceTarget;
-      pendingVoiceIntent = null;
-
-      clearTimeout(voiceCloseTimer);
-      voiceCloseTimer = setTimeout(async () => {
-        closeVoice();
-        await executeVoiceIntent(intentToRun, targetToRun);
-      }, 750);
-    } else if (title.textContent === "Listening…") {
-      title.textContent = "Tap mic to speak";
-    }
-  };
-
   try {
-    recognition.start();
-  } catch {
-    voiceActive = false;
-  }
-}
+    recognition = new SpeechClass();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+    recognition.lang = voiceLang === "auto" ? (navigator.language || "en-US") : voiceLang;
 
-function stopListening() {
-  if (recognition) {
-    try { recognition.abort(); } catch {}
-    recognition = null;
+    recognition.onstart = () => {
+      voiceActive = true;
+      ring.classList.add("active");
+      btn.classList.add("listening");
+      title.textContent = "Listening… speak now";
+      heardLabel.hidden = true;
+      badge.hidden = true;
+      buzz(10);
+    };
+
+    recognition.onresult = (event) => {
+      let interim = "";
+      let final = "";
+
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        const part = event.results[i][0].transcript;
+        if (event.results[i].isFinal) final += part;
+        else interim += part;
+      }
+
+      const spoken = (final || interim).trim();
+      if (spoken) {
+        heardLabel.hidden = false;
+        transcript.textContent = `"${spoken}"`;
+        transcript.className = "voice-transcript" + (final ? "" : " interim");
+
+        const intent = parseVoiceIntent(spoken);
+        if (intent) {
+          badge.hidden = false;
+          if (intent.type === "unknown") {
+            badge.className = "voice-badge muted";
+            badge.textContent = intent.label;
+            pendingVoiceIntent = null;
+          } else {
+            badge.className = "voice-badge";
+            badge.textContent = intent.label;
+            if (final) pendingVoiceIntent = intent;
+          }
+        }
+      }
+    };
+
+    recognition.onspeechend = () => {
+      title.textContent = "Processing…";
+      if (recognition) {
+        try { recognition.stop(); } catch {}
+      }
+    };
+
+    recognition.onerror = (event) => {
+      teardownVoice();
+      buzz([30, 40, 30]);
+
+      title.textContent = "Voice Assistant";
+      badge.hidden = false;
+      badge.className = "voice-badge error";
+      heardLabel.hidden = true;
+
+      if (event.error === "not-allowed") {
+        badge.textContent = "Microphone blocked";
+        transcript.textContent = "Please allow microphone access in your browser / iOS settings.";
+      } else if (event.error === "no-speech") {
+        badge.textContent = "No speech detected";
+        transcript.textContent = "Didn't hear anything. Tap the microphone orb to try again.";
+      } else {
+        badge.textContent = `Error: ${event.error}`;
+        transcript.textContent = "Tap the microphone orb to try speaking again.";
+      }
+    };
+
+    recognition.onend = () => {
+      // Release hardware audio unit immediately so iOS mic indicator vanishes
+      teardownVoice();
+
+      if (pendingVoiceIntent) {
+        title.textContent = "Executing…";
+        const intentToRun = pendingVoiceIntent;
+        const targetToRun = voiceTarget;
+        pendingVoiceIntent = null;
+
+        clearTimeout(voiceCloseTimer);
+        voiceCloseTimer = setTimeout(async () => {
+          await executeVoiceIntent(intentToRun, targetToRun);
+        }, 550);
+      } else {
+        title.textContent = "Tap mic to speak";
+      }
+    };
+
+    recognition.start();
+  } catch (err) {
+    teardownVoice();
+    title.textContent = "Voice Assistant";
+    transcript.textContent = "Could not initialize microphone. Tap to retry.";
   }
-  voiceActive = false;
-  const ring = $("#voice-ring");
-  const btn = $("#voice-toggle-btn");
-  if (ring) ring.classList.remove("active");
-  if (btn) btn.classList.remove("listening");
 }
 
 function closeVoice() {
   clearTimeout(voiceCloseTimer);
-  stopListening();
+  teardownVoice();
   const dlg = $("#voice");
   if (dlg && dlg.open) dlg.close();
 }
@@ -999,6 +1101,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#voice-close").addEventListener("click", closeVoice);
   $("#voice-toggle-btn").addEventListener("click", () => voiceActive ? stopListening() : startListening());
   $("#voice").addEventListener("click", (e) => { if (e.target === $("#voice")) closeVoice(); });
+  const voiceDlg = $("#voice");
+  if (voiceDlg) voiceDlg.addEventListener("close", () => teardownVoice());
+  const wakeQuick = $("#voice-wake-quick");
+  if (wakeQuick) {
+    wakeQuick.addEventListener("click", async () => {
+      $("#voice-tv-banner").hidden = true;
+      $("#voice-title").textContent = "Turning TV on…";
+      await power();
+      updateVoiceTvDot();
+    });
+  }
   document.querySelectorAll(".voice-lang-picker .lang-pill").forEach((b) =>
     b.addEventListener("click", () => setVoiceLang(b.dataset.lang)));
 
