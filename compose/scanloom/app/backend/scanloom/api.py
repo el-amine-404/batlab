@@ -58,7 +58,9 @@ def clean_name(value: str | None) -> str:
 
 
 def jsonable(value):
-    if isinstance(value, (datetime, uuid.UUID)):
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, uuid.UUID):
         return str(value)
     if isinstance(value, dict):
         return {key: jsonable(item) for key, item in value.items()}
@@ -216,10 +218,13 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
                                 ORDER BY p.position LIMIT 1) AS thumbnail_page_id
                         FROM projects pr WHERE pr.expires_at>now() AND pr.status<>'deleting'
                         ORDER BY pr.created_at DESC LIMIT %s""", (limit,))
-        return {"items": [jsonable(dict(row)) | {
-            "thumbnail_url": (f"/api/v1/projects/{row['public_id']}/pages/{row['thumbnail_page_id']}/result"
-                              if row["thumbnail_page_id"] else None)
-        } for row in rows]}
+        items = []
+        for row in rows:
+            item = jsonable(dict(row))
+            page_id = item.pop("thumbnail_page_id", None)
+            item["thumbnail_url"] = (f"/api/v1/projects/{row['public_id']}/pages/{page_id}/result" if page_id else None)
+            items.append(item)
+        return {"items": items}
 
     @app.patch("/api/v1/projects/{public_id}", tags=["Projects"])
     def edit_project(public_id: str, edit: ProjectEdit):
