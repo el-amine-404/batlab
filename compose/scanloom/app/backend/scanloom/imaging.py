@@ -10,6 +10,8 @@ import numpy as np
 import onnxruntime as ort
 import pyvips
 
+ort.disable_telemetry_events()
+
 
 class ImageProblem(ValueError):
     pass
