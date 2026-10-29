@@ -1,15 +1,39 @@
 from __future__ import annotations
 
 import math
+import os
+import subprocess
 from pathlib import Path
 
 import cv2
 import numpy as np
+import onnxruntime as ort
 import pyvips
 
 
 class ImageProblem(ValueError):
     pass
+
+
+_BOUNDARY_SESSION: ort.InferenceSession | None = None
+
+
+def _boundary_session() -> ort.InferenceSession | None:
+    """Load the pinned DocAligner ONNX model once per worker process."""
+    global _BOUNDARY_SESSION
+    if _BOUNDARY_SESSION is not None:
+        return _BOUNDARY_SESSION
+    model = Path(os.environ.get("SCANLOOM_BOUNDARY_MODEL",
+                                "/opt/scanloom/models/docaligner.onnx"))
+    if not model.is_file():
+        return None
+    options = ort.SessionOptions()
+    options.intra_op_num_threads = 1
+    options.inter_op_num_threads = 1
+    options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+    _BOUNDARY_SESSION = ort.InferenceSession(
+        str(model), sess_options=options, providers=["CPUExecutionProvider"])
+    return _BOUNDARY_SESSION
 
 
 def normalize(source: Path, destination: Path, maximum_pixels: int) -> tuple[int, int]:
@@ -154,7 +178,160 @@ def _foreground_quad(gray: np.ndarray, robust: bool = False) -> np.ndarray | Non
     return order_corners(quad)
 
 
-def detect(image: np.ndarray) -> tuple[np.ndarray, float, str]:
+def _neural_boundary(image: np.ndarray) -> tuple[np.ndarray, float] | None:
+    """Predict four physical document corners with DocAligner's heatmap model.
+
+    A small black pad lets the model estimate corners at, or just beyond, the
+    photograph boundary. The model is fixed, local and never receives network
+    access at runtime.
+    """
+    session = _boundary_session()
+    if session is None:
+        return None
+    height, width = image.shape[:2]
+
+    def infer(crop: np.ndarray, offset: tuple[int, int]):
+        crop_height, crop_width = crop.shape[:2]
+        pad = round(max(crop_height, crop_width) * .07)
+        padded = cv2.copyMakeBorder(crop, pad, pad, pad, pad, cv2.BORDER_CONSTANT,
+                                    value=(0, 0, 0))
+        reduced = cv2.resize(padded, (256, 256), interpolation=cv2.INTER_AREA)
+        tensor = reduced.transpose(2, 0, 1).astype(np.float32)[None] / 255.0
+        try:
+            heatmaps = session.run(["heatmap"], {"img": tensor})[0][0]
+        except Exception:
+            return None
+        corners, strengths = [], []
+        target_size = (crop_width + 2 * pad, crop_height + 2 * pad)
+        for heatmap in heatmaps:
+            expanded = cv2.resize(heatmap, target_size, interpolation=cv2.INTER_LINEAR)
+            mask = np.uint8(expanded >= .30)
+            count, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, 8)
+            if count <= 1:
+                return None
+            component = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+            corners.append(centroids[component] - pad + offset)
+            strengths.append(float(expanded[labels == component].max()))
+        quad = order_corners(np.asarray(corners, np.float32))
+        area = abs(cv2.contourArea(quad)) / max(1, width * height)
+        if area < .015 or not np.isfinite(quad).all():
+            return None
+        confidence = min(min(strengths), .72 + min(.24, area * .35))
+        return quad, float(confidence)
+
+    variants = [infer(image, (0, 0))]
+    if height != width:
+        side = min(height, width)
+        left, top = (width - side) // 2, (height - side) // 2
+        variants.append(infer(image[top:top+side, left:left+side], (left, top)))
+    valid = [item for item in variants if item is not None]
+    return max(valid, key=lambda item: item[1]) if valid else None
+
+
+def _grabcut_boundary(image: np.ndarray) -> tuple[np.ndarray, float] | None:
+    """Segment a centered foreground object when the neural model abstains."""
+    height, width = image.shape[:2]
+    scale = min(1.0, 1000 / max(height, width))
+    small = (cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+             if scale < 1 else image)
+    sh, sw = small.shape[:2]
+    mask = np.full((sh, sw), cv2.GC_PR_BGD, np.uint8)
+    border_y, border_x = max(3, sh // 50), max(3, sw // 50)
+    mask[:border_y] = mask[-border_y:] = cv2.GC_BGD
+    mask[:, :border_x] = mask[:, -border_x:] = cv2.GC_BGD
+    cx, cy = sw // 2, sh // 2
+    seed_x, seed_y = max(8, sw // 18), max(8, sh // 18)
+    mask[cy-seed_y:cy+seed_y, cx-seed_x:cx+seed_x] = cv2.GC_FGD
+    background, foreground = np.zeros((1, 65), np.float64), np.zeros((1, 65), np.float64)
+    cv2.grabCut(small, mask, None, background, foreground, 4, cv2.GC_INIT_WITH_MASK)
+    binary = np.where((mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD),
+                      255, 0).astype(np.uint8)
+    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE,
+                              np.ones((11, 11), np.uint8), iterations=2)
+    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    containing = [item for item in contours
+                  if cv2.pointPolygonTest(item, (cx, cy), False) >= 0]
+    if not (containing or contours):
+        return None
+    contour = max(containing or contours, key=cv2.contourArea)
+    area = cv2.contourArea(contour) / max(1, sh * sw)
+    if not .025 <= area <= .82:
+        return None
+    hull = cv2.convexHull(contour)
+    perimeter = cv2.arcLength(hull, True)
+    quad = None
+    for epsilon in (.01, .02, .03, .04, .06, .08):
+        polygon = cv2.approxPolyDP(hull, epsilon * perimeter, True)
+        if len(polygon) == 4 and cv2.isContourConvex(polygon):
+            quad = polygon[:, 0, :]
+            break
+    if quad is None:
+        quad = cv2.boxPoints(cv2.minAreaRect(hull))
+    return order_corners(quad) / scale, float(min(.84, .58 + area * .45))
+
+
+def _edge_support(image: np.ndarray, quad: np.ndarray) -> float:
+    scale = min(1.0, 1200 / max(image.shape[:2]))
+    small = (cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+             if scale < 1 else image)
+    edges = cv2.Canny(cv2.GaussianBlur(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY),
+                                       (5, 5), 0), 35, 120)
+    distance = cv2.distanceTransform(cv2.bitwise_not(edges), cv2.DIST_L2, 3)
+    samples = []
+    for start, end in zip(quad * scale, np.roll(quad * scale, -1, axis=0)):
+        for ratio in np.linspace(.04, .96, 80):
+            point = start * (1 - ratio) + end * ratio
+            x = int(np.clip(point[0], 0, edges.shape[1] - 1))
+            y = int(np.clip(point[1], 0, edges.shape[0] - 1))
+            samples.append(distance[y, x] < 3.5)
+    return float(np.mean(samples))
+
+
+def _edge_boundary(image: np.ndarray) -> tuple[np.ndarray, float] | None:
+    """Find a small, sharply bounded face when segmentation spans its support."""
+    scale = min(1.0, 1200 / max(image.shape[:2]))
+    small = (cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+             if scale < 1 else image)
+    height, width = small.shape[:2]
+    gray = cv2.GaussianBlur(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY), (5, 5), 0)
+    raw_edges = cv2.Canny(gray, 35, 120)
+    candidates = []
+    masks = [cv2.morphologyEx(raw_edges, cv2.MORPH_CLOSE,
+                              np.ones((size, size), np.uint8), iterations=2)
+             for size in (3, 7, 13, 21)]
+    _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    masks.extend((otsu, cv2.bitwise_not(otsu)))
+    for mask in masks:
+        contours, _ = cv2.findContours(mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:80]:
+            if cv2.contourArea(contour) < height * width * .008:
+                break
+            hull = cv2.convexHull(contour)
+            perimeter = cv2.arcLength(hull, True)
+            for epsilon in (.008, .012, .018, .025, .04, .06):
+                polygon = cv2.approxPolyDP(hull, epsilon * perimeter, True)
+                if len(polygon) != 4 or not cv2.isContourConvex(polygon):
+                    continue
+                quad = order_corners(polygon[:, 0, :])
+                area = abs(cv2.contourArea(quad)) / max(1, width * height)
+                if not .012 <= area <= .75:
+                    break
+                support = _edge_support(small, quad)
+                center = np.mean(quad, axis=0)
+                centrality = 1 - min(1, np.linalg.norm(
+                    (center - [width / 2, height / 2]) / [width, height]) * 2)
+                score = support * 4 + math.sqrt(area) * 1.5 + centrality * .5
+                candidates.append((score, quad, support))
+                break
+    if not candidates:
+        return None
+    _, quad, support = max(candidates, key=lambda item: item[0])
+    if support < .62:
+        return None
+    return quad / scale, float(min(.86, .58 + support * .28))
+
+
+def _detect_classical(image: np.ndarray) -> tuple[np.ndarray, float, str]:
     height, width = image.shape[:2]
     full_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
@@ -216,6 +393,81 @@ def detect(image: np.ndarray) -> tuple[np.ndarray, float, str]:
         confidence = 0.35
         method = "full-image fallback"
     return quad, float(confidence), method
+
+
+def detect(image: np.ndarray) -> tuple[np.ndarray, float, str]:
+    """Detect the page with neural corners, then deterministic local fallbacks."""
+    neural = _neural_boundary(image)
+    if neural is not None:
+        quad, confidence = neural
+        return quad, confidence, "DocAligner neural boundary"
+    classical = _detect_classical(image)
+    classical_area = abs(cv2.contourArea(classical[0])) / max(1, image.shape[0] * image.shape[1])
+    # A clean full-resolution light foreground is already a strong result.
+    if (classical[2] == "full-resolution foreground" and classical[1] >= .78
+            and .03 <= classical_area <= .88):
+        return classical
+    # Small, saturated package faces can be more precise than a broad
+    # foreground segmentation (for example a barcode face sitting on a bag).
+    if (classical[2] == "color foreground" and classical[1] >= .85
+            and .01 <= classical_area <= .12):
+        return classical
+    segmented = _grabcut_boundary(image)
+    if segmented is not None:
+        quad, confidence = segmented
+        if _edge_support(image, quad) < .40:
+            edged = _edge_boundary(image)
+            if edged is not None:
+                edge_quad, edge_confidence = edged
+                return edge_quad, edge_confidence, "quadrilateral edge fallback"
+        return quad, confidence, "GrabCut foreground fallback"
+    return classical
+
+
+def detect_orientation(image: np.ndarray) -> tuple[int, float]:
+    """Return a conservative clockwise correction inferred from recognized text.
+
+    Tesseract is invoked with fixed arguments and a hard timeout. Ambiguous
+    photos remain unchanged; a wrong automatic rotation is worse than a review
+    badge and the existing one-click rotation control.
+    """
+    maximum = 1400
+    scale = min(1.0, maximum / max(image.shape[:2]))
+    base = (cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+            if scale < 1 else image)
+    variants = [base, cv2.rotate(base, cv2.ROTATE_90_COUNTERCLOCKWISE),
+                cv2.rotate(base, cv2.ROTATE_180), cv2.rotate(base, cv2.ROTATE_90_CLOCKWISE)]
+    scores = []
+    for variant in variants:
+        ok, encoded = cv2.imencode(".png", variant)
+        if not ok:
+            return 0, 0.0
+        try:
+            result = subprocess.run(
+                ["tesseract", "stdin", "stdout", "-l", "eng", "--psm", "11", "tsv"],
+                input=encoded.tobytes(), capture_output=True, check=False, timeout=12)
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return 0, 0.0
+        score = 0.0
+        for line in result.stdout.decode("utf-8", "ignore").splitlines()[1:]:
+            fields = line.split("\t")
+            if len(fields) < 12:
+                continue
+            text = "".join(character for character in fields[11] if character.isalnum())
+            try:
+                confidence = float(fields[10])
+            except ValueError:
+                continue
+            if confidence >= 45 and len(text) >= 2:
+                score += confidence * min(12, len(text))
+        scores.append(score)
+    ranking = sorted(range(4), key=lambda index: scores[index], reverse=True)
+    best, runner_up = ranking[:2]
+    ratio = scores[best] / max(1, scores[runner_up])
+    if (best == 0 or scores[best] < 1200 or ratio < 1.55
+            or (ratio < 1.75 and scores[best] < 5000)):
+        return 0, 0.0
+    return (0, 270, 180, 90)[best], round(ratio, 3)
 
 
 def normalized_corners(corners: np.ndarray, width: int, height: int) -> list[list[float]]:

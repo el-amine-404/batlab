@@ -4,18 +4,49 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
-from scanloom.imaging import detect, normalize, order_corners, pixel_corners, quality, warp, write_png
+from scanloom.imaging import (detect, detect_orientation, normalize, order_corners,
+                              pixel_corners, quality, warp, write_png)
 from scanloom.security import Refused, inspect_container
 from scanloom.settings import DEFAULTS, validate
 
 
 class ImagingTest(unittest.TestCase):
+    def test_detection_cascade_prefers_neural_and_uses_segmentation_on_abstention(self):
+        image = np.full((500, 800, 3), 80, np.uint8)
+        neural = np.array([[20, 30], [780, 25], [770, 470], [25, 480]], np.float32)
+        segmented = np.array([[100, 90], [700, 90], [700, 410], [100, 410]], np.float32)
+        with mock.patch("scanloom.imaging._neural_boundary", return_value=(neural, .91)):
+            found, confidence, method = detect(image)
+        self.assertTrue(np.array_equal(found, neural))
+        self.assertEqual((confidence, method), (.91, "DocAligner neural boundary"))
+        with (mock.patch("scanloom.imaging._neural_boundary", return_value=None),
+              mock.patch("scanloom.imaging._detect_classical",
+                         return_value=(neural, .70, "minimum-area fallback")),
+              mock.patch("scanloom.imaging._grabcut_boundary", return_value=(segmented, .81))):
+            found, confidence, method = detect(image)
+        self.assertTrue(np.array_equal(found, segmented))
+        self.assertEqual((confidence, method), (.81, "GrabCut foreground fallback"))
+
+    def test_orientation_changes_only_with_strong_text_evidence(self):
+        image = np.full((300, 500, 3), 220, np.uint8)
+        header = b"level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n"
+        weak = mock.Mock(stdout=header + b"5\t1\t1\t1\t1\t1\t0\t0\t10\t10\t80\ttest\n")
+        strong = mock.Mock(stdout=header + b"5\t1\t1\t1\t1\t1\t0\t0\t10\t10\t95\torientationtest\n" * 3)
+        with mock.patch("scanloom.imaging.subprocess.run",
+                        side_effect=[weak, weak, weak, strong]):
+            rotation, confidence = detect_orientation(image)
+        self.assertEqual(rotation, 90)
+        self.assertGreater(confidence, 1.75)
+        with mock.patch("scanloom.imaging.subprocess.run", return_value=weak):
+            self.assertEqual(detect_orientation(image), (0, 0.0))
+
     def test_normalizes_a_real_jpeg_loader_path(self):
         with tempfile.TemporaryDirectory() as folder:
             source = Path(folder) / "source.jpg"
@@ -29,7 +60,9 @@ class ImagingTest(unittest.TestCase):
         quad = np.array([[180, 120], [1030, 190], [950, 760], [120, 700]], np.int32)
         cv2.fillConvexPoly(image, quad, (245, 245, 238))
         cv2.putText(image, "SCANLOOM", (330, 450), cv2.FONT_HERSHEY_SIMPLEX, 2, (20, 40, 35), 5)
-        found, confidence, method = detect(image)
+        with (mock.patch("scanloom.imaging._neural_boundary", return_value=None),
+              mock.patch("scanloom.imaging._grabcut_boundary", return_value=None)):
+            found, confidence, method = detect(image)
         self.assertIn(method, {"contour", "full-resolution foreground"})
         self.assertGreater(confidence, 0.75)
         result = warp(image, found, 0, "color")
@@ -40,7 +73,9 @@ class ImagingTest(unittest.TestCase):
         image = np.full((1400, 700, 3), 28, np.uint8)
         cv2.rectangle(image, (70, 430), (640, 900), (145, 145, 145), -1)
         cv2.rectangle(image, (70, 430), (640, 590), (245, 245, 245), -1)
-        found, confidence, method = detect(image)
+        with (mock.patch("scanloom.imaging._neural_boundary", return_value=None),
+              mock.patch("scanloom.imaging._grabcut_boundary", return_value=None)):
+            found, confidence, method = detect(image)
         self.assertEqual(method, "full-resolution foreground")
         self.assertGreater(confidence, .75)
         self.assertLess(found[:, 0].min(), 85)
@@ -57,7 +92,9 @@ class ImagingTest(unittest.TestCase):
         quad = np.array([[245, 140], [1040, 75], [1080, 655], [270, 625]], np.int32)
         cv2.fillConvexPoly(image, quad, (85, 35, 15))
         cv2.fillConvexPoly(image, np.array([[270, 475], [1065, 455], [1080, 655], [270, 625]]), (55, 150, 80))
-        found, confidence, method = detect(image)
+        with (mock.patch("scanloom.imaging._neural_boundary", return_value=None),
+              mock.patch("scanloom.imaging._grabcut_boundary", return_value=None)):
+            found, confidence, method = detect(image)
         self.assertEqual(method, "color foreground")
         self.assertGreater(confidence, .8)
         self.assertLess(np.abs(found - quad).mean(), 45)

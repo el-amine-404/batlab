@@ -17,8 +17,8 @@ import numpy as np
 
 from .config import Config
 from .db import Database
-from .imaging import (detect, normalize, normalized_corners, pixel_corners,
-                      quality, warp, write_png)
+from .imaging import (detect, detect_orientation, normalize, normalized_corners,
+                      pixel_corners, quality, warp, write_png)
 from .security import Refused, clamav, inspect_container, sha256
 
 
@@ -134,8 +134,15 @@ class Processor:
         if appearance == "auto":
             appearance = {"faithful": "color", "paper": "gray", "mono": "mono"}[page["profile"]]
         self.db.execute("UPDATE pages SET status='rendering' WHERE id=%s", (page_id,))
-        corrected = warp(image, found, int(page["rotation"]), appearance, float(page["corner_radius"]))
+        rotation = int(page["rotation"])
+        orientation_confidence = 0.0
+        if scan and rotation == 0:
+            unrotated = warp(image, found, 0, appearance, float(page["corner_radius"]))
+            rotation, orientation_confidence = detect_orientation(unrotated)
+        corrected = warp(image, found, rotation, appearance, float(page["corner_radius"]))
         report = quality(corrected, confidence) | {"detection_method": method}
+        report["automatic_rotation"] = rotation if orientation_confidence else 0
+        report["orientation_confidence"] = orientation_confidence
         outside = int(np.count_nonzero((found[:, 0] < 0) | (found[:, 0] >= image.shape[1])
                                        | (found[:, 1] < 0) | (found[:, 1] >= image.shape[0])))
         report["outside_corner_count"] = outside
@@ -148,10 +155,10 @@ class Processor:
         write_png(corrected, result)
         result_hash, result_bytes = sha256(result), result.stat().st_size
         with self.db.transaction() as cursor:
-            cursor.execute("""UPDATE pages SET status='ready',corners=%s::jsonb,confidence=%s,quality=%s::jsonb,
+            cursor.execute("""UPDATE pages SET status='ready',corners=%s::jsonb,rotation=%s,confidence=%s,quality=%s::jsonb,
                               normalized_object=%s,result_object=%s,result_sha256=%s,result_bytes=%s,error=NULL,version=version+1
                               WHERE id=%s""",
-                           (json.dumps(corners), confidence, json.dumps(report), normalized_name, result_name,
+                           (json.dumps(corners), rotation, confidence, json.dumps(report), normalized_name, result_name,
                             result_hash, result_bytes, page_id))
             cursor.execute("""UPDATE projects SET completed_count=(SELECT count(*) FROM pages WHERE project_id=%s AND status='ready'),
                               warning_count=(SELECT count(*) FROM pages WHERE project_id=%s AND jsonb_array_length(quality->'warnings')>0),
