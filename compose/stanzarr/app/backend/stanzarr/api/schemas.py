@@ -131,17 +131,20 @@ class Job(BaseModel):
 
 
 class Worker(BaseModel):
-    id: str | None = Field(description="Its key's id; None for a worker on the shared key (before 1.1).")
+    id: str | None = Field(default=None, description="Its key's id; None for a worker on the shared key (before 1.1).")
     name: str
-    prefix: str | None = Field(description="The key's first letters, to tell keys apart.")
-    created_at: float | None
-    last_used: float | None
-    shared_key: bool = Field(description="It uses the key all workers shared before 1.1.")
-    gpu: str = Field(description="The GPU it reported, as the driver names it; empty: none.")
-    vram: int = Field(description="Its GPU's memory, MB.")
-    version: str = Field(description="Its stanzarr-worker.")
-    last_seen: int | None
-    online: bool
+    prefix: str | None = Field(default=None, description="The key's first letters, to tell keys apart.")
+    created_at: float | None = None
+    last_used: float | None = None
+    shared_key: bool = Field(default=False, description="It uses the key all workers shared before 1.1.")
+    gpu: str = Field(default="", description="The GPU it reported, as the driver names it; empty: none.")
+    vram: int = Field(default=0, description="Its GPU's memory, MB.")
+    version: str = Field(default="", description="Its stanzarr-worker.")
+    last_seen: int | None = None
+    online: bool = False
+    host: str = Field(default="", description="The IP address or host where the worker runs.")
+    model: str = Field(default="", description="The AI models loaded on the worker.")
+    capabilities: str = Field(default="sync,generate", description="What the worker supports: sync, generate.")
 
 
 class WorkerList(BaseModel):

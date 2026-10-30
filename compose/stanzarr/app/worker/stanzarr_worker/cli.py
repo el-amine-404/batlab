@@ -48,10 +48,31 @@ class Server:
             shutil.copyfileobj(response, out)
 
 
-def heartbeat(server: Server, name: str, vram: int, stop: threading.Event) -> None:
+def host_address() -> str:
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("192.168.1.1", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return f"{ip} ({socket.gethostname()})"
+    except Exception:
+        return socket.gethostname()
+
+
+MODEL_NAME = "Demucs htdemucs + faster-whisper large-v3 + MMS"
+
+
+def heartbeat(server: Server, name: str, vram: int, host: str, stop: threading.Event) -> None:
     while not stop.is_set():
         try:
-            server.call("POST", "/api/v1/worker/heartbeat", {"gpu": name, "vram": vram, "version": __version__})
+            server.call("POST", "/api/v1/worker/heartbeat", {
+                "gpu": name,
+                "vram": vram,
+                "version": __version__,
+                "host": host,
+                "model": MODEL_NAME,
+                "capabilities": "sync,generate",
+            })
         except Exception as error:
             log.warning("server unreachable: %s", error)
         stop.wait(20)
@@ -60,7 +81,9 @@ def heartbeat(server: Server, name: str, vram: int, stop: threading.Event) -> No
 def work(server: Server, job: dict, device: str) -> None:
     job_id = job["job"]
     song = job["song"]
-    log.info("job %s: %s – %s (%d lines)", job_id, song["artist"], song["title"], len(job["lines"]))
+    kind = job.get("kind", "ai_sync")
+    lines_input = job.get("lines") or []
+    log.info("job %s [%s]: %s – %s (%d lines)", job_id, kind, song["artist"], song["title"], len(lines_input))
     stage = lambda text: _quiet(lambda: server.call("POST", f"/api/v1/worker/jobs/{job_id}/stage", {"stage": text}))
     with tempfile.TemporaryDirectory(prefix="stanzarr-worker-") as workdir:
         try:
@@ -68,11 +91,16 @@ def work(server: Server, job: dict, device: str) -> None:
             ext = job.get("audio_name", "song.flac").rsplit(".", 1)[-1][:5]
             audio = f"{workdir}/song.{ext}"
             server.download(f"/api/v1/worker/jobs/{job_id}/audio", audio)
-            lines, voice = pipeline.run(audio, job["lines"], workdir, stage, device)
-            stage("uploading")
+            if kind == "ai_generate" or not lines_input:
+                lines, voice = pipeline.run_generate(audio, workdir, stage, device, song.get("language", ""))
+                method = "HTDemucs + Whisper large-v3 transcribe & align"
+            else:
+                lines, voice = pipeline.run(audio, lines_input, workdir, stage, device)
+                method = pipeline.NAME
+            stage("uploading voice track")
             with open(voice, "rb") as handle:
                 server.call("PUT", f"/api/v1/worker/jobs/{job_id}/voice", raw=handle.read(), timeout=600)
-            result = server.call("POST", f"/api/v1/worker/jobs/{job_id}/result", {"lines": lines, "method": pipeline.NAME})
+            result = server.call("POST", f"/api/v1/worker/jobs/{job_id}/result", {"lines": lines, "method": method})
             log.info("job %s done: %s", job_id, (result or {}).get("result"))
         except Exception as error:
             log.exception("job %s failed", job_id)
@@ -101,15 +129,23 @@ def main() -> None:
         log.info("GPU: %s (%d MB)", name, vram)
     else:
         log.warning("no NVIDIA GPU found%s", ": taking jobs on the CPU (slow)" if args.cpu else ": checking in, taking no jobs")
+    host = host_address()
     server = Server(args.server, args.key, args.name)
     try:
-        server.call("POST", "/api/v1/worker/heartbeat", {"gpu": name, "vram": vram, "version": __version__})
+        server.call("POST", "/api/v1/worker/heartbeat", {
+            "gpu": name,
+            "vram": vram,
+            "version": __version__,
+            "host": host,
+            "model": MODEL_NAME,
+            "capabilities": "sync,generate",
+        })
     except urllib.error.HTTPError as error:
         raise SystemExit(f"the server refused this worker ({error.code}): check the key") from error
     except urllib.error.URLError as error:
         raise SystemExit(f"cannot reach {args.server}: {error.reason}") from error
     stop = threading.Event()
-    threading.Thread(target=heartbeat, args=(server, name, vram, stop), daemon=True).start()
+    threading.Thread(target=heartbeat, args=(server, name, vram, host, stop), daemon=True).start()
     device = "cuda" if name else "cpu"
     try:
         while True:

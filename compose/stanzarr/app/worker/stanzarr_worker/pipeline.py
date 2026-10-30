@@ -78,3 +78,41 @@ def run(audio: str, lines: list[str], workdir: str, stage: Callable[[str], None]
     voice = os.path.join(workdir, "vocals.ogg")
     _run(["ffmpeg", "-v", "error", "-y", "-nostdin", "-i", vocals, "-c:a", "libopus", "-b:a", "96k", voice])
     return [p | {"s": s} for p, s in zip(placed, lines)], voice
+
+
+def run_generate(audio: str, workdir: str, stage: Callable[[str], None], device: str = "cuda",
+                 language: str = "") -> tuple[list[dict], str]:
+    """Transcribes the song from audio, aligns and verifies, returning (lines, voice path)."""
+    stage("separating the voice (HTDemucs)")
+    vocals = separate(audio, workdir, device)
+    stage("transcribing (Whisper large-v3)")
+    out_trans = os.path.join(workdir, "transcription.json")
+    env = dict(os.environ, LD_LIBRARY_PATH=cuda_library_path())
+    _run([sys.executable, "-m", "stanzarr_worker.align", "transcribe", vocals, audio, out_trans, language or "auto"], env)
+    data = json.load(open(out_trans, encoding="utf-8"))
+    lines = [item["s"] for item in data]
+    if lines:
+        with open(os.path.join(workdir, "lines.json"), "w", encoding="utf-8") as out:
+            json.dump(lines, out, ensure_ascii=False)
+        runs = []
+        for method in METHODS:
+            stage(f"verifying sync ({method})")
+            out = os.path.join(workdir, f"{method}.json")
+            try:
+                _run([sys.executable, "-m", "stanzarr_worker.align", method, vocals, os.path.join(workdir, "lines.json"), out, language or "fr"], env)
+                runs.append(json.load(open(out, encoding="utf-8")))
+            except Exception:
+                pass
+        if len(runs) >= 2:
+            stage("voting on verified timings")
+            placed = vote(runs, len(lines))
+            result_lines = [p | {"s": s} for p, s in zip(placed, lines)]
+        else:
+            result_lines = data
+    else:
+        result_lines = data
+
+    stage("encoding the voice")
+    voice = os.path.join(workdir, "vocals.ogg")
+    _run(["ffmpeg", "-v", "error", "-y", "-nostdin", "-i", vocals, "-c:a", "libopus", "-b:a", "96k", voice])
+    return result_lines, voice

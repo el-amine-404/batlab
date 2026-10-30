@@ -165,6 +165,12 @@ SCHEMA = [
     UPDATE lyrics SET mtime = 0;
     UPDATE songs SET mtime = 0;
     """,
+    # version 5: worker host IP, model name, and capabilities
+    """
+    ALTER TABLE workers ADD COLUMN host TEXT NOT NULL DEFAULT '';
+    ALTER TABLE workers ADD COLUMN model TEXT NOT NULL DEFAULT '';
+    ALTER TABLE workers ADD COLUMN capabilities TEXT NOT NULL DEFAULT 'sync,generate';
+    """,
 ]
 
 

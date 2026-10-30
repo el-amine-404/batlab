@@ -151,6 +151,8 @@ export default function WorkersPage() {
                 </div>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   {worker.online ? "Online" : worker.last_seen ? `Last seen ${timeAgo(worker.last_seen)}` : "Never checked in"}
+                  {worker.host && <> · <code className="rounded bg-muted px-1 text-foreground/90">{worker.host}</code></>}
+                  {worker.model && <> · Model: <span className="font-medium text-foreground">{worker.model}</span></>}
                   {worker.version && ` · stanzarr-worker ${worker.version}`}
                   {worker.prefix && <> · key <code>{worker.prefix}…</code></>}
                   {worker.created_at && ` · added ${timeAgo(worker.created_at)}`}

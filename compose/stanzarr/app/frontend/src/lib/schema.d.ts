@@ -1939,6 +1939,12 @@ export interface components {
             last_seen: number | null;
             /** Online */
             online: boolean;
+            /** Host */
+            host?: string;
+            /** Model */
+            model?: string;
+            /** Capabilities */
+            capabilities?: string;
         };
         /** WorkerIn */
         WorkerIn: {

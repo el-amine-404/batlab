@@ -616,6 +616,53 @@ class Api(unittest.TestCase):
         peaks = self.client.get(f"/api/v1/songs/{song_id}/peaks/mix").json()
         self.assertEqual(peaks["rate"], 200)
 
+    @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg")
+    def test_upload_lyrics_and_worker_heartbeat(self):
+        song = tone(os.path.join(self.cfg.library[0], "Upload", "01 - UploadSong.mp3"), title="UploadSong", artist="UploadArtist")
+        library.scan(self.services.db, self.cfg.library)
+        song_id = self.client.get("/api/v1/songs").json()["songs"][0]["id"]
+
+        # Upload LRC file
+        lrc_text = "[00:01.00] Line one\n[00:05.00] Line two\n"
+        upload_resp = self.client.post(
+            f"/api/v1/songs/{song_id}/lyrics/upload",
+            json={"filename": "01 - UploadSong.lrc", "text": lrc_text},
+            headers=PAGE,
+        )
+        self.assertEqual(upload_resp.status_code, 200)
+        self.assertEqual(upload_resp.json()["source"], "user_uploaded")
+
+        # Verify song details reflect user_uploaded
+        song_info = self.client.get(f"/api/v1/songs/{song_id}").json()
+        uploaded_file = next(f for f in song_info["files"] if f["format"] == "lrc")
+        self.assertEqual(uploaded_file["source"], "user_uploaded")
+        self.assertTrue(uploaded_file["synced"])
+
+        # Worker heartbeat with host and model
+        worker_resp = self.client.post(
+            "/api/v1/worker/heartbeat",
+            json={"gpu": "Quadro T1000", "vram": 4096, "version": "1.0", "host": "192.168.1.131", "model": "large-v3"},
+            headers={"X-Stanzarr-Key": "a-worker-key", "X-Stanzarr-Worker": "laptop-test"},
+        )
+        # Add worker key first
+        w_made = self.services.add_worker("laptop-test")
+        worker_resp = self.client.post(
+            "/api/v1/worker/heartbeat",
+            json={"gpu": "Quadro T1000", "vram": 4096, "version": "1.0", "host": "192.168.1.131", "model": "large-v3"},
+            headers={"X-Stanzarr-Key": w_made[0]},
+        )
+        self.assertEqual(worker_resp.status_code, 200)
+        w_list = self.client.get("/api/v1/workers").json()
+        target_w = next(w for w in w_list["workers"] if w["name"] == "laptop-test")
+        self.assertEqual(target_w["host"], "192.168.1.131")
+        self.assertEqual(target_w["model"], "large-v3")
+        self.assertTrue(target_w["online"])
+
+        # AI generate queuing
+        gen_resp = self.client.post(f"/api/v1/songs/{song_id}/ai-generate", headers=PAGE)
+        self.assertEqual(gen_resp.status_code, 200)
+        self.assertIn("job", gen_resp.json())
+
 
 if __name__ == "__main__":
     unittest.main()

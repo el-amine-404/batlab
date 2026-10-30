@@ -268,6 +268,8 @@ def origin(lyrics: Lyrics) -> Origin:
     if by.startswith("AI-generated"):
         state = "corrected" if "corrected" in by else "checked" if "checked by a person" in by and "not" not in by else "unchecked"
         return Origin("ai", state, unsure, checked)
+    if "user_uploaded" in by.lower() or "user uploaded" in by.lower() or "user_uploaded" in re_.lower() or "user uploaded" in re_.lower():
+        return Origin("user_uploaded", None, 0, 0)
     # A source's file says so: [re:<its name> via Stanzarr].
     for mark, source in (("lrclib", "lrclib"), ("netease", "netease"), ("musixmatch", "musixmatch"), ("genius", "genius"),
                          ("lyrics.ovh", "lyricsovh")):

@@ -250,11 +250,22 @@ def save_ai_result(db: Database, cfg: Config, song_id: int, lines: list[dict], m
     if os.path.exists(lrc):
         _backup(cfg, song, lrc)
     unsure = [str(i + 1) for i, l in enumerate(lines) if l.get("u")]
-    tags = ["[by:AI-generated, not checked by a person]", f"[re:Stanzarr AI sync {date.today()}: {method}]",
+    confidence = round(100 * (len(lines) - len(unsure)) / max(len(lines), 1))
+    tags = ["[by:AI-generated, not checked by a person]", f"[re:Stanzarr AI {date.today()}: {method}]",
+            f"[#:verification: {confidence}% verified]",
             "[#:uncertain lines (the methods disagree): " + (", ".join(unsure) or "none") + "]"]
     body = [lyricsfiles.Line(float(l["t"]), lyricsfiles.HIDDEN.sub("", lyricsfiles.clean(str(l["s"]))).strip()[:lyricsfiles.MAX_LINE])
             for l in lines]
     lyricsfiles.write_atomic(lrc, lyricsfiles.render_lrc(body, tags))
+    txt = sidecar(song, ".txt")
+    if not os.path.exists(txt):
+        plain_body = "\n".join(l.s for l in body if l.s.strip()) + "\n"
+        lyricsfiles.write_atomic(txt, plain_body)
+        db.run(
+            "INSERT INTO written(path, source, at) VALUES(?, 'ai', ?)"
+            " ON CONFLICT(path) DO UPDATE SET source='ai', at=excluded.at",
+            (txt, time.time()),
+        )
     sync_lyrics(db, song_id, song["path"], force=True)
-    db.event("ai", f"{song['artist']} – {song['title']}: synced by AI ({len(unsure)} unsure lines)", song_id, actor)
-    return f"written, {len(unsure)} lines to check"
+    db.event("ai", f"{song['artist']} – {song['title']}: synced by AI ({len(unsure)} unsure lines, {confidence}% verified)", song_id, actor)
+    return f"written, {len(unsure)} lines to check ({confidence}% verified)"

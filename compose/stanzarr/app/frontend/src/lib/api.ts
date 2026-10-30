@@ -13,7 +13,11 @@ export type LyricsStatus = SongRow["status"];
 export type SystemStatus = Schemas["SystemStatus"];
 export type Coverage = Schemas["Coverage"];
 export type Job = Schemas["Job"];
-export type Worker = Schemas["Worker"];
+export type Worker = Schemas["Worker"] & {
+  host?: string;
+  model?: string;
+  capabilities?: string;
+};
 export type WorkerList = Schemas["WorkerList"];
 export type WorkerMade = Schemas["WorkerMade"];
 export type Source = Schemas["Source"];
@@ -101,7 +105,10 @@ export type SongDetail = {
   quality: { rank: number; cutoff: number };
   /** Why AI sync or asking the sources can't be done now; null: they can. */
   ai_blocked: string | null;
+  ai_generate_blocked?: string | null;
   search_blocked: string | null;
+  active_worker?: Worker | null;
+  workers_online?: Worker[];
 };
 
 export type EditorLine = { t: number; s: string; u?: boolean; fixed?: boolean };
@@ -210,6 +217,9 @@ export const api = {
   song: (id: number) => request<SongDetail>(`/songs/${id}`),
   searchSong: (id: number) => request<{ result: string }>(`/songs/${id}/search`, { method: "POST" }),
   aiSync: (id: number) => request<{ job: number }>(`/songs/${id}/ai-sync`, { method: "POST" }),
+  aiGenerate: (id: number) => request<{ job: number }>(`/songs/${id}/ai-generate`, { method: "POST" }),
+  uploadLyrics: (id: number, filename: string, text: string) =>
+    request<{ ok: boolean; filename: string; source: string }>(`/songs/${id}/lyrics/upload`, json("POST", { filename, text })),
   editor: (id: number) => request<EditorData>(`/songs/${id}/editor`),
   saveLyrics: (id: number, lines: EditorLine[]) => request<{ saved: number }>(`/songs/${id}/lyrics`, json("PUT", { lines })),
   audioUrl: (id: number, kind: "mix" | "voice") => `/api/v1/songs/${id}/audio/${kind}`,

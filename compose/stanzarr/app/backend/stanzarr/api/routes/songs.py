@@ -8,7 +8,7 @@ import urllib.parse
 from typing import Literal
 
 import mutagen
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import FileResponse
 
 from ... import language, library, lyricsfiles, operations, peaks
@@ -128,25 +128,33 @@ def song(song_id: int, ctx: Ctx):
                         (song_id,))
     has_text = operations.best_text(db, song_id) is not None
     queued = db.one("SELECT 1 FROM jobs WHERE song_id=? AND status IN ('queued','running')", (song_id,))
+    online_workers = ctx.workers_online()
+    active_worker = online_workers[0] if online_workers else None
     # Why an action can't be done now, said beside it on the page (None: it can).
     ai_blocked = ("stanzarr is read-only: nothing is written." if cfg.read_only
                   else "Queued already: see Activity." if queued
                   else "AI sync places words already there: this song has none yet. Ask the sources, or write them."
                   if not has_text
-                  else "No GPU worker is online: start one (Settings, Workers)." if not any(w["gpu"] for w in ctx.workers_online())
+                  else "No GPU worker is online: start one (Settings, Workers)." if not any(w["gpu"] for w in online_workers)
                   else None)
+    ai_generate_blocked = ("stanzarr is read-only: nothing is written." if cfg.read_only
+                           else "Queued already: see Activity." if queued
+                           else "No GPU worker is online: start one (Settings, Workers)." if not any(w["gpu"] for w in online_workers)
+                           else None)
     search_blocked = None if ctx.sources.asked() else "No source is on: add one in Settings, Sources."
     return {"song": found | {"status": status_row["status"] if status_row else "missing"},
             "quality": {"rank": status_row["rank"] if status_row else 0,
                         "cutoff": library.LEVELS[ctx.settings().cutoff]},
-            "ai_blocked": ai_blocked, "search_blocked": search_blocked,
+            "ai_blocked": ai_blocked, "ai_generate_blocked": ai_generate_blocked, "search_blocked": search_blocked,
             "files": files,
             "attempt": db.one("SELECT * FROM attempts WHERE song_id=?", (song_id,)),
             "jobs": db.all("SELECT * FROM jobs WHERE song_id=? ORDER BY id DESC LIMIT 5", (song_id,)),
             "events": [e | {"ok": bool(e["ok"])} for e in db.all("SELECT * FROM events WHERE song_id=? ORDER BY id DESC LIMIT 10",
                                                                  (song_id,))],
             "has_voice": os.path.exists(os.path.join(cfg.artifacts_dir, str(song_id), "vocals.ogg")),
-            "has_text": has_text}
+            "has_text": has_text,
+            "active_worker": active_worker,
+            "workers_online": online_workers}
 
 
 @router.post("/{song_id}/search", summary="Ask the sources for this song now", responses=_404,
@@ -159,7 +167,7 @@ def search(song_id: int, ctx: Ctx, who: Who):
         raise Conflict(f"No source answered: {error}") from error
 
 
-@router.post("/{song_id}/ai-sync", summary="Queue this song for AI sync", responses=_404,
+@router.post("/{song_id}/ai-sync", summary="Queue this song for AI sync (timing alignment)", responses=_404,
              dependencies=[need("ai")])
 def ai_sync(song_id: int, ctx: Ctx, who: Who):
     db = ctx.db
@@ -174,6 +182,78 @@ def ai_sync(song_id: int, ctx: Ctx, who: Who):
                     (song_id, int(time.time())))
     db.event("ai", f"{found['artist']} – {found['title']}: AI sync queued", song_id, who.name)
     return {"job": job}
+
+
+@router.post("/{song_id}/ai-generate", summary="Queue this song for AI generation (transcription and sync)", responses=_404,
+             dependencies=[need("ai")])
+def ai_generate(song_id: int, ctx: Ctx, who: Who):
+    db = ctx.db
+    found = song_or_404(ctx, song_id)
+    if not any(w["gpu"] for w in ctx.workers_online()):
+        raise Conflict("No GPU worker is online: AI generation needs one (Settings, Workers).")
+    if db.one("SELECT 1 FROM jobs WHERE song_id=? AND status IN ('queued','running')", (song_id,)):
+        raise Conflict("It is queued already.")
+    job = db.insert("INSERT INTO jobs(song_id, kind, status, created_at) VALUES(?, 'ai_generate', 'queued', ?)",
+                    (song_id, int(time.time())))
+    db.event("ai", f"{found['artist']} – {found['title']}: AI generation queued", song_id, who.name)
+    return {"job": job}
+
+
+@router.post("/{song_id}/lyrics/upload", summary="Upload a lyrics file (.lrc or .txt) for this song", responses=_404,
+             dependencies=[need("edit")])
+async def upload_lyrics(song_id: int, request: Request, ctx: Ctx, who: Who):
+    found = song_or_404(ctx, song_id)
+    if ctx.config.read_only:
+        raise Conflict("Stanzarr is read-only (STANZARR_READ_ONLY): nothing is written.")
+
+    content_type = request.headers.get("content-type", "")
+    filename = request.headers.get("x-filename", "lyrics.lrc")
+    raw_text = ""
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+            filename = str(body.get("filename") or filename)
+            raw_text = str(body.get("text") or "")
+        except Exception:
+            raise Invalid("Send valid JSON with {\"filename\": ..., \"text\": ...}.")
+    else:
+        body_bytes = await request.body()
+        raw_text = body_bytes.decode("utf-8", errors="replace")
+
+    if not raw_text.strip() or len(raw_text.encode("utf-8")) > lyricsfiles.MAX_BYTES:
+        raise Invalid(f"Send lyrics text under {lyricsfiles.MAX_BYTES // 1024} KB.")
+
+    checked = lyricsfiles.sanitize(raw_text, found["duration"])
+    if checked.refused:
+        raise Invalid(f"Refused: {checked.refused}")
+    cleaned_text = checked.text
+
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in lyricsfiles.SIDECARS:
+        ext = ".lrc" if lyricsfiles.STAMP.search(cleaned_text) else ".txt"
+
+    target_path = operations.sidecar(found, ext)
+    if os.path.exists(target_path):
+        operations._backup(ctx.config, found, target_path)
+
+    if ext == ".lrc":
+        parsed = lyricsfiles.parse_lrc(cleaned_text)
+        tags = [f"[{k}:{v}]" for k, v in parsed.tags.items() if k.lower() != "by"]
+        tags.insert(0, "[by:User uploaded]")
+        final_content = lyricsfiles.render_lrc(parsed.lines, tags)
+    else:
+        final_content = cleaned_text
+
+    lyricsfiles.write_atomic(target_path, final_content)
+    ctx.db.run(
+        "INSERT INTO written(path, source, at) VALUES(?, 'user_uploaded', ?)"
+        " ON CONFLICT(path) DO UPDATE SET source='user_uploaded', at=excluded.at",
+        (target_path, time.time()),
+    )
+    library.sync_lyrics(ctx.db, song_id, found["path"], force=True)
+    ctx.db.run("UPDATE lyrics SET source='user_uploaded' WHERE song_id=? AND path=?", (song_id, target_path))
+    ctx.db.event("lyrics", f"{found['artist']} – {found['title']}: lyrics uploaded by user ({ext})", song_id, who.name)
+    return {"ok": True, "filename": os.path.basename(target_path), "source": "user_uploaded"}
 
 
 @router.get("/{song_id}/editor", summary="The lines to edit, and what the song has", responses=_404)

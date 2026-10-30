@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, AudioLines, Barcode, Cable, Clock, Database, Disc3, Download, ExternalLink, FolderOpen, Info, Loader2,
-         Pencil } from "lucide-react";
+import { ArrowLeft, AudioLines, Barcode, Cable, Check, Clock, Database, Disc3, Download, ExternalLink,
+         FolderOpen, Info, Loader2, Pencil, Sparkles, Upload } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
@@ -10,6 +10,7 @@ import { StatusBadge } from "@/components/library/StatusBadge";
 import { Failed, Loading } from "@/components/layout/States";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, errorText, type LyricsFile } from "@/lib/api";
 import { useCan } from "@/lib/auth";
@@ -27,6 +28,84 @@ function Section({ title, children, actions, className }: { title: string; child
       </div>
       {children}
     </Card>
+  );
+}
+
+function UploadDialog({ open, onClose, songId, onUploaded }: {
+  open: boolean;
+  onClose: () => void;
+  songId: number;
+  onUploaded: () => void;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!file) return;
+    setBusy(true);
+    try {
+      const text = await file.text();
+      await api.uploadLyrics(songId, file.name, text);
+      toast.success("Lyrics uploaded and tagged as User uploaded.");
+      onUploaded();
+      onClose();
+    } catch (caught) {
+      toast.error(errorText(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <form onSubmit={(e) => void submit(e)}>
+          <DialogHeader>
+            <DialogTitle>Upload lyrics</DialogTitle>
+            <DialogDescription>
+              Upload an LRC (.lrc) or plain text (.txt) file. It will be stored beside the song and marked as User uploaded.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody className="space-y-4">
+            <input
+              ref={fileInput}
+              type="file"
+              accept=".lrc,.txt,.elrc,.ttml,.yaml,.yml"
+              className="hidden"
+              onChange={(e) => {
+                const picked = e.target.files?.[0];
+                if (picked) setFile(picked);
+              }}
+            />
+            <div
+              onClick={() => fileInput.current?.click()}
+              className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-border/80 p-6 text-center hover:border-primary/50 hover:bg-accent/40 transition-colors"
+            >
+              <Upload className="mb-2 size-8 text-muted-foreground" />
+              {file ? (
+                <div>
+                  <p className="font-medium text-foreground">{file.name}</p>
+                  <p className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(1)} KB</p>
+                </div>
+              ) : (
+                <div>
+                  <p className="font-medium text-foreground">Click to select lyrics file</p>
+                  <p className="text-xs text-muted-foreground">.lrc or .txt up to 512 KB</p>
+                </div>
+              )}
+            </div>
+          </DialogBody>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
+            <Button type="submit" disabled={!file || busy}>
+              {busy ? <Loader2 className="animate-spin" /> : <Upload />} Upload
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -54,6 +133,8 @@ function Lines({ lines, synced, className }: { lines: Line[]; synced: boolean; c
 /** What a version is, in words: "LRC file", "Embedded in the audio", with who made it when the file says. */
 function versionName(file: LyricsFile): string {
   const what = file.format === "embedded" ? "Embedded" : `${FORMAT[file.format] ?? file.format} file`;
+  if (file.source === "user_uploaded") return `${what} · User uploaded`;
+  if (file.source === "ai") return `${what} · Generated with AI`;
   return file.source === "unknown" ? what : `${what} · ${SOURCE[file.source] ?? file.source}`;
 }
 
@@ -222,8 +303,9 @@ export function SongPage() {
   const changed = useLyricsChanged();
   const { data, error, isPending, refetch } = useSong(id);
   const { data: best } = useEditor(id);
-  const [busy, setBusy] = useState<"search" | "ai" | null>(null);
+  const [busy, setBusy] = useState<"search" | "ai" | "generate" | null>(null);
   const [cover, setCover] = useState(true);
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   const back = (
     <Link to={libraryLink()} className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
@@ -234,13 +316,16 @@ export function SongPage() {
   if (error) return <>{back}<Failed error={error} retry={() => void refetch()} /></>;
   const { song, files, attempt, jobs, events, quality } = data;
 
-  const act = async (kind: "search" | "ai") => {
+  const act = async (kind: "search" | "ai" | "generate") => {
     setBusy(kind);
     try {
       if (kind === "search") toast.success((await api.searchSong(id)).result);
-      else {
+      else if (kind === "generate") {
+        await api.aiGenerate(id);
+        toast.success("Queued for AI Generation: Whisper transcription will run on the remote worker.");
+      } else {
         await api.aiSync(id);
-        toast.success("Queued: Activity shows it.");
+        toast.success("Queued for AI Sync: timing alignment will run on the remote GPU worker.");
       }
       changed(id);
     } catch (caught) {
@@ -276,12 +361,38 @@ export function SongPage() {
                 </span>
               )}
             </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-border/70 bg-card/60 px-3 py-2 text-xs">
+              <span className={cn("size-2 shrink-0 rounded-full", data.active_worker?.online ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/40")} />
+              {data.active_worker?.online ? (
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <span className="font-semibold text-emerald-400">AI Worker online:</span>
+                  <span className="font-medium text-foreground">{data.active_worker.name}</span>
+                  {data.active_worker.host && <span className="text-muted-foreground font-mono">({data.active_worker.host})</span>}
+                  <span className="text-muted-foreground/60">·</span>
+                  <span className="text-muted-foreground">Model:</span>
+                  <span className="font-medium text-foreground">{data.active_worker.model || "Demucs htdemucs + Whisper large-v3 + MMS"}</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 text-muted-foreground">
+                  <span>No GPU worker online.</span>
+                  <Link to="/settings/workers" className="text-primary hover:underline font-medium">Settings &gt; Workers</Link>
+                  <span>(run worker on external GPU PC)</span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
         <div className="grid w-full grid-cols-2 items-start gap-2 sm:flex sm:w-auto sm:flex-wrap sm:gap-3">
           {can("edit") && (
             <Action>
               <Button asChild><Link to={`/songs/${id}/edit`}><Pencil /> {data.has_text ? "Edit timings" : "Write lyrics"}</Link></Button>
+            </Action>
+          )}
+          {can("edit") && (
+            <Action>
+              <Button variant="secondary" onClick={() => setUploadOpen(true)}>
+                <Upload /> Upload lyrics
+              </Button>
             </Action>
           )}
           {can("edit") && (
@@ -295,6 +406,13 @@ export function SongPage() {
             <Action reason={data.ai_blocked}>
               <Button variant="secondary" onClick={() => void act("ai")} disabled={!!busy || !!data.ai_blocked}>
                 {busy === "ai" ? <Loader2 className="animate-spin" /> : <AudioLines />} Sync with AI
+              </Button>
+            </Action>
+          )}
+          {can("ai") && (
+            <Action reason={data.ai_generate_blocked}>
+              <Button variant="secondary" onClick={() => void act("generate")} disabled={!!busy || !!data.ai_generate_blocked}>
+                {busy === "generate" ? <Loader2 className="animate-spin" /> : <Sparkles />} Generate with AI
               </Button>
             </Action>
           )}
@@ -326,7 +444,11 @@ export function SongPage() {
         </Section>
 
         <div className="flex min-w-0 flex-col gap-4">
-          <Section title="Versions">
+          <Section title="Versions" actions={can("edit") && (
+            <Button variant="ghost" size="sm" onClick={() => setUploadOpen(true)} className="h-7 text-xs">
+              <Upload className="size-3.5" /> Upload lyrics
+            </Button>
+          )}>
             {!files.length ? <p className="text-sm text-muted-foreground">None.</p> : (
               <ul className="flex flex-col divide-y divide-border">
                 {files.map((file) => {
@@ -342,7 +464,10 @@ export function SongPage() {
                           <span title={timing.hint}>Timings: {timing.label.toLowerCase()}</span>
                           <span aria-hidden>·</span>
                           <Link to={`/library?by=${file.source}`} className="hover:text-foreground hover:underline" title="Every song with a file made so">
-                            {file.source === "unknown" ? <span title="stanzarr didn't make this file, and the file doesn't say who did: it was beside the song already, or another app put it there.">Was already there</span> : `From ${SOURCE[file.source] ?? file.source}`}
+                            {file.source === "user_uploaded" ? <span className="text-sky-400 font-medium">User uploaded</span>
+                             : file.source === "unknown" ? <span title="stanzarr didn't make this file, and the file doesn't say who did: it was beside the song already, or another app put it there.">Was already there</span>
+                             : file.source === "ai" ? "Generated with AI"
+                             : `From ${SOURCE[file.source] ?? file.source}`}
                           </Link>
                           <span aria-hidden>·</span>
                           {file.language ? <Link to={`/library?lang=${file.language}`} className="hover:text-foreground hover:underline">{file.language_name}</Link>
@@ -351,10 +476,10 @@ export function SongPage() {
                           <span>{file.lines} {file.lines === 1 ? "line" : "lines"}</span>
                         </p>
                         {file.source === "ai" && (
-                          <p className="mt-0.5 text-xs">
-                            {file.ai_state !== "unchecked" ? <span className="text-success">Checked by a person</span>
+                          <p className="mt-0.5 text-xs flex items-center gap-1.5">
+                            {file.ai_state !== "unchecked" ? <span className="text-success flex items-center gap-1"><Check className="size-3" /> Checked by a person</span>
                               : toCheck > 0 ? <span className="text-warning">{toCheck} unsure {toCheck === 1 ? "line" : "lines"} to check</span>
-                              : <span className="text-muted-foreground">Not checked by a person yet</span>}
+                              : <span className="text-emerald-400 font-medium flex items-center gap-1"><Check className="size-3" /> Timings verified by AI consensus</span>}
                           </p>
                         )}
                       </div>
@@ -416,6 +541,7 @@ export function SongPage() {
           </Section>
         </div>
       </div>
+      <UploadDialog open={uploadOpen} onClose={() => setUploadOpen(false)} songId={id} onUploaded={() => { changed(id); void refetch(); }} />
     </>
   );
 }

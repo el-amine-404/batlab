@@ -77,8 +77,32 @@ def whisper(wave, lines: list[str], size: str, language: str) -> list[float | No
     return [pool[key(t)].pop(0) if pool.get(key(t)) else None for t in lines]
 
 
+def transcribe(vocals_path: str, size: str = "large-v3", language: str = "") -> list[dict]:
+    """Transcribe audio from scratch with Whisper large-v3."""
+    import stable_whisper
+    import torch
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    compute_type = "int8_float16" if device == "cuda" else "int8"
+    model = stable_whisper.load_faster_whisper(size, device=device, compute_type=compute_type)
+    lang = None if language in ("", "auto", "none") else language
+    result = model.transcribe(vocals_path, language=lang, vad=True)
+    out = []
+    for seg in result.segments:
+        text = seg.text.strip()
+        if text:
+            out.append({"t": round(seg.start, 3), "s": text, "u": False})
+    return out
+
+
 def main() -> None:
-    method, vocals, lines_path, out = sys.argv[1:5]
+    method = sys.argv[1]
+    if method == "transcribe":
+        vocals, _, out = sys.argv[2:5]
+        language = sys.argv[5] if len(sys.argv) > 5 else ""
+        result = transcribe(vocals, "large-v3", language)
+        json.dump(result, open(out, "w"))
+        return
+    vocals, lines_path, out = sys.argv[2:5]
     language = sys.argv[5] if len(sys.argv) > 5 else "fr"
     lines = json.load(open(lines_path, encoding="utf-8"))
     wave = load_vocals(vocals)

@@ -68,11 +68,15 @@ def _workers(ctx) -> list[dict]:
         report = seen.pop(key["name"], None) or {}
         out.append({**key, "shared_key": False, "gpu": report.get("gpu", ""), "vram": report.get("vram", 0),
                     "version": report.get("version", ""), "last_seen": report.get("last_seen"),
+                    "host": report.get("host", ""), "model": report.get("model", ""),
+                    "capabilities": report.get("capabilities", "sync,generate"),
                     "online": bool(report) and now - report["last_seen"] < 60})
     for name, report in seen.items():
         out.append({"id": None, "name": name, "prefix": None, "created_at": None, "last_used": None, "shared_key": True,
                     "gpu": report["gpu"], "vram": report["vram"], "version": report["version"],
-                    "last_seen": report["last_seen"], "online": now - report["last_seen"] < 60})
+                    "last_seen": report["last_seen"], "host": report.get("host", ""), "model": report.get("model", ""),
+                    "capabilities": report.get("capabilities", "sync,generate"),
+                    "online": now - report["last_seen"] < 60})
     return out
 
 
@@ -88,7 +92,7 @@ def add_worker(body: WorkerIn, ctx: Ctx, who: Who):
     key, row = ctx.add_worker(body.name)
     ctx.db.event("workers", f"Worker {row['name']} added", actor=who.name)
     return {"key": key, "worker": {**row, "shared_key": False, "gpu": "", "vram": 0, "version": "", "last_seen": None,
-                                   "online": False}}
+                                   "online": False, "host": "", "model": "", "capabilities": "sync,generate"}}
 
 
 @router.patch("/workers/{worker_id}", summary="Rename a worker", response_model=schemas.Ok,
@@ -133,19 +137,23 @@ def _running(ctx, job_id: int, name: str) -> dict:
 
 
 @protocol.post("/heartbeat", summary="A worker checks in (every 20 s)")
-def heartbeat(body: dict, ctx: Ctx, name: str = Depends(worker)):
-    ctx.db.run("INSERT INTO workers(name, gpu, vram, version, last_seen) VALUES(?, ?, ?, ?, ?)"
+def heartbeat(request: Request, body: dict, ctx: Ctx, name: str = Depends(worker)):
+    client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "")
+    host = str(body.get("host") or client_ip)[:120]
+    model = str(body.get("model") or "Demucs htdemucs + Whisper large-v3 + MMS")[:120]
+    capabilities = str(body.get("capabilities") or "sync,generate")[:80]
+    ctx.db.run("INSERT INTO workers(name, gpu, vram, version, last_seen, host, model, capabilities) VALUES(?, ?, ?, ?, ?, ?, ?, ?)"
                " ON CONFLICT(name) DO UPDATE SET gpu=excluded.gpu, vram=excluded.vram, version=excluded.version,"
-               " last_seen=excluded.last_seen",
+               " last_seen=excluded.last_seen, host=excluded.host, model=excluded.model, capabilities=excluded.capabilities",
                (name, str(body.get("gpu", ""))[:120], int(body.get("vram", 0) or 0),
-                str(body.get("version", ""))[:32], int(time.time())))
+                str(body.get("version", ""))[:32], int(time.time()), host, model, capabilities))
     return {"ok": True}
 
 
 @protocol.post("/next", summary="The next job, or 204 when there is none")
 def next_job(ctx: Ctx, name: str = Depends(worker)):
     with ctx.db.tx() as conn:
-        row = conn.execute("SELECT id, song_id FROM jobs WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
+        row = conn.execute("SELECT id, song_id, kind FROM jobs WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
         if not row:
             return Response(status_code=204)
         conn.execute("UPDATE jobs SET status='running', worker=?, started_at=?, stage='starting' WHERE id=?",
@@ -154,7 +162,8 @@ def next_job(ctx: Ctx, name: str = Depends(worker)):
     lyrics = operations.best_text(ctx.db, row["song_id"])
     words = [line.s for line in (lyrics.lines if lyrics else []) if line.s.strip()
              and not (line.s.startswith("[") and line.s.endswith("]"))]
-    return {"job": row["id"], "song": {k: found[k] for k in ("artist", "title", "album", "duration")},
+    kind = row["kind"] if "kind" in row.keys() else "ai_sync"
+    return {"job": row["id"], "kind": kind, "song": {k: found[k] for k in ("artist", "title", "album", "duration")},
             "lines": words, "audio_name": os.path.basename(found["path"])}
 
 
