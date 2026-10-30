@@ -24,6 +24,7 @@ from ..operations import ReadOnly
 from ..services import Services, build
 from .auth import RequestLog, gate, principal
 from .routes import PUBLIC, ROUTERS, WORKERS
+from .routes.workers import MAX_UPLOAD
 
 log = logging.getLogger("stanzarr")
 
@@ -95,7 +96,7 @@ def create_app(services: Services, run_background: bool = True) -> FastAPI:
     # People and keys (api/auth.py): their refusals answered, the accounts the routes use.
     gate.install(app, services.accounts)
     app.add_middleware(GZipMiddleware, minimum_size=1024)
-    app.add_middleware(BodyLimit)
+    app.add_middleware(BodyLimit, limit=MAX_UPLOAD)
     app.add_middleware(RequestLog, name="stanzarr")
 
     api = APIRouter(prefix="/api/v1")
