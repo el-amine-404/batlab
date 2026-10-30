@@ -10,6 +10,16 @@ import re
 import sys
 import unicodedata
 
+try:
+    import av
+    _orig_av_open = av.open
+    def _safe_av_open(*args, **kwargs):
+        kwargs.pop("metadata_errors", None)
+        return _orig_av_open(*args, **kwargs)
+    av.open = _safe_av_open
+except Exception:
+    pass
+
 LOOKALIKE = str.maketrans("еаорсухЕАОРСХ", "eaopcyxEAOPCX")
 # Darija written in Latin letters uses digits for sounds Latin lacks.
 ARABIZI = {"2": "", "3": "a", "5": "kh", "7": "h", "8": "gh", "9": "q", "6": "t"}
