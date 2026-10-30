@@ -66,10 +66,26 @@ def mms(wave, lines: list[str]) -> list[float | None]:
 
 
 def whisper(wave, lines: list[str], size: str, language: str) -> list[float | None]:
-    """Whisper (int8 on the GPU) through stable-ts: places the known lines."""
+    """Whisper (int8 on GPU, fallback to CPU on OOM) through stable-ts: places the known lines."""
     import stable_whisper
-    model = stable_whisper.load_faster_whisper(size, device="cuda", compute_type="int8_float16")
-    result = model.align(wave.numpy(), "\n".join(lines), language=language, original_split=True, verbose=None)
+    import torch
+    result = None
+    if torch.cuda.is_available():
+        try:
+            torch.cuda.empty_cache()
+            model = stable_whisper.load_faster_whisper(size, device="cuda", compute_type="int8_float16")
+            result = model.align(wave.numpy(), "\n".join(lines), language=language, original_split=True, verbose=None)
+        except Exception as e:
+            if "out of memory" in str(e).lower() or "cuda" in str(e).lower():
+                torch.cuda.empty_cache()
+                model = stable_whisper.load_faster_whisper(size, device="cpu", compute_type="int8")
+                result = model.align(wave.numpy(), "\n".join(lines), language=language, original_split=True, verbose=None)
+            else:
+                raise
+    else:
+        model = stable_whisper.load_faster_whisper(size, device="cpu", compute_type="int8")
+        result = model.align(wave.numpy(), "\n".join(lines), language=language, original_split=True, verbose=None)
+
     key = lambda t: re.sub(r"[^\w]+", "", t.translate(LOOKALIKE).lower())
     pool: dict[str, list[float]] = {}
     for seg in result.segments:
@@ -78,14 +94,27 @@ def whisper(wave, lines: list[str], size: str, language: str) -> list[float | No
 
 
 def transcribe(vocals_path: str, size: str = "large-v3", language: str = "") -> list[dict]:
-    """Transcribe audio from scratch with Whisper large-v3."""
+    """Transcribe audio from scratch with Whisper (GPU int8, fallback to CPU on OOM)."""
     import stable_whisper
     import torch
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    compute_type = "int8_float16" if device == "cuda" else "int8"
-    model = stable_whisper.load_faster_whisper(size, device=device, compute_type=compute_type)
     lang = None if language in ("", "auto", "none") else language
-    result = model.transcribe(vocals_path, language=lang, vad=True)
+    result = None
+    if torch.cuda.is_available():
+        try:
+            torch.cuda.empty_cache()
+            model = stable_whisper.load_faster_whisper(size, device="cuda", compute_type="int8_float16")
+            result = model.transcribe(vocals_path, language=lang, vad=True)
+        except Exception as e:
+            if "out of memory" in str(e).lower() or "cuda" in str(e).lower():
+                torch.cuda.empty_cache()
+                model = stable_whisper.load_faster_whisper(size, device="cpu", compute_type="int8")
+                result = model.transcribe(vocals_path, language=lang, vad=True)
+            else:
+                raise
+    else:
+        model = stable_whisper.load_faster_whisper(size, device="cpu", compute_type="int8")
+        result = model.transcribe(vocals_path, language=lang, vad=True)
+
     out = []
     for seg in result.segments:
         text = seg.text.strip()

@@ -3,6 +3,8 @@
 import json
 import logging
 import os
+import re
+import shutil
 import time
 import urllib.parse
 from typing import Literal
@@ -199,6 +201,10 @@ def ai_generate(song_id: int, ctx: Ctx, who: Who):
     return {"job": job}
 
 
+MAX_UPLOAD_BYTES = 256 * 1024  # 256 KB max for lyrics file upload
+DANGEROUS_PAYLOAD = re.compile(r"(<\s*script|#!/(?:bin|usr)|<\?php|<\%|\beval\s*\(|\bexec\s*\(|\bsystem\s*\()", re.IGNORECASE)
+
+
 @router.post("/{song_id}/lyrics/upload", summary="Upload a lyrics file (.lrc or .txt) for this song", responses=_404,
              dependencies=[need("edit")])
 async def upload_lyrics(song_id: int, request: Request, ctx: Ctx, who: Who):
@@ -218,19 +224,34 @@ async def upload_lyrics(song_id: int, request: Request, ctx: Ctx, who: Who):
             raise Invalid("Send valid JSON with {\"filename\": ..., \"text\": ...}.")
     else:
         body_bytes = await request.body()
-        raw_text = body_bytes.decode("utf-8", errors="replace")
+        if len(body_bytes) > MAX_UPLOAD_BYTES:
+            raise Invalid("Uploaded lyrics file exceeds the 256 KB limit.")
+        try:
+            raw_text = body_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            raise Invalid("Uploaded file must be valid UTF-8 text.")
 
-    if not raw_text.strip() or len(raw_text.encode("utf-8")) > lyricsfiles.MAX_BYTES:
-        raise Invalid(f"Send lyrics text under {lyricsfiles.MAX_BYTES // 1024} KB.")
+    # Prevent path traversal and enforce strict extension (.lrc and .txt only)
+    safe_filename = os.path.basename(filename.strip().replace("\\", "/"))
+    ext = os.path.splitext(safe_filename)[1].lower()
+    if ext not in (".lrc", ".txt"):
+        raise Invalid("Only .lrc (synced) and .txt (plain) files are accepted.")
+
+    if not raw_text.strip() or len(raw_text.encode("utf-8")) > MAX_UPLOAD_BYTES:
+        raise Invalid(f"Send lyrics text under {MAX_UPLOAD_BYTES // 1024} KB.")
+
+    if "\x00" in raw_text:
+        raise Invalid("Uploaded file contains binary data (null bytes).")
+    if DANGEROUS_PAYLOAD.search(raw_text):
+        raise Invalid("Uploaded file contains disallowed script or executable patterns.")
 
     checked = lyricsfiles.sanitize(raw_text, found["duration"])
     if checked.refused:
         raise Invalid(f"Refused: {checked.refused}")
     cleaned_text = checked.text
 
-    ext = os.path.splitext(filename)[1].lower()
-    if ext not in lyricsfiles.SIDECARS:
-        ext = ".lrc" if lyricsfiles.STAMP.search(cleaned_text) else ".txt"
+    if ext == ".lrc" and not lyricsfiles.STAMP.search(cleaned_text) and not lyricsfiles.TAG.search(cleaned_text):
+        raise Invalid("The uploaded .lrc file does not contain valid timestamped lyrics lines.")
 
     target_path = operations.sidecar(found, ext)
     if os.path.exists(target_path):
@@ -254,6 +275,54 @@ async def upload_lyrics(song_id: int, request: Request, ctx: Ctx, who: Who):
     ctx.db.run("UPDATE lyrics SET source='user_uploaded' WHERE song_id=? AND path=?", (song_id, target_path))
     ctx.db.event("lyrics", f"{found['artist']} – {found['title']}: lyrics uploaded by user ({ext})", song_id, who.name)
     return {"ok": True, "filename": os.path.basename(target_path), "source": "user_uploaded"}
+
+
+@router.get("/{song_id}/backups", summary="List historical backups of lyrics for this song", responses=_404)
+def song_backups(song_id: int, ctx: Ctx):
+    found = song_or_404(ctx, song_id)
+    prefix = f"{song_id}-"
+    backups = []
+    if os.path.exists(ctx.config.backups_dir):
+        for entry in os.scandir(ctx.config.backups_dir):
+            if entry.is_file() and entry.name.startswith(prefix):
+                remainder = entry.name[len(prefix):]
+                parts = remainder.split("-", 2)
+                stamp = f"{parts[0]}-{parts[1]}" if len(parts) >= 2 else ""
+                orig_name = parts[2] if len(parts) >= 3 else remainder
+                stat = entry.stat()
+                backups.append({
+                    "filename": entry.name,
+                    "name": orig_name,
+                    "stamp": stamp,
+                    "size": stat.st_size,
+                    "at": int(stat.st_mtime)
+                })
+    backups.sort(key=lambda b: b["at"], reverse=True)
+    return {"backups": backups}
+
+
+@router.post("/{song_id}/backups/{backup_filename}/restore", summary="Restore a previously backed up lyrics version",
+             responses=_404, dependencies=[need("edit")])
+def restore_backup(song_id: int, backup_filename: str, ctx: Ctx, who: Who):
+    found = song_or_404(ctx, song_id)
+    if ctx.config.read_only:
+        raise Conflict("Stanzarr is read-only (STANZARR_READ_ONLY): nothing is written.")
+    safe_name = os.path.basename(backup_filename.replace("\\", "/"))
+    if not safe_name.startswith(f"{song_id}-"):
+        raise Invalid("Backup does not belong to this song.")
+    src_path = os.path.join(ctx.config.backups_dir, safe_name)
+    if not os.path.isfile(src_path):
+        raise NotFound("Backup file not found.")
+    ext = os.path.splitext(safe_name)[1].lower()
+    if ext not in lyricsfiles.SIDECARS:
+        raise Invalid("Unsupported lyrics format in backup.")
+    target_path = operations.sidecar(found, ext)
+    if os.path.exists(target_path):
+        operations._backup(ctx.config, found, target_path)
+    shutil.copy2(src_path, target_path)
+    library.sync_lyrics(ctx.db, song_id, found["path"], force=True)
+    ctx.db.event("lyrics", f"{found['artist']} – {found['title']}: restored from backup ({safe_name})", song_id, who.name)
+    return {"ok": True, "restored": safe_name}
 
 
 @router.get("/{song_id}/editor", summary="The lines to edit, and what the song has", responses=_404)

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, AudioLines, Barcode, Cable, Check, Clock, Database, Disc3, Download, ExternalLink,
-         FolderOpen, Info, Loader2, Pencil, Sparkles, Upload } from "lucide-react";
+         FolderOpen, History, Info, Loader2, Pencil, RotateCcw, Sparkles, Upload } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
@@ -31,6 +31,94 @@ function Section({ title, children, actions, className }: { title: string; child
   );
 }
 
+function BackupsDialog({ open, onClose, songId, onRestored }: {
+  open: boolean;
+  onClose: () => void;
+  songId: number;
+  onRestored: () => void;
+}) {
+  const [backups, setBackups] = useState<Array<{ filename: string; name: string; stamp: string; size: number; at: number }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [restoring, setRestoring] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setLoading(true);
+      api.songBackups(songId)
+        .then((res) => setBackups(res.backups))
+        .catch((err) => toast.error(errorText(err)))
+        .finally(() => setLoading(false));
+    }
+  }, [open, songId]);
+
+  const handleRestore = async (filename: string) => {
+    if (!window.confirm("Restore this lyrics version? The current version will be backed up automatically before restoring.")) return;
+    setRestoring(filename);
+    try {
+      await api.restoreBackup(songId, filename);
+      toast.success("Lyrics restored successfully from backup.");
+      onRestored();
+      onClose();
+    } catch (caught) {
+      toast.error(errorText(caught));
+    } finally {
+      setRestoring(null);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <History className="size-5 text-primary" /> Version History & Backups
+          </DialogTitle>
+          <DialogDescription>
+            Whenever lyrics are uploaded, edited, or synced with AI, the previous file is preserved here. You can roll back anytime.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          {loading ? (
+            <div className="flex items-center justify-center p-6 text-muted-foreground text-sm">
+              <Loader2 className="size-4 animate-spin mr-2" /> Loading backup history...
+            </div>
+          ) : !backups.length ? (
+            <div className="p-6 text-center text-sm text-muted-foreground">
+              No previous version backups recorded for this song yet. Backups are created automatically before any update.
+            </div>
+          ) : (
+            <ul className="divide-y divide-border rounded-xl border border-border bg-card">
+              {backups.map((b) => (
+                <li key={b.filename} className="flex items-center justify-between p-3 text-xs gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-foreground truncate">{b.name}</p>
+                    <p className="text-muted-foreground mt-0.5">
+                      {timeAgo(b.at)} · {(b.size / 1024).toFixed(1)} KB
+                    </p>
+                  </div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={Boolean(restoring)}
+                    onClick={() => void handleRestore(b.filename)}
+                    className="h-7 text-xs gap-1 shrink-0"
+                  >
+                    {restoring === b.filename ? <Loader2 className="size-3 animate-spin" /> : <RotateCcw className="size-3" />}
+                    Restore
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function UploadDialog({ open, onClose, songId, onUploaded }: {
   open: boolean;
   onClose: () => void;
@@ -44,6 +132,15 @@ function UploadDialog({ open, onClose, songId, onUploaded }: {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file) return;
+    const ext = file.name.split(".").pop()?.toLowerCase();
+    if (ext !== "lrc" && ext !== "txt") {
+      toast.error("Only .lrc (synced) and .txt (plain) files are accepted.");
+      return;
+    }
+    if (file.size > 256 * 1024) {
+      toast.error("File is too large: maximum allowed size is 256 KB.");
+      return;
+    }
     setBusy(true);
     try {
       const text = await file.text();
@@ -65,18 +162,29 @@ function UploadDialog({ open, onClose, songId, onUploaded }: {
           <DialogHeader>
             <DialogTitle>Upload lyrics</DialogTitle>
             <DialogDescription>
-              Upload an LRC (.lrc) or plain text (.txt) file. It will be stored beside the song and marked as User uploaded.
+              Upload a synced LRC (.lrc) or plain text (.txt) file up to 256 KB. It will be sanitized, checked for security, safely versioned with automatic rollback, and tagged as User uploaded.
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="space-y-4">
             <input
               ref={fileInput}
               type="file"
-              accept=".lrc,.txt,.elrc,.ttml,.yaml,.yml"
+              accept=".lrc,.txt"
               className="hidden"
               onChange={(e) => {
                 const picked = e.target.files?.[0];
-                if (picked) setFile(picked);
+                if (picked) {
+                  const ext = picked.name.split(".").pop()?.toLowerCase();
+                  if (ext !== "lrc" && ext !== "txt") {
+                    toast.error("Only .lrc and .txt files are allowed.");
+                    return;
+                  }
+                  if (picked.size > 256 * 1024) {
+                    toast.error("Maximum file size is 256 KB.");
+                    return;
+                  }
+                  setFile(picked);
+                }
               }}
             />
             <div
@@ -92,7 +200,7 @@ function UploadDialog({ open, onClose, songId, onUploaded }: {
               ) : (
                 <div>
                   <p className="font-medium text-foreground">Click to select lyrics file</p>
-                  <p className="text-xs text-muted-foreground">.lrc or .txt up to 512 KB</p>
+                  <p className="text-xs text-muted-foreground">.lrc or .txt up to 256 KB</p>
                 </div>
               )}
             </div>
@@ -306,6 +414,7 @@ export function SongPage() {
   const [busy, setBusy] = useState<"search" | "ai" | "generate" | null>(null);
   const [cover, setCover] = useState(true);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [backupsOpen, setBackupsOpen] = useState(false);
 
   const back = (
     <Link to={libraryLink()} className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
@@ -445,9 +554,14 @@ export function SongPage() {
 
         <div className="flex min-w-0 flex-col gap-4">
           <Section title="Versions" actions={can("edit") && (
-            <Button variant="ghost" size="sm" onClick={() => setUploadOpen(true)} className="h-7 text-xs">
-              <Upload className="size-3.5" /> Upload lyrics
-            </Button>
+            <div className="flex items-center gap-1.5">
+              <Button variant="ghost" size="sm" onClick={() => setBackupsOpen(true)} className="h-7 text-xs text-muted-foreground hover:text-foreground">
+                <History className="size-3.5 mr-1" /> History & Backups
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setUploadOpen(true)} className="h-7 text-xs">
+                <Upload className="size-3.5 mr-1" /> Upload lyrics
+              </Button>
+            </div>
           )}>
             {!files.length ? <p className="text-sm text-muted-foreground">None.</p> : (
               <ul className="flex flex-col divide-y divide-border">
@@ -541,6 +655,7 @@ export function SongPage() {
           </Section>
         </div>
       </div>
+      <BackupsDialog open={backupsOpen} onClose={() => setBackupsOpen(false)} songId={id} onRestored={() => { changed(id); void refetch(); }} />
       <UploadDialog open={uploadOpen} onClose={() => setUploadOpen(false)} songId={id} onUploaded={() => { changed(id); void refetch(); }} />
     </>
   );

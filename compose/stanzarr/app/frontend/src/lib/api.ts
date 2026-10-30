@@ -232,7 +232,10 @@ export const api = {
   addWorker: (name: string) => request<WorkerMade>("/workers", json("POST", { name })),
   renameWorker: (id: string, name: string) => request<void>(`/workers/${encodeURIComponent(id)}`, json("PATCH", { name })),
   removeWorker: (id: string) => request<void>(`/workers/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  forgetWorker: (name: string) => request<void>(`/workers/name/${encodeURIComponent(name)}`, { method: "DELETE" }),
   retireSharedKey: () => request<void>("/workers-shared-key", { method: "DELETE" }),
+  songBackups: (songId: number) => request<{ backups: Array<{ filename: string; name: string; stamp: string; size: number; at: number }> }>(`/songs/${songId}/backups`),
+  restoreBackup: (songId: number, filename: string) => request<{ ok: boolean; restored: string }>(`/songs/${songId}/backups/${encodeURIComponent(filename)}/restore`, { method: "POST" }),
 
   sourceTypes: () => request<SourceTypes>("/sources/types"),
   sources: () => request<{ items: Source[] }>("/sources"),

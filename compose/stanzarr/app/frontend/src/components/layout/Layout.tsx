@@ -36,7 +36,7 @@ export function Layout() {
       name="stanzarr"
       logo={<Logo className="size-7" />}
       loading={<Loading />}
-      sidebar={(close) => (
+      sidebar={(close: () => void) => (
         <Sidebar
           name="stanzarr"
           logo={<Logo className="size-8" />}

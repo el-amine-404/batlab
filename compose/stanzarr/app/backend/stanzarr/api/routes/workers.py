@@ -6,6 +6,7 @@ an account; the protocol answers at /api/v1/worker/… and, for the workers
 before 1.0, /api/worker/…."""
 
 import os
+import re
 import time
 
 from batlab_common.accounts import Unauthorized
@@ -59,6 +60,15 @@ class WorkerIn(BaseModel):
     name: str = Field(min_length=1, max_length=64, description="How it shows here and in the queue: laptop, desktop…")
 
 
+def _clean_host(h: str) -> str:
+    m = re.match(r"^([\d.]+)\s*\(([\w.-]+)\)$", (h or "").strip())
+    if m:
+        ip, host = m.groups()
+        if host.replace("-", ".") == ip or host.lower() in ("localhost", ip):
+            return ip
+    return (h or "").strip()
+
+
 def _workers(ctx) -> list[dict]:
     """Each worker with a key, and what it reported last; the ones on the shared key too."""
     seen = {r["name"]: r for r in ctx.db.all("SELECT * FROM workers")}
@@ -68,13 +78,13 @@ def _workers(ctx) -> list[dict]:
         report = seen.pop(key["name"], None) or {}
         out.append({**key, "shared_key": False, "gpu": report.get("gpu", ""), "vram": report.get("vram", 0),
                     "version": report.get("version", ""), "last_seen": report.get("last_seen"),
-                    "host": report.get("host", ""), "model": report.get("model", ""),
+                    "host": _clean_host(report.get("host", "")), "model": report.get("model", ""),
                     "capabilities": report.get("capabilities", "sync,generate"),
                     "online": bool(report) and now - report["last_seen"] < 60})
     for name, report in seen.items():
         out.append({"id": None, "name": name, "prefix": None, "created_at": None, "last_used": None, "shared_key": True,
                     "gpu": report["gpu"], "vram": report["vram"], "version": report["version"],
-                    "last_seen": report["last_seen"], "host": report.get("host", ""), "model": report.get("model", ""),
+                    "last_seen": report["last_seen"], "host": _clean_host(report.get("host", "")), "model": report.get("model", ""),
                     "capabilities": report.get("capabilities", "sync,generate"),
                     "online": now - report["last_seen"] < 60})
     return out
@@ -107,7 +117,15 @@ def rename_worker(worker_id: str, body: WorkerIn, ctx: Ctx, who: Who):
                dependencies=[need("settings")])
 def remove_worker(worker_id: str, ctx: Ctx, who: Who):
     ctx.remove_worker(worker_id)
-    ctx.db.event("workers", "A worker was removed: its key no longer works", actor=who.name)
+    ctx.db.event("workers", f"Worker {worker_id} was removed", actor=who.name)
+    return Response(status_code=204)
+
+
+@router.delete("/workers/name/{name}", status_code=204, summary="Forget/remove a worker by its name",
+               dependencies=[need("settings")])
+def forget_worker_by_name(name: str, ctx: Ctx, who: Who):
+    ctx.forget_worker(name)
+    ctx.db.event("workers", f"Worker {name} was forgotten", actor=who.name)
     return Response(status_code=204)
 
 
@@ -139,8 +157,9 @@ def _running(ctx, job_id: int, name: str) -> dict:
 @protocol.post("/heartbeat", summary="A worker checks in (every 20 s)")
 def heartbeat(request: Request, body: dict, ctx: Ctx, name: str = Depends(worker)):
     client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "")
-    host = str(body.get("host") or client_ip)[:120]
-    model = str(body.get("model") or "Demucs htdemucs + Whisper large-v3 + MMS")[:120]
+    raw_host = str(body.get("host") or client_ip)[:120]
+    host = _clean_host(raw_host)
+    model = str(body.get("model") or "Demucs htdemucs + faster-whisper large-v3 + MMS")[:120]
     capabilities = str(body.get("capabilities") or "sync,generate")[:80]
     ctx.db.run("INSERT INTO workers(name, gpu, vram, version, last_seen, host, model, capabilities) VALUES(?, ?, ?, ?, ?, ?, ?, ?)"
                " ON CONFLICT(name) DO UPDATE SET gpu=excluded.gpu, vram=excluded.vram, version=excluded.version,"

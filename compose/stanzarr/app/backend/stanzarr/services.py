@@ -65,6 +65,7 @@ class Background:
                 self.auto_ai_pass()
                 self._step("")
                 self.requeue_stale()
+                self.s.prune_stale_workers()
                 self.s.note_coverage()
             except Exception:  # keep going: one bad file or a network outage is not fatal
                 log.exception("background pass failed")
@@ -232,15 +233,28 @@ class Services:
         self.db.run("UPDATE workers SET name=? WHERE name=?", (name, row["name"]))
         return self.db.one("SELECT id, name, prefix, created_at, last_used FROM worker_keys WHERE id=?", (worker_id,))
 
+    def forget_worker(self, name: str) -> None:
+        """Forget/remove a worker: clears from worker_keys and workers table."""
+        name = name.strip()
+        row = self.db.one("SELECT id FROM worker_keys WHERE name=? COLLATE NOCASE", (name,))
+        if row:
+            self.db.run("DELETE FROM worker_keys WHERE id=?", (row["id"],))
+        self.db.run("DELETE FROM workers WHERE name=? COLLATE NOCASE", (name,))
+        self.db.run("UPDATE jobs SET status='queued', worker='', stage='' WHERE status='running' AND worker=? COLLATE NOCASE",
+                    (name,))
+
     def remove_worker(self, worker_id: str) -> None:
         """Its key stops working at once; a job it was running goes back to the queue."""
         row = self.db.one("SELECT name FROM worker_keys WHERE id=?", (worker_id,))
-        if not row:
-            raise NotFound("There's no such worker.")
-        self.db.run("DELETE FROM worker_keys WHERE id=?", (worker_id,))
-        self.db.run("DELETE FROM workers WHERE name=?", (row["name"],))
-        self.db.run("UPDATE jobs SET status='queued', worker='', stage='' WHERE status='running' AND worker=?",
-                    (row["name"],))
+        if row:
+            self.forget_worker(row["name"])
+        else:
+            self.forget_worker(worker_id)
+
+    def prune_stale_workers(self) -> None:
+        """Forget workers that have not checked in for over 15 days."""
+        cutoff = int(time.time()) - (15 * 86400)
+        self.db.run("DELETE FROM workers WHERE last_seen < ?", (cutoff,))
 
     def forget_legacy_key(self) -> None:
         if self.config.worker_key:

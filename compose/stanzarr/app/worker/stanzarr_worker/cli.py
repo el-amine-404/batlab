@@ -54,7 +54,11 @@ def host_address() -> str:
         s.connect(("192.168.1.1", 80))
         ip = s.getsockname()[0]
         s.close()
-        return f"{ip} ({socket.gethostname()})"
+        hostname = socket.gethostname()
+        clean_host = hostname.replace("-", ".")
+        if clean_host == ip or hostname.lower() in ("localhost", "localhost.localdomain", ip):
+            return ip
+        return f"{ip} ({hostname})"
     except Exception:
         return socket.gethostname()
 
@@ -85,6 +89,14 @@ def work(server: Server, job: dict, device: str) -> None:
     lines_input = job.get("lines") or []
     log.info("job %s [%s]: %s – %s (%d lines)", job_id, kind, song["artist"], song["title"], len(lines_input))
     stage = lambda text: _quiet(lambda: server.call("POST", f"/api/v1/worker/jobs/{job_id}/stage", {"stage": text}))
+    try:
+        import gc
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+    except Exception:
+        pass
     with tempfile.TemporaryDirectory(prefix="stanzarr-worker-") as workdir:
         try:
             stage("downloading the song")
@@ -105,6 +117,15 @@ def work(server: Server, job: dict, device: str) -> None:
         except Exception as error:
             log.exception("job %s failed", job_id)
             _quiet(lambda: server.call("POST", f"/api/v1/worker/jobs/{job_id}/fail", {"error": str(error)[:500]}))
+        finally:
+            try:
+                import gc
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                gc.collect()
+            except Exception:
+                pass
 
 
 def _quiet(action) -> None:

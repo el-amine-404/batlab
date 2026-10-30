@@ -7,6 +7,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -662,6 +663,57 @@ class Api(unittest.TestCase):
         gen_resp = self.client.post(f"/api/v1/songs/{song_id}/ai-generate", headers=PAGE)
         self.assertEqual(gen_resp.status_code, 200)
         self.assertIn("job", gen_resp.json())
+
+        # Test host deduplication
+        self.client.post(
+            "/api/v1/worker/heartbeat",
+            json={"gpu": "Quadro T1000", "vram": 4096, "version": "1.0", "host": "192.168.1.131 (192-168-1-131)", "model": "large-v3"},
+            headers={"X-Stanzarr-Key": w_made[0]},
+        )
+        w_list = self.client.get("/api/v1/workers").json()
+        target_w = next(w for w in w_list["workers"] if w["name"] == "laptop-test")
+        self.assertEqual(target_w["host"], "192.168.1.131")
+
+        # Test forget worker by name
+        del_resp = self.client.delete("/api/v1/workers/name/laptop-test", headers=PAGE)
+        self.assertEqual(del_resp.status_code, 204)
+        w_list = self.client.get("/api/v1/workers").json()
+        self.assertFalse(any(w["name"] == "laptop-test" for w in w_list["workers"]))
+
+        # Test 15-day auto-prune policy
+        old_seen = int(time.time()) - (16 * 86400)
+        self.services.db.run(
+            "INSERT INTO workers(name, gpu, vram, version, last_seen, host, model, capabilities) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+            ("stale-worker", "GPU", 4096, "1.0", old_seen, "1.1.1.1", "model", "sync"),
+        )
+        self.services.prune_stale_workers()
+        self.assertIsNone(self.services.db.one("SELECT 1 FROM workers WHERE name='stale-worker'"))
+
+        # Test upload security: reject invalid extension
+        bad_ext_resp = self.client.post(
+            f"/api/v1/songs/{song_id}/lyrics/upload",
+            json={"filename": "malicious.sh", "text": "#!/bin/bash\necho evil"},
+            headers=PAGE,
+        )
+        self.assertEqual(bad_ext_resp.status_code, 422)
+
+        # Test upload security: reject script payload
+        bad_script_resp = self.client.post(
+            f"/api/v1/songs/{song_id}/lyrics/upload",
+            json={"filename": "lyrics.lrc", "text": "<script>alert(1)</script>"},
+            headers=PAGE,
+        )
+        self.assertEqual(bad_script_resp.status_code, 422)
+
+        # Test backup list and restore
+        backups = self.client.get(f"/api/v1/songs/{song_id}/backups").json()
+        self.assertIn("backups", backups)
+        if backups["backups"]:
+            restore_resp = self.client.post(
+                f"/api/v1/songs/{song_id}/backups/{backups['backups'][0]['filename']}/restore",
+                headers=PAGE,
+            )
+            self.assertEqual(restore_resp.status_code, 200)
 
 
 if __name__ == "__main__":

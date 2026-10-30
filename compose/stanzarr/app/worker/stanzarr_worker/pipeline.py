@@ -31,8 +31,15 @@ def _run(args: list[str], env: dict | None = None) -> None:
 
 
 def separate(audio: str, workdir: str, device: str) -> str:
-    _run([sys.executable, "-m", "demucs", "--two-stems=vocals", "-n", "htdemucs", "--segment", "7", "-d", device,
-          "-o", os.path.join(workdir, "sep"), audio])
+    try:
+        _run([sys.executable, "-m", "demucs", "--two-stems=vocals", "-n", "htdemucs", "--segment", "7", "-d", device,
+              "-o", os.path.join(workdir, "sep"), audio])
+    except RuntimeError as e:
+        if device != "cpu" and ("out of memory" in str(e).lower() or "cuda" in str(e).lower()):
+            _run([sys.executable, "-m", "demucs", "--two-stems=vocals", "-n", "htdemucs", "--segment", "7", "-d", "cpu",
+                  "-o", os.path.join(workdir, "sep"), audio])
+        else:
+            raise
     stem = os.path.splitext(os.path.basename(audio))[0]
     return os.path.join(workdir, "sep", "htdemucs", stem, "vocals.wav")
 
