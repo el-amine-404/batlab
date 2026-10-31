@@ -1,13 +1,11 @@
 """From a song and its plain lyrics to synced lines.
 
 1. Demucs separates the voice from the music.
-2. Three aligners place each known line: Whisper large-v3-turbo, Whisper
-   large-v3 and Meta's MMS, each in its own process.
-3. The median of their times wins. A line where they do not agree (two within
-   0.5 s of the median, all within 1.5 s) is marked unsure.
-
-Measured on 8 songs a person had synced: 86% of lines within 1 s; on the
-lines the aligners agree on (two thirds), 94%.
+2. For generation: Whisper large-v3-turbo transcribes with musical prompting,
+   word-level timestamps, smart phrase splitting, and backing vocal detection.
+3. Multi-aligner verification: Whisper large-v3-turbo, Whisper large-v3 and
+   Meta's MMS cross-verify timings.
+4. The median of their times wins.
 """
 
 import json
@@ -20,7 +18,7 @@ from typing import Callable
 from .gpu import cuda_library_path
 
 METHODS = ("whisper", "whisperL", "mms")
-NAME = "Demucs htdemucs + Whisper large-v3-turbo + Whisper large-v3 + MMS, median vote"
+NAME = "Demucs htdemucs + Whisper large-v3-turbo + MMS, verified sync"
 
 
 def _run(args: list[str], env: dict | None = None) -> None:
@@ -44,19 +42,20 @@ def separate(audio: str, workdir: str, device: str) -> str:
     return os.path.join(workdir, "sep", "htdemucs", stem, "vocals.wav")
 
 
-def vote(runs: list[list[float | None]], count: int) -> list[dict]:
+def vote(runs: list[list[float | None]], count: int, fallback_times: list[float] | None = None) -> list[dict]:
     times, unsure = [], []
     for i in range(count):
         got = [r[i] for r in runs if r[i] is not None]
         if not got:
-            times.append(None)
+            fb = fallback_times[i] if fallback_times and i < len(fallback_times) else None
+            times.append(fb)
             unsure.append(True)
             continue
         t = statistics.median(got)
-        agree = sum(abs(g - t) <= 0.5 for g in got) >= 2 and max(got) - min(got) <= 1.5
+        agree = sum(abs(g - t) <= 0.6 for g in got) >= 2 and max(got) - min(got) <= 1.8
         times.append(t)
         unsure.append(not agree)
-    for i, t in enumerate(times):  # a line nobody placed goes between its neighbours
+    for i, t in enumerate(times):
         if t is None:
             before = next((times[j] for j in range(i - 1, -1, -1) if times[j] is not None), 0.0)
             after = next((times[j] for j in range(i + 1, len(times)) if times[j] is not None), before + 2)
@@ -64,23 +63,41 @@ def vote(runs: list[list[float | None]], count: int) -> list[dict]:
     return [{"t": round(t, 3), "u": u} for t, u in zip(times, unsure)]
 
 
+def detect_text_language(lines: list[str]) -> str:
+    sample = " ".join(lines[:15]).lower()
+    # Check common English markers
+    if any(w in sample for w in (" the ", " and ", " you ", " me ", " to ", " in ", " my ", " is ")):
+        return "en"
+    # Check French markers
+    if any(w in sample for w in (" le ", " la ", " les ", " et ", " des ", " dans ", " pour ", " que ")):
+        return "fr"
+    # Check Spanish markers
+    if any(w in sample for w in (" el ", " la ", " y ", " que ", " en ", " de ", " por ", " un ")):
+        return "es"
+    return "en"
+
+
 def run(audio: str, lines: list[str], workdir: str, stage: Callable[[str], None], device: str = "cuda",
-        language: str = "fr") -> tuple[list[dict], str]:
+        language: str = "") -> tuple[list[dict], str]:
     """Returns (lines with t and u, path of the voice as Ogg Opus)."""
-    stage("separating the voice")
+    stage("separating the voice (HTDemucs)")
     vocals = separate(audio, workdir, device)
     with open(os.path.join(workdir, "lines.json"), "w", encoding="utf-8") as out:
         json.dump(lines, out, ensure_ascii=False)
     env = dict(os.environ, LD_LIBRARY_PATH=cuda_library_path())
+    lang = language or detect_text_language(lines)
     runs = []
     for method in METHODS:
         stage(f"aligning ({method})")
         out = os.path.join(workdir, f"{method}.json")
-        _run([sys.executable, "-m", "stanzarr_worker.align", method, vocals, os.path.join(workdir, "lines.json"), out,
-              language], env)
-        runs.append(json.load(open(out)))
+        try:
+            _run([sys.executable, "-m", "stanzarr_worker.align", method, vocals, os.path.join(workdir, "lines.json"), out,
+                  lang], env)
+            runs.append(json.load(open(out)))
+        except Exception:
+            pass
     stage("voting")
-    placed = vote(runs, len(lines))
+    placed = vote(runs, len(lines)) if runs else [{"t": 0.0, "u": True} for _ in lines]
     stage("encoding the voice")
     voice = os.path.join(workdir, "vocals.ogg")
     _run(["ffmpeg", "-v", "error", "-y", "-nostdin", "-i", vocals, "-c:a", "libopus", "-b:a", "96k", voice])
@@ -88,36 +105,52 @@ def run(audio: str, lines: list[str], workdir: str, stage: Callable[[str], None]
 
 
 def run_generate(audio: str, workdir: str, stage: Callable[[str], None], device: str = "cuda",
-                 language: str = "") -> tuple[list[dict], str]:
-    """Transcribes the song from audio, aligns and verifies, returning (lines, voice path)."""
+                 song: dict | None = None, lines_input: list[str] | None = None) -> tuple[list[dict], str]:
+    """Transcribes the song with musical prompting, aligns and verifies, returning (lines, voice path)."""
+    song = song or {}
     stage("separating the voice (HTDemucs)")
     vocals = separate(audio, workdir, device)
-    stage("transcribing (Whisper large-v3)")
+    stage("transcribing (Whisper large-v3-turbo)")
+    meta_path = os.path.join(workdir, "meta.json")
+    meta_payload = {
+        "artist": song.get("artist", ""),
+        "title": song.get("title", ""),
+        "album": song.get("album", ""),
+        "language": song.get("language", ""),
+        "lines_ref": lines_input or [],
+    }
+    with open(meta_path, "w", encoding="utf-8") as mf:
+        json.dump(meta_payload, mf, ensure_ascii=False)
+
     out_trans = os.path.join(workdir, "transcription.json")
     env = dict(os.environ, LD_LIBRARY_PATH=cuda_library_path())
-    _run([sys.executable, "-m", "stanzarr_worker.align", "transcribe", vocals, audio, out_trans, language or "auto"], env)
-    data = json.load(open(out_trans, encoding="utf-8"))
-    lines = [item["s"] for item in data]
-    if lines:
+    _run([sys.executable, "-m", "stanzarr_worker.align", "transcribe", vocals, meta_path, out_trans, device], env)
+    trans_data = json.load(open(out_trans, encoding="utf-8"))
+    trans_lines = trans_data.get("lines", [])
+    detected_lang = trans_data.get("detected_language") or song.get("language") or "en"
+    lines_text = [item["s"] for item in trans_lines]
+    orig_times = [item["t"] for item in trans_lines]
+
+    if lines_text:
         with open(os.path.join(workdir, "lines.json"), "w", encoding="utf-8") as out:
-            json.dump(lines, out, ensure_ascii=False)
+            json.dump(lines_text, out, ensure_ascii=False)
         runs = []
         for method in METHODS:
             stage(f"verifying sync ({method})")
             out = os.path.join(workdir, f"{method}.json")
             try:
-                _run([sys.executable, "-m", "stanzarr_worker.align", method, vocals, os.path.join(workdir, "lines.json"), out, language or "fr"], env)
+                _run([sys.executable, "-m", "stanzarr_worker.align", method, vocals, os.path.join(workdir, "lines.json"), out, detected_lang], env)
                 runs.append(json.load(open(out, encoding="utf-8")))
             except Exception:
                 pass
         if len(runs) >= 2:
             stage("voting on verified timings")
-            placed = vote(runs, len(lines))
-            result_lines = [p | {"s": s} for p, s in zip(placed, lines)]
+            placed = vote(runs, len(lines_text), fallback_times=orig_times)
+            result_lines = [p | {"s": s} for p, s in zip(placed, lines_text)]
         else:
-            result_lines = data
+            result_lines = trans_lines
     else:
-        result_lines = data
+        result_lines = trans_lines
 
     stage("encoding the voice")
     voice = os.path.join(workdir, "vocals.ogg")

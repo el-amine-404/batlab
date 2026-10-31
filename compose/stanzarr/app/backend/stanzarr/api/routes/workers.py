@@ -182,7 +182,10 @@ def next_job(ctx: Ctx, name: str = Depends(worker)):
     words = [line.s for line in (lyrics.lines if lyrics else []) if line.s.strip()
              and not (line.s.startswith("[") and line.s.endswith("]"))]
     kind = row["kind"] if "kind" in row.keys() else "ai_sync"
-    return {"job": row["id"], "kind": kind, "song": {k: found[k] for k in ("artist", "title", "album", "duration")},
+    song_info = {k: found[k] for k in ("artist", "title", "album", "duration")}
+    lang = found.get("language") or (lyricsfiles.detect_language(lyrics) if lyrics else "")
+    song_info["language"] = lang
+    return {"job": row["id"], "kind": kind, "song": song_info,
             "lines": words, "audio_name": os.path.basename(found["path"])}
 
 

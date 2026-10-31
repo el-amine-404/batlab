@@ -263,8 +263,16 @@ def save_ai_result(db: Database, cfg: Config, song_id: int, lines: list[dict], m
             for l in lines]
     lyricsfiles.write_atomic(lrc, lyricsfiles.render_lrc(body, tags))
     txt = sidecar(song, ".txt")
-    if not os.path.exists(txt):
-        plain_body = "\n".join(l.s for l in body if l.s.strip()) + "\n"
+    if not os.path.exists(txt) or force:
+        plain_lines = []
+        for i, l in enumerate(lines):
+            txt_line = lyricsfiles.HIDDEN.sub("", lyricsfiles.clean(str(l["s"]))).strip()[:lyricsfiles.MAX_LINE]
+            if not txt_line:
+                continue
+            if i > 0 and (l.get("stanza_start") or (float(l.get("t", 0)) - float(lines[i-1].get("t", 0)) >= 2.8)):
+                plain_lines.append("")
+            plain_lines.append(txt_line)
+        plain_body = "\n".join(plain_lines) + "\n"
         lyricsfiles.write_atomic(txt, plain_body)
         db.run(
             "INSERT INTO written(path, source, at) VALUES(?, 'ai', ?)"

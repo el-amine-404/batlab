@@ -645,7 +645,7 @@ export function SongPage() {
                           <Link to={`/library?by=${file.source}`} className="hover:text-foreground hover:underline" title="Every song with a file made so">
                             {file.source === "user_uploaded" ? <span className="text-sky-400 font-medium">User uploaded</span>
                              : file.source === "unknown" ? <span title="stanzarr didn't make this file, and the file doesn't say who did: it was beside the song already, or another app put it there.">Was already there</span>
-                             : file.source === "ai" ? "Generated with AI"
+                             : file.source === "ai" ? <span className="text-purple-400 font-medium inline-flex items-center gap-1"><Sparkles className="size-3" /> Generated with AI</span>
                              : `From ${SOURCE[file.source] ?? file.source}`}
                           </Link>
                           <span aria-hidden>·</span>

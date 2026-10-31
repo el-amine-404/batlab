@@ -63,7 +63,7 @@ def host_address() -> str:
         return socket.gethostname()
 
 
-MODEL_NAME = "Demucs htdemucs + faster-whisper large-v3 + MMS"
+MODEL_NAME = "Demucs htdemucs + faster-whisper large-v3-turbo + MMS"
 
 
 def heartbeat(server: Server, name: str, vram: int, host: str, stop: threading.Event) -> None:
@@ -104,10 +104,10 @@ def work(server: Server, job: dict, device: str) -> None:
             audio = f"{workdir}/song.{ext}"
             server.download(f"/api/v1/worker/jobs/{job_id}/audio", audio)
             if kind == "ai_generate" or not lines_input:
-                lines, voice = pipeline.run_generate(audio, workdir, stage, device, song.get("language", ""))
-                method = "HTDemucs + Whisper large-v3 transcribe & align"
+                lines, voice = pipeline.run_generate(audio, workdir, stage, device, song, lines_input)
+                method = "HTDemucs + Whisper large-v3-turbo transcribe & align"
             else:
-                lines, voice = pipeline.run(audio, lines_input, workdir, stage, device)
+                lines, voice = pipeline.run(audio, lines_input, workdir, stage, device, song.get("language", ""))
                 method = pipeline.NAME
             stage("uploading voice track")
             with open(voice, "rb") as handle:
