@@ -75,20 +75,28 @@ export function CameraCapture({ open, onClose, onCapture }: { open: boolean; onC
         let smoothed: Quad = result.quad;
         const prev = previousQuad.current;
         if (prev) {
-          // Exponential moving average for jitter-free tracking
-          smoothed = [
-            [prev[0][0] * 0.65 + result.quad[0][0] * 0.35, prev[0][1] * 0.65 + result.quad[0][1] * 0.35],
-            [prev[1][0] * 0.65 + result.quad[1][0] * 0.35, prev[1][1] * 0.65 + result.quad[1][1] * 0.35],
-            [prev[2][0] * 0.65 + result.quad[2][0] * 0.35, prev[2][1] * 0.65 + result.quad[2][1] * 0.35],
-            [prev[3][0] * 0.65 + result.quad[3][0] * 0.35, prev[3][1] * 0.65 + result.quad[3][1] * 0.35],
-          ];
+          const prevCx = (prev[0][0] + prev[1][0] + prev[2][0] + prev[3][0]) / 4;
+          const prevCy = (prev[0][1] + prev[1][1] + prev[2][1] + prev[3][1]) / 4;
+          const currCx = (result.quad[0][0] + result.quad[1][0] + result.quad[2][0] + result.quad[3][0]) / 4;
+          const currCy = (result.quad[0][1] + result.quad[1][1] + result.quad[2][1] + result.quad[3][1]) / 4;
+          const jumpDistSq = (prevCx - currCx) ** 2 + (prevCy - currCy) ** 2;
+
+          // If tracking the same object gradually, smooth corners for jitter reduction
+          if (jumpDistSq < 0.02) {
+            smoothed = [
+              [prev[0][0] * 0.60 + result.quad[0][0] * 0.40, prev[0][1] * 0.60 + result.quad[0][1] * 0.40],
+              [prev[1][0] * 0.60 + result.quad[1][0] * 0.40, prev[1][1] * 0.60 + result.quad[1][1] * 0.40],
+              [prev[2][0] * 0.60 + result.quad[2][0] * 0.40, prev[2][1] * 0.60 + result.quad[2][1] * 0.40],
+              [prev[3][0] * 0.60 + result.quad[3][0] * 0.40, prev[3][1] * 0.60 + result.quad[3][1] * 0.40],
+            ];
+          }
         }
         previousQuad.current = smoothed;
         setQuad(smoothed);
         setDetected(true);
       } else {
         missCount.current++;
-        if (missCount.current >= 2) {
+        if (missCount.current >= 3) {
           previousQuad.current = null;
           setQuad(null);
           setDetected(false);
@@ -97,7 +105,7 @@ export function CameraCapture({ open, onClose, onCapture }: { open: boolean; onC
     };
 
     detect();
-    const timer = window.setInterval(detect, 200);
+    const timer = window.setInterval(detect, 150);
     return () => window.clearInterval(timer);
   }, [ready]);
 
