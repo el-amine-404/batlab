@@ -97,7 +97,7 @@ export type SongDetail = {
           path: string; added_at: number; status: LyricsStatus; isrc: string; mbid: string };
   files: LyricsFile[];
   attempt: { at: number; result: string; source: string } | null;
-  jobs: { id: number; status: string; stage: string; error: string; created_at: number; finished_at: number | null }[];
+  jobs: Job[];
   events: ActivityEvent[];
   has_voice: boolean;
   has_text: boolean;
@@ -107,8 +107,8 @@ export type SongDetail = {
   ai_blocked: string | null;
   ai_generate_blocked?: string | null;
   search_blocked: string | null;
-  active_worker?: Worker | null;
-  workers_online?: Worker[];
+  active_worker?: (Worker & { online?: boolean }) | null;
+  workers_online?: (Worker & { online?: boolean })[];
 };
 
 export type EditorLine = { t: number; s: string; u?: boolean; fixed?: boolean };

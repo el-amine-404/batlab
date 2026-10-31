@@ -69,51 +69,117 @@ function Donut({ counts, total, chosen, onChoose }: { counts: Counts; total: num
   );
 }
 
-/** The share that scrolls, day by day: one line, with a crosshair and its numbers on hover. */
+/** The share that scrolls, day by day: a sleek area chart with dots and crosshair on hover. */
 function History({ days }: { days: CoverageDay[] }) {
   const [hover, setHover] = useState<number | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
   if (days.length < 2) {
     return <p className="text-xs text-muted-foreground">The history starts today: a point a day, after each day's last scan.</p>;
   }
-  const W = 600, H = 120, P = 6;
+  const W = 600, H = 84, P = 8;
   const points = days.map((d) => {
     const total = STATUS_ORDER.reduce((sum, s) => sum + (d.counts[s] ?? 0), 0);
     const scrolls = SCROLLS.reduce((sum, s) => sum + (d.counts[s] ?? 0), 0);
     return { day: d.day, total, scrolls, value: total ? scrolls / total : 0 };
   });
-  const min = Math.max(0, Math.floor(Math.min(...points.map((p) => p.value)) * 10) / 10 - 0.05);
+
+  const values = points.map((p) => p.value);
+  const minVal = Math.min(...values);
+  const maxVal = Math.max(...values);
+  const isFlat = maxVal - minVal < 0.01;
+
+  // Scale Y gracefully: if flat, leave breathing room above and below
+  const yMin = isFlat ? Math.max(0, minVal - 0.15) : Math.max(0, Math.floor(minVal * 10) / 10 - 0.05);
+  const yMax = isFlat ? Math.min(1, maxVal + 0.1) : 1;
+  const yRange = Math.max(0.01, yMax - yMin);
+
   const x = (i: number) => P + (i / (points.length - 1)) * (W - 2 * P);
-  const y = (v: number) => H - P - ((v - min) / (1 - min)) * (H - 2 * P);
-  const line = points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join("");
+  const y = (v: number) => H - P - ((v - yMin) / yRange) * (H - 2 * P);
+
+  const line = points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
+  const area = `${line} L${x(points.length - 1).toFixed(1)},${(H - P).toFixed(1)} L${x(0).toFixed(1)},${(H - P).toFixed(1)} Z`;
+
   const shown = hover === null ? points[points.length - 1] : points[hover];
+  const delta = Math.round((points[points.length - 1].value - points[0].value) * 100);
+
   return (
     <div>
-      <div className="mb-1 flex items-baseline justify-between text-xs text-muted-foreground">
-        <span>Songs that scroll, the last {points.length} days</span>
-        <span className="tabular-nums text-foreground">
-          {new Date(`${shown.day}T12:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" })}:{" "}
-          {Math.round(shown.value * 100)}% · {shown.scrolls.toLocaleString()} of {shown.total.toLocaleString()}
-        </span>
+      <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
+        <div className="flex items-center gap-2">
+          <span>Songs that scroll, last {points.length} days</span>
+          <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-400">
+            {delta === 0 ? "Stable" : `${delta > 0 ? "+" : ""}${delta}%`}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="tabular-nums font-medium text-foreground">
+            {new Date(`${shown.day}T12:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" })}:{" "}
+            <span className="text-emerald-400">{Math.round(shown.value * 100)}%</span> · {shown.scrolls.toLocaleString()} of {shown.total.toLocaleString()}
+          </span>
+          <button
+            type="button"
+            onClick={() => setCollapsed(!collapsed)}
+            className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+            aria-label={collapsed ? "Show trend chart" : "Hide trend chart"}
+          >
+            {collapsed ? "Show chart" : "Hide"}
+          </button>
+        </div>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="h-28 w-full" preserveAspectRatio="none" role="img"
-           aria-label={`From ${Math.round(points[0].value * 100)}% to ${Math.round(points[points.length - 1].value * 100)}%`}
-           onMouseLeave={() => setHover(null)}
-           onMouseMove={(e) => {
-             const box = e.currentTarget.getBoundingClientRect();
-             const i = Math.round(((e.clientX - box.left) / box.width) * (points.length - 1));
-             setHover(Math.max(0, Math.min(points.length - 1, i)));
-           }}>
-        {[0.25, 0.5, 0.75, 1].filter((v) => v > min).map((v) => (
-          <line key={v} x1={P} x2={W - P} y1={y(v)} y2={y(v)} className="stroke-border" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-        ))}
-        <path d={line} fill="none" stroke={STATUS.synced.color} strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
-        {hover !== null && (
-          <>
-            <line x1={x(hover)} x2={x(hover)} y1={P} y2={H - P} className="stroke-muted-foreground" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-            <circle cx={x(hover)} cy={y(points[hover].value)} r="4" fill={STATUS.synced.color} className="stroke-card" strokeWidth="2" />
-          </>
-        )}
-      </svg>
+      {!collapsed && (
+        <div className="relative overflow-hidden rounded-xl border border-border/50 bg-background/50 p-2">
+          <svg
+            viewBox={`0 0 ${W} ${H}`}
+            className="h-20 w-full overflow-visible"
+            preserveAspectRatio="none"
+            role="img"
+            aria-label={`From ${Math.round(points[0].value * 100)}% to ${Math.round(points[points.length - 1].value * 100)}%`}
+            onMouseLeave={() => setHover(null)}
+            onMouseMove={(e) => {
+              const box = e.currentTarget.getBoundingClientRect();
+              const i = Math.round(((e.clientX - box.left) / box.width) * (points.length - 1));
+              setHover(Math.max(0, Math.min(points.length - 1, i)));
+            }}
+          >
+            <defs>
+              <linearGradient id="covGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#10b981" stopOpacity="0.22" />
+                <stop offset="100%" stopColor="#10b981" stopOpacity="0.01" />
+              </linearGradient>
+            </defs>
+            {/* Horizontal baseline & grid */}
+            <line x1={P} x2={W - P} y1={H - P} y2={H - P} className="stroke-border/40" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+            {[0.25, 0.5, 0.75, 1].filter((v) => v > yMin && v < yMax).map((v) => (
+              <line key={v} x1={P} x2={W - P} y1={y(v)} y2={y(v)} className="stroke-border/30 stroke-dasharray-[2_4]" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+            ))}
+            {/* Area fill */}
+            <path d={area} fill="url(#covGrad)" />
+            {/* Line */}
+            <path d={line} fill="none" stroke="#10b981" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+            {/* Data point dots */}
+            {points.map((p, i) => (
+              <circle
+                key={p.day}
+                cx={x(i)}
+                cy={y(p.value)}
+                r={hover === i ? 4.5 : 2.5}
+                className={cn(
+                  "stroke-card transition-all",
+                  hover === i ? "fill-white stroke-emerald-500" : "fill-emerald-400"
+                )}
+                strokeWidth={hover === i ? 2 : 1}
+              />
+            ))}
+            {/* Hover vertical crosshair */}
+            {hover !== null && (
+              <>
+                <line x1={x(hover)} x2={x(hover)} y1={P} y2={H - P} className="stroke-muted-foreground/60" strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+                <circle cx={x(hover)} cy={y(points[hover].value)} r="5" fill="#10b981" className="stroke-card" strokeWidth="2" />
+              </>
+            )}
+          </svg>
+        </div>
+      )}
     </div>
   );
 }

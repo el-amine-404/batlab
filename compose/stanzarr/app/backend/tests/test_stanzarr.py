@@ -361,6 +361,24 @@ class LibraryAndRules(unittest.TestCase):
         self.assertIn("kept", operations.save_ai_result(self.db, self.cfg, song_id, [{"t": 1, "s": "x"}], "test"))
         self.assertIn("by a person", Path(path[:-4] + ".lrc").read_text())
 
+    def test_ai_generate_overwrites_with_force(self):
+        path, song_id = self.song()
+        with open(path[:-4] + ".lrc", "w") as out:
+            out.write("[00:01.00] old lyrics\n")
+        res = operations.save_ai_result(self.db, self.cfg, song_id, [{"t": 2, "s": "new generated"}], "test", force=True)
+        self.assertIn("written", res)
+        self.assertIn("new generated", Path(path[:-4] + ".lrc").read_text())
+
+    def test_ai_sync_overwrites_preexisting_file(self):
+        path, song_id = self.song()
+        with open(path[:-4] + ".lrc", "w") as out:
+            out.write("[00:01.00] old preexisting\n")
+        # File mtime is in the past; job created now (after file mtime)
+        file_mtime = os.path.getmtime(path[:-4] + ".lrc")
+        res = operations.save_ai_result(self.db, self.cfg, song_id, [{"t": 3, "s": "synced text"}], "test", job_created_at=file_mtime + 10)
+        self.assertIn("written", res)
+        self.assertIn("synced text", Path(path[:-4] + ".lrc").read_text())
+
     def test_read_only_writes_nothing(self):
         self.cfg.read_only = True
         path, song_id = self.song()

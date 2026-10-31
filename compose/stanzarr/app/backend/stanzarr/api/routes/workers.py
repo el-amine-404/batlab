@@ -226,7 +226,11 @@ def job_result(job_id: int, body: dict, ctx: Ctx, name: str = Depends(worker)):
     lines = body.get("lines")
     if not isinstance(lines, list) or not lines:
         raise Invalid("Send the lines.")
-    outcome = operations.save_ai_result(ctx.db, ctx.config, job["song_id"], lines, str(body.get("method", ""))[:200], name)
+    force = (job.get("kind") == "ai_generate")
+    outcome = operations.save_ai_result(
+        ctx.db, ctx.config, job["song_id"], lines, str(body.get("method", ""))[:200], name,
+        force=force, job_created_at=job.get("created_at", 0)
+    )
     ctx.db.run("UPDATE jobs SET status='finished', stage=?, finished_at=? WHERE id=?",
                (outcome[:80], int(time.time()), job_id))
     song = song_or_404(ctx, job["song_id"])

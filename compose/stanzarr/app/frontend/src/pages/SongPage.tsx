@@ -17,7 +17,7 @@ import { useCan } from "@/lib/auth";
 import { clock, FORMAT, length, LEVELS, SOURCE, timings } from "@/lib/format";
 import { libraryLink } from "@/lib/librarySearch";
 import { useEditor, useLyricsChanged, useSong } from "@/lib/queries";
-import { cn, timeAgo } from "@/lib/utils";
+import { cn, formatDuration, getJobStageProgress, timeAgo } from "@/lib/utils";
 
 function Section({ title, children, actions, className }: { title: string; children: ReactNode; actions?: ReactNode; className?: string }) {
   return (
@@ -470,25 +470,30 @@ export function SongPage() {
                 </span>
               )}
             </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-border/70 bg-card/60 px-3 py-2 text-xs">
-              <span className={cn("size-2 shrink-0 rounded-full", data.active_worker?.online ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/40")} />
-              {data.active_worker?.online ? (
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                  <span className="font-semibold text-emerald-400">AI Worker online:</span>
-                  <span className="font-medium text-foreground">{data.active_worker.name}</span>
-                  {data.active_worker.host && <span className="text-muted-foreground font-mono">({data.active_worker.host})</span>}
-                  <span className="text-muted-foreground/60">·</span>
-                  <span className="text-muted-foreground">Model:</span>
-                  <span className="font-medium text-foreground">{data.active_worker.model || "Demucs htdemucs + Whisper large-v3 + MMS"}</span>
+            {(() => {
+              const isWorkerOnline = Boolean(data.active_worker?.online ?? (data.workers_online && data.workers_online.length > 0));
+              return (
+                <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-border/70 bg-card/60 px-3 py-2 text-xs">
+                  <span className={cn("size-2 shrink-0 rounded-full", isWorkerOnline ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/40")} />
+                  {isWorkerOnline && data.active_worker ? (
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <span className="font-semibold text-emerald-400">AI Worker online:</span>
+                      <span className="font-medium text-foreground">{data.active_worker.name}</span>
+                      {data.active_worker.host && <span className="text-muted-foreground font-mono">({data.active_worker.host})</span>}
+                      <span className="text-muted-foreground/60">·</span>
+                      <span className="text-muted-foreground">Model:</span>
+                      <span className="font-medium text-foreground">{data.active_worker.model || "Demucs htdemucs + Whisper large-v3 + MMS"}</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 text-muted-foreground">
+                      <span>No GPU worker online.</span>
+                      <Link to="/settings/workers" className="text-primary hover:underline font-medium">Settings &gt; Workers</Link>
+                      <span>(run worker on external GPU PC)</span>
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <div className="flex items-center gap-1.5 text-muted-foreground">
-                  <span>No GPU worker online.</span>
-                  <Link to="/settings/workers" className="text-primary hover:underline font-medium">Settings &gt; Workers</Link>
-                  <span>(run worker on external GPU PC)</span>
-                </div>
-              )}
-            </div>
+              );
+            })()}
           </div>
         </div>
         <div className="grid w-full grid-cols-2 items-start gap-2 sm:flex sm:w-auto sm:flex-wrap sm:gap-3">
@@ -527,6 +532,66 @@ export function SongPage() {
           )}
         </div>
       </div>
+
+      {/* Active Job in Progress Banner */}
+      {(() => {
+        const runningJob = data.jobs?.find((j) => j.status === "running");
+        const queuedJob = data.jobs?.find((j) => j.status === "queued");
+        if (runningJob) {
+          const progress = getJobStageProgress(runningJob.stage, runningJob.kind, runningJob.started_at);
+          const elapsed = runningJob.started_at ? Math.max(0, Math.round(Date.now() / 1000 - runningJob.started_at)) : null;
+          return (
+            <div className="mb-4 rounded-xl border border-primary/40 bg-card p-4 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="size-4 animate-spin text-primary" />
+                  <span className="font-semibold text-foreground text-sm">
+                    {runningJob.kind === "ai_generate" ? "AI Generation in progress" : "AI Synchronization in progress"}
+                  </span>
+                  <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground uppercase font-mono">
+                    {runningJob.worker || "worker"}
+                  </span>
+                </div>
+                <Link to="/queue" className="text-xs text-primary hover:underline">
+                  View in queue &rarr;
+                </Link>
+              </div>
+              <div className="mt-3 space-y-1.5">
+                <div className="flex justify-between text-xs">
+                  <span className="font-medium text-foreground">
+                    Step {progress.step} of {progress.totalSteps}: {progress.label}
+                  </span>
+                  <span className="font-mono text-primary font-semibold">{progress.percent}%</span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-primary transition-all duration-500"
+                    style={{ width: `${progress.percent}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-[11px] text-muted-foreground">
+                  <span>Elapsed: {elapsed !== null ? formatDuration(elapsed) : "starting"}</span>
+                  {progress.estimatedRemainingSecs ? (
+                    <span>Est. remaining: ~{formatDuration(progress.estimatedRemainingSecs)}</span>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          );
+        }
+        if (queuedJob) {
+          return (
+            <div className="mb-4 flex items-center justify-between rounded-xl border border-warning/30 bg-warning/10 p-3 text-xs">
+              <div className="flex items-center gap-2">
+                <Clock className="size-4 text-warning" />
+                <span>Queued for AI processing: waiting for GPU worker...</span>
+              </div>
+              <Link to="/queue" className="text-primary hover:underline">View in queue</Link>
+            </div>
+          );
+        }
+        return null;
+      })()}
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
         <Section title="Lyrics">
@@ -616,12 +681,43 @@ export function SongPage() {
           {(jobs.length > 0 || events.length > 0) && (
             <Section title="Activity" actions={<Link to={`/activity?song=${id}`} className="text-xs text-primary hover:underline">All of it</Link>}>
               <ul className="flex flex-col gap-2 text-sm">
-                {jobs.map((job) => (
-                  <li key={`job-${job.id}`} className="flex justify-between gap-3">
-                    <span>AI sync: {job.status}{job.stage ? `, ${job.stage}` : ""}{job.error ? `: ${job.error}` : ""}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground">{timeAgo(job.finished_at ?? job.created_at)}</span>
-                  </li>
-                ))}
+                {jobs.map((job) => {
+                  const took =
+                    job.finished_at && job.started_at ? formatDuration(job.finished_at - job.started_at) : null;
+                  return (
+                    <li key={`job-${job.id}`} className="flex flex-col gap-1 text-xs sm:flex-row sm:items-center sm:justify-between py-1 border-b border-border/30 last:border-0">
+                      <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                        <span className="font-medium text-foreground">
+                          {job.kind === "ai_generate" ? "AI Generate" : "AI Sync"}:
+                        </span>
+                        <span
+                          className={cn(
+                            "rounded px-1.5 py-0.5 text-[10px] font-medium uppercase font-mono",
+                            job.status === "finished"
+                              ? "bg-emerald-500/10 text-emerald-400"
+                              : job.status === "failed"
+                              ? "bg-destructive/10 text-destructive"
+                              : job.status === "running"
+                              ? "bg-primary/10 text-primary animate-pulse"
+                              : "bg-muted text-muted-foreground"
+                          )}
+                        >
+                          {job.status}
+                        </span>
+                        {took && (
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-foreground font-mono">
+                            took {took}
+                          </span>
+                        )}
+                        {job.stage && <span className="text-muted-foreground truncate">· {job.stage}</span>}
+                        {job.error && <span className="text-destructive truncate">· {job.error}</span>}
+                      </div>
+                      <span className="shrink-0 text-muted-foreground">
+                        {timeAgo(job.finished_at ?? job.started_at ?? job.created_at)}
+                      </span>
+                    </li>
+                  );
+                })}
                 {events.map((event) => (
                   <li key={`event-${event.id}`} className="flex justify-between gap-3">
                     <span className={cn("min-w-0", event.ok === false && "text-destructive")}>

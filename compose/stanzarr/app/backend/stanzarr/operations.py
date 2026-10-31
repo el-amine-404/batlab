@@ -236,15 +236,20 @@ def save_from_editor(db: Database, cfg: Config, song_id: int, lines: list[dict],
     return len(clean)
 
 
-def save_ai_result(db: Database, cfg: Config, song_id: int, lines: list[dict], method: str, actor: str = "") -> str:
+def save_ai_result(db: Database, cfg: Config, song_id: int, lines: list[dict], method: str, actor: str = "",
+                   force: bool = False, job_created_at: float = 0) -> str:
     """Write an AI sync as the song's .lrc, flagged as AI-generated. Never over
-    lyrics synced by a person."""
+    lyrics synced by a person unless forced / user-queued."""
     song = song_or_none(db, song_id)
     if not song:
         raise KeyError(song_id)
     lrc = sidecar(song, ".lrc")
-    if os.path.exists(lrc) and not lyricsfiles.is_ai(lrc):
-        return "kept: a person-synced .lrc appeared meanwhile"
+    if os.path.exists(lrc) and not lyricsfiles.is_ai(lrc) and not force:
+        mtime = os.path.getmtime(lrc)
+        if job_created_at and mtime > job_created_at:
+            return "kept: a person-synced .lrc appeared meanwhile"
+        if not job_created_at:
+            return "kept: a person-synced .lrc appeared meanwhile"
     if cfg.read_only:
         return "read-only: not written"
     if os.path.exists(lrc):

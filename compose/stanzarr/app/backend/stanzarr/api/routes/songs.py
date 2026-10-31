@@ -130,8 +130,12 @@ def song(song_id: int, ctx: Ctx):
                         (song_id,))
     has_text = operations.best_text(db, song_id) is not None
     queued = db.one("SELECT 1 FROM jobs WHERE song_id=? AND status IN ('queued','running')", (song_id,))
-    online_workers = ctx.workers_online()
+    online_workers = [w | {"online": True} for w in ctx.workers_online()]
     active_worker = online_workers[0] if online_workers else None
+    if not active_worker:
+        last_worker = db.one("SELECT * FROM workers ORDER BY last_seen DESC LIMIT 1")
+        if last_worker:
+            active_worker = last_worker | {"online": False}
     # Why an action can't be done now, said beside it on the page (None: it can).
     ai_blocked = ("stanzarr is read-only: nothing is written." if cfg.read_only
                   else "Queued already: see Activity." if queued
