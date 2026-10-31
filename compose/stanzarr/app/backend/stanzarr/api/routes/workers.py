@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse
 
-from ... import operations
+from ... import lyricsfiles, operations
 from ...domain import Conflict, Invalid, NotFound
 from ...events import Event
 from .. import schemas
