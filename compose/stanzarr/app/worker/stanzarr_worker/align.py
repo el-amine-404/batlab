@@ -289,23 +289,24 @@ def transcribe(vocals_path: str, meta: dict, device: str = "cuda") -> dict:
     # Secondary / backing vocal detection & stanza segmentation
     processed = []
     for i, item in enumerate(merged):
-        s = item["s"].strip()
+        s = str(item["s"]).strip()
         is_secondary = False
         lower = s.lower().strip(" ,.?!-()")
         if lower in VOCAL_ADLIBS or (len(lower.split()) <= 2 and any(v in lower for v in ("ooh", "yeah", "whoa", "hey", "ah", "mmm"))):
             is_secondary = True
 
         # Overlapping vocal with previous line (backing vocals / ad-lib responses)
-        if i > 0 and item["t"] < merged[i - 1]["end"] - 0.2:
+        if i > 0 and float(item["t"]) < float(merged[i - 1]["end"]) - 0.2:
             is_secondary = True
 
         if is_secondary and not (s.startswith("(") and s.endswith(")")):
             s = f"({s})"
 
-        stanza_start = (i == 0) or (item["t"] - merged[i - 1]["end"] >= 2.5)
+        gap = float(item["t"]) - float(merged[i - 1]["end"]) if i > 0 else 0.0
+        stanza_start = True if i == 0 else bool(gap >= 2.5)
         processed.append({
-            "t": item["t"],
-            "end": item["end"],
+            "t": round(float(item["t"]), 3),
+            "end": round(float(item["end"]), 3),
             "s": s,
             "u": False,
             "stanza_start": stanza_start,
@@ -319,9 +320,22 @@ def transcribe(vocals_path: str, meta: dict, device: str = "cuda") -> dict:
         pass
 
     return {
-        "lines": [{"t": p["t"], "s": p["s"], "u": p["u"], "stanza_start": p.get("stanza_start", False)} for p in processed],
-        "detected_language": detected_lang
+        "lines": [{
+            "t": round(float(p["t"]), 3),
+            "s": str(p["s"]),
+            "u": bool(p.get("u", False)),
+            "stanza_start": bool(p.get("stanza_start", False))
+        } for p in processed],
+        "detected_language": str(detected_lang)
     }
+
+
+def _json_default(obj):
+    if hasattr(obj, "item"):
+        return obj.item()
+    if isinstance(obj, (bool, int, float, str)):
+        return obj
+    return str(obj)
 
 
 def main() -> None:
@@ -336,7 +350,7 @@ def main() -> None:
                 pass
         device = "cuda" if len(sys.argv) > 5 and sys.argv[5] == "cuda" else ("cuda" if _has_cuda() else "cpu")
         res = transcribe(vocals, meta, device=device)
-        json.dump(res, open(out, "w", encoding="utf-8"), ensure_ascii=False)
+        json.dump(res, open(out, "w", encoding="utf-8"), ensure_ascii=False, default=_json_default)
         return
 
     vocals, lines_path, out = sys.argv[2:5]
@@ -349,7 +363,8 @@ def main() -> None:
         starts = whisper(wave, lines, "large-v3", language)
     else:
         starts = whisper(wave, lines, "large-v3-turbo", language)
-    json.dump(starts, open(out, "w"))
+    clean_starts = [(round(float(x), 3) if x is not None else None) for x in starts]
+    json.dump(clean_starts, open(out, "w"), default=_json_default)
 
 
 def _has_cuda() -> bool:

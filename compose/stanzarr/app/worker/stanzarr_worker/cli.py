@@ -23,6 +23,12 @@ from . import __version__, gpu, pipeline
 log = logging.getLogger("stanzarr-worker")
 
 
+def _json_serial(obj):
+    if hasattr(obj, "item"):
+        return obj.item()
+    return str(obj)
+
+
 class Server:
     def __init__(self, url: str, key: str, name: str):
         self.url, self.key, self.name = url.rstrip("/"), key, name
@@ -31,7 +37,7 @@ class Server:
         headers = {"X-Stanzarr-Key": self.key, "X-Stanzarr-Worker": self.name, "User-Agent": f"stanzarr-worker/{__version__}"}
         data = raw
         if body is not None:
-            data = json.dumps(body).encode()
+            data = json.dumps(body, default=_json_serial).encode()
             headers["Content-Type"] = "application/json"
         elif raw is not None:
             headers["Content-Type"] = "application/octet-stream"

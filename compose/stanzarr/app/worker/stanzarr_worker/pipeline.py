@@ -146,9 +146,25 @@ def run_generate(audio: str, workdir: str, stage: Callable[[str], None], device:
         if len(runs) >= 2:
             stage("voting on verified timings")
             placed = vote(runs, len(lines_text), fallback_times=orig_times)
-            result_lines = [p | {"s": s} for p, s in zip(placed, lines_text)]
+            result_lines = [
+                {
+                    "t": round(float(p["t"]), 3),
+                    "s": str(s),
+                    "u": bool(p["u"]),
+                    "stanza_start": bool(orig.get("stanza_start", False)),
+                }
+                for p, s, orig in zip(placed, lines_text, trans_lines)
+            ]
         else:
-            result_lines = trans_lines
+            result_lines = [
+                {
+                    "t": round(float(l["t"]), 3),
+                    "s": str(l["s"]),
+                    "u": bool(l.get("u", False)),
+                    "stanza_start": bool(l.get("stanza_start", False)),
+                }
+                for l in trans_lines
+            ]
     else:
         result_lines = trans_lines
 
