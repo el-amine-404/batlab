@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import mimetypes
 import re
 import secrets
@@ -22,8 +23,11 @@ from starlette.datastructures import MutableHeaders
 from . import __version__
 from .config import Config, load
 from .db import Database
+from .logs import RECENT
 from .processor import event, object_path
 from .settings import validate
+
+logger = logging.getLogger("scanloom.api")
 
 
 class ProjectEdit(BaseModel):
@@ -142,6 +146,11 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
                               count(*) FILTER (WHERE status='failed') AS failed FROM projects WHERE expires_at>now()""")
         return dict(row)
 
+    @app.get("/api/v1/system/logs", tags=["System"])
+    def logs(after: int = 0, level: str | None = None, limit: int = 200):
+        limit = max(1, min(1000, limit))
+        return {"lines": RECENT.lines(after=after, level=level, limit=limit)}
+
     @app.get("/api/v1/settings", tags=["Settings"])
     def get_settings():
         return dict(db.one("SELECT revision,values,updated_at FROM settings WHERE singleton=true"))
@@ -200,7 +209,9 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
                     page_id = cursor.fetchone()["id"]
                     cursor.execute("INSERT INTO jobs(project_id,page_id,kind) VALUES (%s,%s,'process_page')", (project_id, page_id))
                 event(cursor, project_id, "project_queued", {"pages": len(rows)})
-        except BaseException:
+            logger.info("Created project %s (%d pages, profile=%s)", public_id, len(rows), profile)
+        except BaseException as error:
+            logger.exception("Failed creating project: %s", error)
             for path in written:
                 path.unlink(missing_ok=True)
             raise

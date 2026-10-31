@@ -1,3 +1,4 @@
+import logging
 import os
 import struct
 import sys
@@ -8,6 +9,7 @@ from unittest import mock
 
 import cv2
 import numpy as np
+from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
@@ -54,6 +56,18 @@ class ImagingTest(unittest.TestCase):
             source.write_bytes(cv2.imencode(".jpg", np.full((120, 200, 3), 180, np.uint8))[1].tobytes())
             self.assertEqual(normalize(source, destination, 1_000_000), (200, 120))
             self.assertEqual(cv2.imread(str(destination)).shape, (120, 200, 3))
+
+    def test_normalizes_rotated_exif_jpeg(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / "rotated.jpg"
+            destination = Path(folder) / "normalized.png"
+            img = Image.new("RGB", (600, 400), color=(180, 180, 180))
+            exif = img.getexif()
+            exif[0x0112] = 6  # 90 degrees CCW (requires 90 CW rotation)
+            img.save(str(source), format="JPEG", exif=exif)
+            w, h = normalize(source, destination, 5_000_000)
+            self.assertEqual((w, h), (400, 600))
+            self.assertTrue(destination.is_file())
 
     def test_orders_and_warps_a_document(self):
         image = np.full((900, 1200, 3), 35, np.uint8)
@@ -167,6 +181,37 @@ class SettingsTest(unittest.TestCase):
             validate({"retention_hours": 0})
         with self.assertRaisesRegex(ValueError, "Unknown"):
             validate({"surprise": True})
+
+
+class LogsTest(unittest.TestCase):
+    def test_logs_setup_and_recent_buffer(self):
+        from scanloom import logs
+        with tempfile.TemporaryDirectory() as folder:
+            log_dir = Path(folder) / "logs"
+            logs.setup(component="test-worker", logs_dir=log_dir)
+            test_logger = logging.getLogger("scanloom.test")
+            test_logger.info("Hello Scanloom test message")
+            lines = logs.RECENT.lines(level="info", limit=10)
+            self.assertTrue(any("Hello Scanloom test message" in l["message"] for l in lines))
+            log_file = log_dir / "test-worker.log"
+            self.assertTrue(log_file.is_file())
+            content = log_file.read_text(encoding="utf-8")
+            self.assertIn("Hello Scanloom test message", content)
+
+    def test_log_rotation(self):
+        from logging.handlers import RotatingFileHandler
+        with tempfile.TemporaryDirectory() as folder:
+            log_file = Path(folder) / "rot.log"
+            handler = RotatingFileHandler(str(log_file), maxBytes=200, backupCount=2)
+            logger = logging.getLogger("rot.test")
+            logger.addHandler(handler)
+            logger.setLevel(logging.INFO)
+            for i in range(20):
+                logger.info("Message number %d with sufficient padding to exceed 200 bytes", i)
+            handler.close()
+            logger.removeHandler(handler)
+            self.assertTrue(log_file.is_file())
+            self.assertTrue(Path(folder, "rot.log.1").is_file())
 
 
 if __name__ == "__main__":

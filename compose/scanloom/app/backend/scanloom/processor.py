@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import secrets
 import shutil
@@ -20,6 +21,8 @@ from .db import Database
 from .imaging import (detect, detect_orientation, normalize, normalized_corners,
                       pixel_corners, quality, warp, write_png)
 from .security import Refused, clamav, inspect_container, sha256
+
+logger = logging.getLogger("scanloom.worker")
 
 
 def event(cursor, project_id, name: str, data: dict | None = None):
@@ -54,16 +57,24 @@ class Processor:
                     worker_id=%s, started_at=COALESCE(j.started_at,now()), lease_until=now()+interval '5 minutes'
                 FROM candidate WHERE j.id=candidate.id RETURNING j.*
             """, (self.worker_id,))
-            return cursor.fetchone()
+            job = cursor.fetchone()
+            if job:
+                logger.info("Claimed job %d [kind=%s, project=%s, page=%s, attempt=%d]",
+                            job["id"], job["kind"], job["project_id"], job["page_id"], job["attempts"])
+            return job
 
-    def finish(self, job_id: int):
-        self.db.execute("UPDATE jobs SET status='done',finished_at=now(),lease_until=NULL WHERE id=%s", (job_id,))
+    def finish(self, job):
+        self.db.execute("UPDATE jobs SET status='done',finished_at=now(),lease_until=NULL WHERE id=%s", (job["id"],))
+        logger.info("Finished job %d [kind=%s, project=%s]", job["id"], job["kind"], job["project_id"])
 
     def fail(self, job, error: Exception):
         maximum = int(self.settings()["worker_max_attempts"])
         retry = job["attempts"] < maximum and not isinstance(error, Refused)
         status = "queued" if retry else "failed"
         delay = min(300, 5 * (2 ** max(0, job["attempts"] - 1)))
+        logger.exception("Job %d [kind=%s, project=%s, page=%s] failed (attempt %d/%d, status=%s): %s",
+                         job["id"], job["kind"], job["project_id"], job["page_id"],
+                         job["attempts"], maximum, status, error)
         with self.db.transaction() as cursor:
             cursor.execute("UPDATE jobs SET status=%s,error=%s,available_at=now()+(%s*interval '1 second'),lease_until=NULL WHERE id=%s",
                            (status, str(error)[:500], delay, job["id"]))
@@ -91,7 +102,7 @@ class Processor:
                 self.build_export(job)
             elif job["kind"] == "cleanup":
                 self.cleanup()
-            self.finish(job["id"])
+            self.finish(job)
         except Exception as error:
             self.fail(job, error)
         return True
@@ -248,6 +259,7 @@ class Processor:
 
 def loop(config: Config, db: Database):
     processor = Processor(config, db)
+    logger.info("Worker loop started (worker_id=%s)", processor.worker_id)
     next_cleanup = 0.0
     while True:
         worked = processor.run_one()

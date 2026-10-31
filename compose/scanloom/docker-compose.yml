@@ -63,6 +63,7 @@ services:
       - ${VOLUMES_ROOT}/scanloom/incoming:/var/lib/scanloom/incoming
       - ${VOLUMES_ROOT}/scanloom/work:/var/lib/scanloom/work:ro
       - ${VOLUMES_ROOT}/scanloom/exports:/var/lib/scanloom/exports:ro
+      - ${VOLUMES_ROOT}/scanloom/logs:/var/lib/scanloom/logs
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
@@ -101,6 +102,7 @@ services:
       - ${VOLUMES_ROOT}/scanloom/incoming:/var/lib/scanloom/incoming
       - ${VOLUMES_ROOT}/scanloom/work:/var/lib/scanloom/work
       - ${VOLUMES_ROOT}/scanloom/exports:/var/lib/scanloom/exports
+      - ${VOLUMES_ROOT}/scanloom/logs:/var/lib/scanloom/logs
     read_only: true
     tmpfs:
       - /tmp:size=256m,mode=1777

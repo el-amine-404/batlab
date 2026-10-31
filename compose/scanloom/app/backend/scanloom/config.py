@@ -11,6 +11,7 @@ class Config:
     incoming: Path
     work: Path
     exports: Path
+    logs: Path
     static: Path
     port: int
     clamd_host: str
@@ -25,6 +26,7 @@ def load() -> Config:
         incoming=Path(os.getenv("SCANLOOM_INCOMING", root / "incoming")),
         work=Path(os.getenv("SCANLOOM_WORK", root / "work")),
         exports=Path(os.getenv("SCANLOOM_EXPORTS", root / "exports")),
+        logs=Path(os.getenv("SCANLOOM_LOGS", root / "logs")),
         static=Path(os.getenv("SCANLOOM_STATIC", "/opt/scanloom/static")),
         port=int(os.getenv("SCANLOOM_PORT", "8850")),
         clamd_host=os.getenv("SCANLOOM_CLAMD_HOST", "clamav"),

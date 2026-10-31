@@ -40,7 +40,7 @@ def _boundary_session() -> ort.InferenceSession | None:
 
 def normalize(source: Path, destination: Path, maximum_pixels: int) -> tuple[int, int]:
     """Decode through libvips and write a fresh metadata-free, single-frame PNG."""
-    image = pyvips.Image.new_from_file(str(source), access="sequential", fail_on="error")
+    image = pyvips.Image.new_from_file(str(source), fail_on="error")
     pixels = image.width * image.height
     if image.width < 64 or image.height < 64:
         raise ImageProblem("Image is too small to contain a document")

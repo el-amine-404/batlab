@@ -372,7 +372,8 @@ setup-scanloom:
 	sudo install -d -m 0700 -o 11000 -g 11000 \
 		$(VOLUMES_ROOT)/scanloom/incoming \
 		$(VOLUMES_ROOT)/scanloom/work \
-		$(VOLUMES_ROOT)/scanloom/exports
+		$(VOLUMES_ROOT)/scanloom/exports \
+		$(VOLUMES_ROOT)/scanloom/logs
 
 # Only the gateway's folders (also part of setup).
 setup-pdf-gateway:
