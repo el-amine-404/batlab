@@ -26,6 +26,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 @Service
 public class ScanService {
+    private static final int MAX_IN_PROGRESS = 50;
     private final JdbcTemplate jdbc;
     private final GatewayProperties properties;
     private final TransactionTemplate transactions;
@@ -107,6 +108,11 @@ public class ScanService {
                  ORDER BY created_at LIMIT 1""", (rs, row) -> rs.getString(1), owner.userId(), sourceHash);
         if (!duplicate.isEmpty())
             throw new ApiException(409, "DUPLICATE_UPLOAD", "This file is already in your archive", "/api/v1/scans/" + duplicate.getFirst());
+        // Each file takes the one-at-a-time workers minutes: one account can't fill the queue for the others.
+        Integer inProgress = jdbc.queryForObject("SELECT count(*) FROM scan_jobs WHERE owner_id=? AND status NOT IN ('READY','REVIEW_REQUIRED','BLOCKED','FAILED','CANCELLED')",
+                Integer.class, owner.userId());
+        if (inProgress != null && inProgress >= MAX_IN_PROGRESS)
+            throw new ApiException(429, "TOO_MANY_IN_PROGRESS", "You have " + MAX_IN_PROGRESS + " files being checked already: send this one when some have finished");
         String scanId = Ulid.next("scan-");
         jdbc.update("""
                 INSERT INTO scan_jobs(id, owner_id, status, intent, cdr_mode, display_name, source_bytes,

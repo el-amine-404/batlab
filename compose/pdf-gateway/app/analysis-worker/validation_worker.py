@@ -108,7 +108,11 @@ def persist(scan_id: str, job: dict, report: dict) -> None:
         verdict = "FAIL"
         report["failureCodes"] = sorted(set(report.get("failureCodes", [])) | {"OUTPUT_HASH_MISMATCH"})
     engines = {item["engine"]: item.get("version", item.get("status")) for item in report.get("engines", [])}
-    retry = verdict == "UNKNOWN" and attempt < MAX_ATTEMPTS
+    # A check that ran out of time would run out of time again: holding at once also bounds what one upload costs.
+    timed_out = any(item.get("status") == "TIMEOUT" for item in report.get("engines", []))
+    retry = verdict == "UNKNOWN" and attempt < MAX_ATTEMPTS and not timed_out
+    checks = [{key: item.get(key) for key in ("engine", "status", "durationMs", "limitSeconds")} for item in report.get("engines", [])]
+    found = [{key: item.get(key) for key in ("engine", "code", "severity", "message")} for item in report.get("findings", [])]
     if verdict == "PASS":
         decision = "ALLOW_SANITIZED"
     else:
@@ -142,9 +146,14 @@ def persist(scan_id: str, job: dict, report: dict) -> None:
         cursor.execute("UPDATE job_steps SET status=%s,finished_at=now(),engine_version=%s,error_code=%s,details=%s::jsonb WHERE scan_id=%s AND step_type='VALIDATION' AND attempt=%s",
                        ("SUCCEEDED" if verdict == "PASS" else "FAILED", json.dumps(engines, sort_keys=True)[:160],
                         None if verdict == "PASS" else (report["failureCodes"] or ["UNKNOWN"])[0][:80],
-                        json.dumps({"verdict": verdict, "failureCodes": report["failureCodes"]}), scan_id, attempt))
+                        json.dumps({"verdict": verdict, "failureCodes": report["failureCodes"], "checks": checks, "findings": found,
+                                    "outputBytes": report.get("outputBytes")}), scan_id, attempt))
         audit(cursor, scan_id, "VALIDATION_COMPLETED", "SUCCESS" if verdict == "PASS" else "FAILURE",
               {"verdict": verdict, "failureCodes": report["failureCodes"], "retryScheduled": retry})
+    print(json.dumps({"event": "validation_result", "scanId": scan_id, "attempt": attempt, "verdict": verdict,
+                      "failureCodes": report["failureCodes"], "retryScheduled": retry, "outputBytes": report.get("outputBytes"),
+                      "notOk": [item for item in checks if item["status"] not in ("OK", "CLEAN", "CLEAR")],
+                      "slowestMs": max((item["durationMs"] or 0 for item in checks), default=0)}), flush=True)
 
 
 def validate(job: dict) -> dict:
@@ -162,11 +171,13 @@ def validate(job: dict) -> dict:
         return report
     result = subprocess.run(["python3", "/opt/pdf-gateway/final_validate.py", str(job["output"]),
                              "--expected-sha256", job["outputSha256"], "--source", str(job["source"])],
-                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=300, check=False,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600, check=False,
                             env=os.environ.copy())
     try:
         report = json.loads(result.stdout)
     except json.JSONDecodeError:
+        print(json.dumps({"event": "validator_no_report", "exitCode": result.returncode,
+                          "stderr": result.stderr[-500:].decode("utf-8", "replace")}), flush=True)
         return unknown_report("VALIDATOR_NO_REPORT")
     if result.returncode not in (0, 1, 2) or report.get("verdict") not in ("PASS", "FAIL", "UNKNOWN"):
         return unknown_report("VALIDATOR_NO_REPORT")

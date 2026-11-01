@@ -1,20 +1,21 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, Bot, Check, Download, ExternalLink, Eye, FileSearch, Pencil, RefreshCw, Sparkles, Trash2, Undo2, WifiOff, Wrench, X,
+  ArrowLeft, Bot, Check, Download, ExternalLink, Eye, FileSearch, ListChecks, Pencil, ShieldQuestion, RefreshCw, Sparkles, Trash2, Undo2, WifiOff, Wrench, X,
 } from "lucide-react";
 import { AlertDialog } from "radix-ui";
 import { Link, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
-import { api, ApiError, Scan, type EnrichmentJob, type Findings, type MetadataChanges, type PaperlessImport, type Suggestion } from "../api";
+import { api, ApiError, Scan, type EnrichmentJob, type MetadataChanges, type PaperlessImport, type Suggestion } from "../api";
 import { useSession } from "../App";
 import { AiSetup, aiUp } from "../components/ai";
+import { Pipeline, TechnicalDetails } from "../components/pipeline";
 import { Preview, ProgressTrack, useScanProgress } from "../components/progress";
 import {
-  Badge, Button, Card, Details, ErrorNote, Field, Muted, Notice, Select, SelectField, Spinner, Steps, TERMINAL, buttonVariants, cx, formatBytes,
-  formatDate, formatWhen, inputClass, type StepState,
+  Badge, Button, Card, Details, ErrorNote, Field, Muted, Notice, Select, SelectField, Spinner, TERMINAL, buttonVariants, cx, formatBytes,
+  formatWhen, inputClass, type StepState,
 } from "../components/ui";
-import { AI_STATE, FIELD_LABEL, TYPE_LABEL, safetySteps, verdict } from "../words";
+import { AI_STATE, FIELD_LABEL, TYPE_LABEL, safetySteps, statusWord, verdict } from "../words";
 import { folderOf } from "./Documents";
 
 const TAG = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -91,7 +92,8 @@ export function DocumentPage() {
   if (!scan.data) return <Muted className="flex items-center gap-2"><Spinner /> Loading…</Muted>;
   const view = scan.data;
   const sidecar = meta.data?.sidecar;
-  const v = verdict(view);
+  const v = verdict(view, findings.data);
+  const word = statusWord(view.status);
   const reload = () => Promise.all(["sidecar", "document", "documents", "suggestions", "enrichment", "paperless"].map((key) => client.invalidateQueries({ queryKey: [key] })));
 
   const safety = safetySteps(view, findings.data).map((step) => step.key === "archive" && ready && doc.data
@@ -113,11 +115,22 @@ export function DocumentPage() {
     <div className="space-y-6">
       <div>
         <Link to="/documents" className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="size-4" /> All documents</Link>
-        <h1 className="text-2xl font-semibold tracking-tight break-words sm:text-3xl" data-testid="document-title">{sidecar?.title ?? view.displayName}</h1>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <h1 className="min-w-0 text-2xl font-semibold tracking-tight break-words sm:text-3xl" data-testid="document-title">{sidecar?.title ?? view.displayName}</h1>
+          <Badge tone={word.tone}>{word.text}</Badge>
+        </div>
         <p className="mt-1 text-sm break-all text-muted-foreground">{view.displayName} · {formatBytes(view.sourceBytes)} · added {formatWhen(view.createdAt)}</p>
       </div>
 
-      <Notice tone={v.tone} title={v.title}>{v.text}</Notice>
+      <Notice tone={v.tone} title={v.title}>
+        <p>{v.text}</p>
+        {(v.danger || v.next) && (
+          <div className="mt-3 grid gap-3 border-t border-current/15 pt-3 sm:grid-cols-2" data-testid="hold-reason">
+            {v.danger && <div><p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><ShieldQuestion className="size-3.5" /> Is it dangerous?</p><p className="mt-0.5">{v.danger}</p></div>}
+            {v.next && <div><p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><ListChecks className="size-3.5" /> What to do</p><p className="mt-0.5">{v.next}</p></div>}
+          </div>
+        )}
+      </Notice>
 
       {progress && !progress.finished && <Card><ProgressTrack value={progress} /></Card>}
 
@@ -150,9 +163,9 @@ export function DocumentPage() {
         </Card>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <Card title="What happened" icon={<FileSearch className="size-5" />}>
-          <Steps items={steps} />
+      <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <Card title="What happened" description="Open a step to see what it does and how each check ended." icon={<FileSearch className="size-5" />} className="p-2 sm:p-3 [&>header]:p-3 [&>header]:mb-0">
+          <Pipeline items={steps} findings={findings.data} />
         </Card>
         <div className="space-y-6">
           <TechnicalDetails scan={view} findings={findings.data} sidecar={sidecar} documentId={documentId} doc={doc.data} />
@@ -652,74 +665,4 @@ function DeleteCard({ scan, ready }: { scan: Scan; ready: boolean }) {
       </AlertDialog.Root>
     </Details>
   );
-}
-
-function TechnicalDetails({ scan, findings, sidecar, documentId, doc }: {
-  scan: Scan; findings?: Findings; sidecar?: { metadataRevision: number; organization: { reason?: string } };
-  documentId: string | null; doc?: { sha256: string; publishedAt: string };
-}) {
-  const f = findings;
-  return (
-    <Details summary="Technical details" icon={<Wrench className="size-4" />}>
-      <div className="space-y-4 text-sm">
-        {f?.analysis && (
-          <section>
-            <h3 className="mb-1 font-medium">Scan findings</h3>
-            {f.analysis.findings.length === 0 ? <Muted>No indicators reported.</Muted> : (
-              <ul className="space-y-1" data-testid="findings">
-                {f.analysis.findings.map((item, index) => (
-                  <li key={index} className="flex flex-wrap items-center gap-2">
-                    <Badge tone={item.severity === "CRITICAL" ? "bad" : item.severity === "ERROR" || item.severity === "HIGH" ? "warn" : "muted"}>{item.severity}</Badge>
-                    <span className="font-mono text-xs">{item.code}</span>
-                    <span className="text-muted-foreground">{item.message}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <Muted className="mt-1 text-xs">
-              Engines: {f.analysis.engines.map((engine) => `${engine.engine ?? "?"} ${engine.version ?? ""}${engine.databaseVersion ? ` (db ${engine.databaseVersion})` : ""}`.trim()).join(" · ") || "—"}
-            </Muted>
-          </section>
-        )}
-        {f?.signature && f.signature.signatureCount > 0 && (
-          <section>
-            <h3 className="mb-1 font-medium">Digital signatures: {f.signature.state}</h3>
-            <ul className="space-y-1">
-              {f.signature.signatures.map((signature, index) => (
-                <li key={index}>{signature.integrity} · {signature.cryptographicValidity} · {signature.trust} · {signature.revocation} · {signature.modificationLevel}
-                  {signature.signerSubject && <span className="block text-xs text-muted-foreground">Signer: {signature.signerSubject}</span>}</li>
-              ))}
-            </ul>
-          </section>
-        )}
-        {f && (f.cdr.length > 0 || f.validation.length > 0) && (
-          <section>
-            <h3 className="mb-1 font-medium">Rebuild and final checks</h3>
-            <ul className="space-y-1" data-testid="checks">
-              {f.cdr.map((item) => <li key={`c${item.attempt}`}>Rebuild attempt {item.attempt}: {item.status}{item.failureCode ? ` (${item.failureCode})` : ""}{item.durationMs ? ` · ${(item.durationMs / 1000).toFixed(1)} s` : ""}</li>)}
-              {f.validation.map((item) => <li key={`v${item.attempt}`}>Final check {item.attempt} ({item.artifact === "EMBEDDED_METADATA" ? "with metadata" : "rebuilt PDF"}): {item.verdict}{item.failureCodes.length > 0 && <span className="ml-2 font-mono text-xs">{item.failureCodes.join(", ")}</span>}</li>)}
-            </ul>
-          </section>
-        )}
-        <dl className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
-          <Row label="Detection" value={scan.detection} />
-          <Row label="Policy" value={scan.policy} />
-          <Row label="Uploaded" value={formatDate(scan.createdAt)} />
-          {doc && <Row label="Archived" value={formatDate(doc.publishedAt)} />}
-          {sidecar?.organization.reason && <Row label="Filing" value={sidecar.organization.reason} />}
-          {sidecar && <Row label="Metadata revision" value={sidecar.metadataRevision} />}
-          <Row label="Scan ID" value={<code className="text-xs">{scan.scanId}</code>} />
-          {documentId && <Row label="Document ID" value={<code className="text-xs">{documentId}</code>} />}
-          <Row label="SHA-256 of the original" value={<code className="text-xs break-all">{scan.sourceSha256}</code>} />
-          {doc && <Row label="SHA-256 of the clean copy" value={<code className="text-xs break-all">{doc.sha256}</code>} />}
-        </dl>
-        {f && <ul className="list-disc pl-5 text-xs text-muted-foreground">{f.limitations.map((text) => <li key={text}>{text}</li>)}</ul>}
-        {documentId && <a className="text-xs text-primary underline-offset-4 hover:underline" href={`/api/v1/archive/${encodeURIComponent(documentId)}/sidecar`} download>Download the metadata file</a>}
-      </div>
-    </Details>
-  );
-}
-
-function Row({ label, value }: { label: string; value: ReactNode }) {
-  return <div className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="break-words">{value}</dd></div>;
 }

@@ -14,12 +14,19 @@ import socket
 import struct
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 REPORT_VERSION = "scan-report-1"
 POLICY_VERSION = "policy-1"
 RULESET_VERSION = "pdf-risk-1"
 MAX_OUTPUT = 65536
+# pdfid and pdf-parser read a file byte by byte in Python: about 1 CPU second per MiB, so 2 s per MiB
+# at the workers' 0.5 CPU. Fixed limits, never derived from the upload, so a file can't buy more worker
+# time; they cover MAX_CHECKED_BYTES (and the 50 MiB upload limit) with room to spare.
+PYTHON_TOOL_TIMEOUT = 180
+PYTHON_TOOL_CPU = 90
+MAX_CHECKED_BYTES = 60 * 1024 * 1024
 KEYWORDS = ("JS", "JavaScript", "AA", "OpenAction", "Launch", "EmbeddedFile", "RichMedia", "XFA", "AcroForm", "ObjStm")
 ACTIVE = {"JS", "JavaScript", "AA", "OpenAction", "Launch", "RichMedia"}
 
@@ -28,30 +35,33 @@ def finding(engine: str, code: str, severity: str, message: str, **evidence: obj
     return {"engine": engine, "code": code, "severity": severity, "message": message, "evidence": evidence}
 
 
-def bounded_preexec() -> None:
-    resource.setrlimit(resource.RLIMIT_CPU, (15, 15))
+def bounded_preexec(cpu_seconds: int = 15) -> None:
+    resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
     resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
     resource.setrlimit(resource.RLIMIT_FSIZE, (8 * 1024 * 1024, 8 * 1024 * 1024))
     resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
     resource.setrlimit(resource.RLIMIT_NPROC, (32, 32))
 
 
-def command(name: str, argv: list[str], timeout: int = 20) -> dict:
+def command(name: str, argv: list[str], timeout: int = 20, cpu_seconds: int = 15) -> dict:
+    started = time.monotonic()
+    def took() -> int:
+        return round((time.monotonic() - started) * 1000)
     try:
         result = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, timeout=timeout, check=False,
                                 env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "HOME": "/nonexistent"},
-                                preexec_fn=bounded_preexec)
+                                preexec_fn=lambda: bounded_preexec(cpu_seconds))
         output = result.stdout[:MAX_OUTPUT].decode("utf-8", "replace")
         return {"engine": name, "status": "OK" if result.returncode == 0 else "FAILED",
-                "exitCode": result.returncode, "output": output,
+                "exitCode": result.returncode, "output": output, "durationMs": took(),
                 "outputTruncated": len(result.stdout) > MAX_OUTPUT}
     except subprocess.TimeoutExpired as error:
         output = (error.stdout or b"")[:MAX_OUTPUT].decode("utf-8", "replace")
-        return {"engine": name, "status": "TIMEOUT", "exitCode": None,
+        return {"engine": name, "status": "TIMEOUT", "exitCode": None, "durationMs": took(), "limitSeconds": timeout,
                 "output": output, "outputTruncated": bool(error.stdout and len(error.stdout) > MAX_OUTPUT)}
     except OSError as error:
-        return {"engine": name, "status": "UNAVAILABLE", "exitCode": None,
+        return {"engine": name, "status": "UNAVAILABLE", "exitCode": None, "durationMs": took(),
                 "output": type(error).__name__, "outputTruncated": False}
 
 
@@ -79,6 +89,13 @@ def clamd_request(host: str, port: int, payload: bytes, timeout: int) -> bytes:
 
 
 def clamav(path: Path, host: str, port: int, timeout: int, max_age_hours: int) -> tuple[dict, list[dict]]:
+    started = time.monotonic()
+    engine, findings = clamd_scan(path, host, port, timeout, max_age_hours)
+    engine["durationMs"] = round((time.monotonic() - started) * 1000)
+    return engine, findings
+
+
+def clamd_scan(path: Path, host: str, port: int, timeout: int, max_age_hours: int) -> tuple[dict, list[dict]]:
     findings: list[dict] = []
     try:
         raw_version = clamd_request(host, port, b"zVERSION\0", timeout).decode("utf-8", "replace")
@@ -147,10 +164,10 @@ def structural(path: Path, rules: Path) -> tuple[list[dict], list[dict]]:
     elif encrypted["status"] == "FAILED":
         findings.append(finding("qpdf", "ENCRYPTION_CHECK_FAILED", "ERROR", "Encryption state is unknown"))
 
-    pdfid = command("pdfid", ["python3", "/opt/pdf-tools/pdfid.py", "--nozero", str(path)])
+    pdfid = command("pdfid", ["python3", "/opt/pdf-tools/pdfid.py", "--nozero", str(path)], PYTHON_TOOL_TIMEOUT, PYTHON_TOOL_CPU)
     pdfid["version"] = "PDFiD 0.2.10@7d625d0b05c4"
     engines.append(pdfid)
-    parser = command("pdf-parser", ["python3", "/opt/pdf-tools/pdf-parser.py", "--stats", str(path)])
+    parser = command("pdf-parser", ["python3", "/opt/pdf-tools/pdf-parser.py", "--stats", str(path)], PYTHON_TOOL_TIMEOUT, PYTHON_TOOL_CPU)
     parser["version"] = "pdf-parser 0.7.14@7d625d0b05c4"
     engines.append(parser)
 

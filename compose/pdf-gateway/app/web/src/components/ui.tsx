@@ -128,22 +128,8 @@ const MARK: Record<StepState, ReactNode> = {
   skipped: <span className="flex size-7 items-center justify-center rounded-full bg-muted text-muted-foreground"><Minus className="size-4" /></span>,
 };
 
-/** A vertical timeline of steps, each with a state mark and a plain sentence. */
-export function Steps({ items }: { items: { key: string; label: ReactNode; detail?: ReactNode; state: StepState }[] }) {
-  return (
-    <ol className="relative" data-testid="steps">
-      {items.map((item, index) => (
-        <li key={item.key} className="relative flex gap-4 pb-5 last:pb-0" data-step={item.key} data-state={item.state}>
-          {index < items.length - 1 && <span aria-hidden className={cx("absolute top-8 bottom-1 left-3.5 w-px", item.state === "done" ? "bg-success/40" : "bg-border")} />}
-          <span className="relative shrink-0">{MARK[item.state]}</span>
-          <div className="min-w-0 pt-0.5">
-            <p className={cx("text-sm font-medium", (item.state === "waiting" || item.state === "skipped") && "text-muted-foreground")}>{item.label}</p>
-            {item.detail && <div className="mt-0.5 text-sm text-muted-foreground">{item.detail}</div>}
-          </div>
-        </li>
-      ))}
-    </ol>
-  );
+export function StepMark({ state }: { state: StepState }) {
+  return MARK[state];
 }
 
 export function Details({ summary, children, icon }: { summary: ReactNode; children: ReactNode; icon?: ReactNode }) {
@@ -293,6 +279,13 @@ export function formatDate(value: string | null | undefined) {
   if (!value) return "—";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+/** "850 ms", "33.2 s", "2 min 5 s". */
+export function formatDuration(ms: number) {
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
+  return `${Math.floor(ms / 60_000)} min ${Math.round((ms % 60_000) / 1000)} s`;
 }
 
 /** "2 min ago", "3 h ago", or the date. */

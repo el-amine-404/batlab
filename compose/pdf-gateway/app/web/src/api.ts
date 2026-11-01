@@ -43,12 +43,13 @@ export type Scan = z.infer<typeof Scan>;
 export const ScanPage = z.object({ items: z.array(Scan), nextCursor: z.string().nullable() });
 
 const Finding = z.object({ engine: z.string().nullish(), code: z.string().nullish(), severity: z.string().nullish(), message: z.string().nullish() });
+const Check = z.object({ engine: z.string().nullish(), status: z.string().nullish(), durationMs: z.number().nullish(), limitSeconds: z.number().nullish() });
 export const Findings = z.object({
   scanId: z.string(),
   analysis: z.object({
     detection: z.string().nullish(), policyDecision: z.string().nullish(), policyVersion: z.string().nullish(),
     engines: z.array(z.object({ engine: z.string().nullish(), status: z.string().nullish(), version: z.string().nullish(),
-      databaseVersion: z.string().nullish(), databaseDate: z.string().nullish() })),
+      databaseVersion: z.string().nullish(), databaseDate: z.string().nullish(), durationMs: z.number().nullish() })),
     findings: z.array(Finding),
     textExtraction: z.object({ status: z.string().nullish(), pages: z.number().nullish(), characters: z.number().nullish() }),
   }).nullable(),
@@ -62,7 +63,8 @@ export const Findings = z.object({
   cdr: z.array(z.object({ attempt: z.number(), status: z.string(), failureCode: z.string().nullish(),
     durationMs: z.number().nullish(), dangerzoneVersion: z.string().nullish() })),
   validation: z.array(z.object({ attempt: z.number(), artifact: z.string().nullish(), verdict: z.string(),
-    failureCodes: z.array(z.string()), policyVersion: z.string() })),
+    failureCodes: z.array(z.string()), policyVersion: z.string(), outputBytes: z.number().nullish(), createdAt: z.string().nullish(),
+    checks: z.array(Check).nullish(), findings: z.array(Finding).nullish() })),
   archive: z.object({ documentId: z.string(), category: z.string(), reviewState: z.string() }).nullable(),
   steps: z.array(z.object({ type: z.string(), status: z.string(), attempt: z.number(),
     startedAt: z.string().nullish(), finishedAt: z.string().nullish(), errorCode: z.string().nullish() })),

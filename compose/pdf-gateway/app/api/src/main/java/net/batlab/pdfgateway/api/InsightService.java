@@ -39,7 +39,8 @@ public class InsightService {
                       'detection', d->'detection', 'policyDecision', d->'policyDecision', 'policyVersion', d->'policyVersion',
                       'rulesetVersion', d->'rulesetVersion',
                       'engines', COALESCE((SELECT jsonb_agg(jsonb_build_object('engine', e->'engine', 'status', e->'status', 'version', e->'version',
-                                                                               'databaseVersion', e->'databaseVersion', 'databaseDate', e->'databaseDate'))
+                                                                               'databaseVersion', e->'databaseVersion', 'databaseDate', e->'databaseDate',
+                                                                               'durationMs', e->'durationMs'))
                                            FROM jsonb_array_elements(d->'engines') e), '[]'::jsonb),
                       'findings', COALESCE((SELECT jsonb_agg(jsonb_build_object('engine', f->'engine', 'code', f->'code',
                                                                                 'severity', f->'severity', 'message', f->'message'))
@@ -66,7 +67,11 @@ public class InsightService {
                   'validation', COALESCE((SELECT jsonb_agg(jsonb_build_object('attempt', f.attempt, 'artifact',
                                     (SELECT kind FROM artifacts WHERE id=f.artifact_id), 'verdict', f.verdict, 'detection', f.detection,
                                     'policyDecision', f.policy_decision, 'failureCodes', f.failure_codes, 'policyVersion', f.policy_version,
-                                    'engines', f.engines) ORDER BY f.attempt)
+                                    'engines', f.engines,
+                                    'checks', (SELECT j.details->'checks' FROM job_steps j WHERE j.scan_id=s.id AND j.step_type='VALIDATION' AND j.attempt=f.attempt),
+                                    'findings', (SELECT j.details->'findings' FROM job_steps j WHERE j.scan_id=s.id AND j.step_type='VALIDATION' AND j.attempt=f.attempt),
+                                    'outputBytes', (SELECT j.details->'outputBytes' FROM job_steps j WHERE j.scan_id=s.id AND j.step_type='VALIDATION' AND j.attempt=f.attempt),
+                                    'createdAt', f.created_at) ORDER BY f.attempt)
                                    FROM final_validations f WHERE f.scan_id=s.id), '[]'::jsonb),
                   'archive', (SELECT jsonb_build_object('documentId', d.document_id, 'category', d.category, 'reviewState', d.review_state)
                                 FROM archive_documents d WHERE d.scan_id=s.id),

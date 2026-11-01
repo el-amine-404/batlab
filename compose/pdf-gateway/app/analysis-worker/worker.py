@@ -132,13 +132,17 @@ def handle(channel, method, _properties, body: bytes) -> None:
             return
         path, attempt = claimed
         result = subprocess.run(["python3", "/opt/pdf-gateway/scan.py", str(path)], stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, timeout=180, check=False, env=os.environ.copy())
+                                stderr=subprocess.PIPE, timeout=540, check=False, env=os.environ.copy())
         report = json.loads(result.stdout)
         if result.returncode not in (0, 2):
             raise RuntimeError("scanner exited without a typed fail-closed report")
         if report.get("policyDecision") == "CDR_ELIGIBLE":
             report["textExtraction"] = extract_text(scan_id, path)
         persist(scan_id, attempt, report)
+        print(json.dumps({"event": "scan_result", "scanId": scan_id, "attempt": attempt, "detection": report.get("detection"),
+                          "policy": report.get("policyDecision"), "codes": sorted({item.get("code") for item in report.get("findings", [])}),
+                          "notOk": [{"engine": item.get("engine"), "status": item.get("status"), "durationMs": item.get("durationMs")}
+                                    for item in report.get("engines", []) if item.get("status") not in ("OK", "CLEAN", "CLEAR")]}), flush=True)
         channel.basic_ack(method.delivery_tag)
     except (json.JSONDecodeError, KeyError, TypeError):
         # Invalid envelopes cannot become valid through retry and must not form

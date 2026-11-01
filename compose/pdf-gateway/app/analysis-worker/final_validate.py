@@ -23,7 +23,6 @@ import scan
 
 REPORT_VERSION = "final-validation-report-1"
 POLICY_VERSION = "final-policy-1"
-MAX_BYTES = 256 * 1024 * 1024
 MAX_PAGES = 1000
 # Fraction of non-white pixels below which a rendered page counts as blank.
 BLANK_INK = 0.0005
@@ -245,7 +244,7 @@ def blank_pages(path: Path, pages: int, findings: list[dict]) -> dict:
     version = scan.version(["pdftoppm", "-v"])
     with tempfile.TemporaryDirectory(prefix="render-", dir=os.getenv("TMPDIR", "/tmp")) as directory:
         result = scan.command("pdftoppm", ["pdftoppm", "-r", "12", "-gray", str(path), f"{directory}/p"], timeout=120)
-        engine = {"engine": "pdftoppm", "status": result["status"], "version": version, "exitCode": result["exitCode"]}
+        engine = {"engine": "pdftoppm", "status": result["status"], "version": version, "exitCode": result["exitCode"], "durationMs": result["durationMs"]}
         if result["status"] != "OK":
             fail(findings, "pdftoppm", "RENDER_FAILED", "Output could not be rendered for visual checks", status=result["status"])
             return engine
@@ -290,7 +289,18 @@ def main() -> int:
     path = args.path.resolve(strict=True)
     size = path.stat().st_size
     initial = sha256(path)
-    if not path.is_file() or not 0 < size <= MAX_BYTES:
+    # Over the limit no engine runs: the verdict costs nothing and is not retried. A rebuilt file is
+    # much larger than its source, so this bounds the time an upload can take from the workers.
+    if path.is_file() and size > scan.MAX_CHECKED_BYTES:
+        fail(findings, "input", "OUTPUT_TOO_LARGE", "The rebuilt copy is over the size the checks accept",
+             bytes=size, limitBytes=scan.MAX_CHECKED_BYTES)
+        json.dump({"schemaVersion": REPORT_VERSION, "policyVersion": POLICY_VERSION, "rulesetVersion": scan.RULESET_VERSION,
+                   "outputSha256": initial, "outputBytes": size, "verdict": "FAIL", "detection": "UNKNOWN",
+                   "policyDecision": "REVIEW_REQUIRED", "failureCodes": ["OUTPUT_TOO_LARGE"], "engines": engines,
+                   "findings": findings, "limitations": []}, sys.stdout, sort_keys=True, separators=(",", ":"))
+        sys.stdout.write("\n")
+        return 1
+    if not path.is_file() or size <= 0:
         fail(findings, "input", "OUTPUT_SIZE_INVALID", "Output size is outside policy", bytes=size)
     if initial != args.expected_sha256:
         fail(findings, "input", "OUTPUT_HASH_MISMATCH", "Output bytes are not the recorded CDR output")

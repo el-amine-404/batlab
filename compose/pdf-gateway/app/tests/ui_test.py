@@ -197,7 +197,6 @@ try:
     download = driver.find_element(By.CSS_SELECTOR, "[data-testid=download-pdf]")
     check("download is an attachment link to the archive file", download.get_attribute("download") is not None
           and download.get_attribute("href").endswith("/file") and "/quarantine" not in download.get_attribute("href"))
-    driver.find_element(By.XPATH, "//summary[contains(., 'Technical details')]").click()
     text_present(driver, "Final check 1")
     check("technical details keep the final check", "PASS" in driver.find_element(By.CSS_SELECTOR, "[data-testid=checks]").text)
     driver.save_screenshot(str(SHOTS / "desktop-document.png"))
@@ -271,7 +270,7 @@ try:
     driver.get(BASE + "/documents?show=held")
     text_present(driver, HOSTILE)
     driver.find_element(By.PARTIAL_LINK_TEXT, HOSTILE).click()
-    text_present(driver, "Held: not released")
+    text_present(driver, "Held")
     driver.find_element(By.XPATH, "//summary[contains(., 'Delete')]").click()
     driver.find_element(By.CSS_SELECTOR, "[data-testid=delete]").click()
     dialog = wait(driver, ec.presence_of_element_located((By.CSS_SELECTOR, "[data-testid=delete-dialog]")))
