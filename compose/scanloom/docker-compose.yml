@@ -38,7 +38,7 @@ services:
     pids_limit: 128
 
   api:
-    image: local/batlab-scanloom:3.0.0
+    image: local/batlab-scanloom:3.2.0
     build:
       context: ./app
       additional_contexts:
@@ -88,7 +88,7 @@ services:
     pids_limit: 96
 
   worker:
-    image: local/batlab-scanloom:3.0.0
+    image: local/batlab-scanloom:3.2.0
     pull_policy: never
     container_name: scanloom-worker
     command: ["worker"]
@@ -128,7 +128,7 @@ services:
   # The only part that can reach beyond the private network, and only to send
   # messages through Apprise: the worker, which decodes uploads, stays cut off.
   notifier:
-    image: local/batlab-scanloom:3.0.0
+    image: local/batlab-scanloom:3.2.0
     pull_policy: never
     container_name: scanloom-notifier
     command: ["notifier"]
@@ -161,7 +161,7 @@ services:
     pids_limit: 32
 
   web:
-    image: local/batlab-scanloom-web:3.0.0
+    image: local/batlab-scanloom-web:3.2.0
     build:
       context: ./app
       additional_contexts:
