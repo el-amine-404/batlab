@@ -59,7 +59,10 @@ FAST_LANGUAGES = os.getenv("PDF_GATEWAY_OCR_FAST_LANGUAGES", "fra+eng")
 SURE_CONFIDENCE = float(os.getenv("PDF_GATEWAY_OCR_SURE_CONFIDENCE", "70"))
 # Words of Arabic Tesseract is 80% sure of: 59 on a bilingual certificate, at most 5 on any page of a French deck.
 ARABIC_WORDS = int(os.getenv("PDF_GATEWAY_OCR_ARABIC_WORDS", "10"))
-VISION_PIXELS = int(os.getenv("PDF_GATEWAY_VISION_PIXELS", "1600"))
+# The long side of the page the model sees. Scored 2026-11-01: 1100 px reads French as well as 1600 in a third of
+# the time (13/13 in 77 s, 13/13 in 219 s); Arabic loses words below 1600 (18/20 against 19-20); 768 loses names.
+VISION_PIXELS = int(os.getenv("PDF_GATEWAY_VISION_PIXELS", "1100"))
+ARABIC_PIXELS = int(os.getenv("PDF_GATEWAY_VISION_ARABIC_PIXELS", "1600"))
 VISION_TOKENS = int(os.getenv("PDF_GATEWAY_VISION_MAX_TOKENS", "2500"))
 # Below this Tesseract's orientation check is a guess; a wrong turn would spoil a page that was fine.
 ORIENTATION_CONFIDENCE = float(os.getenv("PDF_GATEWAY_ORIENTATION_CONFIDENCE", "3"))
@@ -335,11 +338,11 @@ def looped(text: str) -> bool:
     return len(lines) >= 12 and max(lines.count(line) for line in set(lines)) > max(6, len(lines) // 3)
 
 
-def read_page(page: Path, name: str, seconds: int) -> str | None:
+def read_page(page: Path, name: str, seconds: int, pixels: int) -> str | None:
     """What the vision model reads on a page, or None when it can't be used."""
     with Image.open(page) as image:
         small = image.convert("RGB")
-    small.thumbnail((VISION_PIXELS, VISION_PIXELS))
+    small.thumbnail((pixels, pixels))
     encoded = io.BytesIO()
     small.save(encoded, "PNG")
     body = {"model": name, "temperature": 0, "max_tokens": VISION_TOKENS,
@@ -377,7 +380,7 @@ def ocr(job: dict, engine: str) -> dict:
         name = model()
         for done, (index, seconds) in enumerate(wanted, 1):
             try:
-                text = read_page(upright[index], name, seconds)
+                text = read_page(upright[index], name, seconds, ARABIC_PIXELS if index in arabic else VISION_PIXELS)
                 if text is not None:
                     readings[index] = (text, name)
             # A stuck page (a timeout is an OSError) falls back to Tesseract below.
