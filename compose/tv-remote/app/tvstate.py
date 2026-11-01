@@ -38,6 +38,7 @@ def power(mac: str) -> dict:
     """Toggle, finishing the job: off sends POWER and waits for the screen to
     go; on wakes the network (Wake-on-LAN), then sends POWER from standby."""
     r = remote(mac)
+    r.failed_at = -1e9  # a wish to change power is worth a real try
     st = status(mac)
     if st["power"] == "on":
         r.run(lambda tv: tv.send_key("KEY_POWER"))

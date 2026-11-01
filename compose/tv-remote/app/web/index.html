@@ -55,7 +55,7 @@
     <symbol id="i-swap" viewBox="0 0 24 24"><path d="M7 4 3 8l4 4"/><path d="M3 8h13"/><path d="m17 12 4 4-4 4"/><path d="M21 16H8"/></symbol>
     <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3M8 22h8"/></symbol>
     <symbol id="i-mic-off" viewBox="0 0 24 24"><path d="m2 2 20 20"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><path d="M12 19v3M8 22h8"/></symbol>
-    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+    <symbol id="i-timer" viewBox="0 0 24 24"><circle cx="12" cy="14" r="8"/><path d="M12 10v4l2.5 2"/><path d="M9 2h6M12 2v4"/></symbol>
     <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4 20-7z"/></symbol>
   </svg>
 
@@ -96,37 +96,16 @@
           <span id="status-dot" class="dot" title="checking"></span>
           <div>
             <h1 id="tv-name">TV</h1>
-            <button type="button" id="sleep-chip" class="sleep-chip" aria-label="Sleep timer" hidden></button>
-            <p id="tv-now" class="small now" hidden></p>
+            <!-- Always one line tall, so what it says never moves the page. -->
+            <p class="tv-sub small"><span id="tv-since" class="muted"></span><span id="tv-now" class="now" hidden></span><button type="button" id="sleep-chip" class="sleep-chip" aria-label="Sleep timer" hidden></button></p>
           </div>
         </div>
         <div class="bar-actions">
-          <button id="sleep-open" class="btn btn-ghost btn-icon" aria-label="Sleep timer" title="Sleep timer"><svg class="ic"><use href="#i-moon"/></svg></button>
+          <button id="sleep-open" class="btn btn-ghost btn-icon" aria-label="Turn off later" title="Turn off later"><svg class="ic"><use href="#i-timer"/></svg></button>
           <button id="switch" class="btn btn-ghost btn-icon" aria-label="Switch TV" title="Switch TV"><svg class="ic"><use href="#i-swap"/></svg></button>
           <button class="btn btn-power btn-icon" id="power" aria-label="Power" title="Power"><svg class="ic"><use href="#i-power"/></svg></button>
         </div>
       </header>
-
-      <section id="media" class="card media" hidden aria-label="Now playing">
-        <div class="media-head">
-          <div class="media-text">
-            <b id="media-title"></b>
-            <span id="media-sub" class="muted small"></span>
-          </div>
-          <span id="media-source" class="badge"></span>
-        </div>
-        <div class="media-progress">
-          <input type="range" id="media-seek" min="0" max="100" step="1" value="0" aria-label="Position">
-          <div class="media-times muted small"><span id="media-pos">0:00</span><span id="media-dur">0:00</span></div>
-        </div>
-        <div class="media-ctrl">
-          <button class="btn btn-ghost btn-icon skip" data-media="prev" aria-label="Previous"><svg class="ic"><use href="#i-prev"/></svg></button>
-          <button class="btn btn-ghost btn-icon seekbtn" data-media="rel" data-value="-10" aria-label="Rewind"><svg class="ic"><use href="#i-back10"/></svg><small id="seek-back">−10s</small></button>
-          <button class="btn btn-primary btn-round btn-icon media-main" id="media-toggle" aria-label="Play or pause"><svg class="ic"><use href="#i-pause"/></svg></button>
-          <button class="btn btn-ghost btn-icon seekbtn" data-media="rel" data-value="10" aria-label="Fast forward"><svg class="ic"><use href="#i-fwd10"/></svg><small id="seek-fwd">+10s</small></button>
-          <button class="btn btn-ghost btn-icon skip" data-media="next" aria-label="Next"><svg class="ic"><use href="#i-next"/></svg></button>
-        </div>
-      </section>
 
       <div class="seg" role="tablist" aria-label="Control mode">
         <button role="tab" data-mode="buttons" aria-selected="true"><svg class="ic"><use href="#i-pad"/></svg>Buttons</button>
@@ -190,6 +169,27 @@
         <span id="vol-num" class="vol-num">–</span>
       </div>
 
+      <section id="media" class="card media" hidden aria-label="Now playing">
+        <div class="media-head">
+          <div class="media-text">
+            <b id="media-title"></b>
+            <span id="media-sub" class="muted small"></span>
+          </div>
+          <span id="media-source" class="badge"></span>
+        </div>
+        <div class="media-progress">
+          <input type="range" id="media-seek" min="0" max="100" step="1" value="0" aria-label="Position">
+          <div class="media-times muted small"><span id="media-pos">0:00</span><span id="media-dur">0:00</span></div>
+        </div>
+        <div class="media-ctrl">
+          <button class="btn btn-ghost btn-icon skip" data-media="prev" aria-label="Previous"><svg class="ic"><use href="#i-prev"/></svg></button>
+          <button class="btn btn-ghost btn-icon seekbtn" data-media="rel" data-value="-10" aria-label="Rewind"><svg class="ic"><use href="#i-back10"/></svg><small id="seek-back">−10s</small></button>
+          <button class="btn btn-primary btn-round btn-icon media-main" id="media-toggle" aria-label="Play or pause"><svg class="ic"><use href="#i-pause"/></svg></button>
+          <button class="btn btn-ghost btn-icon seekbtn" data-media="rel" data-value="10" aria-label="Fast forward"><svg class="ic"><use href="#i-fwd10"/></svg><small id="seek-fwd">+10s</small></button>
+          <button class="btn btn-ghost btn-icon skip" data-media="next" aria-label="Next"><svg class="ic"><use href="#i-next"/></svg></button>
+        </div>
+      </section>
+
       <!-- Playback keys for what reports nothing (beIN, HDMI, the TV's player);
            while a Now Playing card shows, it is the one place for playback. -->
       <div class="row three" id="keys-row">
@@ -198,9 +198,9 @@
         <button class="btn btn-key" data-key="KEY_FF" aria-label="Fast forward"><svg class="ic"><use href="#i-fwd10"/></svg><span>Forward</span></button>
       </div>
 
-      <div id="apps" class="apps" hidden></div>
+      <div id="apps" class="apps"></div>
 
-      <form id="yt" class="card kb" hidden autocomplete="off">
+      <form id="yt" class="card kb" autocomplete="off">
         <div class="card-title"><svg class="ic"><use href="#i-youtube"/></svg><label for="yt-text">YouTube</label></div>
         <p class="small muted">Paste a video link to play it, or type to search and pick a result.</p>
         <div class="kb-row">

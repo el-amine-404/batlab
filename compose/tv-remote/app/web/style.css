@@ -45,7 +45,10 @@ body {
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
   min-height: 100dvh;
+  display: flex; flex-direction: column;
 }
+.app { flex: 1 0 auto; width: 100%; }
+.foot { flex: none; }
 .sprite { position: absolute; }
 /* A long press on a control must not start text selection or the copy menu. */
 button, .pad, .pad-area, .pad-scroll, .dpad, .rocker, .seg, .media-ctrl, .bar, .row {
@@ -233,7 +236,7 @@ input[type="text"] {
   color: var(--fg); background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
 }
 
-.apps { display: flex; gap: 8px; overflow-x: auto; margin: 0 -16px; padding: 2px 16px; scrollbar-width: none; }
+.apps { display: flex; gap: 8px; overflow-x: auto; margin: 0 -16px; padding: 2px 16px; scrollbar-width: none; min-height: 48px; }
 .apps::-webkit-scrollbar { display: none; }
 .apps .btn { min-height: 44px; font-size: 13px; flex: none; padding: 0 16px; border-radius: 999px; }
 
@@ -354,8 +357,7 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(2px); }
   position: sticky; bottom: 0; margin: 0 -16px; padding: 8px 16px max(8px, env(safe-area-inset-bottom)); background: var(--bg);
 }
 @media (min-width: 640px) { .deck { position: static; margin: 0; padding: 0; background: none; } }
-/* While something plays, the card takes room from the d-pad, not from the mic. */
-.view:has(#media:not([hidden])) .stage { height: clamp(180px, 25dvh, 240px); }
+
 .btn-mic {
   appearance: none; border: 0; width: 104px; height: 104px; margin: auto; border-radius: 50%; cursor: pointer; touch-action: manipulation;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
@@ -389,9 +391,14 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(2px); }
 #input-open.working .ic { animation: pulse 1s ease-in-out infinite; }
 
 /* Sleep timer */
+.tv-sub {
+  display: flex; gap: 0 8px; min-height: 1.45em; white-space: nowrap; overflow: hidden;
+}
+.tv-sub > * + *::before { content: "·"; margin-right: 8px; color: var(--muted); }
+.tv-sub > [hidden] + *::before, .tv-sub > :first-child:empty + *::before { content: none; }
 .sleep-chip {
-  appearance: none; border: 0; background: transparent; padding: 2px 0; font: inherit; font-size: 13px; font-weight: 500;
-  color: var(--accent); cursor: pointer; display: block;
+  appearance: none; border: 0; background: transparent; padding: 0; font: inherit; font-weight: 500;
+  color: var(--accent); cursor: pointer; flex: none;
 }
 #sleep-open.active { color: var(--accent); }
 .sleep-grid { width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }

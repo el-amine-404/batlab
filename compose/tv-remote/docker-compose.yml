@@ -40,7 +40,8 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=16m
     mem_limit: 128m
-    pids_limit: 128
+    # A scan takes 64 threads, on top of one per open page and request.
+    pids_limit: 256
     logging:
       driver: "json-file"
       options:

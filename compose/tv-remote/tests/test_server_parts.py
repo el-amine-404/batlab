@@ -1,18 +1,24 @@
 """Sessions, the sleep timer and the shared status, with files in a temp folder."""
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "app"))
 import auth  # noqa: E402
 import livestate  # noqa: E402
+import powerlog  # noqa: E402
+import samsung  # noqa: E402
 import sleeptimer  # noqa: E402
 
 _TMP = Path(tempfile.mkdtemp())
 auth.AUTH_FILE = _TMP / "auth.json"
 auth.SESSIONS_FILE = _TMP / "sessions.json"
 sleeptimer._FILE = _TMP / "sleep.json"
+powerlog._FILE = _TMP / "power.json"
 
 
 class Sessions(unittest.TestCase):
@@ -93,6 +99,89 @@ class Reads(unittest.TestCase):
         life.poke()
         life.current()
         self.assertEqual(len(reads), 2)
+
+
+class PowerLog(unittest.TestCase):
+    def test_since_counts_from_the_change(self):
+        powerlog.observe("p1", "on", 100)
+        powerlog.observe("p1", "on", 200)
+        self.assertEqual(powerlog.since("p1"), 100)
+
+    def test_one_lost_answer_is_not_off_and_off_dates_from_the_first(self):
+        powerlog.observe("p2", "on", 100)
+        powerlog.observe("p2", "off", 200)
+        self.assertEqual(powerlog.since("p2"), 100)
+        powerlog.observe("p2", "on", 230)
+        self.assertEqual(powerlog.since("p2"), 100)
+        powerlog.observe("p2", "off", 300)
+        powerlog.observe("p2", "standby", 330)
+        self.assertEqual(powerlog.since("p2"), 300)
+        powerlog.observe("p2", "on", 400)
+        self.assertEqual(powerlog.since("p2"), 400)
+
+
+class TvThatIsOff(unittest.TestCase):
+    """Keys to a TV that is off once used up the container's threads."""
+
+    def test_keys_fail_at_once_after_a_failure_and_scan_once(self):
+        calls = []
+        r = samsung.Remote.__new__(samsung.Remote)
+        r.mac, r.lock, r.tv = "aa", threading.Lock(), None
+        r.failed_at, r.relocated_at, r.last_used = -1e9, -1e9, 0.0
+
+        def refuse():
+            calls.append("connect")
+            raise OSError("timed out")
+
+        with mock.patch.object(r, "_connect", refuse), mock.patch.object(samsung, "scan", lambda: calls.append("scan") or []):
+            for _ in range(5):
+                with self.assertRaises(ConnectionError):
+                    r.run(lambda tv: None)
+        self.assertEqual(calls.count("connect"), 3)
+        self.assertEqual(calls.count("scan"), 1)
+
+    def test_presses_already_queued_do_not_each_retry(self):
+        calls = []
+        r = samsung.Remote.__new__(samsung.Remote)
+        r.mac, r.lock, r.tv = "aa", threading.Lock(), None
+        r.failed_at, r.relocated_at, r.last_used = -1e9, -1e9, 0.0
+
+        def refuse():
+            calls.append("connect")
+            raise OSError("timed out")
+
+        def press():
+            try:
+                r.run(lambda tv: None)
+            except ConnectionError:
+                pass
+
+        with mock.patch.object(r, "_connect", refuse), mock.patch.object(samsung, "scan", lambda: []):
+            r.lock.acquire()
+            threads = [threading.Thread(target=press) for _ in range(5)]
+            for t in threads:
+                t.start()
+            time.sleep(0.1)  # all five are past the first check, waiting for the lock
+            r.lock.release()
+            for t in threads:
+                t.join()
+        self.assertEqual(len(calls), 3)
+
+    def test_scans_at_the_same_time_share_one(self):
+        runs = []
+        samsung._last_scan = (0.0, [])
+
+        def probe(ip):
+            runs.append(ip)
+            return None
+
+        with mock.patch.object(samsung, "device_info", probe):
+            threads = [threading.Thread(target=samsung.scan) for _ in range(4)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        self.assertEqual(len(runs), samsung.TV_SUBNET.num_addresses - 2)
 
 
 if __name__ == "__main__":

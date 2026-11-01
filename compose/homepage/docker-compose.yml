@@ -10,6 +10,15 @@ services:
     volumes:
       - ${CONFIGS_ROOT}/homepage/conf:/app/config:ro
       - ${VOLUMES_ROOT}/homepage/icons:/app/public/icons
+      # The icons of the tools built here: the files each tool serves, so one copy.
+      - ${CONFIGS_ROOT}/clipseerr/app/frontend/public/favicon.svg:/app/public/icons/tools/clipseerr.svg:ro
+      - ${CONFIGS_ROOT}/subfeed/app/frontend/public/favicon.svg:/app/public/icons/tools/subfeed.svg:ro
+      - ${CONFIGS_ROOT}/videodrop/app/frontend/public/favicon.svg:/app/public/icons/tools/videodrop.svg:ro
+      - ${CONFIGS_ROOT}/songdrop/app/frontend/public/favicon.svg:/app/public/icons/tools/songdrop.svg:ro
+      - ${CONFIGS_ROOT}/stanzarr/app/frontend/public/favicon.svg:/app/public/icons/tools/stanzarr.svg:ro
+      - ${CONFIGS_ROOT}/scanloom/app/frontend/public/icon.svg:/app/public/icons/tools/scanloom.svg:ro
+      - ${CONFIGS_ROOT}/pdf-gateway/app/web/public/icon.svg:/app/public/icons/tools/pdf-gateway.svg:ro
+      - ${CONFIGS_ROOT}/tv-remote/app/web/icon.svg:/app/public/icons/tools/tv-remote.svg:ro
       - ${VOLUMES_ROOT}/homepage/images:/app/public/images
       - ${VOLUMES_ROOT}/homepage/logs:/app/config/logs
       - /etc/localtime:/etc/localtime:ro

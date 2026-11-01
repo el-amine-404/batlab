@@ -9,10 +9,13 @@ import sys
 from http.server import ThreadingHTTPServer
 
 import auth
+import powerlog
+import samsung
 import sleeptimer
 import tvcontrol
 from config import DATA_DIR, LISTEN_ADDR, PORT, TOKENS_DIR, TV_SUBNET, VERSION
 from http_api import Handler
+from store import load_tvs
 
 log = logging.getLogger("tv-remote")
 
@@ -21,6 +24,11 @@ def _turn_off(mac: str) -> None:
     tv = tvcontrol.control(mac)
     if tv.status().get("power") == "on":
         tv.toggle_power()
+
+
+def _power_reading(mac: str) -> str:
+    dev = samsung.device_info(load_tvs()[mac]["ip"], timeout=1.5)
+    return dev["power"] if dev else "off"
 
 
 def main() -> None:
@@ -37,6 +45,7 @@ def main() -> None:
     TOKENS_DIR.mkdir(parents=True, exist_ok=True)
     os.chmod(TOKENS_DIR, 0o700)
     sleeptimer.start(_turn_off)
+    powerlog.start(load_tvs, _power_reading)
     server = ThreadingHTTPServer((LISTEN_ADDR, PORT), Handler)
     server.daemon_threads = True
     log.info("tv-remote %s listening on %s:%d, scanning %s", VERSION, LISTEN_ADDR, PORT, TV_SUBNET)

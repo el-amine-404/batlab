@@ -53,12 +53,12 @@
           token: "{{HOMEPAGE_VAR_NAVIDROME_TOKEN}}"
           salt: "{{HOMEPAGE_VAR_NAVIDROME_SALT}}"
     - Feishin:
-        icon: mdi-headphones
+        icon: feishin
         href: http://feishin.homelab.lan
         description: Player for Navidrome
         siteMonitor: http://feishin:9180
     - stanzarr:
-        icon: mdi-script-text
+        icon: /icons/tools/stanzarr.svg
         href: http://stanzarr.homelab.lan
         description: Lyrics for the library, synced
         siteMonitor: http://stanzarr:6868/api/v1/health
@@ -86,12 +86,12 @@
 
 - Get music:
     - Aurral:
-        icon: mdi-music-circle
+        icon: aurral
         href: http://aurral.homelab.lan
         description: Ask for and discover albums
         siteMonitor: http://aurral:3001
     - clipseerr:
-        icon: mdi-music-box-multiple
+        icon: /icons/tools/clipseerr.svg
         href: http://clipseerr.homelab.lan
         description: New music videos; ask for the song or the video
         siteMonitor: http://clipseerr:8820/api/v1/health
@@ -114,7 +114,7 @@
                 requests: failed
               label: Failed
     - songdrop:
-        icon: mdi-link-variant
+        icon: /icons/tools/songdrop.svg
         href: http://songdrop.homelab.lan
         description: Paste a Spotify or YouTube link, get the song
         siteMonitor: http://songdrop:8810/api/v1/health
@@ -145,7 +145,7 @@
               label: Failed
 - Feeds:
     - subfeed:
-        icon: mdi-rss
+        icon: /icons/tools/subfeed.svg
         href: http://subfeed.homelab.lan
         description: Subreddits as feeds (JSON Feed, Atom)
         siteMonitor: http://subfeed:8830/api/v1/health
@@ -170,7 +170,7 @@
 
 - Photos & files:
     - Scanloom:
-        icon: mdi-scanner
+        icon: /icons/tools/scanloom.svg
         href: https://scanloom.homelab.lan
         description: Turn document photos into clean pages
         siteMonitor: http://scanloom:8080/api/v1/health
@@ -199,7 +199,7 @@
           version: 2
           fields: ["users", "photos", "videos", "storage"]
     - PDF Gateway:
-        icon: mdi-file-lock
+        icon: /icons/tools/pdf-gateway.svg
         href: https://pdf.homelab.lan
         description: Checks PDFs, rebuilds them safely, files them
         siteMonitor: http://pdf-gateway-web:8080/manifest.webmanifest
@@ -250,8 +250,8 @@
           # Port 5000 has no login and is only reachable on home_server.
           url: http://frigate:5000
     - TV Remote:
-        icon: mdi-remote-tv
-        href: http://tv.homelab.lan
+        icon: /icons/tools/tv-remote.svg
+        href: https://tv.homelab.lan
         description: Remote for the Samsung TV
 
 - AI:
@@ -319,7 +319,7 @@
 
 - Downloaders:
     - videodrop:
-        icon: mdi-download-box
+        icon: /icons/tools/videodrop.svg
         href: http://videodrop.homelab.lan
         description: Videos for whoever asks (clipseerr, a pasted link)
         siteMonitor: http://videodrop:8840/api/v1/health
@@ -470,7 +470,7 @@
         description: Local AI models
         ping: http://ollama:11434
     - Paperless-GPT:
-        icon: mdi-file-document-edit
+        icon: paperless-gpt
         href: http://paperless-gpt.homelab.lan
         description: AI OCR and tags for Paperless
         siteMonitor: http://paperless-gpt:8080

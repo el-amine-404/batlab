@@ -10,7 +10,12 @@ function openRemote(tv) {
   $("#tv-name").textContent = tv.name;
   $("#tv-model").textContent = [tv.name, tv.model, tv.ip].filter(Boolean).join(" · ");
   $("#kb").hidden = true;
+  // What was last known, at once, so the first paint is already the right
+  // layout; the live stream corrects it within moments.
+  state = {};
+  try { state = JSON.parse(localStorage.getItem(`tv-remote:state:${tv.mac}`)) || {}; } catch {}
   show("remote");
+  render();
   startStatus();
   loadApps();
   loadInputs();
@@ -43,12 +48,29 @@ function render() {
   if (known && !sliding) slider.value = state.volume;
   $("#power").classList.toggle("is-on", on);
   renderSleep();
+  renderSince();
   renderInputLabel();
   $("#power").setAttribute("aria-label", on ? "Turn off the TV" : "Turn on the TV");
   renderMedia();
   $("#tv-now").hidden = !(on && state.app);
-  $("#tv-now").textContent = state.app ? `Now: ${state.app}` : "";
+  $("#tv-now").textContent = state.app || "";
 }
+
+function renderSince() {
+  const box = $("#tv-since");
+  if (!state.power || !state.power_since) { box.textContent = ""; return; }
+  const since = new Date(state.power_since * 1000);
+  if (state.power === "on") {
+    const minutes = Math.floor((Date.now() - since) / 60000);
+    const h = Math.floor(minutes / 60);
+    box.textContent = "On for " + (h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : h ? `${h}h ${minutes % 60}m` : `${minutes}m`);
+  } else {
+    const time = since.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const today = since.toDateString() === new Date().toDateString();
+    box.textContent = "Off since " + (today ? time : `${since.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} ${time}`);
+  }
+}
+setInterval(() => renderSince(), 30000);
 
 function applyStatus(s) {
   if (!current || busy || volHeld || sliding) return;
@@ -56,6 +78,7 @@ function applyStatus(s) {
   state = s;
   mergeMedia(m);
   render();
+  try { localStorage.setItem(`tv-remote:state:${current.mac}`, JSON.stringify(s)); } catch {}
 }
 
 async function refreshStatus() {
@@ -179,21 +202,33 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) stopStatus(); else startStatus();
 });
 
+function renderApps(apps) {
+  $("#apps").replaceChildren(...apps.map((app) =>
+    el("button", { class: "btn", onclick: () => launch(app) }, app.name)));
+  $("#yt").hidden = apps.length > 0 && !apps.some((a) => a.name === "YouTube");
+}
+
+// Last time's list at once, then the TV's: asking takes seconds, and the page
+// must not rearrange itself when the answer comes.
 async function loadApps() {
-  const box = $("#apps");
-  box.replaceChildren();
-  box.hidden = true;
-  const apps = await api(`/api/tv/${current.mac}/apps`).catch(() => []);
-  for (const app of apps) {
-    box.append(el("button", { class: "btn", onclick: () => launch(app) }, app.name));
-  }
-  box.hidden = apps.length === 0;
-  $("#yt").hidden = !apps.some((a) => a.name === "YouTube");
+  const key = `tv-remote:apps:${current.mac}`;
+  let saved = [];
+  try { saved = JSON.parse(localStorage.getItem(key)) || []; } catch {}
+  renderApps(saved);
+  const apps = await api(`/api/tv/${current.mac}/apps`).catch(() => null);
+  if (!apps) return;
+  try { localStorage.setItem(key, JSON.stringify(apps)); } catch {}
+  if (JSON.stringify(apps) !== JSON.stringify(saved)) renderApps(apps);
 }
 
 async function send(key) {
   if (!current) return;
   buzz();
+  // Asking would only take seconds to say the same. An unknown state still tries.
+  if (state.power === "off" || state.power === "standby") {
+    toast("The TV is off");
+    return;
+  }
   try {
     if (key.startsWith("KEY_VOL") && state.volume != null) {
       // Count on the page at once; the TV is read again after release.

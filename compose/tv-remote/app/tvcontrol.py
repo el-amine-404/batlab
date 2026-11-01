@@ -11,6 +11,7 @@ import urllib.error
 from typing import Protocol
 
 import playback
+import powerlog
 import samsung
 import sleeptimer
 import tvstate
@@ -61,6 +62,9 @@ class SamsungTv:
 
     def status(self) -> dict:
         st = tvstate.status(self.mac)
+        powerlog.observe(self.mac, st.get("power", "off"))
+        if at := powerlog.since(self.mac):
+            st["power_since"] = at
         if at := sleeptimer.when(self.mac):
             st["sleep_at"] = at
         if st.get("power") == "on" and self.mac in _last_input:

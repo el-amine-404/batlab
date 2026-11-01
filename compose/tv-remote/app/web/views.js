@@ -61,6 +61,7 @@ function tvCard(tv, action) {
 async function showTvs() {
   show("tvs");
   stopStatus();
+  $("#tv-model").textContent = "";
   const list = $("#tv-list");
   list.replaceChildren();
   const tvs = await api("/api/tvs").catch(() => []);
@@ -77,19 +78,20 @@ async function scan() {
   btn.querySelector("span").textContent = "Scanning…";
   try {
     const found = await api("/api/discover", {});
+    const paired = await api("/api/tvs");
     const list = $("#tv-list");
     list.replaceChildren();
-    if (!found.length) {
-      $("#scan-note").hidden = false;
-      $("#scan-note").textContent = "No Samsung TV answered. Is it switched on and on this network?";
+    // A paired TV stays listed when it is off: it can still be opened and woken.
+    for (const tv of paired) {
+      list.append(tvCard(tv, el("button", { class: "btn btn-primary", onclick: () => openRemote(tv) }, "Open")));
     }
-    for (const tv of found) {
-      const action = tv.paired
-        ? el("button", { class: "btn btn-primary", onclick: () => openRemote(tv) }, "Open")
-        : el("button", { class: "btn btn-primary", onclick: () => pair(tv) }, "Connect");
-      list.append(tvCard(tv, action));
+    for (const tv of found.filter((t) => !t.paired)) {
+      list.append(tvCard(tv, el("button", { class: "btn btn-primary", onclick: () => pair(tv) }, "Connect")));
     }
-      if (found.length) $("#scan-note").hidden = true;
+    const note = $("#scan-note");
+    const newOnes = found.some((t) => !t.paired);
+    note.hidden = newOnes;
+    note.textContent = paired.length ? "No new TV found. A TV must be on to be found." : "No Samsung TV answered. Is it switched on and on this network?";
   } catch (e) {
     toast(e.message, true);
   } finally {

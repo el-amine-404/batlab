@@ -71,11 +71,22 @@ def device_info(ip: str, timeout: float = 0.8) -> dict | None:
     }
 
 
+_scan_lock = threading.Lock()
+_last_scan: tuple[float, list[dict]] = (0.0, [])
+SCAN_REUSE = 5  # seconds a result answers anyone who was waiting for it
+
+
 def scan() -> list[dict]:
-    hosts = [str(h) for h in TV_SUBNET.hosts()]
-    with ThreadPoolExecutor(max_workers=64) as pool:
-        found = [d for d in pool.map(device_info, hosts) if d]
-    return sorted(found, key=lambda d: d["ip"])
+    """One at a time: a scan takes 64 threads, and the container has a limit."""
+    global _last_scan
+    with _scan_lock:
+        if time.monotonic() - _last_scan[0] < SCAN_REUSE:
+            return _last_scan[1]
+        hosts = [str(h) for h in TV_SUBNET.hosts()]
+        with ThreadPoolExecutor(max_workers=64) as pool:
+            found = sorted((d for d in pool.map(device_info, hosts) if d), key=lambda d: d["ip"])
+        _last_scan = (time.monotonic(), found)
+        return found
 
 
 class Remote:
@@ -86,12 +97,18 @@ class Remote:
     # pinged while the remote is in use, and let go after KEEP seconds unused.
     PING_EVERY = 8
     KEEP = 600
+    # After failing, answer at once for a while: keys to a TV that is off would
+    # otherwise queue here, each holding a thread for up to 20 s.
+    FAIL_FAST = 10
+    RELOCATE_EVERY = 60
 
     def __init__(self, mac: str) -> None:
         self.mac = mac
         self.lock = threading.Lock()
         self.tv: SamsungTVWS | None = None
         self.last_used = 0.0
+        self.failed_at = -1e9
+        self.relocated_at = -1e9
         threading.Thread(target=self._keepalive, daemon=True).start()
 
     def _keepalive(self) -> None:
@@ -116,6 +133,9 @@ class Remote:
 
     def _relocate(self) -> None:
         """The TV may have a new address: look for its MAC on the subnet."""
+        if time.monotonic() - self.relocated_at < self.RELOCATE_EVERY:
+            return
+        self.relocated_at = time.monotonic()
         for dev in scan():
             if dev["mac"] == self.mac:
                 with store_lock:
@@ -156,9 +176,15 @@ class Remote:
                 pass
         self.tv = None
 
+    def _refuse_if_failing(self) -> None:
+        if time.monotonic() - self.failed_at < self.FAIL_FAST:
+            raise ConnectionError("the TV is not answering; is it on?")
+
     def run(self, fn):
         """fn(tv) with one reconnect, and one relocation, on failure."""
+        self._refuse_if_failing()
         with self.lock:
+            self._refuse_if_failing()  # the press ahead in the queue may just have failed
             for attempt in range(3):
                 try:
                     started = time.monotonic()
@@ -168,12 +194,14 @@ class Remote:
                     if took > 0.5:
                         log.info("%s: slow command %.2fs (new connection: %s)", self.mac, took, fresh)
                     self.last_used = time.monotonic()
+                    self.failed_at = -1e9
                     return result
                 except Exception as err:  # noqa: BLE001 - library raises many kinds
                     log.info("%s: attempt %d failed: %s", self.mac, attempt + 1, err)
                     self._drop()
                     if attempt == 1:
                         self._relocate()
+            self.failed_at = time.monotonic()
             raise ConnectionError("the TV is not answering; is it on?")
 
 
