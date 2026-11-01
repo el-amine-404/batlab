@@ -44,6 +44,8 @@ from pyytlounge import EventListener, State, YtLoungeApi
 from samsungtvws import SamsungTVWS
 from samsungtvws.remote import RemoteControlCommand
 
+import voice
+
 LISTEN_ADDR = os.environ.get("LISTEN_ADDR", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8080"))
 TV_SUBNET = ipaddress.ip_network(os.environ.get("TV_SUBNET", "192.168.1.0/24"), strict=False)
@@ -51,6 +53,7 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 REMOTE_NAME = os.environ.get("REMOTE_NAME", "batlab remote")
 JELLYFIN_URL = os.environ.get("JELLYFIN_URL", "").rstrip("/")
 JELLYFIN_API_KEY = os.environ.get("JELLYFIN_API_KEY", "")
+SPEECH_URL = os.environ.get("SPEECH_URL", "").rstrip("/")
 WEB_DIR = Path(__file__).with_name("web")
 VERSION = Path(__file__).with_name("VERSION").read_text().strip()
 
@@ -734,6 +737,155 @@ def media_action(mac: str, action: str, value: float = 0) -> None:
         r.run(lambda tv: tv.send_key(key))
 
 
+# ------------------------------------------------------------------ voice
+
+VOICE_MAX_BYTES = 16000 * 2 * 30  # 30 s of 16 kHz mono 16-bit
+VOICE_LANGUAGES = ("en", "fr", "ar")
+VOLUME_STEP = 5
+
+
+def hear(pcm: bytes, language: str) -> dict:
+    url = f"{SPEECH_URL}/transcribe?language={language}"
+    req = urllib.request.Request(url, data=pcm, method="POST", headers={"Content-Type": "application/octet-stream"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return json.load(r)
+    except (OSError, ValueError, urllib.error.URLError) as err:
+        raise ConnectionError("speech recognition is not answering") from err
+
+
+def heard_speech(result: dict) -> bool:
+    """Whisper writes words even for noise; these two numbers tell them apart."""
+    return bool(result["text"]) and result["no_speech"] < 0.7 and result["logprob"] > -1.6
+
+
+def understand(pcm: bytes, language: str, order: list[str]) -> dict:
+    """The sentence and its command. Whisper's own language detection fails on
+    a two-word command, so with "auto" the most recent language is tried first
+    and the others only if that gave no command."""
+    if language in VOICE_LANGUAGES:
+        order = [language]
+    best = None
+    for lang in order:
+        result = hear(pcm, lang)
+        if not heard_speech(result):
+            continue
+        intent = voice.parse(result["text"])
+        if intent:
+            return {**result, "intent": intent}
+        if best is None or result["logprob"] > best["logprob"]:
+            best = result  # what to show when nothing was a command
+    return {**(best or {"text": ""}), "intent": None}
+
+
+class Duck:
+    """The TV lowered while listening, as voice remotes do: a phone near a loud
+    TV hears the film. Comes back when listening ends, whatever the page does."""
+
+    HOLD = 20  # seconds, if the page vanishes (phone locked, tab closed)
+    QUIET = 0.35
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.saved: dict[str, tuple[str, int]] = {}
+        self.timers: dict[str, threading.Timer] = {}
+
+    def lower(self, mac: str) -> None:
+        ip = load_tvs()[mac]["ip"]
+        with self.lock:
+            if mac in self.saved:
+                self.timers[mac].cancel()
+            else:
+                level = audio(ip)
+                if level["volume"] is None or level["mute"] or level["volume"] <= 8:
+                    return
+                self.saved[mac] = (ip, level["volume"])
+                set_volume(ip, max(4, round(level["volume"] * self.QUIET)))
+            timer = threading.Timer(self.HOLD, self.restore, args=(mac,))
+            timer.daemon = True
+            self.timers[mac] = timer
+            timer.start()
+
+    def restore(self, mac: str) -> None:
+        with self.lock:
+            saved = self.saved.pop(mac, None)
+            timer = self.timers.pop(mac, None)
+            if timer:
+                timer.cancel()
+            if saved:
+                try:
+                    set_volume(*saved)
+                except (OSError, urllib.error.URLError) as err:
+                    log.warning("%s: volume not restored: %s", mac, err)
+
+
+duck = Duck()
+
+
+def run_intent(mac: str, intent: dict) -> dict:
+    """Does what was asked and says what happened: {"say": ...}, plus "results"
+    for a search. Raises ConnectionError when the TV cannot do it."""
+    kind = intent["type"]
+    r = remote(mac)
+    st = status(mac)
+    on = st.get("power") == "on"
+
+    if kind == "power":
+        want_on = intent["action"] == "on"
+        if on == want_on:
+            return {"say": f"The TV is already {'on' if on else 'off'}"}
+        new = power(mac)
+        return {"say": f"TV {'on' if want_on else 'off'}", "state": new}
+    if kind in ("app", "play") and not on:
+        power(mac)
+        time.sleep(2)
+        on = True
+    if kind == "app":
+        try:
+            rest(load_tvs()[mac]["ip"], f"applications/{intent['id']}", "POST", timeout=6)
+        except (OSError, urllib.error.URLError) as err:
+            raise ConnectionError(f"the TV did not open {intent['name']}") from err
+        return {"say": f"Opening {intent['name']}"}
+    if kind == "search":
+        return {"say": f"Results for {intent['query']}", "results": youtube_search(intent["query"])}
+    if kind == "play":
+        found = youtube_search(intent["query"], limit=1)
+        if not found:
+            return {"say": f"No video found for {intent['query']}", "failed": True}
+        try:
+            youtube_link(mac).play_video(found[0]["id"])
+        except (OSError, urllib.error.URLError, TimeoutError) as err:
+            raise ConnectionError("YouTube on the TV did not answer") from err
+        return {"say": f"Playing {found[0]['title']}"}
+
+    if not on:
+        return {"say": "The TV is off. Say “turn on the TV” first", "failed": True}
+    ip = load_tvs()[mac]["ip"]
+    if kind == "volume":
+        level = audio(ip)["volume"]
+        by = intent.get("by", VOLUME_STEP)
+        if level is None:
+            key = "KEY_VOLUP" if intent["dir"] > 0 else "KEY_VOLDOWN"
+            r.run(lambda tv: tv.send_key(key))
+            return {"say": intent["label"]}
+        level = max(0, min(100, level + intent["dir"] * by))
+        set_volume(ip, level)
+        return {"say": f"Volume {level}"}
+    if kind == "volume_set":
+        set_volume(ip, intent["level"])
+        return {"say": f"Volume {intent['level']}"}
+    if kind == "mute":
+        set_mute(ip, intent["on"])
+        return {"say": "Muted" if intent["on"] else "Sound on"}
+    if kind == "media":
+        media_action(mac, intent["action"], float(intent.get("value", 0)))
+        return {"say": intent["label"]}
+    if kind == "key":
+        r.run(lambda tv: tv.send_key(intent["key"]))
+        return {"say": intent["label"]}
+    raise ValueError(f"unknown intent {kind}")
+
+
 # ------------------------------------------------------------------ power
 
 def status(mac: str) -> dict:
@@ -963,13 +1115,55 @@ class Handler(BaseHTTPRequestHandler):
             if file.name == "index.html":
                 # The version in every asset URL: a new release is a new URL,
                 # so no browser can mix an old script with new HTML.
-                body = re.sub(rb'(href|src)="(style\.css|app\.js)"',
+                body = re.sub(rb'(href|src)="(style\.css|app\.js|mic-worklet\.js)"',
                               lambda m: m.group(1) + b'="' + m.group(2) + b"?v=" + VERSION.encode() + b'"', body)
             return self._send(200, body, STATIC_TYPES[file.suffix], "no-cache")
         self._json(404, {"error": "not found"})
 
     # POST: everything that does something
+    def _voice(self, mac: str) -> None:
+        """Audio in; the words, the command, and what it did out."""
+        length = int(self.headers.get("Content-Length") or 0)
+        if self.headers.get("X-Remote") != "1" or self.headers.get("Content-Type") != "audio/l16":
+            return self._json(403, {"error": "forbidden"})
+        if not 0 < length <= VOICE_MAX_BYTES or length % 2:
+            return self._json(400, {"error": "that recording is too long"})
+        pcm = self.rfile.read(length)
+        if not self._authed():
+            return self._json(401, {"error": "log in"})
+        if mac not in load_tvs():
+            return self._json(404, {"error": "unknown TV"})
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        language = q.get("language", ["auto"])[0]
+        recent = q.get("recent", ["en"])[0]
+        order = [recent] if recent in VOICE_LANGUAGES else []
+        order += [x for x in VOICE_LANGUAGES if x not in order]
+        try:
+            if q.get("mode", [""])[0] == "dictate":
+                # Words for a text field: nothing to check them against.
+                said = hear(pcm, language if language in VOICE_LANGUAGES else "auto")
+                return self._json(200, {"text": said["text"] if heard_speech(said) else "", "language": said["language"]})
+            said = understand(pcm, language, order)
+            # Before acting: "volume up" means up from the real level.
+            duck.restore(mac)
+            out = {"text": said["text"], "language": said.get("language"), "intent": said["intent"]}
+            if said["intent"]:
+                out.update(run_intent(mac, said["intent"]))
+            log.info("%s: voice %r (%s, %s ms) -> %s", mac, said["text"], said.get("language"), said.get("ms"),
+                     said["intent"]["type"] if said["intent"] else "no command")
+            return self._json(200, out)
+        except ConnectionError as err:
+            duck.restore(mac)
+            return self._json(502, {"error": str(err)})
+        except Exception:  # noqa: BLE001 - never leak a traceback to the page
+            duck.restore(mac)
+            log.exception("voice request failed")
+            return self._json(500, {"error": "something went wrong"})
+
     def do_POST(self) -> None:
+        m = re.fullmatch(r"/api/tv/([0-9a-f:]{17})/voice", self.path.split("?", 1)[0])
+        if m:
+            return self._voice(m.group(1))
         try:
             body = self._body()
         except PermissionError:
@@ -1005,12 +1199,24 @@ class Handler(BaseHTTPRequestHandler):
                 if not MAC_RE.match(mac) or ipaddress.ip_address(ip) not in TV_SUBNET:
                     return self._json(400, {"error": "bad TV"})
                 return self._json(200, {"mac": mac, **pair(mac, ip)})
-            m = re.fullmatch(r"/api/tv/([0-9a-f:]{17})/(key|text|enter-text|app|power|mute|volume|media|youtube|cursor|click|forget)", path)
+            m = re.fullmatch(r"/api/tv/([0-9a-f:]{17})/(key|text|enter-text|app|power|mute|volume|media|youtube|cursor|click|forget|command|listening)", path)
             if not m:
                 return self._json(404, {"error": "not found"})
             mac, action = m.groups()
             r = remote(mac)
-            if action == "key":
+            if action == "listening":
+                if body.get("on"):
+                    duck.lower(mac)
+                else:
+                    duck.restore(mac)
+            elif action == "command":
+                text = str(body.get("text", ""))[:300]
+                intent = voice.parse(text)
+                out = {"text": text, "intent": intent}
+                if intent:
+                    out.update(run_intent(mac, intent))
+                return self._json(200, out)
+            elif action == "key":
                 key = str(body.get("key", ""))
                 if key not in KEYS:
                     return self._json(400, {"error": "unknown key"})

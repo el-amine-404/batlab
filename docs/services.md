@@ -519,8 +519,9 @@ CA; devices install `http://pdf.homelab.lan/ca.crt` once). Docs:
 `compose/tv-remote`, `tv.homelab.lan`.
 
 - **Job**: a web remote for the Samsung TVs on the network: find, pair, wake,
-  send keys.
-- **Alone**: yes; it talks only to the TVs.
+  send keys, take voice commands in English, French and Arabic.
+- **Alone**: yes; it talks only to the TVs. Voice uses `tv-remote-speech` in the
+  same stack: Whisper on lab2, on loopback, no audio leaves the house.
 
 ## Where the services stand
 

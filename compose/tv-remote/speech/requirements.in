@@ -1,0 +1,2 @@
+# Regenerate requirements.txt with the command in its header.
+faster-whisper==1.2.1

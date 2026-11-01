@@ -211,28 +211,11 @@ function render() {
   const slider = $("#vol-slider");
   slider.disabled = !known;
   if (known && !sliding) slider.value = state.volume;
+  $("#power").classList.toggle("is-on", on);
+  $("#power").setAttribute("aria-label", on ? "Turn off the TV" : "Turn on the TV");
   renderMedia();
   $("#tv-now").hidden = !(on && state.app);
   $("#tv-now").textContent = state.app ? `Now: ${state.app}` : "";
-
-  // Update voice button state based on TV power
-  const isOff = state.power === "off" || state.power === "standby";
-  const voiceBtn = $("#voice-open");
-  if (voiceBtn) {
-    voiceBtn.setAttribute("aria-disabled", String(isOff));
-    voiceBtn.title = isOff ? "TV is powered off" : "Voice control";
-    voiceBtn.setAttribute("aria-label", isOff ? "TV is powered off" : "Voice control");
-    const use = voiceBtn.querySelector("use");
-    if (use) use.setAttribute("href", isOff ? "#i-mic-off" : "#i-mic");
-  }
-
-  // If TV powers off while voice modal is open, close it cleanly
-  if (isOff) {
-    const dlg = $("#voice");
-    if (dlg && dlg.open) closeVoice();
-  }
-
-  updateVoiceTvDot();
 }
 
 async function refreshStatus() {
@@ -684,494 +667,300 @@ document.addEventListener("keydown", (e) => {
 });
 
 // ------------------------------------------------------------------- voice
+// The page records and lab2 recognises (compose/tv-remote/speech): the same on
+// every phone and browser, and it works inside a home-screen app, where iPhones
+// offer no speech recognition of their own.
 
-let recognition = null;
-let voiceActive = false;
-let startWatchdog = null;
-let silenceTimer = null;
+const SAMPLE_RATE = 16000;
+const VOICE = { minSpeech: 0.2, endSilence: 0.8, noSpeech: 6, maxLength: 10 }; // seconds
+const EXAMPLES = {
+  en: ["Open YouTube", "Volume 20", "Pause", "Turn off the TV", "Play lofi music"],
+  fr: ["Ouvre Netflix", "Monte le son", "Mets en pause", "Éteins la télé", "Mets du jazz"],
+  ar: ["افتح يوتيوب", "ارفع الصوت", "وقف", "طفي التلفزيون", "شغل قرآن"],
+};
+
 let voiceLang = "auto";
-try { voiceLang = localStorage.getItem("tv-remote:voice-lang") || "auto"; } catch {}
-let voiceTarget = "assistant"; // "assistant" | "youtube" | "keyboard"
-let pendingVoiceIntent = null;
+let voiceRecent = "en";
+try {
+  voiceLang = localStorage.getItem("tv-remote:voice-lang") || "auto";
+  voiceRecent = localStorage.getItem("tv-remote:voice-recent") || "en";
+} catch {}
+let voiceTarget = "command"; // "command", or the text field dictation goes to: "youtube", "keyboard"
+let capture = null;           // the recording under way
+let voiceRun = 0;             // a newer run makes an older answer irrelevant
 let voiceCloseTimer = null;
 
-function updateVoiceTvDot() {
-  const dot = $("#voice-tv-dot");
-  if (!dot) return;
-  const on = state.power === "on";
-  dot.className = "dot " + (busy ? "busy" : on ? "on" : state.power ? "off" : "");
-  dot.title = busy ? "Working…" : on ? "TV is on" : "TV is off";
+function voiceState(name, title, detail = "") {
+  $("#voice").dataset.state = name;
+  $("#voice-title").textContent = title;
+  $("#voice-detail").textContent = detail;
+  $("#voice-mic-main").setAttribute("aria-label", name === "listening" ? "Finish speaking" : "Speak");
 }
 
-function normalizeVoiceText(str) {
-  return (str || "")
-    .toLowerCase()
-    .replace(/[\.,\/#!$%\^&\*;:{}=\-_`~()?]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function parseVoiceIntent(rawText, target = voiceTarget) {
-  const text = normalizeVoiceText(rawText);
-  if (!text) return null;
-
-  // 1. App Launching (YouTube, Netflix, Jellyfin, Spotify, Prime Video, Disney+, Internet)
-  const appKeywords = [
-    { id: "111299001912", name: "YouTube", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|play|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح)\s+)?(?:ال|ل|لل)?(?:you\s*tube|يوتيوب)(?:\s+(?:app|application|تطبيق))?$/i },
-    { id: "3201907018807", name: "Netflix", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح)\s+)?(?:ال|ل|لل)?(?:net\s*flix|نتفليكس|نتفلكس)(?:\s+(?:app|application|تطبيق))?$/i },
-    { id: "AprZAARz4r.Jellyfin", name: "Jellyfin", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح)\s+)?(?:ال|ل|لل)?(?:jelly\s*fin|جيليفين)(?:\s+(?:app|application|تطبيق))?$/i },
-    { id: "3201606009684", name: "Spotify", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح)\s+)?(?:ال|ل|لل)?(?:spotify|سبوتيفاي)(?:\s+(?:app|application|تطبيق))?$/i },
-    { id: "3201910019365", name: "Prime Video", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح)\s+)?(?:ال|ل|لل)?(?:prime\s*video|amazon\s*prime|برايم)(?:\s+(?:app|application|تطبيق))?$/i },
-    { id: "3201901017640", name: "Disney+", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح)\s+)?(?:ال|ل|لل)?(?:disney\s*(?:plus|\+)?|ديزني)(?:\s+(?:app|application|تطبيق))?$/i },
-    { id: "3202010022079", name: "Internet", match: /^(?:(?:go\s+to|open|launch|start|switch\s+to|ouvre|ouvrez|lance|lancer|mets|mettre|va\s+sur|افتح|شغل|حط|روح)\s+)?(?:ال|ل|لل)?(?:internet|browser|navigateur|المتصفح|انترنت)(?:\s+(?:app|application|تطبيق))?$/i },
-  ];
-
-  for (const a of appKeywords) {
-    if (a.match.test(text)) {
-      const isOff = state.power !== "on";
-      return {
-        type: "app",
-        app: { id: a.id, name: a.name },
-        label: isOff ? `⚡ Wake TV & Open ${a.name}` : `▶ Launch ${a.name}`,
-      };
-    }
-  }
-
-  // 2. Power Toggle / Off / On
-  if (/^(?:turn\s+off|power\s+off|shut\s+down|switch\s+off|éteins|éteindre|arrête|arrêter|coupe|couper|طفي|اطفي|اقفل|إغلاق)(?:\s+(?:the|la|le|l')?\s*(?:tv|télé|téléviseur|التلفزيون|التلفاز|الشاشة))?$/i.test(text)) {
-    return { type: "power", action: "off", label: "⏻ Turn Off TV" };
-  }
-  if (/^(?:turn\s+on|power\s+on|wake\s+up|allume|allumer|démarre|démarrer|شغل|ولع)(?:\s+(?:the|la|le|l')?\s*(?:tv|télé|téléviseur|التلفزيون|التلفاز|الشاشة))?$/i.test(text)) {
-    return { type: "power", action: "on", label: "⏻ Turn On TV" };
-  }
-
-  // 3. Volume Up
-  if (/^(?:volume\s*up|turn\s*(?:it\s*)?up|louder|increase\s+volume|sound\s*up|monte(?:r)?(?:\s+(?:le\s+)?(?:son|volume))?|augmente(?:r)?(?:\s+(?:le\s+)?(?:son|volume))?|plus\s+fort|un\s+peu\s+plus\s+fort|علي\s+الصوت|علّي|علّي\s+الصوت|ارفع\s+الصوت|صوت\s+اعلى|زيد\s+الصوت)$/i.test(text)) {
-    return { type: "volume", dir: 1, label: "🔊 Volume Up" };
-  }
-
-  // 4. Volume Down
-  if (/^(?:volume\s*down|turn\s*(?:it\s*)?down|quieter|decrease\s+volume|sound\s*down|lower\s+volume|baisse(?:r)?(?:\s+(?:le\s+)?(?:son|volume))?|diminue(?:r)?(?:\s+(?:le\s+)?(?:son|volume))?|moins\s+fort|un\s+peu\s+moins\s+fort|وطي\s+الصوت|وطّي|وطّي\s+الصوت|اخفض\s+الصوت|نزل\s+الصوت|صوت\s+اوطى|نقص\s+الصوت)$/i.test(text)) {
-    return { type: "volume", dir: -1, label: "🔉 Volume Down" };
-  }
-
-  // 5. Mute / Unmute
-  if (/^(?:mute|unmute|silence|coupe(?:r)?\s+(?:le\s+)?son|mets?\s+en\s+sourdine|mettre\s+en\s+sourdine|sourdine|remets?\s+(?:le\s+)?son|remettre\s+(?:le\s+)?son|démute|كتم|كتم\s+الصوت|صامت|الغاء\s+الكتم|فك\s+الكتم)$/i.test(text)) {
-    return { type: "mute", label: "🔇 Toggle Mute" };
-  }
-
-  // 6. Play / Pause
-  if (/^(?:pause|freeze|stop|mets?\s+en\s+pause|mettre\s+en\s+pause|arrêt|وقف|ايقاف\s+مؤقت|لحظة)$/i.test(text)) {
-    return { type: "media", action: "pause", label: "⏸ Pause" };
-  }
-  if (/^(?:play|resume|continue|continuer|lecture|reprends|reprendre|relance|relancer|شغل|استئناف|كمل)$/i.test(text)) {
-    return { type: "media", action: "play", label: "▶ Play" };
-  }
-
-  // 7. Navigation
-  if (/^(?:home|go\s+home|main\s+menu|accueil|page\s+d'accueil|الرئيسية|الصفحة\s+الرئيسية)$/i.test(text)) {
-    return { type: "key", key: "KEY_HOME", label: "⌂ Home" };
-  }
-  if (/^(?:back|go\s+back|return|retour|en\s+arrière|رجوع|ارجع|للخلف)$/i.test(text)) {
-    return { type: "key", key: "KEY_RETURN", label: "↩ Back" };
-  }
-  if (/^(?:menu|settings|paramètres|réglages|القائمة|الإعدادات)$/i.test(text)) {
-    return { type: "key", key: "KEY_MENU", label: "☰ Menu" };
-  }
-  if (/^(?:input|source|switch\s+input|changer\s+de\s+source|المصدر|المدخل)$/i.test(text)) {
-    return { type: "key", key: "KEY_SOURCE", label: "⎘ Source" };
-  }
-
-  // 8. Search query stripping: "search for xyz", "cherche xyz", "ابحث عن xyz"
-  const searchMatch = rawText.trim().match(/^(?:search(?:\s+for)?|find|cherche|recherche|trouve|ابحث\s+عن|دور\s+على|بحث)\s+(.+)$/i);
-  if (searchMatch) {
-    const query = searchMatch[1].trim();
-    return { type: "search", query, label: `🔍 Search: "${query}"` };
-  }
-
-  // 9. Contextual targets
-  if (target === "youtube") {
-    return { type: "search", query: rawText.trim(), label: `🔍 YouTube: "${rawText.trim()}"` };
-  }
-  if (target === "keyboard") {
-    return { type: "search", query: rawText.trim(), label: `⌨ Type: "${rawText.trim()}"` };
-  }
-
-  // General assistant unrecognized command
-  return { type: "unknown", raw: rawText.trim(), label: "Say an app, volume, or power command" };
-}
-
-async function executeVoiceIntent(intent, target) {
-  if (!intent) return;
-  buzz([15, 40, 15]);
-
-  const isTvOn = state.power === "on";
-
-  // Handle app launch: if TV is off, wake the TV first then launch!
-  if (intent.type === "app") {
-    if (!isTvOn) {
-      $("#voice-title").textContent = `Waking TV for ${intent.app.name}…`;
-      toast(`Waking TV and opening ${intent.app.name}…`);
-      closeVoice();
-      try {
-        await power(); // wakes TV via WOL & power toggle
-        await new Promise((r) => setTimeout(r, 1500));
-        await launch(intent.app);
-      } catch (err) {
-        toast(err.message, true);
-      }
-      return;
-    }
-    closeVoice();
-    await launch(intent.app);
-    return;
-  }
-
-  // Handle power commands
-  if (intent.type === "power") {
-    if (intent.action === "off" && !isTvOn) {
-      toast("TV is already off");
-      closeVoice();
-      return;
-    }
-    if (intent.action === "on" && isTvOn) {
-      toast("TV is already on");
-      closeVoice();
-      return;
-    }
-    closeVoice();
-    await power();
-    return;
-  }
-
-  // Other TV actions require TV to be ON
-  if (!isTvOn) {
-    closeVoice();
-    toast("TV is powered off. Turn it on first.");
-    return;
-  }
-
-  closeVoice();
-
-  if (intent.type === "volume") {
-    await send(intent.dir > 0 ? "KEY_VOLUP" : "KEY_VOLDOWN");
-    toast(intent.dir > 0 ? "Volume Up" : "Volume Down");
-    return;
-  }
-  if (intent.type === "mute") {
-    await toggleMute();
-    toast("Mute toggled");
-    return;
-  }
-  if (intent.type === "media") {
-    await mediaAction(intent.action);
-    toast(intent.action === "pause" ? "Paused" : "Playing");
-    return;
-  }
-  if (intent.type === "key") {
-    await send(intent.key);
-    toast(intent.label);
-    return;
-  }
-  if (intent.type === "search") {
-    if (target === "youtube" || state.app === "YouTube") {
-      const input = $("#yt-text");
-      input.value = intent.query;
-      syncClear();
-      await sendYoutube();
-      toast(`YouTube: "${intent.query}"`);
-    } else if (target === "keyboard" || !$("#kb").hidden) {
-      if (current) {
-        await api(`/api/tv/${current.mac}/text`, { text: intent.query }).catch(() => {});
-        toast(`Typed: "${intent.query}"`);
-      }
-    } else {
-      const input = $("#yt-text");
-      input.value = intent.query;
-      syncClear();
-      await sendYoutube();
-      toast(`YouTube: "${intent.query}"`);
-    }
-  }
-}
-
-// Tears down speech recognition and explicitly forces WebKit/iOS to release the microphone audio lock
-function teardownVoice() {
-  clearTimeout(voiceCloseTimer);
-  clearTimeout(startWatchdog);
-  clearTimeout(silenceTimer);
-  silenceTimer = null;
-  if (recognition) {
-    const r = recognition;
-    recognition = null;
-    r.onstart = null;
-    r.onresult = null;
-    r.onerror = null;
-    r.onspeechend = null;
-    r.onend = null;
-    try {
-      r.abort();
-    } catch {}
-  }
-  voiceActive = false;
-  const ring = $("#voice-ring");
-  const btn = $("#voice-toggle-btn");
-  if (ring) ring.classList.remove("active");
-  if (btn) btn.classList.remove("listening");
-}
-
-function stopListening() {
-  teardownVoice();
-  const title = $("#voice-title");
-  if (title) title.textContent = "Tap mic to speak";
+function renderExamples() {
+  const lang = voiceLang === "auto" ? voiceRecent : voiceLang;
+  $("#voice-examples").replaceChildren(...(EXAMPLES[lang] || EXAMPLES.en).map((text) =>
+    el("button", { type: "button", class: "chip", dir: "auto", onclick: () => runCommand(text) }, text)));
 }
 
 function setVoiceLang(lang) {
   voiceLang = lang;
   try { localStorage.setItem("tv-remote:voice-lang", lang); } catch {}
-  document.querySelectorAll(".voice-lang-picker .lang-pill").forEach((b) => {
-    b.setAttribute("aria-checked", String(b.dataset.lang === lang));
-  });
-  if (voiceActive) {
-    teardownVoice();
-    startListening();
+  document.querySelectorAll("#voice-lang button").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.lang === lang)));
+  renderExamples();
+}
+
+function micProblem(err) {
+  if (!window.isSecureContext || !navigator.mediaDevices) {
+    return ["This phone doesn't trust the remote's certificate", "The microphone needs a trusted HTTPS page. Install the certificate from http://tv.homelab.lan/ca.crt, then open https://tv.homelab.lan."];
+  }
+  if (err && (err.name === "NotAllowedError" || err.name === "SecurityError")) {
+    return ["Microphone is blocked", "On iPhone: Settings > Apps > Safari > Microphone > Ask. You can also type a command below."];
+  }
+  if (err && err.name === "NotFoundError") return ["No microphone found", "You can type a command below."];
+  return ["The microphone didn't start", "Tap the microphone to try again, or type a command below."];
+}
+
+function setDuck(on) {
+  if (current && state.power === "on") {
+    api(`/api/tv/${current.mac}/listening`, { on }).catch(() => {});
   }
 }
 
-function openVoice(target = "assistant") {
-  const isOff = state.power === "off" || state.power === "standby";
-  if (isOff) {
-    toast("TV is powered off. Turn it on first.");
-    buzz([20, 30, 20]);
-    return;
+async function startCapture() {
+  const run = ++voiceRun;
+  clearTimeout(voiceCloseTimer);
+  $("#voice-results").replaceChildren();
+  $("#voice-results").hidden = true;
+  $("#voice-heard").textContent = "";
+  voiceState("starting", "Starting the microphone…");
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx || !navigator.mediaDevices || !window.isSecureContext) {
+    return voiceState("error", ...micProblem());
   }
-  voiceTarget = target;
-  teardownVoice();
-  pendingVoiceIntent = null;
-
-  const dlg = $("#voice");
-  const title = $("#voice-title");
-  const transcript = $("#voice-transcript");
-  const heardLabel = $("#voice-heard-label");
-  const badge = $("#voice-action-badge");
-  const btn = $("#voice-toggle-btn");
-
-  updateVoiceTvDot();
-
-  const SpeechClass = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-  title.textContent = "Connecting…";
-  transcript.textContent = target === "youtube" ? "Say what you want to watch…" : "Say an app, command, or search…";
-  transcript.className = "voice-transcript";
-  heardLabel.hidden = true;
-  badge.hidden = true;
-  btn.disabled = false;
-
-  setVoiceLang(voiceLang);
-  if (!dlg.open) dlg.showModal();
-
-  if (!SpeechClass) {
-    const isStandalone = ("standalone" in navigator && navigator.standalone) ||
-                         window.matchMedia("(display-mode: standalone)").matches;
-    title.textContent = "Voice Assistant";
-    transcript.textContent = isStandalone
-      ? "Apple restricts speech recognition inside Home Screen apps. Open tv.homelab.lan directly in Safari to use your microphone."
-      : "Speech recognition is supported in Chrome, iOS Safari, and Android. In this browser, dictate directly using your keyboard mic.";
-    badge.hidden = false;
-    badge.className = "voice-badge error";
-    badge.textContent = isStandalone ? "Open in Safari for voice" : "Speech API unavailable";
-    btn.disabled = true;
-    return;
-  }
-
-  startListening();
-}
-
-function startListening() {
-  const SpeechClass = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechClass) return;
-
-  teardownVoice();
-
-  const ring = $("#voice-ring");
-  const btn = $("#voice-toggle-btn");
-  const title = $("#voice-title");
-  const transcript = $("#voice-transcript");
-  const heardLabel = $("#voice-heard-label");
-  const badge = $("#voice-action-badge");
-
-  title.textContent = "Connecting…";
-  transcript.textContent = "Say an app, command, or search…";
-  transcript.className = "voice-transcript";
-  heardLabel.hidden = true;
-  badge.hidden = true;
-
+  // Created in the tap itself: an iPhone only lets sound start from a gesture.
+  const ctx = new Ctx();
+  ctx.resume().catch(() => {});
+  let stream;
   try {
-    recognition = new SpeechClass();
-    recognition.continuous = false;
-    recognition.interimResults = true;
-    recognition.maxAlternatives = 1;
-
-    let lang = voiceLang === "auto" ? (navigator.language || "en-US") : voiceLang;
-    if (lang.startsWith("fr")) lang = "fr-FR";
-    else if (lang.startsWith("ar")) lang = "ar-SA";
-    else if (lang.startsWith("en")) lang = "en-US";
-    recognition.lang = lang;
-
-    recognition.onstart = () => {
-      clearTimeout(startWatchdog);
-      voiceActive = true;
-      ring.classList.add("active");
-      btn.classList.add("listening");
-      title.textContent = "Listening… speak now";
-      heardLabel.hidden = true;
-      badge.hidden = true;
-      buzz(10);
-    };
-
-    recognition.onresult = (event) => {
-      let interim = "";
-      let final = "";
-
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        const part = event.results[i][0].transcript;
-        if (event.results[i].isFinal) final += part;
-        else interim += part;
-      }
-
-      const spoken = (final || interim).trim();
-      if (spoken) {
-        heardLabel.hidden = false;
-        transcript.textContent = `"${spoken}"`;
-        transcript.className = "voice-transcript" + (final ? "" : " interim");
-
-        const intent = parseVoiceIntent(spoken);
-        if (intent && intent.type !== "unknown") {
-          badge.hidden = false;
-          badge.className = "voice-badge";
-          badge.textContent = intent.label;
-          pendingVoiceIntent = intent; // Store intent even if isFinal is false (critical for iOS WebKit!)
-
-          // Auto-execute after 1s of pause in speech
-          clearTimeout(silenceTimer);
-          silenceTimer = setTimeout(() => {
-            if (pendingVoiceIntent && voiceActive) {
-              const toRun = pendingVoiceIntent;
-              const targetRun = voiceTarget;
-              pendingVoiceIntent = null;
-              title.textContent = "Executing…";
-              teardownVoice();
-              executeVoiceIntent(toRun, targetRun);
-            }
-          }, 1000);
-        } else if (intent && intent.type === "unknown") {
-          badge.hidden = false;
-          badge.className = "voice-badge muted";
-          badge.textContent = intent.label;
-          pendingVoiceIntent = null;
-          clearTimeout(silenceTimer);
-        }
-      }
-    };
-
-    recognition.onspeechend = () => {
-      title.textContent = "Processing…";
-      if (pendingVoiceIntent) {
-        clearTimeout(silenceTimer);
-        silenceTimer = setTimeout(() => {
-          if (pendingVoiceIntent && voiceActive) {
-            const toRun = pendingVoiceIntent;
-            const targetRun = voiceTarget;
-            pendingVoiceIntent = null;
-            title.textContent = "Executing…";
-            teardownVoice();
-            executeVoiceIntent(toRun, targetRun);
-          }
-        }, 400);
-      }
-    };
-
-    recognition.onerror = (event) => {
-      clearTimeout(startWatchdog);
-      clearTimeout(silenceTimer);
-      const isAborted = event.error === "aborted";
-      teardownVoice();
-      buzz([30, 40, 30]);
-
-      if (isAborted) {
-        title.textContent = "Tap mic to speak";
-        transcript.textContent = "Tap the microphone orb to speak.";
-        return;
-      }
-
-      title.textContent = "Voice Assistant";
-      badge.hidden = false;
-      badge.className = "voice-badge error";
-      heardLabel.hidden = true;
-
-      const isStandalone = ("standalone" in navigator && navigator.standalone) ||
-                           window.matchMedia("(display-mode: standalone)").matches;
-
-      if (event.error === "not-allowed") {
-        badge.textContent = "Microphone blocked";
-        transcript.textContent = isStandalone
-          ? "Microphone access blocked. Apple restricts voice in Home Screen web apps. Please open in Safari directly."
-          : "Microphone blocked. Please allow microphone access in Safari settings.";
-      } else if (event.error === "service-not-allowed") {
-        badge.textContent = "Dictation disabled";
-        transcript.textContent = "Please enable Dictation in iPhone Settings > General > Keyboard > Enable Dictation.";
-      } else if (event.error === "no-speech") {
-        badge.textContent = "No speech detected";
-        transcript.textContent = "Didn't hear anything. Speak closer or tap the microphone orb to try again.";
-      } else {
-        badge.textContent = `Notice: ${event.error}`;
-        transcript.textContent = "Tap the microphone orb to try speaking again.";
-      }
-    };
-
-    recognition.onend = () => {
-      clearTimeout(startWatchdog);
-      clearTimeout(silenceTimer);
-      const intentToRun = pendingVoiceIntent;
-      const targetToRun = voiceTarget;
-      pendingVoiceIntent = null;
-      teardownVoice();
-
-      if (intentToRun) {
-        title.textContent = "Executing…";
-        clearTimeout(voiceCloseTimer);
-        voiceCloseTimer = setTimeout(async () => {
-          await executeVoiceIntent(intentToRun, targetToRun);
-        }, 300);
-      } else {
-        title.textContent = "Tap mic to speak";
-      }
-    };
-
-    recognition.start();
-
-    // Guard watchdog: if onstart does not fire within 4s, reset cleanly
-    clearTimeout(startWatchdog);
-    startWatchdog = setTimeout(() => {
-      if (!voiceActive) {
-        teardownVoice();
-        title.textContent = "Tap mic to speak";
-        transcript.textContent = "Ready. Tap the microphone orb to speak.";
-      }
-    }, 4000);
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    await ctx.resume();
+    await ctx.audioWorklet.addModule($("#mic-worklet").href);
   } catch (err) {
-    clearTimeout(startWatchdog);
-    teardownVoice();
-    title.textContent = "Voice Assistant";
-    transcript.textContent = "Tap the microphone orb to speak.";
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    ctx.close().catch(() => {});
+    if (run === voiceRun) voiceState("error", ...micProblem(err));
+    return;
   }
+  if (run !== voiceRun) { // closed while the permission was being asked
+    stream.getTracks().forEach((t) => t.stop());
+    ctx.close().catch(() => {});
+    return;
+  }
+
+  const source = ctx.createMediaStreamSource(stream);
+  const node = new AudioWorkletNode(ctx, "mic", { numberOfOutputs: 1 });
+  source.connect(node);
+  node.connect(ctx.destination); // silent: Safari only runs what reaches an output
+
+  const c = capture = { ctx, stream, node, source, run, chunks: [], samples: 0, voiced: 0, quiet: 0, floor: 0.01, carry: 0, carryN: 0 };
+  const ratio = ctx.sampleRate / SAMPLE_RATE;
+  node.port.onmessage = (e) => {
+    if (capture !== c) return;
+    const input = e.data;
+    const out = new Int16Array(Math.ceil(input.length / ratio) + 1);
+    let n = 0, sum = 0;
+    for (let i = 0; i < input.length; i++) {
+      sum += input[i] * input[i];
+      c.carry += input[i];
+      c.carryN += 1;
+      if (c.carryN >= ratio) {
+        out[n++] = Math.max(-1, Math.min(1, c.carry / c.carryN)) * 32767;
+        c.carry = 0;
+        c.carryN -= ratio; // the fraction left carries over
+        if (c.carryN < 0) c.carryN = 0;
+      }
+    }
+    c.chunks.push(out.slice(0, n));
+    c.samples += n;
+    listenStep(c, Math.sqrt(sum / input.length), input.length / ctx.sampleRate);
+  };
+  setDuck(true);
+  voiceState("listening", voiceTarget === "command" ? "Listening…" : "Say what to type…", "Tap the microphone when you've finished.");
+  buzz(10);
+}
+
+// Ends the sentence by itself: a pause after speech. The threshold follows the
+// room's level, so a TV playing nearby is not taken for someone speaking.
+function listenStep(c, rms, seconds) {
+  c.floor = rms < c.floor ? c.floor * 0.9 + rms * 0.1 : c.floor * 0.998 + rms * 0.002;
+  const speaking = rms > Math.max(0.012, c.floor * 2.5);
+  if (speaking) { c.voiced += seconds; c.quiet = 0; } else { c.quiet += seconds; }
+  $("#voice-orb").style.setProperty("--level", Math.min(1, rms * 9).toFixed(3));
+  const elapsed = c.samples / SAMPLE_RATE;
+  if (c.voiced >= VOICE.minSpeech && c.quiet >= VOICE.endSilence) return finishCapture();
+  if (elapsed >= VOICE.maxLength) return finishCapture();
+  if (c.voiced < VOICE.minSpeech && elapsed >= VOICE.noSpeech) {
+    stopCapture();
+    setDuck(false);
+    voiceState("error", "I didn't hear anything", "Tap the microphone and speak close to the phone.");
+  }
+}
+
+function stopCapture() {
+  const c = capture;
+  capture = null;
+  if (!c) return null;
+  c.node.port.onmessage = null;
+  try { c.source.disconnect(); c.node.disconnect(); } catch {}
+  c.stream.getTracks().forEach((t) => t.stop()); // lets the iPhone's audio go back to normal
+  c.ctx.close().catch(() => {});
+  $("#voice-orb").style.setProperty("--level", 0);
+  return c;
+}
+
+async function finishCapture() {
+  const c = stopCapture();
+  if (!c) return;
+  const run = c.run;
+  const pcm = new Int16Array(c.samples);
+  let at = 0;
+  for (const chunk of c.chunks) { pcm.set(chunk, at); at += chunk.length; }
+  voiceState("thinking", "Working on it…");
+  buzz(10);
+  const target = voiceTarget;
+  const query = new URLSearchParams({ language: voiceLang, recent: voiceRecent });
+  if (target !== "command") query.set("mode", "dictate");
+  try {
+    const res = await fetch(`/api/tv/${current.mac}/voice?${query}`, {
+      method: "POST", headers: { "Content-Type": "audio/l16", "X-Remote": "1" }, body: pcm.buffer,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) { closeVoice(); showLogin(); return; }
+    if (!res.ok) throw new Error(data.error || "something went wrong");
+    if (run !== voiceRun) return;
+    if (target !== "command") {
+      setDuck(false);
+      return dictated(data, target);
+    }
+    voiceAnswer(data);
+  } catch (err) {
+    setDuck(false);
+    if (run === voiceRun) voiceState("error", "That didn't work", err.message === "Failed to fetch" ? "The remote can't reach the server. Try again." : capitalize(err.message));
+  }
+}
+
+function capitalize(text) {
+  return text ? text[0].toUpperCase() + text.slice(1) : text;
+}
+
+function dictated(data, target) {
+  if (!data.text) return voiceState("error", "I didn't catch that", "Tap the microphone and try again.");
+  closeVoice();
+  if (target === "youtube") {
+    $("#yt-text").value = data.text;
+    syncClear();
+    sendYoutube();
+  } else {
+    $("#kb-text").value = data.text;
+    $("#kb-text").focus();
+  }
+}
+
+function voiceAnswer(data) {
+  $("#voice-heard").textContent = data.text ? `“${data.text}”` : "";
+  if (!data.text) return voiceState("error", "I didn't catch that", "Tap the microphone and try again.");
+  if (!data.intent) {
+    return voiceState("error", "That isn't a command I know", "Try one of these, or start with “play” or “search”.");
+  }
+  if (data.language) {
+    voiceRecent = data.language;
+    try { localStorage.setItem("tv-remote:voice-recent", voiceRecent); } catch {}
+    renderExamples();
+  }
+  if (data.failed) return voiceState("error", data.say);
+  buzz([15, 40, 15]);
+  voiceState("done", data.say);
+  refreshSoon(data.intent.type === "power" || data.intent.type === "app" ? 2000 : 500);
+  if (data.results) return showVoiceResults(data.results);
+  voiceCloseTimer = setTimeout(closeVoice, 1300);
+}
+
+function showVoiceResults(results) {
+  const box = $("#voice-results");
+  if (!results.length) { voiceState("error", "No videos found"); return; }
+  box.hidden = false;
+  box.replaceChildren(...results.map((v) =>
+    el("button", { type: "button", class: "result", onclick: () => { closeVoice(); playVideo(v.id, v.title); } },
+      el("img", { src: `/api/youtube/thumb/${v.id}`, alt: "", loading: "lazy" }),
+      el("div", { class: "meta" },
+        el("b", { dir: "auto" }, v.title),
+        el("span", { dir: "auto" }, [v.channel, v.length || "Live"].filter(Boolean).join(" · ")),
+      ),
+    )));
+}
+
+// A typed or tapped command: everything after the recording is the same.
+async function runCommand(text) {
+  const run = ++voiceRun;
+  if (stopCapture()) setDuck(false);
+  clearTimeout(voiceCloseTimer);
+  $("#voice-results").hidden = true;
+  $("#voice-heard").textContent = `“${text}”`;
+  voiceState("thinking", "Working on it…");
+  try {
+    const data = await api(`/api/tv/${current.mac}/command`, { text });
+    if (run === voiceRun) voiceAnswer(data);
+  } catch (err) {
+    if (run === voiceRun) voiceState("error", "That didn't work", capitalize(err.message));
+  }
+}
+
+function openVoice(target = "command") {
+  voiceTarget = target;
+  const dlg = $("#voice");
+  $("#voice").classList.toggle("dictating", target !== "command");
+  setVoiceLang(voiceLang);
+  $("#voice-text").value = "";
+  if (!dlg.open) dlg.showModal();
+  $("#voice-mic-main").focus();
+  startCapture();
 }
 
 function closeVoice() {
+  voiceRun++;
   clearTimeout(voiceCloseTimer);
-  teardownVoice();
+  const wasListening = !!stopCapture();
   const dlg = $("#voice");
-  if (dlg && dlg.open) dlg.close();
+  const waiting = dlg.dataset.state === "thinking" && voiceTarget !== "command";
+  if (wasListening || waiting) setDuck(false);
+  if (dlg.open) dlg.close();
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && capture) closeVoice(); // the phone was locked mid-sentence
+});
+
+function bindVoice() {
+  $("#voice-open").addEventListener("click", () => openVoice("command"));
+  $("#yt-voice").addEventListener("click", () => openVoice("youtube"));
+  $("#kb-voice").addEventListener("click", () => openVoice("keyboard"));
+  $("#voice-close").addEventListener("click", closeVoice);
+  $("#voice-mic-main").addEventListener("click", () => {
+    if (capture) finishCapture();
+    else if ($("#voice").dataset.state !== "thinking" && $("#voice").dataset.state !== "starting") startCapture();
+  });
+  const dlg = $("#voice");
+  dlg.addEventListener("click", (e) => { if (e.target === dlg) closeVoice(); });
+  dlg.addEventListener("close", closeVoice);
+  document.querySelectorAll("#voice-lang button").forEach((b) => b.addEventListener("click", () => setVoiceLang(b.dataset.lang)));
+  $("#voice-type").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = $("#voice-text").value.trim();
+    if (text) { $("#voice-text").value = ""; $("#voice-text").blur(); runCommand(text); }
+  });
 }
 
 // ------------------------------------------------------------------- wiring
@@ -1187,33 +976,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   bindScrollStrip($("#pad-scroll"));
   bindSlider($("#vol-slider"));
 
-  // Voice assistant bindings
-  $("#voice-open").addEventListener("click", () => openVoice("assistant"));
-  $("#yt-voice").addEventListener("click", () => openVoice("youtube"));
-  $("#kb-voice").addEventListener("click", () => openVoice("keyboard"));
-  $("#voice-close").addEventListener("click", closeVoice);
-  $("#voice-toggle-btn").addEventListener("click", () => {
-    if (voiceActive) {
-      if (pendingVoiceIntent) {
-        clearTimeout(silenceTimer);
-        const toRun = pendingVoiceIntent;
-        const targetRun = voiceTarget;
-        pendingVoiceIntent = null;
-        title.textContent = "Executing…";
-        teardownVoice();
-        executeVoiceIntent(toRun, targetRun);
-        return;
-      }
-      stopListening();
-    } else {
-      startListening();
-    }
-  });
-  $("#voice").addEventListener("click", (e) => { if (e.target === $("#voice")) closeVoice(); });
-  const voiceDlg = $("#voice");
-  if (voiceDlg) voiceDlg.addEventListener("close", closeVoice);
-  document.querySelectorAll(".voice-lang-picker .lang-pill").forEach((b) =>
-    b.addEventListener("click", () => setVoiceLang(b.dataset.lang)));
+  bindVoice();
 
   $("#yt").addEventListener("submit", sendYoutube);
   $("#yt-text").addEventListener("input", syncClear);

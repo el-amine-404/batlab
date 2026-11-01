@@ -34,12 +34,46 @@ services:
       - JELLYFIN_URL=http://jellyfin.homelab.lan
       - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:?set in compose/.env}
       - DATA_DIR=/data
+      - SPEECH_URL=http://127.0.0.1:${TV_REMOTE_SPEECH_PORT:-8766}
     volumes:
       - ${VOLUMES_ROOT}/tv-remote:/data
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=16m
     mem_limit: 128m
     pids_limit: 128
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Whisper for the remote's voice commands: on this machine, because the speech
+  # recognition in iPhone browsers is unreliable and absent from home-screen apps.
+  # Loopback only. Capped, so a command cannot push lab2 toward its thermal limit.
+  tv-remote-speech:
+    image: local/batlab-tv-remote-speech
+    build:
+      context: ./speech
+      network: host
+      args:
+        BASE_IMAGE: ${IMAGE_TV_REMOTE_BASE}:${TAG_TV_REMOTE_BASE}
+    pull_policy: build
+    container_name: tv-remote-speech
+    restart: unless-stopped
+    network_mode: host
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - PORT=${TV_REMOTE_SPEECH_PORT:-8766}
+      - THREADS=4
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    cpus: 4
+    mem_limit: 1g
+    pids_limit: 64
     logging:
       driver: "json-file"
       options:

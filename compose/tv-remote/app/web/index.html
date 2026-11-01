@@ -14,6 +14,7 @@
   <link rel="icon" href="icon-192.png" sizes="192x192" type="image/png">
   <link rel="apple-touch-icon" href="icon-180.png">
   <link rel="stylesheet" href="style.css">
+  <link id="mic-worklet" rel="preload" as="script" href="mic-worklet.js">
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -85,8 +86,8 @@
           </div>
         </div>
         <div class="bar-actions">
-          <button id="voice-open" class="btn btn-ghost btn-icon" aria-label="Voice control" title="Voice control"><svg class="ic"><use href="#i-mic"/></svg></button>
           <button id="switch" class="btn btn-ghost btn-icon" aria-label="Switch TV" title="Switch TV"><svg class="ic"><use href="#i-swap"/></svg></button>
+          <button class="btn btn-power btn-icon" id="power" aria-label="Power" title="Power"><svg class="ic"><use href="#i-power"/></svg></button>
         </div>
       </header>
 
@@ -110,12 +111,6 @@
           <button class="btn btn-ghost btn-icon skip" data-media="next" aria-label="Next"><svg class="ic"><use href="#i-next"/></svg></button>
         </div>
       </section>
-
-      <div class="row three">
-        <button class="btn btn-danger btn-round" id="power" aria-label="Power"><svg class="ic"><use href="#i-power"/></svg></button>
-        <button class="btn btn-key" data-key="KEY_SOURCE" aria-label="Input"><svg class="ic"><use href="#i-source"/></svg><span>Input</span></button>
-        <button class="btn btn-key" data-key="KEY_MENU" aria-label="Settings menu"><svg class="ic"><use href="#i-menu"/></svg><span>Menu</span></button>
-      </div>
 
       <div class="seg" role="tablist" aria-label="Control mode">
         <button role="tab" data-mode="buttons" aria-selected="true"><svg class="ic"><use href="#i-pad"/></svg>Buttons</button>
@@ -141,10 +136,12 @@
       </div>
       </div>
 
-      <div class="row three">
+      <div class="row five">
         <button class="btn btn-key" data-key="KEY_RETURN" aria-label="Back"><svg class="ic"><use href="#i-back"/></svg><span>Back</span></button>
         <button class="btn btn-key" data-key="KEY_HOME" aria-label="Home"><svg class="ic"><use href="#i-home"/></svg><span>Home</span></button>
-        <button class="btn btn-key" id="kb-toggle" aria-label="Keyboard: type into the TV"><svg class="ic"><use href="#i-keyboard"/></svg><span>Keyboard</span></button>
+        <button class="btn btn-key" data-key="KEY_SOURCE" aria-label="Input"><svg class="ic"><use href="#i-source"/></svg><span>Input</span></button>
+        <button class="btn btn-key" data-key="KEY_MENU" aria-label="Settings menu"><svg class="ic"><use href="#i-menu"/></svg><span>Menu</span></button>
+        <button class="btn btn-key" id="kb-toggle" aria-label="Keyboard: type into the TV"><svg class="ic"><use href="#i-keyboard"/></svg><span>Type</span></button>
       </div>
 
       <form id="kb" class="card kb" hidden autocomplete="off">
@@ -157,23 +154,24 @@
         <button id="kb-done" class="btn btn-ghost btn-wide small" type="button">Done: close the TV keyboard</button>
       </form>
 
-      <div class="vol-row" id="vol-row">
-        <button class="vol-mute" id="mute" aria-label="Mute" aria-pressed="false"><svg class="ic"><use href="#i-volume"/></svg></button>
-        <input type="range" id="vol-slider" min="0" max="100" step="1" value="0" aria-label="Volume">
-        <span id="vol-num" class="vol-num">–</span>
-      </div>
-
-      <div class="row two">
+      <div class="deck">
         <div class="rocker" id="vol-rocker" role="group" aria-label="Volume">
           <button class="btn btn-key" data-key="KEY_VOLUP" data-repeat aria-label="Volume up"><svg class="ic"><use href="#i-plus"/></svg></button>
           <span class="rocker-label" id="vol-label">VOL</span>
           <button class="btn btn-key" data-key="KEY_VOLDOWN" data-repeat aria-label="Volume down"><svg class="ic"><use href="#i-minus"/></svg></button>
         </div>
+        <button id="voice-open" class="btn-mic" aria-label="Voice command" title="Voice command"><svg class="ic"><use href="#i-mic"/></svg><span>Speak</span></button>
         <div class="rocker" role="group" aria-label="Channel">
           <button class="btn btn-key" data-key="KEY_CHUP" aria-label="Channel up"><svg class="ic"><use href="#i-up"/></svg></button>
           <span class="rocker-label">CH</span>
           <button class="btn btn-key flip" data-key="KEY_CHDOWN" aria-label="Channel down"><svg class="ic"><use href="#i-up"/></svg></button>
         </div>
+      </div>
+
+      <div class="vol-row" id="vol-row">
+        <button class="vol-mute" id="mute" aria-label="Mute" aria-pressed="false"><svg class="ic"><use href="#i-volume"/></svg></button>
+        <input type="range" id="vol-slider" min="0" max="100" step="1" value="0" aria-label="Volume">
+        <span id="vol-num" class="vol-num">–</span>
       </div>
 
       <!-- Playback keys for what reports nothing (beIN, HDMI, the TV's player);
@@ -219,41 +217,36 @@
     <div class="spinner" aria-hidden="true"></div>
   </dialog>
 
-  <dialog id="voice" class="card voice-dialog" aria-labelledby="voice-title">
+  <dialog id="voice" class="voice-sheet" aria-labelledby="voice-title" data-state="idle">
     <div class="voice-top">
-      <div class="voice-lang-picker" role="radiogroup" aria-label="Speech recognition language">
-        <button type="button" class="lang-pill" data-lang="auto" aria-checked="true">Auto</button>
-        <button type="button" class="lang-pill" data-lang="en-US" aria-checked="false">EN</button>
-        <button type="button" class="lang-pill" data-lang="fr-FR" aria-checked="false">FR</button>
-        <button type="button" class="lang-pill" data-lang="ar-SA" aria-checked="false">AR</button>
+      <div id="voice-lang" class="voice-lang" role="radiogroup" aria-label="Language you speak">
+        <button type="button" role="radio" data-lang="auto" aria-checked="true">Auto</button>
+        <button type="button" role="radio" data-lang="en" aria-checked="false">EN</button>
+        <button type="button" role="radio" data-lang="fr" aria-checked="false">FR</button>
+        <button type="button" role="radio" data-lang="ar" aria-checked="false">عربي</button>
       </div>
-      <div class="voice-top-right">
-        <span id="voice-tv-dot" class="dot" title="TV status"></span>
-        <button type="button" id="voice-close" class="btn btn-ghost btn-icon btn-sm voice-close" aria-label="Close voice control">
-          <svg class="ic"><use href="#i-x"/></svg>
-        </button>
-      </div>
+      <button type="button" id="voice-close" class="btn btn-ghost btn-icon" aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
 
-    <div class="voice-center">
-      <div class="voice-orb-wrap">
-        <div class="voice-pulse-ring" id="voice-ring" aria-hidden="true"></div>
-        <button type="button" id="voice-toggle-btn" class="btn btn-round btn-voice" aria-label="Tap to speak or stop">
-          <svg class="ic ic-lg"><use href="#i-mic"/></svg>
-        </button>
-      </div>
-      <h2 id="voice-title" class="voice-title">Listening…</h2>
-      
-      <div class="voice-transcript-card">
-        <div id="voice-heard-label" class="voice-heard-label" hidden>You said:</div>
-        <p id="voice-transcript" class="voice-transcript" aria-live="polite">Say an app, command, or search…</p>
-      </div>
-
-      <div id="voice-action-badge" class="voice-badge" hidden></div>
+    <div id="voice-orb" class="voice-orb">
+      <span class="voice-halo" aria-hidden="true"></span>
+      <button type="button" id="voice-mic-main" class="voice-mic" aria-label="Speak"><svg class="ic"><use href="#i-mic"/></svg></button>
     </div>
 
-    <div class="voice-hints small muted center">
-      <span>Try: <i>"Open YouTube"</i> · <i>"Monte le son"</i> · <i>"شغل نتفليكس"</i> · <i>"Pause"</i></span>
+    <div class="voice-words" aria-live="polite">
+      <h2 id="voice-title"></h2>
+      <p id="voice-heard" class="voice-heard" dir="auto"></p>
+      <p id="voice-detail" class="muted small"></p>
+    </div>
+
+    <div id="voice-results" class="results" hidden></div>
+
+    <div class="voice-more">
+      <div id="voice-examples" class="chips"></div>
+      <form id="voice-type" class="kb-row" autocomplete="off">
+        <input id="voice-text" type="text" dir="auto" placeholder="Or type a command" aria-label="Type a command" enterkeyhint="send" autocapitalize="off" spellcheck="false">
+        <button class="btn btn-primary btn-icon" type="submit" aria-label="Send command"><svg class="ic"><use href="#i-send"/></svg></button>
+      </form>
     </div>
   </dialog>
 
