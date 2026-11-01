@@ -46,3 +46,62 @@ html[data-theme="dark"] .file-chip:hover{background:#29443c;border-color:#63dcb6
 
 /* Accessible select contrast in both themes */
 .select-item{position:relative;padding:9px 36px 9px 12px;color:#18302c}.select-item>span:last-child{position:absolute;right:10px;top:50%;transform:translateY(-50%);display:grid}.select-item svg{width:15px;height:15px}.select-item[data-highlighted]{background:#d9eee6;color:#0b382f}html[data-theme="dark"] .select-item{color:#e4eee9}html[data-theme="dark"] .select-item[data-highlighted]{background:#315047;color:#fff}
+
+
+/* Smart AI Document & Card Scanner */
+.scanner-overlay-svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.6))}
+.scanner-poly.poly-ready{fill:#10b9812e;stroke:#10b981;stroke-width:2.4;vector-effect:non-scaling-stroke;transition:all 0.08s ease-out}
+.scanner-poly.poly-tracking{fill:#f59e0b1c;stroke:#f59e0b;stroke-width:2;stroke-dasharray:4 4;vector-effect:non-scaling-stroke;transition:all 0.08s ease-out}
+.scanner-corner-outer.corner-ready{fill:#10b981;stroke:#ffffff;stroke-width:1.2;vector-effect:non-scaling-stroke;filter:drop-shadow(0 0 6px #10b981)}
+.scanner-corner-outer.corner-tracking{fill:#f59e0b;stroke:#ffffff;stroke-width:1.2;vector-effect:non-scaling-stroke}
+.scanner-corner-inner{fill:#ffffff;vector-effect:non-scaling-stroke}
+.scanner-idle-rect{fill:none;stroke:#ffffff28;stroke-width:1.5;stroke-dasharray:6 6;vector-effect:non-scaling-stroke}
+.scanner-corner-bracket{fill:none;stroke:#35c99baa;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.camera-loading-overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#050c0bcc;color:#e4eee9;z-index:4;font-size:13px;font-weight:600}
+
+.scanner-pill{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);display:inline-flex;align-items:center;gap:8px;padding:8px 18px;border-radius:999px;font-size:12.5px;font-weight:650;white-space:nowrap;backdrop-filter:blur(10px);z-index:3;transition:all 0.2s cubic-bezier(0.16,1,0.3,1);box-shadow:0 6px 20px rgba(0,0,0,0.45)}
+.scanner-pill.is-searching{background:#07120fe8;color:#d1e1db;border:1px solid #31443f}
+.scanner-pill.is-ready{background:#064e3bf2;color:#34d399;border:1px solid #10b981;box-shadow:0 6px 24px #10b98155}
+.scanner-pill.is-countdown{background:#047857fa;color:#ffffff;border:1px solid #34d399;box-shadow:0 0 28px #10b98199}
+.scanner-pill.is-warning{background:#451a03f0;color:#fcd34d;border:1px solid #f59e0b}
+.scanner-pill.is-info{background:#0c2538f0;color:#93c5fd;border:1px solid #3b82f6}
+
+.scanner-bottom-controls{display:flex;flex-direction:column;gap:14px;padding:14px 6px 4px;width:100%}
+.scanner-modes-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.scanner-pill-group{display:inline-flex;align-items:center;gap:3px;padding:3px;border:1px solid var(--line);border-radius:999px;background:var(--card)}
+.scanner-tab-btn{border:0;border-radius:999px;background:transparent;color:var(--muted);font-size:12px;font-weight:650;padding:5px 12px;display:inline-flex;align-items:center;gap:5px;cursor:pointer;transition:all 0.15s ease}
+.scanner-tab-btn.active{background:#e6f4ef;color:#0a1714;box-shadow:0 2px 8px #0002}
+html[data-theme="dark"] .scanner-tab-btn.active{background:#2a453d;color:#eff8f4}
+
+.scanner-shutter-row{display:flex;align-items:center;justify-content:space-between;padding:0 8px}
+.scanner-shutter-side{width:52px;display:flex;align-items:center;justify-content:center}
+.scanner-shutter-center{display:flex;justify-content:center}
+.scanner-icon-btn{width:44px;height:44px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:var(--ink);display:grid;place-items:center;cursor:pointer;transition:all 0.15s ease}
+.scanner-icon-btn:hover{background:#243933}
+.scanner-icon-btn.active{background:#ffc568;color:#332002;border-color:#ffc568}
+.scanner-shutter-btn{position:relative;width:76px;height:76px;border-radius:50%;border:0;background:transparent;display:grid;place-items:center;cursor:pointer;padding:0}
+.scanner-shutter-btn:disabled{opacity:0.4;cursor:not-allowed}
+.scanner-shutter-svg{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg);pointer-events:none}
+.scanner-shutter-track{fill:none;stroke:#213730;stroke-width:3.5}
+.scanner-shutter-meter{fill:none;stroke:#10b981;stroke-width:4;stroke-linecap:round;transition:stroke-dashoffset 0.06s linear}
+.scanner-shutter-inner{width:60px;height:60px;border-radius:50%;background:#e6f4ef;color:#0a1714;display:grid;place-items:center;box-shadow:0 6px 20px #0006;transition:transform 0.12s cubic-bezier(0.16,1,0.3,1)}
+.scanner-shutter-btn:active:not(:disabled) .scanner-shutter-inner{transform:scale(0.90)}
+.scanner-shutter-btn.is-counting .scanner-shutter-inner{background:#34d399;color:#05241b}
+
+/* Crop & Review Editor */
+.scanner-crop-modal{display:flex;flex-direction:column;gap:12px;width:100%}
+.scanner-crop-header{display:flex;flex-direction:column;gap:3px}
+.scanner-crop-header strong{font-size:16px}
+.scanner-crop-header span{color:var(--muted);font-size:12px}
+.scanner-crop-preview{position:relative;width:100%;max-height:65vh;overflow:hidden;border-radius:14px;background:#050c0b;display:flex;align-items:center;justify-content:center;touch-action:none;user-select:none}
+.scanner-crop-img{display:block;max-width:100%;max-height:65vh;object-fit:contain;pointer-events:none}
+.scanner-crop-svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2}
+.scanner-crop-poly{fill:rgba(16,185,129,0.24);stroke:#10b981;stroke-width:2.4;vector-effect:non-scaling-stroke}
+.scanner-crop-handle-group{pointer-events:auto;cursor:crosshair;touch-action:none}
+.scanner-crop-touch-target{fill:transparent}
+.scanner-crop-handle{fill:#ffffff;stroke:#10b981;stroke-width:2.8;vector-effect:non-scaling-stroke;filter:drop-shadow(0 3px 6px rgba(0,0,0,0.6));transition:transform 0.1s ease}
+.scanner-crop-handle.active{fill:#10b981;stroke:#ffffff;transform:scale(1.3)}
+.scanner-crop-center-dot{fill:#10b981;vector-effect:non-scaling-stroke}
+.scanner-preset-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:4px 0;flex-wrap:wrap}
+.scanner-preset-label{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--muted)}
+.scanner-crop-actions{display:flex;justify-content:flex-end;gap:10px;padding-top:6px}

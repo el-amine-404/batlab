@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "test": "node src/__tests__/detector.test.mjs",
+    "test": "node src/__tests__/detector.test.mjs && node src/__tests__/scanner.test.mjs",
     "typecheck": "tsc --noEmit",
-    "build": "npm run test && npm run typecheck && vite build && node scripts/copy-scalar.mjs"
+    "build": "npm run test && npm run typecheck && vite build && node scripts/copy-scalar.mjs && node scripts/copy-onnx.mjs"
   },
   "dependencies": {
     "@fontsource-variable/inter": "5.3.0",
@@ -16,6 +16,7 @@
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "lucide-react": "1.56.0",
+    "onnxruntime-web": "^1.31.1",
     "radix-ui": "1.8.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",

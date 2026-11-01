@@ -10,9 +10,9 @@
     X-Frame-Options DENY
     Referrer-Policy no-referrer
     Permissions-Policy "camera=(self), microphone=(), geolocation=()"
-    Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'"
+    Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' blob:; worker-src 'self' blob:; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'"
   }
-  @assets path /assets/* /icon.svg /icon-192.png /icon-512.png /manifest.webmanifest /sw.js
+  @assets path /assets/* /icon.svg /icon-192.png /icon-512.png /manifest.webmanifest /sw.js /models/* /vendor/*
   header @assets Cache-Control "public, max-age=86400"
   route {
     @backend path /api/* /docs /api-docs/*
