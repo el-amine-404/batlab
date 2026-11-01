@@ -38,7 +38,7 @@ services:
     pids_limit: 128
 
   api:
-    image: local/batlab-scanloom:2.0.0
+    image: local/batlab-scanloom:2.3.0
     build:
       context: ./app
       additional_contexts:
@@ -85,7 +85,7 @@ services:
     pids_limit: 96
 
   worker:
-    image: local/batlab-scanloom:2.0.0
+    image: local/batlab-scanloom:2.3.0
     pull_policy: never
     container_name: scanloom-worker
     command: ["worker"]
@@ -123,7 +123,7 @@ services:
     pids_limit: 128
 
   web:
-    image: local/batlab-scanloom-web:2.0.0
+    image: local/batlab-scanloom-web:2.3.0
     build:
       context: ./app
       additional_contexts:

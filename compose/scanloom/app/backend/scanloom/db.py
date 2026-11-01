@@ -21,10 +21,12 @@ class Database:
     thrown away, and a single statement outside a transaction tried once more,
     so a restart of PostgreSQL never leaves a request hanging or failing for good."""
 
-    def __init__(self, url: str, migrations: Path | None = None, size: int = 12):
+    def __init__(self, url: str, migrations: Path | None = None, size: int = 12, idle: int = 4):
         self.url = url
         self.migrations = migrations or Path(__file__).parent.parent / "migrations"
         self.size = size
+        # Kept open between requests: a new connection costs PostgreSQL a password check.
+        self.idle = min(idle, size)
         self._pool: psycopg2.pool.ThreadedConnectionPool | None = None
         self._slots = threading.BoundedSemaphore(size)
         self._lock = threading.Lock()
@@ -39,7 +41,7 @@ class Database:
         with self._lock:
             if self._pool is None:
                 self._pool = psycopg2.pool.ThreadedConnectionPool(
-                    0, self.size, self.url, connect_timeout=5, application_name="scanloom")
+                    self.idle, self.size, self.url, connect_timeout=5, application_name="scanloom")
             return self._pool
 
     @contextmanager
@@ -55,10 +57,22 @@ class Database:
             yield connection
         except _GONE:
             broken = True
+            # The others in the pool died with it (a database restart): the next asks a new pool.
+            with self._lock:
+                if self._pool is pool:
+                    self._pool = None
             raise
         finally:
             if connection is not None:
-                pool.putconn(connection, close=broken or bool(connection.closed))
+                try:
+                    pool.putconn(connection, close=broken or bool(connection.closed))
+                except psycopg2.pool.PoolError:
+                    connection.close()  # its pool was closed meanwhile, by a database restart
+            if broken:
+                try:
+                    pool.closeall()
+                except psycopg2.Error:
+                    pass
             self._slots.release()
 
     @contextmanager

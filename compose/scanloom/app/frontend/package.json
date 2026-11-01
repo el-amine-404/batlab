@@ -1,11 +1,11 @@
 {
   "name": "scanloom-web",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "test": "node src/__tests__/tracker.test.mjs",
+    "test": "node src/__tests__/tracker.test.mjs && node src/__tests__/pageSpec.test.mjs && node src/__tests__/quad.test.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "npm run test && npm run typecheck && vite build && node scripts/copy-scalar.mjs && node scripts/copy-onnx.mjs"
   },

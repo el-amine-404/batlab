@@ -11,11 +11,12 @@ import { STAGE, STEPS } from "./labels";
 /** Ticks once a second while it matters: what is left counts down between the server's answers. */
 function useCountdown(seconds: number | undefined, measuredAt: number) {
   const [now, setNow] = useState(Date.now());
+  const counting = seconds !== undefined;
   useEffect(() => {
-    if (seconds === undefined) return;
+    if (!counting) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [seconds]);
+  }, [counting]);
   if (seconds === undefined) return undefined;
   return Math.max(1, seconds - Math.max(0, (now - measuredAt) / 1000));
 }
@@ -47,9 +48,13 @@ function UploadRow({ item }: { item: Upload }) {
 export function Pipeline({ project, measuredAt }: { project: Project; measuredAt: number }) {
   const uploads = useUploads(project.public_id);
   const progress = project.progress;
-  const left = useCountdown(progress?.eta_seconds, measuredAt);
+  // Photos still on their way count too: they will be pages to make, once there.
+  const waiting = uploads.filter((item) => item.status !== "failed").length;
+  const known = progress?.eta_seconds || (project.held_count === 0 && waiting) ? (progress?.eta_seconds ?? 0) + (project.held_count === 0 ? waiting * project.page_seconds : 0) : undefined;
+  const left = useCountdown(known, measuredAt);
   const [open, setOpen] = useState(false);
-  if (!progress && !uploads.length) return null;
+  if (!progress?.eta_seconds && !uploads.length && !project.held_count) return null;
+  if (project.held_count && !uploads.length) return null;
 
   const done = project.completed_count + project.failed_count;
   const total = project.page_count + uploads.length;
@@ -59,17 +64,16 @@ export function Pipeline({ project, measuredAt }: { project: Project; measuredAt
 
   return (
     <section aria-label="Progress" className="mb-6 rounded-xl border border-primary/30 bg-card p-4">
-      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1">
-        <p className="flex min-w-0 items-center gap-2 font-medium">
-          {sending.length ? <CloudUpload className="size-4 shrink-0 text-primary" /> : <Loader2 className="size-4 shrink-0 animate-spin text-primary" />}
-          {sending.length ? `Sending ${plural(sending.length, "photo")}` : `${done} of ${plural(total, "page")} finished`}
+      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+        <p className="flex min-w-0 items-center gap-2 text-lg font-semibold">
+          {sending.length ? <CloudUpload className="size-5 shrink-0 self-center text-primary" /> : <Loader2 className="size-5 shrink-0 animate-spin self-center text-primary" />}
+          {(progress?.redoing ?? 0) > 0 && !sending.length ? `Updating ${plural(progress!.redoing, "page")}: ` : ""}{left !== undefined ? `${eta(left)} left` : "Checking your photos"}
         </p>
-        {left !== undefined && (
-          <p className="text-sm text-muted-foreground tabular-nums" aria-live="off">
-            {progress!.measured ? "" : "Roughly: "}{eta(left)} left
-            {progress!.ahead > 0 && ` · ${plural(progress!.ahead, "page")} from other scans first`}
-          </p>
-        )}
+        <p className="text-sm text-muted-foreground tabular-nums">
+          {sending.length ? `Sending ${plural(sending.length, "photo")} · ` : ""}{done} of {plural(total, "page")} finished
+          {progress && !progress.measured ? " · first estimate" : ""}
+          {(progress?.ahead ?? 0) > 0 && ` · ${plural(progress!.ahead, "page")} from other scans first`}
+        </p>
       </div>
       <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={Math.round(percent)} aria-valuemin={0} aria-valuemax={100} aria-label="Pages finished">
         <div className="h-full rounded-full bg-primary transition-[width] duration-500" style={{ width: `${percent}%` }} />

@@ -19,6 +19,25 @@ from scanloom.security import Refused, inspect_container
 from scanloom.settings import DEFAULTS, validate
 
 
+class PageSpecTest(unittest.TestCase):
+    def test_what_people_write(self):
+        from scanloom.pagespec import parse_pages
+        self.assertEqual(parse_pages("1-3,6,7-9", 10), [1, 2, 3, 6, 7, 8, 9])
+        self.assertEqual(parse_pages(" 1 - 2 , 4 ,", 4), [1, 2, 4])
+        self.assertEqual(parse_pages("5,1", 5), [5, 1])
+        self.assertEqual(parse_pages("9-7", 9), [9, 8, 7])
+        self.assertEqual(parse_pages("1-3,2,3-4", 4), [1, 2, 3, 4])
+        self.assertEqual(parse_pages("4", 4), [4])
+
+    def test_what_is_refused_says_why(self):
+        from scanloom.pagespec import parse_pages
+        for spec, message in (("", "which pages"), (" , ", "which pages"), ("0", "no page 0"), ("11", "no page 11"), ("3-11", "no page 11"),
+                              ("a", "isn't a page"), ("1-", "isn't a page"), ("-3", "isn't a page"), ("1--2", "isn't a page"),
+                              ("1-2-3", "isn't a page"), ("1.5", "isn't a page"), ("1;2", "isn't a page"), ("9" * 9, "isn't a page")):
+            with self.assertRaisesRegex(ValueError, message):
+                parse_pages(spec, 10)
+
+
 class ImagingTest(unittest.TestCase):
     def test_detection_cascade_prefers_neural_and_uses_segmentation_on_abstention(self):
         image = np.full((500, 800, 3), 80, np.uint8)
@@ -46,6 +65,11 @@ class ImagingTest(unittest.TestCase):
             self.assertEqual(method, "no document found: whole photo")
             self.assertLess(confidence, .72)
             self.assertEqual(found[2].tolist(), [1399, 999])
+        # Unsure, but a large four-sided thing: better than a fallback's guess inside it.
+        phone = np.array([[300, 100], [1100, 110], [1080, 900], [280, 890]], np.float32)
+        with (mock.patch("scanloom.imaging._neural_boundary", return_value=(phone, .25)),
+              mock.patch("scanloom.imaging._edge_support", return_value=.2)):
+            self.assertEqual(detect(image)[2], "DocAligner neural boundary")
         receipt = np.array([[600, 50], [760, 50], [760, 950], [600, 950]], np.float32)
         with mock.patch("scanloom.imaging._neural_boundary", return_value=(receipt, .9)):
             self.assertEqual(detect(image)[2], "DocAligner neural boundary")

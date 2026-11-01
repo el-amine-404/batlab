@@ -184,8 +184,11 @@ def _neural_boundary(image: np.ndarray) -> tuple[np.ndarray, float] | None:
     """Predict four physical document corners with DocAligner's heatmap model.
 
     A small black pad lets the model estimate corners at, or just beyond, the
-    photograph boundary. The model is fixed, local and never receives network
-    access at runtime.
+    photograph boundary. Several views are asked (the photo, its middle square)
+    and the best is looked at again from close up, where a small card has enough
+    pixels for exact corners. One weak corner lowers the confidence, and only a
+    corner with no signal at all abstains. The model is fixed, local and never
+    receives network access at runtime.
     """
     session = _boundary_session()
     if session is None:
@@ -207,13 +210,14 @@ def _neural_boundary(image: np.ndarray) -> tuple[np.ndarray, float] | None:
         target_size = (crop_width + 2 * pad, crop_height + 2 * pad)
         for heatmap in heatmaps:
             expanded = cv2.resize(heatmap, target_size, interpolation=cv2.INTER_LINEAR)
-            mask = np.uint8(expanded >= .30)
-            count, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, 8)
-            if count <= 1:
+            peak = float(expanded.max())
+            if peak < .12:
                 return None
+            mask = np.uint8(expanded >= max(.08, peak * .5))
+            _count, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, 8)
             component = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
             corners.append(centroids[component] - pad + offset)
-            strengths.append(float(expanded[labels == component].max()))
+            strengths.append(peak)
         quad = order_corners(np.asarray(corners, np.float32))
         area = abs(cv2.contourArea(quad)) / max(1, width * height)
         if area < .015 or not np.isfinite(quad).all():
@@ -226,8 +230,52 @@ def _neural_boundary(image: np.ndarray) -> tuple[np.ndarray, float] | None:
         side = min(height, width)
         left, top = (width - side) // 2, (height - side) // 2
         variants.append(infer(image[top:top+side, left:left+side], (left, top)))
-    valid = [item for item in variants if item is not None]
-    return max(valid, key=lambda item: item[1]) if valid else None
+    valid = [item for item in variants if item is not None and _plausible(item[0], width, height)]
+    if not valid or max(_boundary_score(image, *item) for item in valid) < .78:
+        # Small in a busy scene (a card in a hand), the model sees too little of it: look
+        # at parts of the photo. A result touching a part's edge goes on beyond it, so isn't one.
+        side = int(min(height, width) * .75)
+        spots = [((width - side) * x // 2, (height - side) * y // 2) for x in range(3) for y in range(3)]
+        for left, top in spots:
+            found = infer(image[top:top+side, left:left+side], (left, top))
+            if found is None or not _plausible(found[0], width, height):
+                continue
+            local = found[0] - (left, top)
+            if (local.min() < side * .02 or local.max() > side * .98):
+                continue
+            valid.append(found)
+    if not valid:
+        return None
+    # Of what fits the edges about as well, the largest: a page's outer outline, not a box printed on it.
+    top_score = max(_boundary_score(image, *item) for item in valid)
+    near = [item for item in valid if _boundary_score(image, *item) >= top_score - .08]
+    best = max(near, key=lambda item: abs(cv2.contourArea(item[0])))
+    # Closer, with some of the surroundings: the same thing at a higher resolution.
+    x0, y0 = best[0].min(axis=0)
+    x1, y1 = best[0].max(axis=0)
+    margin = .22 * max(x1 - x0, y1 - y0)
+    left, top = max(0, int(x0 - margin)), max(0, int(y0 - margin))
+    right, bottom = min(width, int(x1 + margin)), min(height, int(y1 + margin))
+    if (right - left) * (bottom - top) < .6 * width * height:
+        closer = infer(image[top:bottom, left:right], (left, top))
+        if (closer is not None and _plausible(closer[0], width, height)
+                and float(np.abs(closer[0] - best[0]).max()) < margin
+                and _boundary_score(image, closer[0], closer[1]) >= _boundary_score(image, best[0], best[1]) - .02):
+            best = closer
+    return best
+
+
+def _on_photo_edges(quad: np.ndarray, width: int, height: int) -> int:
+    """How many of the corners are on the photo's own border."""
+    tolerance = .012 * max(width, height)
+    return int(np.count_nonzero((quad[:, 0] <= tolerance) | (quad[:, 0] >= width - 1 - tolerance)
+                                | (quad[:, 1] <= tolerance) | (quad[:, 1] >= height - 1 - tolerance)))
+
+
+def _boundary_score(image: np.ndarray, quad: np.ndarray, confidence: float) -> float:
+    """How well an outline fits the picture: the detector's confidence, and whether
+    there are really edges along it, which no detector's own opinion can vouch for."""
+    return .5 * confidence + .5 * _edge_support(image, quad)
 
 
 def _grabcut_boundary(image: np.ndarray) -> tuple[np.ndarray, float] | None:
@@ -421,12 +469,18 @@ def detect(image: np.ndarray) -> tuple[np.ndarray, float, str]:
 
 def _detect(image: np.ndarray) -> tuple[np.ndarray, float, str]:
     """Detect the page with neural corners, then deterministic local fallbacks."""
+    height, width = image.shape[:2]
     neural = _neural_boundary(image)
-    if neural is not None:
-        quad, confidence = neural
-        return quad, confidence, "DocAligner neural boundary"
+    # Unsure of itself but seeing a large four-sided thing: still better than the fallbacks,
+    # which latch onto what is printed inside it. The page is told it is unsure (quality).
+    if neural is not None and (neural[1] >= .5 or _edge_support(image, neural[0]) >= .4
+                               or (neural[1] >= .2 and abs(cv2.contourArea(neural[0])) >= .12 * width * height)):
+        return neural[0], neural[1], "DocAligner neural boundary"
     classical = _detect_classical(image)
-    classical_area = abs(cv2.contourArea(classical[0])) / max(1, image.shape[0] * image.shape[1])
+    # The background seen as the page: an outline along the photo's own borders.
+    if _on_photo_edges(classical[0], width, height) >= 2:
+        classical = (classical[0], min(classical[1], .4), classical[2])
+    classical_area = abs(cv2.contourArea(classical[0])) / max(1, height * width)
     # A clean full-resolution light foreground is already a strong result.
     if (classical[2] == "full-resolution foreground" and classical[1] >= .78
             and .03 <= classical_area <= .88):
@@ -437,7 +491,7 @@ def _detect(image: np.ndarray) -> tuple[np.ndarray, float, str]:
             and .01 <= classical_area <= .12):
         return classical
     segmented = _grabcut_boundary(image)
-    if segmented is not None:
+    if segmented is not None and _on_photo_edges(segmented[0], width, height) < 2:
         quad, confidence = segmented
         if _edge_support(image, quad) < .40:
             edged = _edge_boundary(image)
@@ -445,6 +499,8 @@ def _detect(image: np.ndarray) -> tuple[np.ndarray, float, str]:
                 edge_quad, edge_confidence = edged
                 return edge_quad, edge_confidence, "quadrilateral edge fallback"
         return quad, confidence, "GrabCut foreground fallback"
+    if neural is not None:
+        return neural[0], neural[1], "DocAligner neural boundary"
     return classical
 
 
@@ -518,10 +574,16 @@ def pixel_corners(corners: list[list[float]], width: int, height: int) -> np.nda
     return ordered
 
 
-def _appearance(image: np.ndarray, mode: str) -> np.ndarray:
+def appearance(image: np.ndarray, mode: str) -> np.ndarray:
     if mode in {"auto", "color"}:
         return image
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    if mode == "clean":
+        # Evens out the light: the paper white, shadows and creases gone, the print kept.
+        side = max(31, (max(gray.shape) // 25) | 1)
+        paper = cv2.medianBlur(cv2.dilate(gray, np.ones((7, 7), np.uint8)), min(side, 255))
+        flat = cv2.divide(gray, paper, scale=255)
+        return cv2.cvtColor(cv2.normalize(flat, None, 0, 255, cv2.NORM_MINMAX), cv2.COLOR_GRAY2BGR)
     if mode == "gray":
         return cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
     mono = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
@@ -548,7 +610,7 @@ def warp(image: np.ndarray, corners: np.ndarray, rotation: int, appearance: str,
         result = cv2.rotate(result, cv2.ROTATE_180)
     elif rotation == 270:
         result = cv2.rotate(result, cv2.ROTATE_90_COUNTERCLOCKWISE)
-    result = _appearance(result, appearance)
+    result = globals()["appearance"](result, appearance)
     if corner_radius > 0:
         radius = int(round(min(result.shape[:2]) * min(.25, max(0, corner_radius))))
         alpha = np.zeros(result.shape[:2], np.uint8)

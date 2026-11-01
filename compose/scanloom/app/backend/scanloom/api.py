@@ -29,6 +29,7 @@ from .config import Config, load
 from .db import Database
 from .events import Broker
 from .logs import RECENT
+from .pagespec import parse_pages
 from .security import looks_like_image
 from .settings import known, validate
 from .storage import event, object_path
@@ -44,7 +45,7 @@ Who = gate.Who
 Scanner = Annotated[Principal, gate.need("scan")]
 
 ACTIVE_STAGES = ("queued", "scanning", "decoding", "detecting", "rendering")
-PRIORITY = {"build_export": 20, "render_page": 10, "process_page": 5}
+PRIORITY = {"build_export": 20, "render_page": 10, "prepare_page": 8, "process_page": 5}
 MIN_FREE_BYTES = 512 * 1024 * 1024
 # A PDF is built in memory: more than this of lossless pages wouldn't fit the worker's.
 LOSSLESS_PDF_LIMIT = 1024 ** 3
@@ -70,7 +71,7 @@ class PageEdit(BaseModel):
     rotation: Quarter | None = None
     rotate_by: Quarter | None = Field(None, description="Clockwise, from the page's rotation when the request arrives")
     appearance: Appearance | None = None
-    corner_radius: float | None = Field(None, ge=0, le=.25)
+    redetect: bool = Field(False, description="Forget the crop and find the page again")
 
 
 class ManyPagesEdit(PageEdit):
@@ -83,9 +84,20 @@ class ManyPages(BaseModel):
 
 class ExportRequest(BaseModel):
     kind: Literal["zip", "pdf"]
+    pages: str | None = Field(None, max_length=2000, description="Page numbers in the order wanted: 1-3,6,7-9. A range may run backwards (9-7); a page named twice comes once.")
     page_ids: list[uuid.UUID] | None = Field(None, max_length=1000)
-    page_from: int | None = Field(None, ge=1)
-    page_to: int | None = Field(None, ge=1)
+    quality: Literal["lossless", "balanced", "small"] = "balanced"
+    filename: str | None = Field(None, max_length=160, description="Without the extension; the scan's name when left out")
+    color: Literal["keep", "gray", "mono"] = "keep"
+    long_edge: int | None = Field(None, ge=300, le=12000, description="Largest side of each image, in pixels; never enlarged")
+    jpeg_quality: int | None = Field(None, ge=30, le=100)
+    paper: Literal["fit", "a4", "a5", "letter"] = Field("fit", description="PDF: each page the size of its image, or one paper size")
+    margin_mm: float = Field(0, ge=0, le=50, description="PDF, on a paper size")
+
+
+class BatchExport(BaseModel):
+    project_ids: list[str] = Field(min_length=1, max_length=200)
+    format: Literal["pdf", "images"] = "pdf"
     quality: Literal["lossless", "balanced", "small"] = "balanced"
 
 
@@ -138,17 +150,20 @@ def page_view(public_id: str, row: dict) -> dict:
         "source_bytes": row["source_bytes"], "result_bytes": row["result_bytes"], "jpeg_bytes": row["jpeg_bytes"],
         "reused_from": None,
         "thumb_url": image("thumb", "png" if has_result else None),
-        "preview_url": image("preview", "png" if has_result else None),
+        "preview_url": image("preview", "png" if has_result else "source" if row["source_preview_object"] else None),
+        "hold": row["hold"],
         "source_url": image("source"),
         "png_url": f"{base}/image/png?v={version}&download=1" if has_result else None,
         "jpeg_url": f"{base}/image/jpeg?v={version}&download=1" if row["jpeg_object"] else None,
     }
     if row.get("reused_public_id"):
-        answer["reused_from"] = {"project": row["reused_public_id"], "title": row["reused_title"], "page": row["reused_position"] + 1}
+        answer["reused_from"] = {"project": row["reused_public_id"], "title": row["reused_title"], "page": row["reused_position"] + 1,
+                                # A scan of this photo alone: scanning it again would only make a copy of that scan.
+                                "alone": row["reused_page_count"] == 1 and row["reused_public_id"] != public_id}
     return answer
 
 
-PAGE_ROWS = """SELECT p.*, rpr.public_id AS reused_public_id, rpr.title AS reused_title, rp.position AS reused_position
+PAGE_ROWS = """SELECT p.*, rpr.public_id AS reused_public_id, rpr.title AS reused_title, rp.position AS reused_position, rpr.page_count AS reused_page_count
                FROM pages p LEFT JOIN pages rp ON rp.id=p.reused_from LEFT JOIN projects rpr ON rpr.id=rp.project_id"""
 
 
@@ -269,27 +284,36 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
         return project
 
     def page_rows(project_id, *, limit: int | None = None, offset: int = 0, only: str | None = None) -> list[dict]:
-        where = {None: "", "review": " AND jsonb_array_length(COALESCE(p.quality->'warnings','[]'::jsonb))>0",
+        where = {None: " AND NOT p.hold", "held": " AND p.hold", "review": " AND jsonb_array_length(COALESCE(p.quality->'warnings','[]'::jsonb))>0",
                  "failed": " AND p.status IN ('failed','blocked')"}[only]
         return db.all(f"{PAGE_ROWS} WHERE p.project_id=%s{where} ORDER BY p.position LIMIT %s OFFSET %s",
                       (project_id, limit, offset))
 
     # ---- the pipeline, as the page shows it ---------------------------------------------------
 
+    def page_seconds() -> tuple[bool, float]:
+        """How long a page has been taking, and whether that is measured or a first guess."""
+        row = db.one("""SELECT avg(seconds)::float AS average FROM (
+                            SELECT EXTRACT(EPOCH FROM j.finished_at-j.started_at) AS seconds FROM jobs j
+                            WHERE j.kind='process_page' AND j.status='done' AND j.finished_at-j.started_at > interval '3 seconds'
+                            ORDER BY j.finished_at DESC LIMIT 30) newest""")
+        return bool(row["average"]), row["average"] or DEFAULT_PAGE_SECONDS
+
     def progress(project: dict) -> dict | None:
         if project["status"] != "processing":
             return None
         stages = db.all("SELECT status,count(*)::int AS n FROM pages WHERE project_id=%s GROUP BY 1", (project["id"],))
         by_stage = {row["status"]: row["n"] for row in stages}
-        remaining = sum(by_stage.get(stage, 0) for stage in ACTIVE_STAGES)
+        remaining = db.one(f"SELECT count(*)::int AS n FROM pages WHERE project_id=%s AND NOT hold AND status IN {ACTIVE_STAGES}", (project["id"],))["n"]
         current = db.one("""SELECT id,position,original_name,status,stage_started_at FROM pages
                             WHERE project_id=%s AND status IN ('scanning','decoding','detecting','rendering')
                             ORDER BY position LIMIT 1""", (project["id"],))
-        recent = db.one("""SELECT avg(seconds)::float AS average FROM (
-                               SELECT EXTRACT(EPOCH FROM j.finished_at-j.started_at) AS seconds FROM jobs j
-                               WHERE j.kind='process_page' AND j.status='done' AND j.finished_at-j.started_at > interval '3 seconds'
-                               ORDER BY j.finished_at DESC LIMIT 30) newest""")
-        average = recent["average"] or DEFAULT_PAGE_SECONDS
+        recent, average = page_seconds()
+        # A page that is only being redone (a new look, a crop) takes moments, not a whole scan.
+        redoing = db.one("""SELECT avg(seconds)::float AS average FROM (
+                                SELECT EXTRACT(EPOCH FROM j.finished_at-j.started_at) AS seconds FROM jobs j
+                                WHERE j.kind='render_page' AND j.status='done' ORDER BY j.finished_at DESC LIMIT 30) newest""")["average"] or 2.0
+        quick = db.one(f"SELECT count(*)::int AS n FROM pages WHERE project_id=%s AND NOT hold AND status IN {ACTIVE_STAGES} AND result_object IS NOT NULL", (project["id"],))["n"]
         ahead = db.one("""SELECT count(*)::int AS n FROM jobs j WHERE j.status IN ('queued','running') AND j.page_id IS NOT NULL
                           AND j.kind IN ('process_page','render_page') AND j.project_id<>%s
                           AND j.id < COALESCE((SELECT min(id) FROM jobs WHERE project_id=%s AND status IN ('queued','running')), 0)""",
@@ -300,13 +324,15 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
                              (current["id"],))
             elapsed = started["s"] if started and started["s"] else 0.0
         return {"by_stage": by_stage, "remaining": remaining, "ahead": ahead,
-                "average_seconds": round(average, 1), "measured": bool(recent["average"]),
-                "eta_seconds": max(1, round((remaining + ahead) * average - elapsed)),
+                "average_seconds": round(average, 1), "measured": recent,
+                "eta_seconds": max(1, round((remaining - quick + ahead) * average + quick * redoing - elapsed)) if remaining else None,
+                "redoing": quick,
                 "current": jsonable(dict(current)) if current else None}
 
     def project_view(project: dict) -> dict:
         answer = jsonable({key: value for key, value in project.items() if key != "id"})
         answer["progress"] = progress(project)
+        answer["page_seconds"] = round(page_seconds()[1], 1)
         sizes = db.one("SELECT COALESCE(sum(result_bytes),0)::bigint AS result_bytes FROM pages WHERE project_id=%s", (project["id"],))
         answer["bytes"] = sizes["result_bytes"]
         answer["exports"] = [jsonable(dict(row)) | {"download_url": f"/api/v1/projects/{project['public_id']}/exports/{row['id']}/download" if row["status"] == "ready" else None}
@@ -334,7 +360,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
 
     @api.get("/projects", tags=["Scans"])
     def list_projects(who: Who, limit: int = Query(24, ge=1, le=1000), offset: int = Query(0, ge=0),
-                      q: str | None = Query(None, max_length=160), status: Literal["processing", "ready", "failed"] | None = None):
+                      q: str | None = Query(None, max_length=160), status: Literal["processing", "ready", "failed", "draft"] | None = None):
         where, params = ["pr.status<>'deleting'", "(pr.page_count>0 OR pr.created_at>now()-interval '1 hour')"], []
         scope = scope_of(who)
         if scope is not None:
@@ -351,15 +377,18 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
         condition = " AND ".join(where)
         total = db.one(f"SELECT count(*)::int AS n FROM projects pr WHERE {condition}", tuple(params))["n"]
         rows = db.all(f"""SELECT pr.public_id,pr.title,pr.profile,pr.status,pr.page_count,pr.completed_count,pr.failed_count,
-                                 pr.warning_count,pr.expires_at,pr.created_at,pr.updated_at,pr.owner,
+                                 pr.warning_count,pr.held_count,pr.expires_at,pr.created_at,pr.updated_at,pr.owner,
                                  first_page.id AS page_id,first_page.version AS page_version,first_page.thumb_object,first_page.result_object
                           FROM projects pr LEFT JOIN LATERAL (
                               SELECT p.id,p.version,p.thumb_object,p.result_object FROM pages p
                               WHERE p.project_id=pr.id AND p.result_object IS NOT NULL ORDER BY p.position LIMIT 1) first_page ON true
                           WHERE {condition} ORDER BY pr.created_at DESC LIMIT %s OFFSET %s""", (*params, limit, offset))
         items = []
+        seconds = page_seconds()[1]
         for row in rows:
             item = jsonable(dict(row))
+            left = row["page_count"] - row["completed_count"] - row["failed_count"]
+            item["eta_seconds"] = max(1, round((left - row["held_count"]) * seconds)) if row["status"] == "processing" and left > row["held_count"] else None
             page_id, version = item.pop("page_id"), item.pop("page_version")
             form = "thumb" if item.pop("thumb_object") else "png" if item.pop("result_object", None) else None
             item.pop("result_object", None)
@@ -415,14 +444,15 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
 
     @api.get("/projects/{public_id}/pages", tags=["Pages"], summary="A scan's pages, a stretch at a time")
     def list_pages(public_id: str, who: Who, limit: int = Query(48, ge=1, le=1000), offset: int = Query(0, ge=0),
-                   only: Literal["review", "failed"] | None = None):
+                   only: Literal["review", "failed", "held"] | None = None):
         project = find(public_id, who)
         rows = page_rows(project["id"], limit=limit, offset=offset, only=only)
-        counts = db.one("""SELECT count(*)::int AS total,
+        counts = db.one("""SELECT (count(*) FILTER (WHERE NOT hold))::int AS total,
+                                  (count(*) FILTER (WHERE hold))::int AS held,
                                   (count(*) FILTER (WHERE jsonb_array_length(COALESCE(quality->'warnings','[]'::jsonb))>0))::int AS review,
                                   (count(*) FILTER (WHERE status IN ('failed','blocked')))::int AS failed
                            FROM pages WHERE project_id=%s""", (project["id"],))
-        total = counts["review"] if only == "review" else counts["failed"] if only == "failed" else counts["total"]
+        total = {"review": counts["review"], "failed": counts["failed"], "held": counts["held"]}.get(only, counts["total"])
         return {"items": [page_view(public_id, row) for row in rows], "total": total, "counts": dict(counts),
                 "limit": limit, "offset": offset}
 
@@ -435,7 +465,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
         if shutil.disk_usage(config.incoming).free < MIN_FREE_BYTES:
             raise HTTPException(507, "The server is nearly out of disk space")
 
-    def add_page(project: dict, name: str, object_name: str, digest: str, total: int, hint) -> dict:
+    def add_page(project: dict, name: str, object_name: str, digest: str, total: int, hint, hold: bool) -> dict:
         with db.transaction() as cursor:
             # One at a time per scan: what decides a page's place and whether it is a repeat.
             cursor.execute("SELECT id FROM projects WHERE id=%s FOR UPDATE", (project["id"],))
@@ -444,12 +474,13 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
             if same:
                 object_path(config.incoming, object_name).unlink(missing_ok=True)
                 return {"duplicate": True, "page": page_view(project["public_id"], same)}
-            cursor.execute("""INSERT INTO pages(project_id,position,original_name,source_object,source_sha256,source_bytes,corners_hint)
-                              VALUES (%s,(SELECT COALESCE(max(position)+1,0) FROM pages WHERE project_id=%s),%s,%s,%s,%s,%s::jsonb) RETURNING id""",
-                           (project["id"], project["id"], name, object_name, digest, total, json.dumps(hint) if hint else None))
+            cursor.execute("""INSERT INTO pages(project_id,position,original_name,source_object,source_sha256,source_bytes,corners_hint,hold)
+                              VALUES (%s,(SELECT COALESCE(max(position)+1,0) FROM pages WHERE project_id=%s),%s,%s,%s,%s,%s::jsonb,%s) RETURNING id""",
+                           (project["id"], project["id"], name, object_name, digest, total, json.dumps(hint) if hint else None, hold))
             page_id = cursor.fetchone()["id"]
-            cursor.execute("INSERT INTO jobs(project_id,page_id,kind,priority) VALUES (%s,%s,'process_page',%s)",
-                           (project["id"], page_id, PRIORITY["process_page"]))
+            kind = "prepare_page" if hold else "process_page"
+            cursor.execute("INSERT INTO jobs(project_id,page_id,kind,priority) VALUES (%s,%s,%s,%s)",
+                           (project["id"], page_id, kind, PRIORITY[kind]))
             cursor.execute("SELECT project_refresh(%s)", (project["id"],))
             event(cursor, project, "page_added", {"page_id": str(page_id)})
             cursor.execute(f"{PAGE_ROWS} WHERE p.id=%s", (page_id,))
@@ -458,9 +489,10 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
     @api.post("/projects/{public_id}/pages", status_code=201, tags=["Pages"],
               summary="Add one photo: the file itself is the request's body",
               description="`curl --data-binary @photo.heic -H 'X-Api-Key: …' '…/pages?name=photo.heic'`. "
-                          "A file this scan already has isn't added (`duplicate: true`); one you scanned in another scan is not processed again.")
+                          "A file this scan already has isn't added (`duplicate: true`); one you scanned in another scan is not processed again (the hash of each original is kept).")
     async def upload_page(public_id: str, request: Request, who: Scanner, name: str = Query(max_length=400),
-                          hint: str | None = Query(None, max_length=400, description="Four [x, y] the camera saw, as JSON")):
+                          hint: str | None = Query(None, max_length=400, description="Four [x, y] the camera saw, as JSON"),
+                          hold: bool = Query(False, description="Check it and show it, but scan only when /start is asked")):
         clean = clean_name(name)
         corners = None
         if hint:
@@ -493,7 +525,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
             if total == 0:
                 raise HTTPException(422, f"{clean} is empty")
             await run_in_threadpool(output.close)
-            answer = await run_in_threadpool(add_page, project, clean, object_name, digest.hexdigest(), total, corners)
+            answer = await run_in_threadpool(add_page, project, clean, object_name, digest.hexdigest(), total, corners, hold)
             keep = True
             return answer
         except ClientDisconnect:
@@ -519,6 +551,9 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
             rows = cursor.fetchall()
             if len(rows) != len(set(page_ids)):
                 raise HTTPException(404, "That page doesn't exist, or was deleted")
+            cursor.execute("SELECT count(*) AS n FROM pages WHERE id=ANY(%s::uuid[]) AND hold", (page_ids,))
+            if cursor.fetchone()["n"]:
+                raise HTTPException(409, "That photo hasn't been scanned yet")
             if any(not row["normalized_object"] for row in rows):
                 raise HTTPException(409, "That page is still being scanned")
             sets, values = ["status='queued'", "edit_rev=edit_rev+1", "error=NULL", "stage_started_at=NULL"], []
@@ -534,9 +569,8 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
             if edit.appearance is not None:
                 sets.append("appearance=%s")
                 values.append(edit.appearance)
-            if edit.corner_radius is not None:
-                sets.append("corner_radius=%s")
-                values.append(edit.corner_radius)
+            if edit.redetect:
+                sets.append("corners=NULL")
             cursor.execute(f"UPDATE pages SET {','.join(sets)} WHERE id=ANY(%s::uuid[])", (*values, page_ids))
             for page_id in page_ids:
                 cursor.execute("INSERT INTO jobs(project_id,page_id,kind,priority) VALUES (%s,%s,'render_page',%s) ON CONFLICT DO NOTHING",
@@ -554,6 +588,34 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
     def edit_page(public_id: str, page_id: uuid.UUID, edit: PageEdit, who: Scanner):
         project = find(public_id, who)
         edit_pages(project, [page_id], edit)
+        return project_view(find(public_id, who))
+
+    @api.post("/projects/{public_id}/start", status_code=202, tags=["Scans"], summary="Scan the photos waiting for review")
+    def start_scan(public_id: str, who: Scanner):
+        project = find(public_id, who)
+        with db.transaction() as cursor:
+            cursor.execute("SELECT count(*) AS n FROM pages WHERE project_id=%s AND hold AND status NOT IN ('held','failed','blocked')", (project["id"],))
+            if cursor.fetchone()["n"]:
+                raise HTTPException(409, "Some photos are still being checked")
+            # A photo already scanned on its own isn't scanned into a copy. As part of another scan, it is welcome.
+            cursor.execute("""SELECT p.* FROM pages p JOIN pages rp ON rp.id=p.reused_from JOIN projects rpr ON rpr.id=rp.project_id
+                              WHERE p.project_id=%s AND p.hold AND p.status='held' AND rpr.page_count=1 AND rpr.id<>p.project_id""", (project["id"],))
+            copies = cursor.fetchall()
+            cursor.execute("SELECT count(*) AS n FROM pages WHERE project_id=%s AND hold AND status='held'", (project["id"],))
+            if copies and cursor.fetchone()["n"] == len(copies):
+                raise HTTPException(409, "These photos were already scanned on their own")
+            if copies:
+                cursor.execute("DELETE FROM pages WHERE id=ANY(%s::uuid[])", ([row["id"] for row in copies],))
+                objects = [row[column] for row in copies for column in (*FORMS.values(), "normalized_object") if row[column]]
+                cursor.execute("INSERT INTO jobs(project_id,kind,priority,payload) VALUES (%s,'remove_objects',%s,%s::jsonb)",
+                               (project["id"], PRIORITY["render_page"], json.dumps({"objects": objects, "incoming": [row["source_object"] for row in copies]})))
+            cursor.execute("UPDATE pages SET hold=false,status=CASE WHEN status='held' THEN 'queued' ELSE status END WHERE project_id=%s AND hold RETURNING id,status", (project["id"],))
+            for row in cursor.fetchall():
+                if row["status"] == "queued":
+                    cursor.execute("INSERT INTO jobs(project_id,page_id,kind,priority) VALUES (%s,%s,'process_page',%s) ON CONFLICT DO NOTHING",
+                                   (project["id"], row["id"], PRIORITY["process_page"]))
+            cursor.execute("SELECT project_refresh(%s)", (project["id"],))
+            event(cursor, project, "project_started")
         return project_view(find(public_id, who))
 
     @api.post("/projects/{public_id}/pages/retry", status_code=202, tags=["Pages"], summary="Try failed pages again")
@@ -620,8 +682,8 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
 
     @api.post("/projects/{public_id}/exports", status_code=202, tags=["Exports"], summary="Make a ZIP or a PDF of a scan's pages")
     def create_export(public_id: str, request: ExportRequest, who: Scanner):
-        if request.page_ids is not None and (request.page_from is not None or request.page_to is not None):
-            raise HTTPException(422, "Use page_ids or a page range, not both")
+        if request.page_ids is not None and request.pages is not None:
+            raise HTTPException(422, "Use page_ids or pages, not both")
         project = find(public_id, who)
         rows = db.all("SELECT id,position,version,result_bytes FROM pages WHERE project_id=%s AND status='ready' AND result_object IS NOT NULL ORDER BY position", (project["id"],))
         if not rows:
@@ -632,19 +694,26 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
             chosen = [row for row in rows if row["id"] in wanted]
             if not chosen or len(chosen) != len(wanted):
                 raise HTTPException(422, "Some of those pages aren't finished, or aren't in this scan")
-        elif request.page_from is not None or request.page_to is not None:
-            first, last = request.page_from or 1, request.page_to or len(rows)
-            if first > last or last > len(rows):
-                raise HTTPException(422, f"This scan's finished pages are 1 to {len(rows)}")
-            chosen = rows[first - 1:last]
+        elif request.pages is not None:
+            try:
+                numbers = parse_pages(request.pages, int(project["page_count"]))
+            except ValueError as error:
+                raise HTTPException(422, str(error)) from error
+            by_number = {row["position"] + 1: row for row in rows}
+            missing = [number for number in numbers if number not in by_number]
+            if missing:
+                raise HTTPException(422, f"Page {missing[0]} isn't finished")
+            chosen = [by_number[number] for number in numbers]
         if (request.kind == "pdf" and request.quality == "lossless"
                 and sum(row["result_bytes"] or 0 for row in chosen) > LOSSLESS_PDF_LIMIT):
             raise HTTPException(422, "That many lossless pages are too large for one PDF: choose Balanced, or fewer pages")
         settings = db.settings()
-        fingerprint = json.dumps([request.kind, request.quality, [[str(row["id"]), row["version"]] for row in chosen]])
+        options = {"color": request.color, "long_edge": request.long_edge, "jpeg_quality": request.jpeg_quality,
+                   "paper": request.paper, "margin_mm": request.margin_mm if request.paper != "fit" else 0}
+        fingerprint = json.dumps([request.kind, request.quality, options, [[str(row["id"]), row["version"]] for row in chosen]])
         cache_key = hashlib.sha256(fingerprint.encode()).hexdigest()
         expires = datetime.now(timezone.utc) + timedelta(minutes=int(settings["export_ttl_minutes"]))
-        stem = re.sub(r'[\x00-\x1f\x7f\\/:*?"<>|]+', "-", project["title"]).strip(" .-") or "scan"
+        stem = re.sub(r'[\x00-\x1f\x7f\\/:*?"<>|]+', "-", request.filename or project["title"]).strip(" .-") or "scan"
         filename = f"{stem}.{request.kind}"
         with db.transaction() as cursor:
             # The same pages asked for again: the file already made.
@@ -660,10 +729,30 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
                 export_id, export_status = cursor.fetchone()["id"], "queued"
                 cursor.execute("INSERT INTO jobs(project_id,kind,priority,payload) VALUES (%s,'build_export',%s,%s::jsonb)",
                                (project["id"], PRIORITY["build_export"],
-                                json.dumps({"export_id": str(export_id), "page_ids": [str(row["id"]) for row in chosen], "quality": request.quality})))
+                                json.dumps({"export_id": str(export_id), "page_ids": [str(row["id"]) for row in chosen], "quality": request.quality, "options": options})))
                 event(cursor, project, "export_queued", {"export_id": str(export_id), "kind": request.kind})
         return {"id": str(export_id), "kind": request.kind, "status": export_status, "page_count": len(chosen), "quality": request.quality,
                 "download_url": f"/api/v1/projects/{public_id}/exports/{export_id}/download"}
+
+    @api.post("/exports/batch", status_code=202, tags=["Exports"], summary="One ZIP of several scans")
+    def batch_export(body: BatchExport, who: Scanner):
+        scans = [find(public_id, who) for public_id in dict.fromkeys(body.project_ids)]
+        pages = sum(scan["completed_count"] for scan in scans)
+        if not pages:
+            raise HTTPException(409, "None of those scans has finished pages yet")
+        settings = db.settings()
+        expires = datetime.now(timezone.utc) + timedelta(minutes=int(settings["export_ttl_minutes"]))
+        first = scans[0]
+        with db.transaction() as cursor:
+            cursor.execute("INSERT INTO exports(project_id,kind,filename,expires_at,page_count) VALUES (%s,'zip',%s,%s,%s) RETURNING id",
+                           (first["id"], f"Scanloom {len(scans)} scans.zip", expires, pages))
+            export_id = cursor.fetchone()["id"]
+            cursor.execute("INSERT INTO jobs(project_id,kind,priority,payload) VALUES (%s,'build_export',%s,%s::jsonb)",
+                           (first["id"], PRIORITY["build_export"],
+                            json.dumps({"export_id": str(export_id), "batch": [str(scan["id"]) for scan in scans], "format": body.format, "quality": body.quality})))
+            event(cursor, first, "export_queued", {"export_id": str(export_id), "kind": "zip"})
+        return {"id": str(export_id), "project": first["public_id"], "page_count": pages,
+                "download_url": f"/api/v1/projects/{first['public_id']}/exports/{export_id}/download"}
 
     @api.get("/projects/{public_id}/exports/{export_id}/download", tags=["Exports"])
     def download_export(public_id: str, export_id: uuid.UUID, who: Who):

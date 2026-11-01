@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 export const ALL = 1000;
 
-/** Which stretch of a long list is on screen, and how much of it: up to all of it. */
+/** Which stretch of a long list is on screen, and how much of it: up to all of it. Fixed to the screen's bottom, so it never moves with the content; a page using it leaves room with pb-16. */
 export function Pagination({ total, size, sizes, offset, noun, onChange }: {
   total: number; size: number; sizes: number[]; offset: number; noun: string;
   onChange: (next: { size: number; offset: number }) => void;
@@ -14,7 +14,7 @@ export function Pagination({ total, size, sizes, offset, noun, onChange }: {
   const page = Math.floor(offset / size) + 1;
   const to = (target: number) => onChange({ size, offset: (target - 1) * size });
   return (
-    <nav aria-label={`${noun} pages`} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-sm text-muted-foreground">
+    <nav aria-label={`${noun} pages`} className="fixed right-0 bottom-0 left-0 z-30 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-border bg-background/95 px-4 py-2 pb-[max(.5rem,env(safe-area-inset-bottom))] text-sm text-muted-foreground backdrop-blur sm:px-6 lg:left-64 lg:px-10">
       <p className="tabular-nums" aria-live="polite">{total ? `${offset + 1}–${Math.min(total, offset + size)} of ${total}` : `No ${noun}`}</p>
       <div className="flex flex-wrap items-center gap-2">
         <Select value={String(size)} onValueChange={(value) => onChange({ size: Number(value), offset: 0 })}>

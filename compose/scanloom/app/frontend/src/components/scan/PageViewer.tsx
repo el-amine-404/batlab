@@ -1,7 +1,6 @@
 import { ChevronLeft, ChevronRight, Crop, Download, Loader2, RotateCcw, RotateCw, Trash2, TriangleAlert, X, ZoomIn, ZoomOut } from "lucide-react";
 import { Dialog as Primitive } from "radix-ui";
-import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -9,6 +8,18 @@ import type { Appearance, Page, PageEdit } from "@/lib/api";
 import { cn, formatBytes } from "@/lib/utils";
 
 import { APPEARANCES, STAGE, TIMINGS } from "./labels";
+
+function Section({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
+  return (
+    <section className="flex flex-col gap-1.5">
+      <div>
+        <h3 className="text-xs font-semibold tracking-wide text-foreground uppercase">{title}</h3>
+        <p className="text-xs text-muted-foreground">{hint}</p>
+      </div>
+      {children}
+    </section>
+  );
+}
 
 /** One page, large, with everything that can be done to it. Arrow keys or a swipe for the next. */
 export function PageViewer({ pages, at, onGo, onClose, onEdit, onCrop, onRemove, onRetry }: {
@@ -77,28 +88,29 @@ export function PageViewer({ pages, at, onGo, onClose, onEdit, onCrop, onRemove,
                 {page.warnings.map((warning) => <li key={warning} className="flex items-start gap-2"><TriangleAlert className="mt-0.5 size-4 shrink-0" /> {warning}</li>)}
               </ul>
             )}
-            {page.reused_from && (
-              <p className="rounded-lg border border-border p-3 text-sm text-muted-foreground">
-                The same photo as page {page.reused_from.page} of{" "}
-                <Link className="text-primary underline underline-offset-2" to={`/scans/${page.reused_from.project}`}>{page.reused_from.title}</Link>: reused, not scanned again.
-              </p>
-            )}
-            <div className="grid grid-cols-2 gap-2">
-              <Button variant="secondary" disabled={!page.source_url || isWorking} onClick={() => onEdit(page, { rotate_by: 270 })}><RotateCcw /> Left</Button>
-              <Button variant="secondary" disabled={!page.source_url || isWorking} onClick={() => onEdit(page, { rotate_by: 90 })}><RotateCw /> Right</Button>
-              <Button variant="secondary" className="col-span-2" disabled={!page.source_url} onClick={() => onCrop(page)}><Crop /> Adjust crop</Button>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <span id="look" className="text-xs font-medium text-muted-foreground">Look of this page</span>
-              <Select value={page.appearance} disabled={!page.source_url || isWorking} onValueChange={(value) => onEdit(page, { appearance: value as Appearance })}>
-                <SelectTrigger aria-labelledby="look"><SelectValue /></SelectTrigger>
+            <Section title="Rotate" hint="Turns the page a quarter turn.">
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="secondary" title="A quarter turn to the left" disabled={isWorking} onClick={() => onEdit(page, { rotate_by: 270 })}><RotateCcw /> Rotate left</Button>
+                <Button variant="secondary" title="A quarter turn to the right" disabled={isWorking} onClick={() => onEdit(page, { rotate_by: 90 })}><RotateCw /> Rotate right</Button>
+              </div>
+            </Section>
+            <Section title="Crop" hint="Where the page's corners are in the photo.">
+              <Button variant="secondary" className="w-full" disabled={!page.source_url} title={page.source_url ? undefined : "The photo is still being prepared"} onClick={() => onCrop(page)}><Crop /> Adjust the corners</Button>
+            </Section>
+            <Section title="Look" hint="Transforms this page only. It can be changed back.">
+              <Select value={page.appearance} disabled={isWorking} onValueChange={(value) => onEdit(page, { appearance: value as Appearance })}>
+                <SelectTrigger aria-label="Look of this page"><SelectValue /></SelectTrigger>
                 <SelectContent className="z-[60]">{APPEARANCES.map(({ id, label }) => <SelectItem key={id} value={id}>{label}</SelectItem>)}</SelectContent>
               </Select>
-            </div>
-            <div className="flex flex-col gap-2">
-              {page.png_url && <Button asChild><a href={page.png_url} download><Download /> Lossless PNG{page.result_bytes ? ` · ${formatBytes(page.result_bytes)}` : ""}</a></Button>}
-              {page.jpeg_url && <Button asChild variant="secondary"><a href={page.jpeg_url} download><Download /> JPEG{page.jpeg_bytes ? ` · ${formatBytes(page.jpeg_bytes)}` : ""}</a></Button>}
-            </div>
+            </Section>
+            {page.png_url && (
+              <Section title="Download this page" hint="For several pages, use PDF or ZIP on the scan.">
+                <div className="flex flex-col gap-2">
+                  <Button asChild><a href={page.png_url} download><Download /> Lossless PNG{page.result_bytes ? ` · ${formatBytes(page.result_bytes)}` : ""}</a></Button>
+                  {page.jpeg_url && <Button asChild variant="secondary"><a href={page.jpeg_url} download><Download /> JPEG{page.jpeg_bytes ? ` · ${formatBytes(page.jpeg_bytes)}` : ""}</a></Button>}
+                </div>
+              </Section>
+            )}
             {total > 0 && (
               <details className="text-xs text-muted-foreground">
                 <summary className="cursor-pointer select-none hover:text-foreground">Done in {total.toFixed(1)} s</summary>

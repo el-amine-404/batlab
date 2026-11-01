@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDownUp, ArrowLeft, Check, CheckSquare, Download, FileArchive, FileText, LayoutGrid, List, MoreVertical, Plus, RotateCw, Trash2, TriangleAlert, X } from "lucide-react";
+import { ArrowDownUp, ArrowLeft, Camera, Check, Clock, Download, FileArchive, FileText, HardDrive, Infinity as Forever, Layers, LayoutGrid, List, MoreVertical, Palette, Plus, RotateCw, Timer, Trash2, TriangleAlert, X } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { toast } from "sonner";
@@ -7,19 +7,19 @@ import { toast } from "sonner";
 import { Failed } from "@/components/layout/States";
 import { CropEditor } from "@/components/scan/CropEditor";
 import { ExportDialog } from "@/components/scan/ExportDialog";
-import { PROFILES } from "@/components/scan/labels";
+import { LookDialog } from "@/components/scan/LookDialog";
 import { PageRow, PageTile, type PageActions } from "@/components/scan/PageViews";
 import { PageViewer } from "@/components/scan/PageViewer";
 import { ALL, Pagination } from "@/components/scan/Pagination";
 import { Pipeline } from "@/components/scan/Pipeline";
+import { Review } from "@/components/scan/Review";
 import { ScanTitle } from "@/components/scan/ScanTitle";
 import { Button } from "@/components/ui/button";
 import { Confirm } from "@/components/ui/confirm";
 import { Menu, MenuContent, MenuItem, MenuLink, MenuTrigger } from "@/components/ui/menu";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { api, errorText, type Page, type PageEdit, type Point, type Profile } from "@/lib/api";
+import { api, errorText, type Page, type PageEdit, type Point } from "@/lib/api";
 import { addUploads, ACCEPT, useUploads } from "@/lib/uploads";
-import { cn, formatBytes, plural, timeAgo } from "@/lib/utils";
+import { cn, formatBytes, plural, timeAgo, timeUntil } from "@/lib/utils";
 
 const Scanner = lazy(() => import("@/scanner/Scanner").then((module) => ({ default: module.Scanner })));
 const SIZES = [24, 48, 96];
@@ -58,13 +58,14 @@ export function ProjectPage() {
     }, { replace });
   }, [setSearch]);
 
-  const project = useQuery({ queryKey: ["project", id], queryFn: () => api.project(id) });
-  const pages = useQuery({ queryKey: ["pages", id, size, offset, only], queryFn: () => api.pages(id, size, offset, only), placeholderData: keepPreviousData });
+  const project = useQuery({ queryKey: ["project", id], queryFn: () => api.project(id), refetchInterval: (query) => (query.state.data?.status === "processing" ? 2500 : false) });
+  // Also read every few seconds while working, in case a network in between holds the live stream back.
+  const pages = useQuery({ queryKey: ["pages", id, size, offset, only], queryFn: () => api.pages(id, size, offset, only), placeholderData: keepPreviousData, refetchInterval: () => (project.data?.status === "processing" ? 2500 : false) });
   // All of them, only when something needs them: the viewer's next and previous.
   const allPages = useQuery({ queryKey: ["pages", id, "all"], queryFn: () => api.pages(id, ALL, 0), enabled: Boolean(openId), placeholderData: keepPreviousData });
   const uploads = useUploads(id);
 
-  const [selecting, setSelecting] = useState(false);
+  const [look, setLook] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [crop, setCrop] = useState<Page | null>(null);
   const [exporting, setExporting] = useState<"pdf" | "zip" | null>(null);
@@ -87,7 +88,6 @@ export function ProjectPage() {
     onError: failure,
   });
   const retry = useMutation({ mutationFn: (ids?: string[]) => api.retryPages(id, ids), onSuccess: refresh, onError: failure });
-  const finish = useMutation({ mutationFn: (profile: Profile) => api.editProject(id, { profile }), onSuccess: refresh, onError: failure });
   const removeScan = useMutation({
     mutationFn: () => api.deleteProject(id),
     onSuccess: () => { void client.invalidateQueries({ queryKey: ["projects"] }); navigate("/scans"); toast.success("Scan deleted"); },
@@ -137,16 +137,21 @@ export function ProjectPage() {
   const viewerAt = openId ? viewerPages.findIndex((page) => page.id === openId) : -1;
 
   return (
-    <div className={cn(over && "outline-2 outline-offset-8 outline-primary outline-dashed rounded-xl")}>
+    <div className={cn("pb-16", over && "outline-2 outline-offset-8 outline-primary outline-dashed rounded-xl")}>
       <Link to="/scans" className="mb-2 inline-flex min-h-8 items-center gap-1.5 rounded text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring"><ArrowLeft className="size-4" /> All scans</Link>
       <header className="mb-5 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
         <div className="min-w-0 flex-1 basis-72">
           <ScanTitle id={id} title={data.title} />
-          <p className="mt-1 text-sm text-muted-foreground">
-            {plural(data.page_count, "page")}{data.bytes > 0 && ` · ${formatBytes(data.bytes)}`} · {timeAgo(data.created_at)}
+          <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground [&_svg]:size-3.5">
+            <span className="flex items-center gap-1.5"><Layers /> {plural(data.page_count, "page")}</span>
+            {data.bytes > 0 && <span className="flex items-center gap-1.5"><HardDrive /> {formatBytes(data.bytes)}</span>}
+            <span className="flex items-center gap-1.5"><Clock /> {timeAgo(data.created_at)}</span>
+            {data.expires_at ? <span className="flex items-center gap-1.5"><Timer /> Deleted in {timeUntil(data.expires_at)}</span>
+              : <span className="flex items-center gap-1.5" title="This scan has no expiry: it stays until you delete it"><Forever /> Kept until you delete it</span>}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button variant="secondary" disabled={!canDownload} title="Transform all the pages: color, clean paper or black & white" onClick={() => setLook(true)}><Palette /> Change the look</Button>
           <Button disabled={!canDownload} onClick={() => setExporting("pdf")}><FileText /> PDF</Button>
           <Button variant="secondary" disabled={!canDownload} onClick={() => setExporting("zip")}><FileArchive /> ZIP</Button>
           <Menu>
@@ -162,6 +167,7 @@ export function ProjectPage() {
       </header>
 
       <Pipeline project={data} measuredAt={project.dataUpdatedAt} />
+      {data.held_count > 0 && <Review project={data} onAdd={() => input.current?.click()} />}
 
       {data.failed_count > 0 && (
         <div role="alert" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm">
@@ -171,39 +177,37 @@ export function ProjectPage() {
       )}
 
       {/* The bar over the pages: what to show, and how; or, while selecting, what to do with those selected. */}
-      <div className="sticky top-14 z-20 -mx-1 mb-4 flex flex-wrap items-center gap-2 rounded-xl bg-background/90 px-1 py-2 backdrop-blur lg:top-0">
-        {selecting ? (
+      {data.held_count > 0 && !items.length && <input ref={input} hidden type="file" multiple accept={ACCEPT} onChange={(event) => { take(Array.from(event.target.files ?? [])); event.target.value = ""; }} />}
+      <div hidden={data.held_count > 0 && !items.length} className="sticky top-14 z-20 -mx-1 mb-4 flex flex-wrap items-center gap-2 rounded-xl bg-background/90 px-1 py-2 backdrop-blur lg:top-0">
+        {selected.length > 0 ? (
           <>
-            <Button variant="ghost" size="sm" onClick={() => { setSelecting(false); setSelected([]); }}><X /> Done</Button>
-            <span className="text-sm font-medium tabular-nums" aria-live="polite">{selected.length} selected</span>
-            <Button variant="ghost" size="sm" onClick={() => setSelected(selected.length === items.length ? [] : items.map((page) => page.id))}><Check /> {selected.length === items.length && items.length ? "None" : "All on this page"}</Button>
+            <span className="flex items-center gap-1.5 text-sm font-medium tabular-nums" aria-live="polite"><Check className="size-4 text-primary" /> {plural(selected.length, "page")} selected</span>
+            <Button variant="ghost" size="sm" onClick={() => setSelected(items.length && items.every((page) => selected.includes(page.id)) ? selected.filter((value) => !items.some((page) => page.id === value)) : [...new Set([...selected, ...items.map((page) => page.id)])])}>
+              <Check /> {items.every((page) => selected.includes(page.id)) ? "None on this page" : "All on this page"}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setSelected([])}><X /> Clear</Button>
             <div className="ml-auto flex flex-wrap gap-2">
-              <Button variant="secondary" size="sm" disabled={!selected.length} onClick={() => edit.mutate({ ids: selected, body: { rotate_by: 90 } })}><RotateCw /> Rotate</Button>
-              <Button variant="secondary" size="sm" disabled={!selected.length} onClick={() => setExporting("pdf")}><Download /> Download</Button>
-              <Button variant="destructive" size="sm" disabled={!selected.length} onClick={() => setRemoving({ ids: selected, label: plural(selected.length, "page") })}><Trash2 /> Delete</Button>
+              <Button variant="secondary" size="sm" onClick={() => edit.mutate({ ids: selected, body: { rotate_by: 90 } })}><RotateCw /> Rotate</Button>
+              <Button variant="secondary" size="sm" onClick={() => setExporting("pdf")}><Download /> Download</Button>
+              <Button variant="destructive" size="sm" onClick={() => setRemoving({ ids: selected, label: plural(selected.length, "page") })}><Trash2 /> Delete</Button>
             </div>
           </>
         ) : (
           <>
             <div role="tablist" aria-label="Which pages" className="flex rounded-lg border border-border bg-card p-0.5 text-sm">
-              {([[undefined, `All ${counts?.total ?? data.page_count}`], ["review", `To review ${counts?.review ?? data.warning_count}`], ["failed", `Failed ${counts?.failed ?? data.failed_count}`]] as const)
+              {([[undefined, `All ${counts?.total ?? data.page_count}`, Layers], ["review", `To review ${counts?.review ?? data.warning_count}`, TriangleAlert], ["failed", `Failed ${counts?.failed ?? data.failed_count}`, X]] as const)
                 .filter(([key]) => !key || (key === "review" ? (counts?.review ?? data.warning_count) : (counts?.failed ?? data.failed_count)))
-                .map(([key, label]) => (
+                .map(([key, label, Icon]) => (
                   <button key={label} type="button" role="tab" aria-selected={only === key}
-                          className={cn("min-h-8 rounded-md px-2.5 outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring", only === key ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:text-foreground")}
-                          onClick={() => setParams({ only: key ?? null, from: null })}>{label}</button>
+                          className={cn("flex min-h-8 items-center gap-1.5 rounded-md px-2.5 outline-none [&_svg]:size-3.5 transition-colors focus-visible:ring-[3px] focus-visible:ring-ring", only === key ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:text-foreground")}
+                          onClick={() => setParams({ only: key ?? null, from: null })}><Icon /> {label}</button>
                 ))}
             </div>
             <div className="ml-auto flex flex-wrap items-center gap-2">
-              <Button variant="secondary" size="sm" onClick={() => input.current?.click()}><Plus /> Add</Button>
-              <input ref={input} hidden type="file" multiple accept={ACCEPT} onChange={(event) => { take(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
-              <Button variant="secondary" size="sm" className="sm:hidden" onClick={() => setCamera(true)} aria-label="Add with the camera">Camera</Button>
-              {data.page_count > 1 && <Button asChild variant="secondary" size="sm"><Link to={`/scans/${id}/arrange`}><ArrowDownUp /> Arrange</Link></Button>}
-              <Button variant="secondary" size="sm" onClick={() => setSelecting(true)}><CheckSquare /> Select</Button>
-              <Select value={data.profile} onValueChange={(value) => finish.mutate(value as Profile)}>
-                <SelectTrigger aria-label="Finish of this scan" className="h-8 w-auto gap-2 text-xs"><SelectValue /></SelectTrigger>
-                <SelectContent>{PROFILES.map(({ id: key, label }) => <SelectItem key={key} value={key}>{label}</SelectItem>)}</SelectContent>
-              </Select>
+              <Button variant="secondary" size="sm" onClick={() => input.current?.click()}><Plus /> Add photos</Button>
+              {!(data.held_count > 0 && !items.length) && <input ref={input} hidden type="file" multiple accept={ACCEPT} onChange={(event) => { take(Array.from(event.target.files ?? [])); event.target.value = ""; }} />}
+              <Button variant="secondary" size="sm" className="sm:hidden" onClick={() => setCamera(true)} aria-label="Add with the camera"><Camera /> Camera</Button>
+              {data.page_count > 1 && !data.held_count && <Button asChild variant="secondary" size="sm"><Link to={`/scans/${id}/arrange`}><ArrowDownUp /> Arrange</Link></Button>}
               <div role="radiogroup" aria-label="Layout" className="flex rounded-lg border border-border bg-card p-0.5">
                 {([["grid", LayoutGrid, "Grid"], ["list", List, "List"]] as const).map(([key, Icon, label]) => (
                   <button key={key} type="button" role="radio" aria-checked={view === key} aria-label={label} title={label}
@@ -216,7 +220,7 @@ export function ProjectPage() {
         )}
       </div>
 
-      {pages.error ? <Failed message={errorText(pages.error, "The pages couldn't be loaded.")} /> : !list ? (
+      {data.held_count > 0 && !items.length ? null : pages.error ? <Failed message={errorText(pages.error, "The pages couldn't be loaded.")} /> : !list ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" role="status" aria-label="Loading">{Array.from({ length: 10 }, (_, index) => <div key={index} className="aspect-[3/4] animate-pulse rounded-xl bg-card" />)}</div>
       ) : !items.length && !uploads.length ? (
         <button type="button" onClick={() => input.current?.click()} className="w-full rounded-xl border-2 border-dashed border-foreground/15 p-10 text-center text-sm text-muted-foreground hover:border-foreground/30 hover:text-foreground">
@@ -224,16 +228,16 @@ export function ProjectPage() {
         </button>
       ) : view === "grid" ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-          {items.map((page) => <PageTile key={page.id} page={page} number={page.position + 1} actions={actions} selecting={selecting} selected={selected.includes(page.id)} onSelect={() => toggle(page.id)} />)}
+          {items.map((page) => <PageTile key={page.id} page={page} number={page.position + 1} actions={actions} selected={selected.includes(page.id)} onSelect={() => toggle(page.id)} />)}
         </div>
       ) : (
         <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
-          {items.map((page) => <PageRow key={page.id} page={page} number={page.position + 1} actions={actions} selecting={selecting} selected={selected.includes(page.id)} onSelect={() => toggle(page.id)} />)}
+          {items.map((page) => <PageRow key={page.id} page={page} number={page.position + 1} actions={actions} selected={selected.includes(page.id)} onSelect={() => toggle(page.id)} />)}
         </ul>
       )}
 
       {list && list.total > 0 && (
-        <div className="mt-5">
+        <div>
           <Pagination total={list.total} size={size} sizes={SIZES} offset={offset} noun="pages" onChange={(next) => {
             localStorage.setItem("scanloom.size", String(next.size));
             setParams({ size: String(next.size), from: next.offset ? String(next.offset) : null });
@@ -248,6 +252,7 @@ export function ProjectPage() {
                     onEdit={(page, body) => edit.mutate({ ids: [page.id], body })} onCrop={setCrop} onRemove={actions.remove} onRetry={(page) => retry.mutate([page.id])} />
       )}
       {crop && <CropEditor page={crop} onClose={() => setCrop(null)} onSave={(body) => { edit.mutate({ ids: [crop.id], body }); setCrop(null); }} />}
+      {look && <LookDialog project={data} sample={items.find((page) => page.thumb_url)?.thumb_url ?? null} onClose={() => setLook(false)} onChanged={refresh} />}
       {exporting && <ExportDialog project={data} initial={exporting} selected={selected} onClose={() => setExporting(null)} />}
       {camera && (
         <Suspense fallback={<div className="fixed inset-0 z-[70] bg-black" />}>

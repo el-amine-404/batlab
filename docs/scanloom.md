@@ -5,14 +5,19 @@ pages, on the home network at `https://scanloom.homelab.lan`.
 
 ## What it promises
 
-- **Scanning starts as soon as photos arrive.** Dropped files or camera pictures
-  go up one at a time, in order; the screen shows each step and the time left.
+- **Nothing is scanned until you say.** Dropped files or camera pictures go up one
+  at a time, in order, and each gets the security check and a clean copy, so it can
+  be shown, HEIC too. Remove any, then scan or cancel. Then the screen shows each step
+  and the time left. (By the API, a page is scanned at once unless `hold=true`.)
 - **Scans are kept until deleted**, and are the same on every device: one live
   stream tells each open page what changed. `retention_days` in the settings can
   turn on automatic deletion for new scans.
-- **A file is never scanned twice.** The same file in the same scan isn't added;
-  the same file in another scan of the same owner reuses the earlier work (a hard
-  link to the clean copy, the same corners) and only makes the page.
+- **A file is never scanned twice.** Each original's SHA-256 is kept in PostgreSQL.
+  The same file in the same scan isn't added. Scanned on its own in a one-page scan, it
+  is refused in review with a link to that scan: only a copy would come of it. Part of
+  a larger scan, it is welcome in another, and silently reuses the earlier work (a hard
+  link to the clean copy, the same corners). The bytes must be the same: a re-encoded
+  copy of a photo is a new file.
 - **Every page is checked before a decoder sees it**: ClamAV, exact container
   checks, decode limits, then a new metadata-free raster. The upload itself is
   deleted once that copy exists.
@@ -56,6 +61,23 @@ Each page has its finished PNG and four smaller forms: JPEG, `preview` (WebP 180
 `thumb` (WebP 480) and `source` (the photo, WebP 2200, for the crop editor). An
 image's address carries the page's version and is cached for good, so lists load
 small files once.
+
+## Finding the page
+
+The model's corners, from the photo, its middle and, when unsure, parts of it, are
+scored by whether real edges run along them, and looked at again from closer. Unsure
+but seeing a large four-sided thing still beats the classical fallbacks, which latch
+onto what is printed inside. A background outline along the photo's borders is
+distrusted. What the live camera followed beats everything but a sure model. Nothing
+plausible: the whole photo, flagged. "Find again" in the crop editor redoes it.
+
+## Exports
+
+`pages` takes page numbers as written, `1-3,6,7-9`: in that order, a range may run
+backwards, a page named twice comes once, and a number outside the scan is refused
+with a sentence. The same rules are in `backend/scanloom/pagespec.py` and
+`frontend/src/lib/pageSpec.ts`, each tested. Advanced: file name, colour, largest side,
+JPEG quality, and for a PDF a paper size with margins.
 
 ## The live camera
 

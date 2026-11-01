@@ -85,7 +85,7 @@ function next(): void {
   running = xhr;
   item.status = "sending";
   changed();
-  const query = new URLSearchParams({ name: item.file.name || "photo.jpg" });
+  const query = new URLSearchParams({ name: item.file.name || "photo.jpg", hold: "true" });
   if (item.hint) query.set("hint", JSON.stringify(item.hint));
   xhr.open("POST", `/api/v1/projects/${encodeURIComponent(item.project)}/pages?${query}`);
   xhr.setRequestHeader(PAGE_HEADER, "1");

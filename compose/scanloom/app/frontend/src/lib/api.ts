@@ -12,33 +12,33 @@ export type ApiKeyMade = ApiKey & { key: string };
 
 export type Profile = "faithful" | "paper" | "mono";
 export type Appearance = "auto" | "color" | "gray" | "mono";
-export type Stage = "queued" | "scanning" | "decoding" | "detecting" | "rendering" | "ready" | "blocked" | "failed";
+export type Stage = "held" | "queued" | "scanning" | "decoding" | "detecting" | "rendering" | "ready" | "blocked" | "failed";
 export type Point = [number, number];
 
 export type Page = {
   id: string; position: number; original_name: string; status: Stage; error: string | null; version: number;
   width: number | null; height: number | null; corners: Point[] | null; rotation: number; appearance: Appearance;
-  corner_radius: number; confidence: number | null; warnings: string[]; timings: Record<string, number>;
+  confidence: number | null; warnings: string[]; timings: Record<string, number>;
   detection_method: string | null; stage_started_at: string | null; source_bytes: number; result_bytes: number | null;
-  jpeg_bytes: number | null; reused_from: { project: string; title: string; page: number } | null;
+  jpeg_bytes: number | null; hold: boolean; reused_from: { project: string; title: string; page: number; alone: boolean } | null;
   thumb_url: string | null; preview_url: string | null; source_url: string | null; png_url: string | null; jpeg_url: string | null;
 };
 export type Progress = {
   by_stage: Partial<Record<Stage, number>>; remaining: number; ahead: number; average_seconds: number; measured: boolean;
-  eta_seconds: number; current: { id: string; position: number; original_name: string; status: Stage; stage_started_at: string | null } | null;
+  eta_seconds: number | null; redoing: number; current: { id: string; position: number; original_name: string; status: Stage; stage_started_at: string | null } | null;
 };
 export type ExportJob = { id: string; kind: "zip" | "pdf"; status: "queued" | "building" | "ready" | "failed"; filename: string; bytes: number | null; error: string | null; page_count: number; download_url: string | null };
 export type Project = {
-  public_id: string; title: string; profile: Profile; status: "empty" | "queued" | "processing" | "ready" | "failed";
-  page_count: number; completed_count: number; failed_count: number; warning_count: number; error: string | null;
-  expires_at: string | null; created_at: string; bytes: number; progress: Progress | null; exports: ExportJob[]; owner: string | null;
+  public_id: string; title: string; profile: Profile; status: "empty" | "draft" | "queued" | "processing" | "ready" | "failed";
+  page_count: number; completed_count: number; failed_count: number; warning_count: number; held_count: number; error: string | null;
+  expires_at: string | null; created_at: string; bytes: number; page_seconds: number; progress: Progress | null; exports: ExportJob[]; owner: string | null;
 };
-export type ProjectSummary = Pick<Project, "public_id" | "title" | "profile" | "status" | "page_count" | "completed_count" | "failed_count" | "warning_count" | "created_at"> & { thumbnail_url: string | null };
-export type PageList = { items: Page[]; total: number; counts: { total: number; review: number; failed: number }; limit: number; offset: number };
-export type ExportRequest = { kind: "zip" | "pdf"; quality: "lossless" | "balanced" | "small"; page_ids?: string[]; page_from?: number; page_to?: number };
+export type ProjectSummary = Pick<Project, "public_id" | "title" | "profile" | "status" | "page_count" | "completed_count" | "failed_count" | "warning_count" | "held_count" | "created_at" | "expires_at"> & { thumbnail_url: string | null; eta_seconds: number | null };
+export type PageList = { items: Page[]; total: number; counts: { total: number; held: number; review: number; failed: number }; limit: number; offset: number };
+export type ExportRequest = { kind: "zip" | "pdf"; quality: "lossless" | "balanced" | "small"; page_ids?: string[]; pages?: string; filename?: string; color?: "keep" | "gray" | "mono"; long_edge?: number; jpeg_quality?: number; paper?: "fit" | "a4" | "a5" | "letter"; margin_mm?: number };
 export type Settings = { revision: number; values: { retention_days: number; export_ttl_minutes: number; max_files_per_project: number; max_upload_bytes: number; max_pixels: number; jpeg_quality: number; default_profile: Profile; worker_max_attempts: number } };
 export type LogLine = { seq: number; at: string; level: string; logger: string; message: string; detail: string | null };
-export type PageEdit = { corners?: Point[]; rotate_by?: number; appearance?: Appearance; corner_radius?: number };
+export type PageEdit = { corners?: Point[]; rotate_by?: number; appearance?: Appearance; redetect?: boolean };
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) {
@@ -101,6 +101,8 @@ export const api = {
   editPages: (id: string, pageIds: string[], body: PageEdit) => request<Project>(`${scan(id)}/pages`, json("PATCH", { page_ids: pageIds, ...body })),
   deletePages: (id: string, pageIds: string[]) => request<Project>(`${scan(id)}/pages/delete`, json("POST", { page_ids: pageIds })),
   retryPages: (id: string, pageIds?: string[]) => request<Project>(`${scan(id)}/pages/retry`, json("POST", { page_ids: pageIds ?? null })),
+  start: (id: string) => request<Project>(`${scan(id)}/start`, { method: "POST" }),
+  batchExport: (body: { project_ids: string[]; format: "pdf" | "images"; quality: ExportRequest["quality"] }) => request<{ id: string; project: string; page_count: number; download_url: string }>("/exports/batch", json("POST", body)),
   createExport: (id: string, body: ExportRequest) => request<{ id: string; status: string; download_url: string; page_count: number }>(`${scan(id)}/exports`, json("POST", body)),
   settings: () => request<Settings>("/settings"),
   saveSettings: (values: Settings["values"], revision: number) => request<Settings>("/settings", json("PUT", { values, revision })),

@@ -143,7 +143,10 @@ export function Scanner({ onCapture, onDone }: Props) {
     try {
       const photo = await takeFullPhoto(track);
       if (photo) {
-        onCapture(new File([photo], `${name}.jpg`, { type: photo.type || "image/jpeg" }));
+        // The outline fits the photo too when it shows what the video showed: the same shape.
+        const size = await createImageBitmap(photo).then((bitmap) => { const shape = bitmap.width / bitmap.height; bitmap.close(); return shape; }).catch(() => 0);
+        const same = Math.abs(size - element.videoWidth / element.videoHeight) < 0.02;
+        onCapture(new File([photo], `${name}.jpg`, { type: photo.type || "image/jpeg" }), same ? quad ?? undefined : undefined);
       } else {
         const frame = (shot.current ??= document.createElement("canvas"));
         frame.width = element.videoWidth;

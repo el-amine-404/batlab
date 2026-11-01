@@ -155,6 +155,116 @@ class Flow(unittest.TestCase):
         self.work()
         self.assertEqual(self.client.get(page["png_url"]).status_code, 200)
 
+    def test_photos_wait_for_review_and_only_then_scan(self):
+        scan = self.new_scan(title="Review")
+        names = {}
+        for seed, name in ((120, "keep.jpg"), (121, "drop.jpg")):
+            answer = self.client.post(f"/api/v1/projects/{scan}/pages", params={"name": name, "hold": True}, content=photo(seed)).json()
+            names[name] = answer["page"]["id"]
+        self.assertEqual(self.client.post(f"/api/v1/projects/{scan}/start").status_code, 409)
+        with unittest.mock.patch("scanloom.processor.detect", side_effect=AssertionError("detected before asked")):
+            self.work()
+        project = self.client.get(f"/api/v1/projects/{scan}").json()
+        self.assertEqual((project["status"], project["held_count"]), ("draft", 2))
+        held = self.client.get(f"/api/v1/projects/{scan}/pages", params={"only": "held"}).json()["items"]
+        self.assertEqual([page["status"] for page in held], ["held", "held"])
+        self.assertEqual(self.client.get(held[0]["thumb_url"]).headers["content-type"], "image/webp")
+        self.assertEqual(self.client.get(f"/api/v1/projects/{scan}/pages").json()["total"], 0)
+        self.assertEqual(self.client.patch(f"/api/v1/projects/{scan}/pages/{held[0]['id']}", json={"rotate_by": 90}).status_code, 409)
+        self.client.post(f"/api/v1/projects/{scan}/pages/delete", json={"page_ids": [names["drop.jpg"]]})
+        started = self.client.post(f"/api/v1/projects/{scan}/start").json()
+        self.assertEqual((started["status"], started["held_count"]), ("processing", 0))
+        self.assertGreater(started["progress"]["eta_seconds"], 0)
+        self.work()
+        done = self.pages(scan)
+        self.assertEqual([page["original_name"] for page in done], ["keep.jpg"])
+        self.assertEqual(done[0]["status"], "ready")
+        # The same photo again, waiting: no second check, and it says where it was scanned.
+        other = self.new_scan(title="Again")
+        self.client.post(f"/api/v1/projects/{other}/pages", params={"name": "again.jpg", "hold": True}, content=photo(120))
+        with unittest.mock.patch("scanloom.processor.clamav", side_effect=AssertionError("checked again")), \
+             unittest.mock.patch("scanloom.processor.detect", side_effect=AssertionError("detected again")):
+            self.work()
+            page = self.client.get(f"/api/v1/projects/{other}/pages", params={"only": "held"}).json()["items"][0]
+            self.assertEqual(page["reused_from"]["title"], "Review")
+            # That was a scan of this photo alone: only a copy would come of it.
+            self.assertTrue(page["reused_from"]["alone"])
+            self.assertEqual(self.client.post(f"/api/v1/projects/{other}/start").status_code, 409)
+            # With another photo, that one goes ahead and the copy is dropped.
+            self.client.post(f"/api/v1/projects/{other}/pages", params={"name": "new.jpg", "hold": True}, content=photo(122))
+        self.work()
+        self.assertEqual(self.client.post(f"/api/v1/projects/{other}/start").status_code, 202)
+        self.work()
+        self.assertEqual([page["original_name"] for page in self.pages(other)], ["new.jpg"])
+        # Part of a larger scan, a photo may be scanned again into another: it just isn't redone.
+        larger = self.new_scan(title="Larger")
+        for seed in (123, 124):
+            self.upload(larger, seed)
+        self.work()
+        third = self.new_scan(title="Third")
+        self.client.post(f"/api/v1/projects/{third}/pages", params={"name": "part.jpg", "hold": True}, content=photo(123))
+        with unittest.mock.patch("scanloom.processor.clamav", side_effect=AssertionError("checked again")):
+            self.work()
+        page = self.client.get(f"/api/v1/projects/{third}/pages", params={"only": "held"}).json()["items"][0]
+        self.assertFalse(page["reused_from"]["alone"])
+        self.assertEqual(self.client.post(f"/api/v1/projects/{third}/start").status_code, 202)
+        self.work()
+        self.assertEqual(self.pages(third)[0]["status"], "ready")
+
+    def test_a_look_really_changes_the_pages(self):
+        scan = self.new_scan(profile="faithful")
+        self.upload(scan, 140)
+        self.work()
+        def colours():
+            page = self.pages(scan)[0]
+            image = cv2.imdecode(np.frombuffer(self.client.get(page["jpeg_url"]).content, np.uint8), cv2.IMREAD_COLOR)
+            return page["version"], image
+        version, _ = colours()
+        changed = self.client.patch(f"/api/v1/projects/{scan}", json={"profile": "mono"}).json()
+        self.assertEqual(changed["status"], "processing")
+        self.assertEqual(changed["progress"]["redoing"], 1)
+        self.assertLess(changed["progress"]["eta_seconds"], 20)
+        self.work()
+        new_version, mono = colours()
+        self.assertGreater(new_version, version)
+        self.assertEqual(len(np.unique(cv2.cvtColor(mono, cv2.COLOR_BGR2GRAY))) < 60, True)
+        self.client.patch(f"/api/v1/projects/{scan}", json={"profile": "paper"})
+        self.work()
+        self.assertEqual(self.pages(scan)[0]["status"], "ready")
+
+    def test_connections_are_kept_between_requests(self):
+        first = self.db.one("SELECT pg_backend_pid() AS pid")["pid"]
+        pids = {self.db.one("SELECT pg_backend_pid() AS pid")["pid"] for _ in range(5)}
+        self.assertIn(first, pids)
+
+    def test_a_scan_from_before_accounts_still_counts_as_scanned(self):
+        old = self.new_scan(title="Before accounts")
+        self.upload(old, 125)
+        self.work()
+        self.db.execute("UPDATE projects SET owner=NULL WHERE public_id=%s", (old,))
+        second = self.new_scan()
+        self.upload(second, 125)
+        with unittest.mock.patch("scanloom.processor.clamav", side_effect=AssertionError("scanned again")):
+            self.work()
+        self.assertEqual(self.pages(second)[0]["status"], "ready")
+
+    def test_a_batch_of_scans_in_one_zip(self):
+        import io
+        import zipfile
+        one = self.new_scan(title="Same name")
+        two = self.new_scan(title="Same name")
+        self.upload(one, 130)
+        self.upload(two, 131)
+        self.work()
+        for fmt, names in (("pdf", ["Same name.pdf", "Same name (2).pdf"]), ("images", ["Same name/page-001.jpg", "Same name (2)/page-001.jpg"])):
+            made = self.client.post("/api/v1/exports/batch", json={"project_ids": [one, two], "format": fmt})
+            self.assertEqual(made.status_code, 202, made.text)
+            self.work()
+            got = self.client.get(made.json()["download_url"])
+            self.assertEqual(got.status_code, 200)
+            with zipfile.ZipFile(io.BytesIO(got.content)) as archive:
+                self.assertEqual(archive.namelist(), names)
+
     def test_edits_rotate_delete_and_a_stale_render_does_not_win(self):
         scan = self.new_scan()
         self.upload(scan, 60)
@@ -224,16 +334,61 @@ class Flow(unittest.TestCase):
                 again = self.client.post(f"/api/v1/projects/{scan}/exports", json={"kind": kind, "quality": quality}).json()
                 self.assertEqual((again["id"], again["status"]), (made["id"], "ready"))
 
-    def test_rounded_page_makes_a_lossless_pdf(self):
+    def test_export_by_page_numbers_in_their_order_with_options(self):
+        scan = self.new_scan()
+        for seed in (101, 102, 103, 104):
+            self.upload(scan, seed, f"s{seed}.jpg")
+        self.work()
+        bad = self.client.post(f"/api/v1/projects/{scan}/exports", json={"kind": "pdf", "pages": "1-9"})
+        self.assertEqual(bad.status_code, 422)
+        self.assertIn("no page 9", bad.json()["detail"])
+        made = self.client.post(f"/api/v1/projects/{scan}/exports", json={"kind": "zip", "pages": "4,1-2", "quality": "balanced", "filename": "my: pick", "color": "gray", "long_edge": 500, "jpeg_quality": 60}).json()
+        self.assertEqual(made["page_count"], 3)
+        self.work()
+        got = self.client.get(made["download_url"])
+        self.assertIn("my-%20pick.zip", got.headers["content-disposition"])
+        import io, zipfile
+        with zipfile.ZipFile(io.BytesIO(got.content)) as archive:
+            self.assertEqual(archive.namelist(), ["page-001.jpg", "page-002.jpg", "page-003.jpg"])
+            first = cv2.imdecode(np.frombuffer(archive.read("page-001.jpg"), np.uint8), cv2.IMREAD_UNCHANGED)
+        self.assertLessEqual(max(first.shape[:2]), 500)
+        # Different options, a different file; the fourth page first.
+        pdf = self.client.post(f"/api/v1/projects/{scan}/exports", json={"kind": "pdf", "pages": "4,1", "paper": "a4", "margin_mm": 10}).json()
+        self.assertNotEqual(pdf["id"], made["id"])
+        self.work()
+        body = self.client.get(pdf["download_url"]).content
+        import io as _io
+
+        import pikepdf
+        with pikepdf.open(_io.BytesIO(body)) as document:
+            self.assertEqual(len(document.pages), 2)
+            box = [float(value) for value in document.pages[0].MediaBox]
+        # A4, turned to suit the page.
+        self.assertAlmostEqual(min(box[2:]), 595.3, delta=1)
+        self.assertAlmostEqual(max(box[2:]), 841.9, delta=1)
+
+    def test_hint_beats_a_fallback_but_not_a_sure_model(self):
+        scan = self.new_scan()
+        hint = [[.1, .1], [.9, .1], [.9, .9], [.1, .9]]
+        answer = self.client.post(f"/api/v1/projects/{scan}/pages", params={"name": "h.jpg", "hint": json.dumps(hint)}, content=photo(111))
+        self.assertEqual(answer.status_code, 201)
+        fallback = np.array([[300, 300], [800, 300], [800, 500], [300, 500]], np.float32)
+        with unittest.mock.patch("scanloom.processor.detect", return_value=(fallback, .85, "quadrilateral edge fallback")):
+            self.work()
+        self.assertEqual(self.pages(scan)[0]["detection_method"], "live camera boundary")
+
+    def test_redetect_finds_the_page_again(self):
         scan = self.new_scan()
         self.upload(scan, 85)
         self.work()
         page = self.pages(scan)[0]
-        self.client.patch(f"/api/v1/projects/{scan}/pages/{page['id']}", json={"corner_radius": .1})
+        self.client.patch(f"/api/v1/projects/{scan}/pages/{page['id']}", json={"corners": [[0, 0], [1, 0], [1, 1], [0, 1]]})
         self.work()
-        made = self.client.post(f"/api/v1/projects/{scan}/exports", json={"kind": "pdf", "quality": "lossless"}).json()
+        self.assertEqual(self.pages(scan)[0]["corners"][2], [1, 1])
+        self.client.patch(f"/api/v1/projects/{scan}/pages/{page['id']}", json={"redetect": True})
         self.work()
-        self.assertEqual(self.client.get(made["download_url"]).status_code, 200)
+        self.work()
+        self.assertNotEqual(self.pages(scan)[0]["corners"][2], [1, 1])
 
     def test_one_person_does_not_see_anothers_scans(self):
         from fastapi.testclient import TestClient

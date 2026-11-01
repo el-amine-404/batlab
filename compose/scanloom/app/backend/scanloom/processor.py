@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import secrets
 import select
 import shutil
@@ -19,7 +20,7 @@ import numpy as np
 
 from .config import Config
 from .db import Database
-from .imaging import (detect, detect_orientation, fitted, normalize, normalized_corners, on_white,
+from .imaging import (appearance, detect, detect_orientation, fitted, normalize, normalized_corners, on_white,
                       pixel_corners, quality, warp, write_jpeg, write_png, write_webp)
 from .security import Refused, clamav, inspect_container, sha256
 from .storage import event, object_path
@@ -29,6 +30,11 @@ logger = logging.getLogger("scanloom.worker")
 LEASE_SECONDS = 120
 THUMB_EDGE, PREVIEW_EDGE, SOURCE_PREVIEW_EDGE = 480, 1800, 2200
 PDF_QUALITY = {"balanced": (2400, 88), "small": (1600, 74)}
+PAPER = {"a4": (210, 297), "letter": (215.9, 279.4), "a5": (148, 210)}  # mm
+
+
+def safe_name(title: str) -> str:
+    return re.sub(r'[\x00-\x1f\x7f\\/:*?"<>|]+', "-", title).strip(" .-") or "scan"
 
 
 def link_or_copy(source: Path, destination: Path) -> None:
@@ -134,7 +140,9 @@ class Processor:
         self._current = job["id"]
         try:
             kind = job["kind"]
-            if kind == "process_page":
+            if kind == "prepare_page":
+                self.prepare_page(job)
+            elif kind == "process_page":
                 self.process_page(job)
             elif kind == "render_page":
                 self.render_page(job)
@@ -168,51 +176,108 @@ class Processor:
     def _appearance(self, page: dict) -> str:
         if page["appearance"] != "auto":
             return page["appearance"]
-        return {"faithful": "color", "paper": "gray", "mono": "mono"}[page["profile"]]
+        return {"faithful": "color", "paper": "clean", "mono": "mono"}[page["profile"]]
 
-    def process_page(self, job):
-        """A new file: from the scan for malware to the finished page, or, for a
-        file this owner has already had scanned, straight to the finished page."""
+    def _ingest(self, project: dict, page: dict, settings: dict) -> dict:
+        """From an upload to a clean, metadata-free copy, safe to show: the security
+        check and decoding, or, for a file this owner has already had scanned, the
+        earlier copy and its crop. The hash of every original is in the database."""
+        project_dir = self.config.work / str(page["project_id"])
+        page_id = page["id"]
+        source = object_path(self.config.incoming, page["source_object"])
+        normalized_name, source_preview = f"{page_id}.png", f"{page_id}-source.webp"
+        normalized = object_path(project_dir, normalized_name)
+        donor = self.db.one("""SELECT p.* FROM pages p JOIN projects pr ON pr.id=p.project_id
+                               WHERE p.source_sha256=%s AND p.id<>%s AND p.status='ready'
+                                 AND p.normalized_object IS NOT NULL AND p.corners IS NOT NULL
+                                 AND (pr.owner IS NOT DISTINCT FROM %s OR pr.owner IS NULL) AND pr.status<>'deleting'
+                               ORDER BY (pr.page_count=1) DESC, p.created_at LIMIT 1""",
+                            (page["source_sha256"], page_id, project["owner"]))
+        if donor:
+            started = time.monotonic()
+            donor_dir = self.config.work / str(donor["project_id"])
+            link_or_copy(object_path(donor_dir, donor["normalized_object"]), normalized)
+            if donor["source_preview_object"]:
+                link_or_copy(object_path(donor_dir, donor["source_preview_object"]), object_path(project_dir, source_preview))
+            else:
+                # A page from before there were such previews: made here, once.
+                earlier = cv2.imread(str(normalized), cv2.IMREAD_COLOR)
+                if earlier is None:
+                    raise RuntimeError("The earlier copy of this image could not be read")
+                write_webp(earlier, object_path(project_dir, source_preview), SOURCE_PREVIEW_EDGE, 82)
+            with self.db.transaction() as cursor:
+                cursor.execute("""UPDATE pages SET width=%s,height=%s,normalized_object=%s,source_preview_object=%s,malware_status=%s,detected_mime=%s,
+                                  integrity=%s::jsonb,corners=%s::jsonb,rotation=%s,confidence=%s,reused_from=%s,quality=%s::jsonb WHERE id=%s""",
+                               (donor["width"], donor["height"], normalized_name, source_preview, donor["malware_status"], donor["detected_mime"],
+                                json.dumps(donor["integrity"]), json.dumps(donor["corners"]), donor["rotation"], donor["confidence"], donor["id"],
+                                json.dumps({"detection_method": dict(donor["quality"] or {}).get("detection_method", "reused")}), page_id))
+            source.unlink(missing_ok=True)
+            logger.info("Page %s reuses the work on page %s", page_id, donor["id"])
+            return {"reused": round(time.monotonic() - started, 2)}
+        timings: dict[str, float] = {}
+        clock = time.monotonic()
+        self._stage(project, page_id, "scanning")
+        clamav(source, self.config.clamd_host, self.config.clamd_port, int(settings["max_upload_bytes"]))
+        mime, integrity = inspect_container(source)
+        timings["scanning"] = round(time.monotonic() - clock, 2)
+        clock = time.monotonic()
+        self._stage(project, page_id, "decoding", malware_status="clean", detected_mime=mime, integrity=json.dumps(integrity))
+        width, height = normalize(source, normalized, int(settings["max_pixels"]))
+        image = cv2.imread(str(normalized), cv2.IMREAD_COLOR)
+        if image is None:
+            raise RuntimeError("Normalized image could not be read")
+        write_webp(image, object_path(project_dir, source_preview), SOURCE_PREVIEW_EDGE, 82)
+        timings["decoding"] = round(time.monotonic() - clock, 2)
+        self.db.execute("UPDATE pages SET width=%s,height=%s,normalized_object=%s,source_preview_object=%s WHERE id=%s",
+                        (width, height, normalized_name, source_preview, page_id))
+        return timings
+
+    def prepare_page(self, job):
+        """Checked and made safe to show, then it waits to be asked for."""
         settings = self.db.settings()
         page = self._load_page(job["page_id"])
         if not page:
             return
         project = self._project(page["project_id"])
-        project_id, page_id = page["project_id"], page["id"]
-        project_dir = self.config.work / str(project_id)
-        source = object_path(self.config.incoming, page["source_object"])
-        normalized_name = f"{page_id}.png"
-        normalized = object_path(project_dir, normalized_name)
-        timings: dict[str, float] = {}
+        timings = self._ingest(project, page, settings)
+        page = self._load_page(page["id"])
+        project_dir = self.config.work / str(page["project_id"])
+        image = cv2.imread(str(object_path(project_dir, page["normalized_object"])), cv2.IMREAD_COLOR)
+        if image is None:
+            raise RuntimeError("Normalized image could not be read")
+        thumb = f"{page['id']}-thumb.webp"
+        write_webp(image, object_path(project_dir, thumb), THUMB_EDGE, 78)
+        with self.db.transaction() as cursor:
+            cursor.execute("UPDATE pages SET status='held',thumb_object=%s,timings=%s::jsonb,stage_started_at=NULL,version=version+1 WHERE id=%s",
+                           (thumb, json.dumps(timings), page["id"]))
+            cursor.execute("SELECT project_refresh(%s)", (page["project_id"],))
+            event(cursor, project, "page_stage", {"page_id": str(page["id"]), "stage": "held"})
 
-        donor = self.db.one("""SELECT p.* FROM pages p JOIN projects pr ON pr.id=p.project_id
-                               WHERE p.source_sha256=%s AND p.id<>%s AND p.status='ready'
-                                 AND p.normalized_object IS NOT NULL AND p.corners IS NOT NULL
-                                 AND pr.owner IS NOT DISTINCT FROM %s AND pr.status<>'deleting'
-                               ORDER BY p.created_at LIMIT 1""",
-                            (page["source_sha256"], page_id, project["owner"]))
-        if donor:
-            started = time.monotonic()
-            self._stage(project, page_id, "rendering")
-            link_or_copy(object_path(self.config.work / str(donor["project_id"]), donor["normalized_object"]), normalized)
-            with self.db.transaction() as cursor:
-                cursor.execute("""UPDATE pages SET width=%s,height=%s,normalized_object=%s,malware_status=%s,detected_mime=%s,
-                                  integrity=%s::jsonb,corners=%s::jsonb,rotation=%s,confidence=%s,reused_from=%s WHERE id=%s""",
-                               (donor["width"], donor["height"], normalized_name, donor["malware_status"], donor["detected_mime"],
-                                json.dumps(donor["integrity"]), json.dumps(donor["corners"]), donor["rotation"],
-                                donor["confidence"], donor["id"], page_id))
-            page = self._load_page(page_id)
-            image = cv2.imread(str(normalized), cv2.IMREAD_COLOR)
-            if image is None:
-                raise RuntimeError("The earlier copy of this image could not be read")
-            found = pixel_corners(page["corners"], image.shape[1], image.shape[0])
-            self._publish(project, page, image, found, float(page["confidence"] or 0),
-                          dict(donor["quality"] or {}).get("detection_method", "reused"), int(page["rotation"]), 0.0,
-                          {"reused": round(time.monotonic() - started, 2)}, settings)
-            source.unlink(missing_ok=True)
-            logger.info("Page %s reused the work on page %s", page_id, donor["id"])
+    def process_page(self, job):
+        """To the finished page, from the upload or from what was prepared for review."""
+        settings = self.db.settings()
+        page = self._load_page(job["page_id"])
+        if not page:
             return
-
+        project = self._project(page["project_id"])
+        page_id = page["id"]
+        project_dir = self.config.work / str(page["project_id"])
+        source = object_path(self.config.incoming, page["source_object"])
+        timings = dict(page["timings"] or {})
+        if not page["normalized_object"]:
+            timings = self._ingest(project, page, settings)
+            page = self._load_page(page_id)
+        image = cv2.imread(str(object_path(project_dir, page["normalized_object"])), cv2.IMREAD_COLOR)
+        if image is None:
+            raise RuntimeError("Normalized image could not be read")
+        width, height = image.shape[1], image.shape[0]
+        if page["reused_from"] or "reused" in timings:
+            self._stage(project, page_id, "rendering")
+            found = pixel_corners(page["corners"], width, height)
+            self._publish(project, page, image, found, float(page["confidence"] or 0),
+                          dict(page["quality"] or {}).get("detection_method", "reused"), int(page["rotation"]), 0.0, timings, settings)
+            source.unlink(missing_ok=True)
+            return
         clock = time.monotonic()
 
         def lap(name: str) -> None:
@@ -221,36 +286,22 @@ class Processor:
             timings[name] = round(timings.get(name, 0) + now - clock, 2)
             clock = now
 
-        self._stage(project, page_id, "scanning")
-        clamav(source, self.config.clamd_host, self.config.clamd_port, int(settings["max_upload_bytes"]))
-        mime, integrity = inspect_container(source)
-        lap("scanning")
-        self._stage(project, page_id, "decoding", malware_status="clean", detected_mime=mime, integrity=json.dumps(integrity))
-        width, height = normalize(source, normalized, int(settings["max_pixels"]))
-        image = cv2.imread(str(normalized), cv2.IMREAD_COLOR)
-        if image is None:
-            raise RuntimeError("Normalized image could not be read")
-        source_preview = f"{page_id}-source.webp"
-        write_webp(image, object_path(project_dir, source_preview), SOURCE_PREVIEW_EDGE, 82)
-        lap("decoding")
-        self._stage(project, page_id, "detecting", width=width, height=height, normalized_object=normalized_name,
-                    source_preview_object=source_preview)
+        self._stage(project, page_id, "detecting")
         found, confidence, method = detect(image)
         hint = page["corners_hint"]
-        if hint and confidence < .72:
-            # What the live camera saw beats a weak second opinion on the same frame.
+        if hint and not (method.startswith("DocAligner") and confidence >= .72):
+            # What the live camera followed for a moment beats any weaker second opinion on one frame.
             found, confidence, method = pixel_corners(hint, width, height), .72, "live camera boundary"
         lap("detecting")
         self._stage(project, page_id, "rendering")
-        appearance = self._appearance(page)
+        appearance_now = self._appearance(page)
         rotation, orientation_confidence = int(page["rotation"]), 0.0
         if rotation == 0:
-            upright = warp(image, found, 0, appearance, float(page["corner_radius"]))
+            upright = warp(image, found, 0, appearance_now, float(page["corner_radius"]))
             rotation, orientation_confidence = detect_orientation(upright)
         lap("orienting")
-        corners = normalized_corners(found, width, height)
         self.db.execute("UPDATE pages SET corners=%s::jsonb,rotation=%s,confidence=%s WHERE id=%s",
-                        (json.dumps(corners), rotation, confidence, page_id))
+                        (json.dumps(normalized_corners(found, width, height)), rotation, confidence, page_id))
         page = self._load_page(page_id)
         self._publish(project, page, image, found, confidence, method, rotation, orientation_confidence, timings, settings, lap)
         # The metadata-free copy is the source from here on: the upload isn't kept.
@@ -279,8 +330,8 @@ class Processor:
             confidence, method = float(page["confidence"] or 0), "manual"
         else:
             found, confidence, method = detect(image)
-            self.db.execute("UPDATE pages SET corners=%s::jsonb WHERE id=%s",
-                            (json.dumps(normalized_corners(found, image.shape[1], image.shape[0])), page["id"]))
+            self.db.execute("UPDATE pages SET corners=%s::jsonb,confidence=%s WHERE id=%s",
+                            (json.dumps(normalized_corners(found, image.shape[1], image.shape[0])), confidence, page["id"]))
         self._publish(project, page, image, found, confidence, method, int(page["rotation"]), 0.0,
                       {"edit": round(time.monotonic() - started, 2)}, settings)
 
@@ -366,10 +417,14 @@ class Processor:
         export = self.db.one("SELECT * FROM exports WHERE id=%s", (payload["export_id"],))
         if not export:
             return
+        if payload.get("batch"):
+            return self._build_batch(job, payload, export)
         rows = self.db.all("SELECT * FROM pages WHERE project_id=%s AND status='ready' AND result_object IS NOT NULL ORDER BY position", (job["project_id"],))
-        wanted = set(payload.get("page_ids") or [])
+        wanted = payload.get("page_ids") or []
         if wanted:
-            rows = [row for row in rows if str(row["id"]) in wanted]
+            # In the order asked for, which needn't be the scan's.
+            by_id = {str(row["id"]): row for row in rows}
+            rows = [by_id[page_id] for page_id in wanted if page_id in by_id]
         if not rows:
             raise Refused("This scan has no finished pages to export")
         project = self._project(job["project_id"])
@@ -377,16 +432,16 @@ class Processor:
             cursor.execute("UPDATE exports SET status='building' WHERE id=%s", (export["id"],))
             event(cursor, project, "export_building", {"export_id": str(export["id"])})
         project_dir = self.config.work / str(job["project_id"])
-        chosen = payload.get("quality", "lossless")
+        options = dict(payload.get("options") or {}) | {"quality": payload.get("quality", "balanced")}
         destination_name = f"{export['id']}.{export['kind']}"
         destination = object_path(self.config.exports, destination_name)
         partial = destination.with_name(f".partial-{destination.name}")
         destination.parent.mkdir(parents=True, exist_ok=True)
         try:
             if export["kind"] == "zip":
-                self._zip(partial, rows, project_dir, chosen)
+                self._zip(partial, rows, project_dir, options)
             else:
-                self._pdf(partial, rows, project_dir, chosen)
+                self._pdf(partial, rows, project_dir, options, export["filename"])
             os.replace(partial, destination)
         finally:
             partial.unlink(missing_ok=True)
@@ -396,38 +451,121 @@ class Processor:
                            (destination_name, destination.stat().st_size, digest, export["id"]))
             event(cursor, project, "export_ready", {"export_id": str(export["id"]), "kind": export["kind"]})
 
-    def _zip(self, partial: Path, rows, project_dir: Path, chosen: str) -> None:
-        # Images are compressed already: storing them is as small and much faster.
-        with zipfile.ZipFile(partial, "w", compression=zipfile.ZIP_STORED) as archive:
-            for index, row in enumerate(rows, 1):
-                name = row["result_object"] if chosen == "lossless" or not row["jpeg_object"] else row["jpeg_object"]
-                source = object_path(project_dir, name)
-                archive.write(source, f"page-{index:03d}{source.suffix.lower()}")
+    def _build_batch(self, job, payload: dict, export: dict) -> None:
+        """One ZIP of several scans: a PDF each, or a folder of images each."""
+        project = self._project(job["project_id"])
+        with self.db.transaction() as cursor:
+            cursor.execute("UPDATE exports SET status='building' WHERE id=%s", (export["id"],))
+            event(cursor, project, "export_building", {"export_id": str(export["id"])})
+        options = {"quality": payload.get("quality", "balanced")}
+        destination_name = f"{export['id']}.zip"
+        destination = object_path(self.config.exports, destination_name)
+        partial = destination.with_name(f".partial-{destination.name}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        used: set[str] = set()
+        try:
+            with tempfile.TemporaryDirectory(prefix="scanloom-batch-") as temporary, zipfile.ZipFile(partial, "w", compression=zipfile.ZIP_STORED) as archive:
+                for project_id in payload["batch"]:
+                    scan = self.db.one("SELECT id,title FROM projects WHERE id=%s AND status<>'deleting'", (project_id,))
+                    if not scan:
+                        continue
+                    rows = self.db.all("SELECT * FROM pages WHERE project_id=%s AND status='ready' AND result_object IS NOT NULL ORDER BY position", (project_id,))
+                    if not rows:
+                        continue
+                    stem = safe_name(scan["title"])
+                    name, number = stem, 2
+                    while name in used:
+                        name, number = f"{stem} ({number})", number + 1
+                    used.add(name)
+                    folder = self.config.work / str(project_id)
+                    if payload.get("format") == "images":
+                        for index, row in enumerate(rows, 1):
+                            chosen = row["result_object"] if options["quality"] == "lossless" or not row["jpeg_object"] else row["jpeg_object"]
+                            source = object_path(folder, chosen)
+                            archive.write(source, f"{name}/page-{index:03d}{source.suffix.lower()}")
+                    else:
+                        path = Path(temporary) / "scan.pdf"
+                        self._pdf(path, rows, folder, options, f"{name}.pdf")
+                        archive.write(path, f"{name}.pdf")
+                        path.unlink()
+            if not used:
+                raise Refused("None of those scans has finished pages")
+            os.replace(partial, destination)
+        finally:
+            partial.unlink(missing_ok=True)
+        digest = sha256(destination)
+        with self.db.transaction() as cursor:
+            cursor.execute("UPDATE exports SET status='ready',object_name=%s,bytes=%s,sha256=%s,ready_at=now() WHERE id=%s",
+                           (destination_name, destination.stat().st_size, digest, export["id"]))
+            event(cursor, project, "export_ready", {"export_id": str(export["id"]), "kind": "zip"})
 
-    def _pdf(self, partial: Path, rows, project_dir: Path, chosen: str) -> None:
+    @staticmethod
+    def _shaped(image, options: dict):
+        """A page as an export asks for it: its colour, its largest size."""
+        image = on_white(image)
+        color = options.get("color", "keep")
+        if color != "keep":
+            image = appearance(image, color)
+        if options.get("long_edge"):
+            image = fitted(image, int(options["long_edge"]))
+        return image
+
+    def _zip(self, partial: Path, rows, project_dir: Path, options: dict) -> None:
+        lossless = options["quality"] == "lossless"
+        plain = options.get("color", "keep") == "keep" and not options.get("long_edge") and not options.get("jpeg_quality")
+        with tempfile.TemporaryDirectory(prefix="scanloom-zip-") as temporary, zipfile.ZipFile(partial, "w", compression=zipfile.ZIP_STORED) as archive:
+            # Images are compressed already: storing them is as small and much faster.
+            for index, row in enumerate(rows, 1):
+                if plain:
+                    source = object_path(project_dir, row["result_object"] if lossless or not row["jpeg_object"] else row["jpeg_object"])
+                    archive.write(source, f"page-{index:03d}{source.suffix.lower()}")
+                    continue
+                image = cv2.imread(str(object_path(project_dir, row["result_object"])), cv2.IMREAD_UNCHANGED)
+                if image is None:
+                    raise RuntimeError(f"Page {index} could not be read for the ZIP")
+                image = self._shaped(image, options)
+                path = Path(temporary) / f"page-{index:03d}{'.png' if lossless else '.jpg'}"
+                params = [cv2.IMWRITE_PNG_COMPRESSION, 3] if lossless else [cv2.IMWRITE_JPEG_QUALITY, int(options.get("jpeg_quality") or 88), cv2.IMWRITE_JPEG_OPTIMIZE, 1]
+                if not cv2.imwrite(str(path), image, params):
+                    raise RuntimeError(f"Page {index} could not be prepared for the ZIP")
+                archive.write(path, path.name)
+                path.unlink()
+
+    def _pdf(self, partial: Path, rows, project_dir: Path, options: dict, filename: str | None) -> None:
+        chosen = options["quality"]
+        untouched = chosen == "lossless" and options.get("color", "keep") == "keep" and not options.get("long_edge")
+        default_edge, default_jpeg = PDF_QUALITY.get(chosen, (None, None))
+        shape = dict(options)
+        if chosen != "lossless":
+            shape["long_edge"] = options.get("long_edge") or default_edge
         with tempfile.TemporaryDirectory(prefix="scanloom-pdf-") as temporary:
             sources: list[str] = []
             for index, row in enumerate(rows, 1):
                 source = object_path(project_dir, row["result_object"])
-                if chosen == "lossless" and not float(row["corner_radius"]):
+                if untouched and not float(row["corner_radius"]):
                     sources.append(str(source))
                     continue
                 image = cv2.imread(str(source), cv2.IMREAD_UNCHANGED)
                 if image is None:
                     raise RuntimeError(f"Page {index} could not be read for the PDF")
-                image = on_white(image)
+                image = self._shaped(image, shape)
                 if chosen == "lossless":
                     path = Path(temporary) / f"page-{index:04d}.png"
                     written = cv2.imwrite(str(path), image, [cv2.IMWRITE_PNG_COMPRESSION, 3])
                 else:
-                    long_edge, jpeg_quality = PDF_QUALITY[chosen]
                     path = Path(temporary) / f"page-{index:04d}.jpg"
-                    written = cv2.imwrite(str(path), fitted(image, long_edge), [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality, cv2.IMWRITE_JPEG_OPTIMIZE, 1])
+                    written = cv2.imwrite(str(path), image, [cv2.IMWRITE_JPEG_QUALITY, int(options.get("jpeg_quality") or default_jpeg), cv2.IMWRITE_JPEG_OPTIMIZE, 1])
                 if not written:
                     raise RuntimeError(f"Page {index} could not be prepared for the PDF")
                 sources.append(str(path))
+            layout = {}
+            paper = PAPER.get(options.get("paper", "fit"))
+            if paper:
+                border = img2pdf.mm_to_pt(float(options.get("margin_mm") or 0))
+                layout["layout_fun"] = img2pdf.get_layout_fun(pagesize=(img2pdf.mm_to_pt(paper[0]), img2pdf.mm_to_pt(paper[1])),
+                                                              border=(border, border), fit=img2pdf.FitMode.into, auto_orient=True)
             with partial.open("wb") as output:
-                img2pdf.convert(sources, rotation=img2pdf.Rotation.ifvalid, outputstream=output)
+                img2pdf.convert(sources, rotation=img2pdf.Rotation.ifvalid, outputstream=output, title=Path(filename or "scan").stem, **layout)
 
     # ---- removing --------------------------------------------------------------------------
 

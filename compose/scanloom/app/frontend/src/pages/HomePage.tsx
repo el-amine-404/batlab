@@ -1,10 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Camera, Images, ScanLine } from "lucide-react";
+import { Camera, Images, ScanLine } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { Link } from "react-router";
 
 import { PROFILES } from "@/components/scan/labels";
-import { ScanCard } from "@/components/scan/ScanCard";
 import { Button } from "@/components/ui/button";
 import { api, type Profile } from "@/lib/api";
 import { saveProfile, savedProfile, useNewScan } from "@/lib/scanning";
@@ -20,7 +18,6 @@ export function HomePage() {
   const [profile, setProfile] = useState<Profile | undefined>(savedProfile);
   const input = useRef<HTMLInputElement>(null);
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings, staleTime: 300_000 });
-  const recent = useQuery({ queryKey: ["projects", { limit: 8, offset: 0 }], queryFn: () => api.projects({ limit: 8, offset: 0 }) });
   const chosen = profile ?? settings.data?.values.default_profile ?? "faithful";
 
   // A drop anywhere on the page counts.
@@ -51,7 +48,7 @@ export function HomePage() {
         <span className="flex size-14 items-center justify-center rounded-2xl bg-primary/15 text-primary"><ScanLine className="size-7" /></span>
         <div>
           <p className="text-xl font-semibold tracking-tight sm:text-2xl">Scan a document</p>
-          <p className="mt-1 text-sm text-muted-foreground">Take pictures, or drop photos anywhere on this page. Scanning starts right away.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Take pictures, or drop photos anywhere on this page. You see them first; nothing is scanned until you say.</p>
         </div>
         <div className="flex w-full flex-col justify-center gap-2 sm:w-auto sm:flex-row">
           <Button size="lg" onClick={() => setCamera(true)}><Camera /> Use the camera</Button>
@@ -59,7 +56,7 @@ export function HomePage() {
           <input ref={input} hidden type="file" multiple accept={ACCEPT} onChange={(event) => { void fromFiles(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
         </div>
         <div className="flex flex-col items-center gap-1.5">
-          <div role="radiogroup" aria-label="Finish" className="inline-flex rounded-lg border border-border bg-background p-0.5">
+          <div role="radiogroup" aria-label="Look" className="inline-flex rounded-lg border border-border bg-background p-0.5">
             {PROFILES.map(({ id, label, hint }) => (
               <button key={id} type="button" role="radio" aria-checked={chosen === id} title={hint}
                       onClick={() => { setProfile(id); saveProfile(id); }}
@@ -68,21 +65,9 @@ export function HomePage() {
               </button>
             ))}
           </div>
-          <p className="text-xs text-muted-foreground">{PROFILES.find(({ id }) => id === chosen)?.hint}. You can change it after.</p>
+          <p className="text-xs text-muted-foreground">{PROFILES.find(({ id }) => id === chosen)?.hint} You can change it after.</p>
         </div>
       </section>
-
-      {Boolean(recent.data?.items.length) && (
-        <section className="mt-10">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-base font-semibold">Latest scans</h2>
-            <Button asChild variant="ghost" size="sm"><Link to="/scans">All scans <ArrowRight /></Link></Button>
-          </div>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
-            {recent.data!.items.map((scan) => <ScanCard key={scan.public_id} scan={scan} />)}
-          </div>
-        </section>
-      )}
 
       {camera && (
         <Suspense fallback={<div className="fixed inset-0 z-[70] bg-black" />}>

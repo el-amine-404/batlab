@@ -41,3 +41,11 @@ export const plural = (count: number, one: string, many = `${one}s`) => `${count
 export function naturalCompare(a: string, b: string): number {
   return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 }
+
+/** How long until a time: "3 d". */
+export function timeUntil(when: string, now = Date.now()): string {
+  const minutes = Math.max(1, Math.round((new Date(when).getTime() - now) / 60000));
+  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 1440) return `${Math.round(minutes / 60)} h`;
+  return `${Math.round(minutes / 1440)} d`;
+}

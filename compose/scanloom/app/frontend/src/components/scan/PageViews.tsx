@@ -1,8 +1,9 @@
-import { Check, Crop, Download, Loader2, MoreVertical, RotateCw, Trash2, TriangleAlert } from "lucide-react";
+import { Crop, Download, Loader2, MoreVertical, RotateCw, Trash2, TriangleAlert } from "lucide-react";
 import type { MouseEvent, ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Tick } from "@/components/ui/tick";
 import { Menu, MenuContent, MenuItem, MenuLink, MenuTrigger } from "@/components/ui/menu";
 import type { Page } from "@/lib/api";
 import { cn, formatBytes } from "@/lib/utils";
@@ -59,28 +60,22 @@ function More({ page, actions, trigger }: { page: Page; actions: PageActions; tr
 
 const onImage = "flex size-9 items-center justify-center rounded-lg bg-black/75 text-white transition-colors hover:bg-black focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none disabled:opacity-40 [&_svg]:size-4";
 
-export function PageTile({ page, number, actions, selecting, selected, onSelect }: {
-  page: Page; number: number; actions: PageActions; selecting: boolean; selected: boolean; onSelect: () => void;
+export function PageTile({ page, number, actions, selected, onSelect }: {
+  page: Page; number: number; actions: PageActions; selected: boolean; onSelect: () => void;
 }) {
   const notes = page.warnings.length;
   const stop = (event: MouseEvent) => event.stopPropagation();
   return (
     <article className={cn("group relative overflow-hidden rounded-xl border bg-card transition-colors", selected ? "border-primary ring-2 ring-primary/50" : "border-border hover:border-foreground/30")}>
-      <button type="button" onClick={selecting ? onSelect : () => actions.open(page)} aria-pressed={selecting ? selected : undefined}
-              aria-label={selecting ? `Select page ${number}` : `Open page ${number}, ${page.original_name}`}
+      <button type="button" onClick={() => actions.open(page)} aria-label={`Open page ${number}, ${page.original_name}`}
               className="relative block aspect-[3/4] w-full bg-tile p-2 outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring">
         <Picture page={page} number={number} />
       </button>
-      {selecting ? (
-        <span aria-hidden className={cn("pointer-events-none absolute top-2 left-2 flex size-6 items-center justify-center rounded-full border-2", selected ? "border-primary bg-primary text-primary-foreground" : "border-white bg-black/50")}>
-          {selected && <Check className="size-4" />}
-        </span>
-      ) : (
-        <div className="absolute top-2 right-2 flex gap-1 opacity-100 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-focus-within:opacity-100 [@media(hover:hover)]:group-hover:opacity-100" onClick={stop}>
-          <button type="button" className={cn(onImage, "max-[28rem]:hidden")} disabled={!page.source_url || working(page)} title="Rotate clockwise" aria-label={`Rotate page ${number} clockwise`} onClick={() => actions.rotate(page)}><RotateCw /></button>
-          <More page={page} actions={actions} trigger={<button type="button" className={onImage} aria-label={`More for page ${number}`}><MoreVertical /></button>} />
-        </div>
-      )}
+      <Tick checked={selected} label={`Select page ${number}`} onToggle={onSelect} className="absolute top-1 left-1" />
+      <div className="absolute top-2 right-2 flex gap-1 opacity-100 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-focus-within:opacity-100 [@media(hover:hover)]:group-hover:opacity-100" onClick={stop}>
+        <button type="button" className={cn(onImage, "max-[28rem]:hidden")} disabled={working(page)} title="Rotate clockwise" aria-label={`Rotate page ${number} clockwise`} onClick={() => actions.rotate(page)}><RotateCw /></button>
+        <More page={page} actions={actions} trigger={<button type="button" className={onImage} aria-label={`More for page ${number}`}><MoreVertical /></button>} />
+      </div>
       <div className="flex items-center gap-2 border-t border-border px-2.5 py-2 text-sm">
         <span className="font-semibold tabular-nums">{number}</span>
         <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={page.original_name}>{page.original_name}</span>
@@ -91,24 +86,19 @@ export function PageTile({ page, number, actions, selecting, selected, onSelect 
   );
 }
 
-export function PageRow({ page, number, actions, selecting, selected, onSelect }: {
-  page: Page; number: number; actions: PageActions; selecting: boolean; selected: boolean; onSelect: () => void;
+export function PageRow({ page, number, actions, selected, onSelect }: {
+  page: Page; number: number; actions: PageActions; selected: boolean; onSelect: () => void;
 }) {
   const size = page.width && page.height ? `${page.width} × ${page.height}` : null;
   return (
     <li className={cn("flex items-center gap-3 px-3 py-2 transition-colors hover:bg-accent/50", selected && "bg-primary/10")}>
-      {selecting && (
-        <button type="button" onClick={onSelect} aria-pressed={selected} aria-label={`Select page ${number}`}
-                className={cn("flex size-6 shrink-0 items-center justify-center rounded-full border-2", selected ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground")}>
-          {selected && <Check className="size-4" />}
-        </button>
-      )}
+      <Tick checked={selected} label={`Select page ${number}`} onToggle={onSelect} className="[&>span]:border-muted-foreground" />
       <span className="w-7 shrink-0 text-right text-sm font-semibold tabular-nums">{number}</span>
-      <button type="button" onClick={selecting ? onSelect : () => actions.open(page)} aria-label={`Open page ${number}`}
+      <button type="button" onClick={() => actions.open(page)} aria-label={`Open page ${number}`}
               className="relative size-14 shrink-0 overflow-hidden rounded-md bg-tile p-0.5 outline-none focus-visible:ring-[3px] focus-visible:ring-ring">
         <Picture page={page} number={number} />
       </button>
-      <button type="button" onClick={selecting ? onSelect : () => actions.open(page)} className="min-w-0 flex-1 rounded text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring">
+      <button type="button" onClick={() => actions.open(page)} className="min-w-0 flex-1 rounded text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring">
         <span className="block truncate text-sm font-medium">{page.original_name}</span>
         <span className="block truncate text-xs text-muted-foreground">
           {page.status === "failed" || page.status === "blocked" ? page.error ?? STAGE[page.status]
@@ -118,7 +108,7 @@ export function PageRow({ page, number, actions, selecting, selected, onSelect }
       </button>
       {page.warnings.length > 0 && <Badge variant="warning" className="max-sm:hidden" title={page.warnings.join("\n")}><TriangleAlert /> {page.warnings.length === 1 ? "1 note" : `${page.warnings.length} notes`}</Badge>}
       <div className="flex shrink-0 items-center gap-0.5">
-        <Button variant="ghost" size="icon" className="max-sm:hidden" disabled={!page.source_url || working(page)} aria-label={`Rotate page ${number} clockwise`} title="Rotate clockwise" onClick={() => actions.rotate(page)}><RotateCw /></Button>
+        <Button variant="ghost" size="icon" className="max-sm:hidden" disabled={working(page)} aria-label={`Rotate page ${number} clockwise`} title="Rotate clockwise" onClick={() => actions.rotate(page)}><RotateCw /></Button>
         <Button variant="ghost" size="icon" className="max-sm:hidden" disabled={!page.source_url} aria-label={`Adjust the crop of page ${number}`} title="Adjust crop" onClick={() => actions.crop(page)}><Crop /></Button>
         <More page={page} actions={actions} trigger={<Button variant="ghost" size="icon" aria-label={`More for page ${number}`}><MoreVertical /></Button>} />
       </div>
