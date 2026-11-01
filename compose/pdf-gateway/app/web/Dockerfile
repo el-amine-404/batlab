@@ -1,5 +1,5 @@
-# syntax=docker/dockerfile:1.7
-FROM node:24.21.0-alpine3.24@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS build
+# syntax=docker/dockerfile:1.28
+FROM node:24.22.2-alpine3.24@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS build
 # Where the page is in the repo, beside lib/batlab-ui (the context "ui", the
 # frame shared by batlab's apps), so the relative paths hold in both.
 WORKDIR /batlab/compose/pdf-gateway/app/web
@@ -12,7 +12,7 @@ COPY public ./public
 COPY src ./src
 RUN npm run build
 
-FROM caddy:2@sha256:f2a1290d0463aad60660d4ec134943f183ee2a5f6c3eb7bf32dd984f2f020772
+FROM caddy:2@sha256:36c24ad91a7ff7bc4c87fe22bfa8df3c4b18da0773d73fc12ee2c52b98c0bb7e
 # The image's caddy carries a file capability (bind :80), which cannot exec under
 # no-new-privileges with all capabilities dropped. We listen on 8080, so run a
 # copy without it (cp does not carry file capabilities).

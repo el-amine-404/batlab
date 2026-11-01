@@ -1,7 +1,7 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.28
 # The shapes rebuild's sandbox: runs under gVisor with no network, no capabilities and
 # a read-only disk (hosts/lab2/pdf-cdr-provider). Hostile PDF on stdin, plain list on stdout.
-FROM debian:13.1-slim@sha256:a347fd7510ee31a84387619a492ad6c8eb0af2f2682b916ff3e643eb076f925a
+FROM debian:13.7-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4
 COPY requirements.txt /tmp/requirements.txt
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 python3-pip libjpeg-turbo-progs tesseract-ocr tesseract-ocr-fra tesseract-ocr-eng \
