@@ -506,6 +506,21 @@
         "dependencies",
         "major"
       ]
+    },
+    {
+      "description": "A new Python for the gateway's images waits for a person: pikepdf and friends may have no wheels for it yet (3.15 broke the build, 2026-11-01). Patches and digests still merge",
+      "matchPackageNames": [
+        "python"
+      ],
+      "matchFileNames": [
+        "compose/pdf-gateway/**"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "major"
+      ],
+      "automerge": false,
+      "groupName": "pdf gateway python"
     }
   ],
   "pip-compile": {
