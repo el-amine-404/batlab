@@ -224,7 +224,8 @@ class Paperless:
         return any(f.get("field") == self.field_id() and f.get("value") == document_id for f in doc.get("custom_fields", []))
 
     def update(self, paperless_id: int, title: str, filing: dict, content: str | None = None) -> None:
-        body = {"title": title, **filing}
+        # A value the sidecar no longer has goes in Paperless too (a re-run dropped a wrong correspondent).
+        body = {"title": title, "correspondent": None, **filing}
         if content:
             body["content"] = content
         self.call("PATCH", f"/api/documents/{int(paperless_id)}/", body=body)
