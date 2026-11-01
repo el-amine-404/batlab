@@ -1,10 +1,18 @@
-"""Run from compose/tv-remote: python -m unittest discover tests"""
+"""The sentences voice.py must and must not take for commands."""
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "app"))
-from voice import parse  # noqa: E402
+from profiles import profile_for  # noqa: E402
+import voice  # noqa: E402
+
+INPUTS = profile_for()["inputs"]
+
+
+def parse(text):
+    return voice.parse(text, INPUTS)
+
 
 CASES = {
     # apps
@@ -53,6 +61,35 @@ CASES = {
     "go home please": ("key", "key", "KEY_HOME"),
     "à gauche": ("key", "key", "KEY_LEFT"),
     "يمين": ("key", "key", "KEY_RIGHT"),
+    # inputs
+    "Switch to HDMI 1.": ("input", "id", "hdmi1"),
+    "switch to HDMI one": ("input", "id", "hdmi1"),
+    "HDMI-2": ("input", "id", "hdmi2"),
+    "hdmi2": ("input", "id", "hdmi2"),
+    "Passe en HDMI 1": ("input", "id", "hdmi1"),
+    "switch to the DVR": ("input", "id", "hdmi2"),
+    "go to the TV box": ("input", "id", "hdmi1"),
+    "switch to blu-ray": ("input", "id", "hdmi1"),
+    "switch to live TV": ("input", "id", "tv"),
+    "HDMI 3": ("input", "id", "hdmi3"),
+    "next input": ("input_next", "type", "input_next"),
+    "change input": ("key", "key", "KEY_SOURCE"),
+    # volume by an amount
+    "Turn the volume up by 10.": ("volume", "by", 10),
+    "turn the volume down by 5": ("volume", "by", 5),
+    "lower the volume by 3": ("volume", "by", 3),
+    "baisse le volume de 5": ("volume", "by", 5),
+    # places
+    "Go to homepage.": ("key", "key", "KEY_HOME"),
+    "go to the home page": ("key", "key", "KEY_HOME"),
+    "Go to settings": ("key", "key", "KEY_MENU"),
+    "ouvre les paramètres": ("key", "key", "KEY_MENU"),
+    "Go to Wi-Fi": ("settings_hint", "label", "Settings"),
+    "wifi settings": ("settings_hint", "label", "Settings"),
+    # repeats, channels
+    "down 3 times": ("key", "times", 3),
+    "channel 5": ("channel", "number", "5"),
+    "restart": ("media", "action", "restart"),
     # free form keeps the words as spoken
     "Play Interstellar trailer.": ("play", "query", "Interstellar trailer"),
     "Mets Interstellar sur YouTube": ("play", "query", "Interstellar"),
@@ -63,7 +100,7 @@ CASES = {
 NOT_COMMANDS = [
     "", "...", "Thank you.", "Merci.", "Sous-titres réalisés par la communauté d'Amara.org", "شكرا",
     "It's a lovely day.", "Multi-four.", "After he'll deal.", "the weather is nice in Paris today",
-    "I think we should turn around", "Menopause.", "Turn the TV.", "turn of the tv",
+    "I think we should turn around", "turn tv", "Menopause.", "Turn the TV.", "turn of the tv",
 ]
 
 

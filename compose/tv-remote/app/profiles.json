@@ -1,0 +1,13 @@
+{
+  "_comment": "What differs between TVs. Looked up by MAC, then model, then default. See ../README.md.",
+  "default": {
+    "inputs": [
+      {"id": "tv", "name": "TV", "row": 0,
+       "aliases": ["tv", "tv input", "the tv input", "live tv", "television", "la television", "la tele", "chaines", "tnt", "التلفزيون العادي", "القنوات"]},
+      {"id": "hdmi1", "name": "TV box", "detail": "HDMI 1", "row": 1,
+       "aliases": ["blu ray", "bluray", "blue ray", "tv box", "the tv box", "the box", "box", "la box", "le boitier", "boitier", "decodeur", "le decodeur", "البوكس", "الريسيفر"]},
+      {"id": "hdmi2", "name": "DVR", "detail": "HDMI 2", "row": 2,
+       "aliases": ["dvr", "the dvr", "recorder", "the recorder", "camera", "cameras", "the cameras", "enregistreur", "l enregistreur", "cameras de surveillance", "الكاميرات", "المسجل"]}
+    ]
+  }
+}

@@ -15,7 +15,14 @@
   <link rel="apple-touch-icon" href="icon-180.png">
   <link rel="stylesheet" href="style.css">
   <link id="mic-worklet" rel="preload" as="script" href="mic-worklet.js">
-  <script src="app.js" defer></script>
+  <script src="core.js" defer></script>
+  <script src="views.js" defer></script>
+  <script src="remote.js" defer></script>
+  <script src="youtube.js" defer></script>
+  <script src="touch.js" defer></script>
+  <script src="voice-ui.js" defer></script>
+  <script src="inputs.js" defer></script>
+  <script src="main.js" defer></script>
 </head>
 <body>
   <svg width="0" height="0" class="sprite" aria-hidden="true">
@@ -139,7 +146,7 @@
       <div class="row five">
         <button class="btn btn-key" data-key="KEY_RETURN" aria-label="Back"><svg class="ic"><use href="#i-back"/></svg><span>Back</span></button>
         <button class="btn btn-key" data-key="KEY_HOME" aria-label="Home"><svg class="ic"><use href="#i-home"/></svg><span>Home</span></button>
-        <button class="btn btn-key" data-key="KEY_SOURCE" aria-label="Input"><svg class="ic"><use href="#i-source"/></svg><span>Input</span></button>
+        <button class="btn btn-key" id="input-open" aria-label="Choose input"><svg class="ic"><use href="#i-source"/></svg><span>Input</span></button>
         <button class="btn btn-key" data-key="KEY_MENU" aria-label="Settings menu"><svg class="ic"><use href="#i-menu"/></svg><span>Menu</span></button>
         <button class="btn btn-key" id="kb-toggle" aria-label="Keyboard: type into the TV"><svg class="ic"><use href="#i-keyboard"/></svg><span>Type</span></button>
       </div>
@@ -247,6 +254,18 @@
         <input id="voice-text" type="text" dir="auto" placeholder="Or type a command" aria-label="Type a command" enterkeyhint="send" autocapitalize="off" spellcheck="false">
         <button class="btn btn-primary btn-icon" type="submit" aria-label="Send command"><svg class="ic"><use href="#i-send"/></svg></button>
       </form>
+    </div>
+  </dialog>
+
+  <dialog id="inputs" class="voice-sheet input-sheet" aria-labelledby="inputs-title">
+    <div class="voice-top">
+      <h2 id="inputs-title">Input</h2>
+      <button type="button" id="inputs-close" class="btn btn-ghost btn-icon" aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div id="inputs-list" class="input-list"></div>
+    <div class="row two input-more">
+      <button type="button" id="input-next" class="btn">Next HDMI</button>
+      <button type="button" id="input-list-tv" class="btn" data-key="KEY_SOURCE">List on TV</button>
     </div>
   </dialog>
 

@@ -96,10 +96,24 @@ _GROUPS: list[tuple[dict, str]] = [
      "next|next video|next episode|skip|suivant|suivante|video suivante|episode suivant|التالي|اللي بعدو|اللي من بعد"),
     (_media("prev", "Previous"),
      "previous|previous video|precedent|precedente|video precedente|السابق|اللي قبل|اللي قبلو"),
-    (_key("KEY_HOME", "Home"), "home|go home|home screen|main menu|accueil|page d accueil|الرئيسيه|الصفحه الرئيسيه|الديور"),
+    (_key("KEY_HOME", "Home"), "home|go home|go to home|home screen|homepage|home page|go to homepage|go to the homepage|go to home page|go to the home page|go to the home screen|main menu|accueil|page d accueil|va a l accueil|retour a l accueil|الرئيسيه|الصفحه الرئيسيه|الديور"),
     (_key("KEY_RETURN", "Back"), "back|go back|return|retour|reviens|en arriere|رجوع|ارجع|رجع|للخلف"),
-    (_key("KEY_MENU", "Menu"), "menu|settings|parametres|reglages|القائمه|الاعدادات|المينو"),
-    (_key("KEY_SOURCE", "Input"), "input|source|change input|switch input|changer de source|change de source|المصدر|المدخل"),
+    (_key("KEY_MENU", "Settings"), "menu|settings|go to settings|open settings|open the settings|tv settings|parametres|reglages|ouvre les parametres|ouvre les reglages|va dans les parametres|va dans les reglages|القائمه|الاعدادات|افتح الاعدادات|المينو"),
+    ({"type": "settings_hint", "label": "Settings", "where": "Wi-Fi is under Connections, then Network"},
+     "wifi|wi fi|go to wifi|go to wi fi|open wifi|wifi settings|wi fi settings|network|network settings|internet settings|"
+     "connections|go to connections|reseau|le wifi|parametres wifi|parametres reseau|ouvre le wifi|va dans le wifi|"
+     "الويفي|الواي فاي|واي فاي|افتح الويفي|اعدادات الويفي|اعدادات الشبكه|الشبكه"),
+    ({"type": "settings_hint", "label": "Settings", "where": "Picture is near the top of the list"},
+     "picture settings|image settings|parametres image|reglages image|parametres de l image|اعدادات الصوره"),
+    ({"type": "settings_hint", "label": "Settings", "where": "Sound is near the top of the list"},
+     "sound settings|audio settings|parametres son|reglages son|parametres du son|اعدادات الصوت"),
+    (_key("KEY_EXIT", "Exit"), "exit|close|quitter|quitte|ferme|خروج|سد"),
+    (_media("restart", "From the start"), "restart|start over|from the beginning|recommence|depuis le debut|من الاول|من البدايه"),
+    ({"type": "input_next", "label": "Next HDMI"},
+     "next input|next hdmi|switch input|change hdmi|hdmi|entree suivante|hdmi suivant|change d entree|المدخل التالي"),
+    ({"type": "input_list", "label": "Source list"},
+     "input list|source list|show inputs|show sources|liste des sources|les sources|قائمه المصادر"),
+    (_key("KEY_SOURCE", "Input"), "input|source|change input|changer de source|change de source|المصدر|المدخل"),
     (_key("KEY_INFO", "Info"), "info|information|informations|معلومات"),
     (_key("KEY_GUIDE", "Guide"), "guide|tv guide|guide tv|الدليل"),
     (_key("KEY_UP", "Up"), "up|go up|haut|en haut|vers le haut|فوق|الفوق"),
@@ -139,6 +153,31 @@ _TENS = {
 _NUM = r"(\d{1,3}|" + "|".join(sorted(map(re.escape, _TENS), key=len, reverse=True)) + ")"
 
 
+_INPUT_NUM = {"1": 1, "one": 1, "un": 1, "une": 1, "واحد": 1, "2": 2, "two": 2, "to": 2, "too": 2, "deux": 2, "اثنين": 2, "جوج": 2, "زوج": 2,
+              "3": 3, "three": 3, "trois": 3, "تلاته": 3, "ثلاثه": 3, "4": 4, "four": 4, "quatre": 4, "اربعه": 4}
+_GO = (r"(?:(?:switch|change|go|put|move|set)(?: it)?(?: over)?(?: to| on| the input to| input to)?|input|source|"
+       r"passe(?: sur| en| a)?|mets(?: sur| en)?|mettre(?: sur| en)?|va sur|change(?: sur| en| pour)?|bascule(?: sur| en)?|"
+       r"حط|حول ل|حول الي|حول علي|روح ل|سير ل|افتح|شغل|دير) ")
+_HDMI_WORD = r"(?:hdmi|h d m i|اتش دي ام اي|اتش دي ام|الاتش دي ام اي)"
+_INPUT_HDMI = re.compile(rf"^(?:{_GO})?(?:the |l |le |la )?(?:{_HDMI_WORD}) ?({'|'.join(_INPUT_NUM)})$")
+_INPUT_GO = re.compile(rf"^{_GO}(.+)$")
+
+
+def _input(text: str, inputs) -> dict | None:
+    """An input by number, or by a name from the TV's profile (profiles.json)."""
+    if m := _INPUT_HDMI.match(text):
+        n = _INPUT_NUM[m.group(1)]
+        return {"type": "input", "id": f"hdmi{n}", "label": f"HDMI {n}"}
+    names = {_fold(alias): i["id"] for i in inputs for alias in i.get("aliases", ())}
+    m = _INPUT_GO.match(text)
+    target = names.get(m.group(1) if m else "")
+    if target is None and text not in ("tv", "television"):  # alone, those mean the TV itself
+        target = names.get(text)
+    if target:
+        return {"type": "input", "id": target, "label": "Switch input"}
+    return None
+
+
 def _number(word: str) -> int:
     return int(word) if word.isdigit() else _TENS[word]
 
@@ -148,11 +187,15 @@ _VOLUME_SET = re.compile(
     rf"(?: (?:to|at|a|sur|على|علي|ف|في))? {_NUM}$"
 )
 _VOLUME_BY = re.compile(
-    rf"^(?:(?P<up>volume up|turn up|turn it up|turn the volume up|monte(?: le (?:son|volume))?|"
+    rf"^(?:(?P<up>volume up|turn up|turn it up|turn the volume up|turn up the volume|raise the volume|raise volume|increase the volume|increase volume|monte(?: le (?:son|volume))?|"
     rf"augmente(?: le (?:son|volume))?|ارفع الصوت|زيد الصوت|علي الصوت)|"
-    rf"(?P<down>volume down|turn down|turn it down|turn the volume down|baisse(?: le (?:son|volume))?|"
+    rf"(?P<down>volume down|turn down|turn it down|turn the volume down|turn down the volume|lower the volume|lower volume|decrease the volume|decrease volume|baisse(?: le (?:son|volume))?|"
     rf"diminue(?: le (?:son|volume))?|نقص الصوت|نزل الصوت|وطي الصوت))(?: (?:by|de|ب))? {_NUM}$"
 )
+_REPEAT = re.compile(r"^(?:go )?(up|down|left|right|haut|bas|gauche|droite|فوق|تحت|يسار|يمين)(?: by)? (\d)(?: times?| fois| مرات| مره)?$")
+_REPEAT_KEYS = {"up": "KEY_UP", "haut": "KEY_UP", "فوق": "KEY_UP", "down": "KEY_DOWN", "bas": "KEY_DOWN", "تحت": "KEY_DOWN",
+                "left": "KEY_LEFT", "gauche": "KEY_LEFT", "يسار": "KEY_LEFT", "right": "KEY_RIGHT", "droite": "KEY_RIGHT", "يمين": "KEY_RIGHT"}
+_CHANNEL = re.compile(r"^(?:go to |switch to |mets |passe sur |va sur )?(?:channel|chaine|la chaine|القناه) (\d{1,4})$")
 _UNIT = r"(?: (sec|secs|second|seconds|seconde|secondes|ثانيه|ثواني|min|mins|minute|minutes|دقيقه|دقايق|دقائق))?"
 _SEEK_FWD = re.compile(
     rf"^(?:(?:skip|jump|go|fast)(?: forward)?|forward|avance|avancer|avance de|قدم|زيد لقدام)(?: (?:by|de))? {_NUM}{_UNIT}$"
@@ -224,8 +267,9 @@ def _app(text: str) -> dict | None:
     return {"type": "app", "id": hit[0], "name": hit[1], "label": f"Open {hit[1]}"}
 
 
-def parse(raw: str) -> dict | None:
-    """The command in a sentence, or None when it is not one."""
+def parse(raw: str, inputs=()) -> dict | None:
+    """The command in a sentence, or None when it is not one. `inputs` is the
+    TV's input list (profiles.py), for names such as "the DVR"."""
     text = normalize(raw)
     if not text or _HALLUCINATION.match(text):
         return None
@@ -251,6 +295,13 @@ def parse(raw: str) -> dict | None:
         return {"type": "media", "action": "rel", "value": 30, "label": "Forward 30s"}
     if _SEEK_BACK_PLAIN.match(text):
         return {"type": "media", "action": "rel", "value": -10, "label": "Back 10s"}
+
+    if m := _REPEAT.match(text):
+        return {"type": "key", "key": _REPEAT_KEYS[m.group(1)], "times": int(m.group(2)), "label": m.group(1).capitalize()}
+    if m := _CHANNEL.match(text):
+        return {"type": "channel", "number": m.group(1), "label": f"Channel {m.group(1)}"}
+    if found := _input(text, inputs):
+        return found
 
     # "lance netflix" before "lance <a video>", and a bare app name.
     if app := _app(text):
