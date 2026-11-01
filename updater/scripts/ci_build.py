@@ -31,7 +31,12 @@ def changed_pins(base):
 
 def render(compose_file, stub):
     """The stack as Compose sees it, with a placeholder for each required secret."""
-    required = set(re.findall(r"\$\{([A-Z0-9_]+):\?", compose_file.read_text()))
+    # Only what no env file gives a value: read last, a placeholder would replace a real
+    # value, and "ci" in a number such as cpus stops Compose from rendering at all.
+    given = set()
+    for env in ("compose/versions.env", "compose/.env.example", "hosts/lab2/compose.env"):
+        given |= set(re.findall(r"^([A-Z0-9_]+)=\S", (ROOT / env).read_text(), re.M))
+    required = set(re.findall(r"\$\{([A-Z0-9_]+):\?", compose_file.read_text())) - given
     stub.write_text("".join(f"{name}=ci\n" for name in sorted(required)))
     result = subprocess.run(
         ["docker", "compose", "--profile", "*",

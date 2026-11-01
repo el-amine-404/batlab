@@ -10,8 +10,10 @@ on:
     branches: ["renovate/**"]
   workflow_dispatch:
 
+# write: to merge a branch whose lock file was repaired here. The token is only
+# handed to that one last step; the builds run without it.
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: deps-gate-${{ github.ref }}
@@ -25,5 +27,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - run: git fetch --quiet origin main
+      # Renovate leaves some package-lock.json files behind; npm ci would fail.
+      - id: locks
+        run: python3 updater/scripts/sync_locks.py origin/main | tee /dev/stderr | grep '^repaired=' >> "$GITHUB_OUTPUT" || true
       - run: python3 updater/scripts/ci_build.py origin/main
+      # A repaired branch is not the commit Renovate made, so Renovate would not
+      # merge it: merged here, on the same terms. The gateway's npm updates wait
+      # for a person (renovate.json). Fast-forward only: if main has moved, this
+      # refuses, and Renovate's rebase brings the branch back through this gate.
+      - name: Merge the repaired branch
+        if: steps.locks.outputs.repaired == 'true' && !contains(github.ref_name, 'pdf-gateway')
+        env:
+          TOKEN: ${{ github.token }}
+        run: git push "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/main

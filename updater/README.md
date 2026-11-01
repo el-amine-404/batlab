@@ -46,7 +46,10 @@ majors included: pip, npm, Maven, base images, and a weekly lock file refresh fo
 indirect dependencies. Each Renovate branch must pass `deps-gate`
 (`.github/workflows/deps-gate.yml`, `scripts/ci_build.py`), which builds the app
 on GitHub's machines; its Dockerfile runs its tests and typecheck. A pass merges
-to `main`, and that night the updater deploys it and posts it in `#updates`. A
+to `main`, and that night the updater deploys it and posts it in `#updates`. Renovate leaves some apps' `package-lock.json` behind, so the gate first updates
+those (`scripts/sync_locks.py`, without running package scripts); if the build then
+passes, the gate merges that branch itself, as Renovate would not merge a commit it
+did not make. A
 failure stays on its branch and the updater posts "Update not merged" once per
 commit, with a link to the failed run. A database major (postgres, RabbitMQ)
 never merges alone: it can't start on the old major's data.
