@@ -29,7 +29,7 @@ STORAGE = Path(os.getenv("PDF_GATEWAY_STORAGE_ROOT", "/var/lib/pdf-gateway"))
 SOCKET = os.getenv("PDF_GATEWAY_CDR_SOCKET", "/run/pdf-cdr/cdr.sock")
 MAX_ATTEMPTS = int(os.getenv("PDF_GATEWAY_CDR_MAX_ATTEMPTS", "4"))
 RETRY_SECONDS = int(os.getenv("PDF_GATEWAY_CDR_RETRY_SECONDS", "60"))
-RESPONSE_TIMEOUT = int(os.getenv("PDF_GATEWAY_CDR_RESPONSE_TIMEOUT_SECONDS", "720"))
+RESPONSE_TIMEOUT = int(os.getenv("PDF_GATEWAY_CDR_RESPONSE_TIMEOUT_SECONDS", "1320"))
 MAX_OUTPUT = int(os.getenv("PDF_GATEWAY_CDR_MAX_OUTPUT_BYTES", str(256 * 1024 * 1024)))
 MAX_HEADER = 4096
 SIGNATURE_DECISIONS = ("CDR_REQUIRED", "CDR_REQUIRED_PRESERVE_ORIGINAL")
@@ -74,13 +74,13 @@ def hold_for_review(cursor, scan_id: str, code: str) -> None:
     audit(cursor, scan_id, "CDR_PRECONDITION_FAILED", "FAILURE", {"code": code})
 
 
-def claim(scan_id: str) -> tuple[Path, str, int] | None:
+def claim(scan_id: str) -> tuple[Path, str, int, str] | None:
     with database() as connection, connection.cursor() as cursor:
-        cursor.execute("SELECT status,policy,quarantine_object,source_sha256 FROM scan_jobs WHERE id=%s FOR UPDATE", (scan_id,))
+        cursor.execute("SELECT status,policy,quarantine_object,source_sha256,cdr_mode FROM scan_jobs WHERE id=%s FOR UPDATE", (scan_id,))
         row = cursor.fetchone()
         if row is None or row[0] not in ("AWAITING_CDR", "SANITIZING"):
             return None
-        status, policy, quarantine_object, source_hash = row
+        status, policy, quarantine_object, source_hash, mode = row
         if status == "SANITIZING":
             # A previous worker died mid-conversion; that attempt is not trusted.
             cursor.execute("UPDATE job_steps SET status='FAILED',finished_at=now(),error_code='INTERRUPTED' WHERE scan_id=%s AND step_type='CDR' AND status='RUNNING'", (scan_id,))
@@ -112,7 +112,7 @@ def claim(scan_id: str) -> tuple[Path, str, int] | None:
         cursor.execute("UPDATE scan_jobs SET status='SANITIZING',updated_at=now(),version=version+1 WHERE id=%s", (scan_id,))
         cursor.execute("INSERT INTO job_steps(id,scan_id,step_type,status,attempt,started_at) VALUES (%s,%s,'CDR','RUNNING',%s,now())",
                        (str(uuid.uuid4()), scan_id, attempt))
-        return path, source_hash, attempt
+        return path, source_hash, attempt, mode
 
 
 def recv_exact(sock: socket.socket, count: int, sink) -> None:
@@ -142,7 +142,7 @@ def read_header(sock: socket.socket) -> dict:
     return header
 
 
-def convert(scan_id: str, source: Path, source_hash: str, attempt: int) -> tuple[Path, dict]:
+def convert(scan_id: str, source: Path, source_hash: str, attempt: int, mode: str = "RASTER") -> tuple[Path, dict]:
     """Stream the source to the provider and stage the returned bytes privately."""
     size = source.stat().st_size
     staging = STORAGE / "cdr-output"
@@ -154,7 +154,7 @@ def convert(scan_id: str, source: Path, source_hash: str, attempt: int) -> tuple
             sock.connect(SOCKET)
         except OSError as error:
             raise CdrFailure("PROVIDER_UNAVAILABLE", type(error).__name__) from error
-        request = {"protocol": PROTOCOL, "jobId": scan_id, "sha256": source_hash, "bytes": size}
+        request = {"protocol": PROTOCOL, "jobId": scan_id, "sha256": source_hash, "bytes": size, "mode": mode}
         sock.sendall(json.dumps(request, separators=(",", ":")).encode() + b"\n")
         sent = hashlib.sha256()
         with source.open("rb") as handle:
@@ -217,7 +217,7 @@ def persist(scan_id: str, attempt: int, source_hash: str, output: Path, header: 
     if output_hash != header["outputSha256"]:
         raise CdrFailure("OUTPUT_HASH_MISMATCH", "staged output changed before commit")
     artifact_id = f"cdr-{scan_id[5:]}-{attempt}"
-    evidence = {key: header.get(key) for key in ("isolation", "durationMs", "outerRuntime")}
+    evidence = {key: header.get(key) for key in ("isolation", "durationMs", "outerRuntime", "rebuildMode", "shapes", "shapesFailure")}
     with database() as connection, connection.cursor() as cursor:
         cursor.execute("SELECT source_sha256,status FROM scan_jobs WHERE id=%s FOR UPDATE", (scan_id,))
         row = cursor.fetchone()
@@ -233,7 +233,7 @@ def persist(scan_id: str, attempt: int, source_hash: str, output: Path, header: 
                         str(header.get("imageDigest"))[:80], json.dumps(evidence), header.get("durationMs")))
         cursor.execute("UPDATE scan_jobs SET status='VALIDATING_OUTPUT',artifact_state='SANITIZED_STAGED',updated_at=now(),version=version+1 WHERE id=%s", (scan_id,))
         cursor.execute("UPDATE job_steps SET status='SUCCEEDED',finished_at=now(),engine_version=%s,details=%s::jsonb WHERE scan_id=%s AND step_type='CDR' AND attempt=%s",
-                       (f"Dangerzone {header.get('dangerzoneVersion')} {header.get('imageDigest')}"[:160],
+                       (f"{'Shapes' if header.get('rebuildMode') == 'SHAPES' else 'Dangerzone'} {header.get('dangerzoneVersion')} {header.get('imageDigest')}"[:160],
                         json.dumps({"artifactId": artifact_id, "outputSha256": output_hash}), scan_id, attempt))
         audit(cursor, scan_id, "CDR_COMPLETED", "SUCCESS", {"artifactId": artifact_id, "attempt": attempt})
         cursor.execute("INSERT INTO outbox_events(id,aggregate_type,aggregate_id,event_type,payload) VALUES (%s,'SCAN',%s,'VALIDATION_QUEUED',jsonb_build_object('scanId',%s,'artifactId',%s))",
@@ -279,9 +279,9 @@ def handle(channel, method, _properties, body: bytes) -> None:
         if claimed is None:
             channel.basic_ack(method.delivery_tag)
             return
-        source, source_hash, attempt = claimed
+        source, source_hash, attempt, mode = claimed
         try:
-            output, header = convert(scan_id, source, source_hash, attempt)
+            output, header = convert(scan_id, source, source_hash, attempt, mode)
             persist(scan_id, attempt, source_hash, output, header)
         except CdrFailure as failure:
             fail(scan_id, attempt, source_hash, failure)

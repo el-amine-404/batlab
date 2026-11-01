@@ -50,7 +50,7 @@ export const ENGINE: Record<string, { name: string; what: string }> = {
   "pdf-parser": { name: "Object inventory", what: "pdf-parser lists every object in the file." },
   "pdf-keywords": { name: "Hidden actions", what: "Looks for names like JavaScript and Launch." },
   yara: { name: "Malware patterns", what: "YARA rules for known attack techniques." },
-  "qpdf-json": { name: "Nothing but page images", what: "Reads the decoded file: no scripts, links, forms or visible fonts." },
+  "qpdf-json": { name: "Only what the rebuild writes", what: "Reads the decoded file: no scripts, links, forms or visible fonts, and pages draw from a fixed list." },
   "page-count": { name: "Page count", what: "The copy has as many pages as the original." },
   pdftoppm: { name: "Pages can be drawn", what: "Draws each page to catch blank or broken output." },
 };
@@ -69,8 +69,8 @@ export const STAGE_ABOUT: Record<string, string> = {
   received: "The upload is stored unopened in quarantine. Only the sealed workers read it, and it never reaches your browser.",
   scan: "Looks at the original for known malware, hidden scripts and a broken structure. A clean result doesn't release the file: only the rebuilt copy can leave.",
   signature: "A digital signature can't survive a rebuild, so it's verified on the original and recorded here.",
-  rebuild: "The original is opened in a sandbox with no network, and each page is turned into pixels. Scripts, links, forms and attachments have nowhere to go.",
-  recheck: "The rebuilt copy is new bytes, so it goes through the checks again, and it must contain nothing but page images. Every check has to finish and pass: one without an answer holds the file.",
+  rebuild: "The original is opened in a sandbox with no network, and all that comes out is a list of shapes and pixels. A separate writer makes a new PDF from that list, so fonts, scripts, links, forms and attachments have nowhere to go. A page it can't express that way becomes pixels.",
+  recheck: "The rebuilt copy is new bytes, so it goes through the checks again, and it may contain only plain shapes, images and invisible text. Every check has to finish and pass: one without an answer holds the file.",
   archive: "Files the clean copy with its details. The original stays in quarantine.",
 };
 
@@ -89,8 +89,9 @@ const CODE_TEXT: Record<string, string> = {
   RENDER_FAILED: "The rebuilt copy's pages couldn't be drawn.", RENDER_PAGE_COUNT: "Not every page of the rebuilt copy could be drawn.",
   OUTPUT_ALL_PAGES_BLANK: "Every page of the rebuilt copy came out blank.", OUTPUT_HASH_MISMATCH: "The rebuilt copy's bytes changed after it was made.",
   OUTPUT_UNREADABLE: "The rebuilt copy couldn't be read from storage.", VALIDATOR_NO_REPORT: "The final check stopped without a report.",
-  FORBIDDEN_STRUCTURE: "The rebuilt copy contains something other than page images.", NON_IMAGE_XOBJECT: "The rebuilt copy contains something other than page images.",
-  PAGE_RESOURCES_UNEXPECTED: "The rebuilt copy contains something other than page images.", FONT_NOT_ALLOWED: "The rebuilt copy contains an unexpected font.",
+  FORBIDDEN_STRUCTURE: "The rebuilt copy contains something the rebuild never writes.", NON_IMAGE_XOBJECT: "The rebuilt copy contains something the rebuild never writes.",
+  PAGE_RESOURCES_UNEXPECTED: "The rebuilt copy contains something the rebuild never writes.", CONTENT_NOT_ALLOWED: "A page draws with something outside the allowed list.",
+  IMAGE_NOT_ALLOWED: "An image isn't in the plain form the rebuild writes.", GRAPHICS_STATE_NOT_ALLOWED: "A page sets more than opacity.", CONTENT_UNREADABLE: "A page's content couldn't be read.", FONT_NOT_ALLOWED: "The rebuilt copy contains an unexpected font.",
   VISIBLE_TEXT: "The rebuilt copy has visible text where only images belong.", MALWARE_DETECTED: "The virus scanner recognised malware.",
   YARA_MATCH: "A malware pattern matched.", PDF_ENCRYPTED: "The file is locked with a password, so it can't be inspected.",
   PDF_KEYWORD_EMBEDDEDFILE: "The file has an attachment inside it.", PDF_STRUCTURE_INVALID: "The file isn't a well-formed PDF.",
@@ -180,11 +181,18 @@ export function safetySteps(scan: Scan, findings: Findings | undefined): Step[] 
       detail: !signature ? undefined : signature.state === "UNSIGNED" ? "Not digitally signed." :
         `Signed (${signature.signatureCount}). The signed original is kept as evidence; the clean copy can't carry the signature.` },
     { key: "rebuild", label: "Rebuilt as a clean copy", state: state("CDR"),
-      detail: "Every page redrawn as an image in a sandbox." },
+      detail: rebuildNote(findings) },
     { key: "recheck", label: "Checked the clean copy again", state: state("VALIDATION"),
       detail: passes ? "Passed." : state("VALIDATION") === "failed" ? recheckNote(findings) : undefined },
     { key: "archive", label: "Saved to your archive", state: state("ARCHIVE") },
   ];
+}
+
+function rebuildNote(findings: Findings | undefined) {
+  const last = findings?.cdr.filter((item) => item.status === "SUCCEEDED").at(-1);
+  if (last?.rebuildMode !== "SHAPES") return last?.shapesFailure ? "Every page redrawn as an image: the shapes rebuild couldn't handle this file." : "Every page redrawn as an image in a sandbox.";
+  const pixels = last.shapes?.pixelPages ?? 0;
+  return `Pages rewritten as plain shapes and images in a sandbox${pixels ? `; ${pixels} of ${last.shapes?.pages} as pixels` : ""}.`;
 }
 
 function recheckNote(findings: Findings | undefined) {

@@ -45,6 +45,12 @@ Stopped containers are never started, so services the data disk guard or you
 stopped stay stopped. A tag that failed once is not retried until a newer one
 lands. The updater refuses to pull over local changes and says so in `#alerts`.
 
+The PDF gateway is built as one unit (`update_pdf_gateway`): when its code, pins
+or the provider's files change, the updater runs its `install.sh` and
+`make up STACK=pdf-gateway`, waits for every container to be healthy, and otherwise
+restores the previous images. Renovate automerges its Dockerfile, npm, Maven, pip
+and pdfid updates (not majors), and ClamAV's image.
+
 ## Choosing what updates itself
 
 A service updates itself only when it appears in **both** places:

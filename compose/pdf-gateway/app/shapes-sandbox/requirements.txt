@@ -1,0 +1,2 @@
+pillow==13.0.0
+pymupdf==2.0

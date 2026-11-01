@@ -144,16 +144,102 @@ wait_until_healthy() {
   return 1
 }
 
+cool_enough() {
+  while [[ "$(cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null | sort -n | tail -1)" -gt 75000 ]]; do
+    echo "CPU above 75 C, waiting..."
+    sleep 20
+  done
+}
+
+# Built as make builds: Compose's own build refuses network: host since it went
+# through bake ("additional privileges requested", and it has no --allow), which
+# failed every local app's rebuild each night until 2026-11-01.
+build_local() {
+  local compose_file="$1" service="$2" argv
+  cool_enough
+  mapfile -d '' -t argv < <(docker compose "${ENV_ARGS[@]}" -f "$compose_file" config --format json | python3 -c '
+import json, os, sys
+svc = json.load(sys.stdin)["services"][sys.argv[1]]
+build = svc["build"]
+argv = ["--network", "host", "-t", svc["image"], "-f", os.path.join(build["context"], build.get("dockerfile", "Dockerfile"))]
+for key, value in (build.get("args") or {}).items():
+    argv += ["--build-arg", f"{key}={value}"]
+for key, value in (build.get("additional_contexts") or {}).items():
+    argv += ["--build-context", f"{key}={value}"]
+if build.get("target"):
+    argv += ["--target", build["target"]]
+sys.stdout.write("\0".join([*argv, build["context"]]) + "\0")' "$service")
+  ((${#argv[@]})) && docker build "${argv[@]}"
+}
+
+# The PDF gateway is one unit: images shared between services, a sandbox image in
+# the provider's podman, the provider itself on the host, and a temperature-gated
+# build (make). It parses hostile files, so it always follows its pins and code.
+gateway_fingerprint() {
+  local path
+  for path in compose/pdf-gateway lib/batlab-ui lib/batlab-common hosts/lab2/pdf-cdr-provider; do
+    git rev-parse "HEAD:$path"
+  done | sha256sum | cut -c1-16
+}
+
+gateway_healthy() {
+  local container
+  for container in $(docker ps -a --filter name=^pdf-gateway- --format '{{.Names}}'); do
+    wait_until_healthy "$container" >/dev/null || { echo "$container"; return 1; }
+  done
+}
+
+update_pdf_gateway() {
+  grep -vE '^\s*(#|$)' "hosts/$HOST_PROFILE_NAME/stacks.txt" 2>/dev/null | grep -qxF pdf-gateway || return 0
+  local fingerprint recorded image reason images=() provider_old
+  fingerprint="$(gateway_fingerprint)"
+  recorded="$(built_from pdf-gateway)"
+  [[ -n "$recorded" ]] || { record_build pdf-gateway "$fingerprint"; return 0; }
+  [[ "$recorded" == "$fingerprint" ]] && return 0
+  if seen "pdf-gateway $fingerprint" failed; then
+    echo "Skipping pdf-gateway: $fingerprint already failed once"
+    return 0
+  fi
+  echo "Updating pdf-gateway: $recorded -> $fingerprint"
+  [[ "$DRY_RUN" == "1" ]] && return 0
+
+  mapfile -t images < <(docker ps --filter name=^pdf-gateway- --format '{{.Image}}' | grep '^local/' | sort -u)
+  for image in "${images[@]}"; do
+    docker tag "$image" "local/batlab-rollback:${image#local/}" || true
+  done
+  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  provider_old="$(cat "$HOME/.local/lib/pdf-cdr-provider/provider.py" "$HOME/.local/lib/pdf-cdr-provider/shape_writer.py" 2>/dev/null | sha256sum)"
+  if hosts/lab2/pdf-cdr-provider/install.sh >/dev/null &&
+    { [[ "$provider_old" == "$(cat "$HOME/.local/lib/pdf-cdr-provider/provider.py" "$HOME/.local/lib/pdf-cdr-provider/shape_writer.py" | sha256sum)" ]] ||
+      systemctl --user restart pdf-cdr-provider; } &&
+    make up STACK=pdf-gateway && reason="$(gateway_healthy)"; then
+    record_build pdf-gateway "$fingerprint"
+    notify updates "Updated pdf-gateway" success "Built from" "$fingerprint" "Previous" "$recorded"
+    return 0
+  fi
+
+  echo "Update of pdf-gateway failed (${reason:-build or start}); rolling back" >&2
+  for image in "${images[@]}"; do
+    docker tag "local/batlab-rollback:${image#local/}" "$image" || true
+  done
+  local rollback="rolled back"
+  docker compose "${ENV_ARGS[@]}" -f compose/pdf-gateway/docker-compose.yml up -d --no-build --force-recreate &&
+    gateway_healthy >/dev/null || rollback="ROLLBACK FAILED, check it now"
+  remember "pdf-gateway $fingerprint" failed
+  notify alerts "Update failed: pdf-gateway" failure "Tried" "$fingerprint" "Reason" "${reason:-build or start failed}" \
+    "Result" "$rollback" "Logs" "journalctl -u batlab-updater -n 100"
+  return 1
+}
+
 update_service() {
   local stack="$1" service="$2" container="$3" old_image="$4" new_image="$5" built="$6" key="$7"
   local compose_file="compose/$stack/docker-compose.yml" reason override old_id new_id
   local fetch=(pull --quiet) start=(up -d --no-deps) previous="$old_image" keep="$old_image"
   # A locally built image is rebuilt from the new pins and code; there is
-  # nothing to pull. Not --quiet: with it, Compose refuses the build's
-  # network.host entitlement ("additional privileges requested"). Started
-  # with --no-build (pull_policy: build would build it a second time) and
-  # recreated whatever Compose thinks: the image name is often the same.
-  [[ "$built" == "yes" ]] && fetch=(build) start=(up -d --no-deps --no-build --force-recreate)
+  # nothing to pull. Started with --no-build (pull_policy: build would build it
+  # a second time) and recreated whatever Compose thinks: the image name is
+  # often the same.
+  [[ "$built" == "yes" ]] && start=(up -d --no-deps --no-build --force-recreate)
 
   echo "Updating $service: $old_image -> $new_image"
   if [[ "$DRY_RUN" == "1" ]]; then
@@ -169,7 +255,13 @@ update_service() {
     previous="$old_image (${old_id:7:12})"
   fi
 
-  if docker compose "${ENV_ARGS[@]}" -f "$compose_file" "${fetch[@]}" "$service"; then
+  local fetched=0
+  if [[ "$built" == "yes" ]]; then
+    build_local "$compose_file" "$service" && fetched=1
+  else
+    docker compose "${ENV_ARGS[@]}" -f "$compose_file" "${fetch[@]}" "$service" && fetched=1
+  fi
+  if ((fetched)); then
     new_id="$(docker image inspect -f '{{.Id}}' "$new_image" 2>/dev/null || true)"
     if docker compose "${ENV_ARGS[@]}" -f "$compose_file" "${start[@]}" "$service" &&
       reason="$(wait_until_healthy "$container")"; then
@@ -254,6 +346,8 @@ main() {
       [[ "$state" == "running" ]] || continue
       running_image="$(docker inspect -f '{{.Config.Image}}' "$container")"
       checked=$((checked + 1))
+      # update_pdf_gateway builds these together.
+      [[ "$stack" == "pdf-gateway" && "$built" == "yes" ]] && continue
       key="$service $desired"
       if [[ "$built" == "yes" ]]; then
         # Built here: the same image name may hide new pins (a base image's
@@ -290,6 +384,8 @@ main() {
     done < <(docker compose "${ENV_ARGS[@]}" -f "$stack_file" config --format json 2>/dev/null |
       python3 -c "$BUILD_FINGERPRINT")
   done
+
+  update_pdf_gateway || failures=$((failures + 1))
 
   echo "Checked $checked running service(s): $changed differ from the checkout, $failures failed."
   ((failures == 0))

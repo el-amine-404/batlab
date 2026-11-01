@@ -131,8 +131,9 @@ export function TechnicalDetails({ scan, findings, sidecar, documentId, doc }: {
           {!f?.cdr.length && !f?.validation.length && <Muted>The file hasn't reached the rebuild yet.</Muted>}
           {f?.cdr.map((item) => (
             <div key={`c${item.attempt}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-background/40 px-3 py-2.5">
-              <span className="text-sm font-medium">Rebuild, try {item.attempt}</span>
+              <span className="text-sm font-medium">Rebuild, try {item.attempt}{item.rebuildMode === "SHAPES" ? " (shapes)" : ""}</span>
               <span className="flex items-center gap-2">
+                {item.outputBytes != null && <span className="text-xs text-muted-foreground tabular-nums">{formatBytes(item.outputBytes)}</span>}
                 {item.durationMs != null && <span className="text-xs text-muted-foreground tabular-nums">{formatDuration(item.durationMs)}</span>}
                 {item.failureCode && <code className="text-xs break-all">{item.failureCode}</code>}
                 <Badge tone={item.status === "SUCCEEDED" ? "good" : "warn"}>{item.status}</Badge>
@@ -174,6 +175,11 @@ export function TechnicalDetails({ scan, findings, sidecar, documentId, doc }: {
               )}
               <CheckList checks={f.analysis.engines} />
               <dl className="divide-y divide-border">
+                {Object.keys(f.analysis.fonts?.byType ?? {}).length > 0 && (
+                  <Fact label="Fonts in the original (none reach the clean copy)">
+                    <span className="text-xs text-muted-foreground">{Object.entries(f.analysis.fonts?.byType ?? {}).map(([kind, count]) => `${count} ${kind}`).join(" · ")}</span>
+                  </Fact>
+                )}
                 <Fact label="Tool versions">
                   <span className="text-xs text-muted-foreground">{f.analysis.engines.map((engine) => `${engine.engine ?? "?"} ${engine.version ?? ""}${engine.databaseVersion ? ` (db ${engine.databaseVersion})` : ""}`.trim()).join(" · ")}</span>
                 </Fact>

@@ -30,7 +30,7 @@ export function UploadProvider({ canUpload, children }: { canUpload: boolean; ch
     for (const item of next.filter((candidate) => !candidate.error)) {
       try {
         // Archive and Paperless: Paperless gets the clean copy once it is ready.
-        const result = await upload(item.file, "ARCHIVE_AND_IMPORT", (progress) => update(item.id, { progress }));
+        const result = await upload(item.file, "ARCHIVE_AND_IMPORT", localStorage.getItem("rebuildMode") === "RASTER" ? "RASTER" : "SHAPES", (progress) => update(item.id, { progress }));
         update(item.id, { progress: 1, scanId: result.scanId });
         client.invalidateQueries({ queryKey: ["scans"] });
       } catch (error) {

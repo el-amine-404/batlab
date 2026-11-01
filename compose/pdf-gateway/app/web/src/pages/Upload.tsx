@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ChangeEvent, type DragEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, FileText, FolderTree, ScanSearch, ShieldCheck, UploadCloud, type LucideIcon } from "lucide-react";
+import { Switch } from "radix-ui";
 import { Link } from "react-router";
 import { api } from "../api";
 import { useSession } from "../App";
@@ -23,6 +24,7 @@ export function UploadPage() {
   const session = useSession();
   const { items, add, canUpload } = useUploads();
   const [dragging, setDragging] = useState(false);
+  const [strict, setStrict] = useState(() => localStorage.getItem("rebuildMode") === "RASTER");
   const [reports, setReports] = useState<Record<string, Report>>({});
   const report = useCallback((id: string, value: Report) => setReports((current) =>
     current[id]?.finished === value.finished && current[id]?.remaining === value.remaining ? current : { ...current, [id]: value }), []);
@@ -39,6 +41,20 @@ export function UploadPage() {
       <PageHeader title="Add PDF files"
         description="Each file is checked, rebuilt as a clean copy, filed, saved to your archive and added to Paperless. Your original is never released." />
       {session.role === "READ_ONLY" && <ErrorNote error={new Error("This account can only read; it cannot add files.")} />}
+      <div className="flex items-start justify-between gap-4 rounded-xl border border-border bg-card p-4" data-testid="rebuild-mode">
+        <div className="min-w-0">
+          <p className="text-sm font-medium">Strictest rebuild: images only</p>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            {strict ? "New files become pictures of their pages: the least a PDF viewer has to process, but larger, and text is only as sharp as the picture."
+              : "New files are rebuilt as sharp shapes and clean images, small and searchable. Turn this on for files you really don't trust."}
+          </p>
+        </div>
+        <Switch.Root checked={strict} aria-label="Strictest rebuild: images only" data-testid="rebuild-strict"
+          onCheckedChange={(on) => { localStorage.setItem("rebuildMode", on ? "RASTER" : "SHAPES"); setStrict(on); }}
+          className="relative mt-0.5 h-6 w-11 shrink-0 rounded-full bg-muted transition outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=checked]:bg-primary">
+          <Switch.Thumb className="block size-5 translate-x-0.5 rounded-full bg-foreground transition data-[state=checked]:translate-x-[1.375rem] data-[state=checked]:bg-primary-foreground" />
+        </Switch.Root>
+      </div>
       <label onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop}
         className={cx("group relative flex min-h-72 cursor-pointer flex-col items-center justify-center gap-4 overflow-hidden rounded-2xl border-2 border-dashed p-8 text-center transition",
           dragging ? "border-primary bg-primary/10" : "border-border bg-card backdrop-blur-xl hover:border-primary/50 hover:bg-primary/5",

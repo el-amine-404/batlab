@@ -196,6 +196,18 @@ def structural(path: Path, rules: Path) -> tuple[list[dict], list[dict]]:
     return engines, findings
 
 
+def fonts_seen(path: Path) -> dict:
+    """What fonts the original carries, for the record. They never reach the clean copy, so nothing here decides anything."""
+    result = command("pdffonts", ["pdffonts", str(path)])
+    counts: dict[str, int] = {}
+    for line in result["output"].splitlines()[2:]:
+        for kind in ("Type 3", "CID TrueType", "CID Type 0", "TrueType", "Type 1"):
+            if kind in line:
+                counts[kind] = counts.get(kind, 0) + 1
+                break
+    return {"status": "OK" if result["status"] == "OK" else "UNREADABLE", "byType": counts}
+
+
 def decide(engines: list[dict], findings: list[dict]) -> tuple[str, str]:
     if any(item["code"] == "MALWARE_DETECTED" for item in findings):
         return "MALICIOUS", "BLOCK"
@@ -231,7 +243,7 @@ def main() -> int:
     detection, policy = decide(engines, findings)
     report = {"schemaVersion": REPORT_VERSION, "policyVersion": POLICY_VERSION,
               "rulesetVersion": RULESET_VERSION, "sourceSha256": source_hash,
-              "sourceBytes": path.stat().st_size, "detection": detection,
+              "sourceBytes": path.stat().st_size, "detection": detection, "fonts": fonts_seen(path),
               "policyDecision": policy, "engines": engines, "findings": findings}
     json.dump(report, sys.stdout, sort_keys=True, separators=(",", ":"))
     sys.stdout.write("\n")

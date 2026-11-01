@@ -82,7 +82,7 @@ def claim(scan_id: str) -> dict | None:
         cursor.execute("INSERT INTO job_steps(id,scan_id,step_type,status,attempt,started_at) VALUES (%s,%s,'VALIDATION','RUNNING',%s,now())",
                        (str(uuid.uuid4()), scan_id, attempt))
         return {"attempt": attempt, "artifactId": artifact[0], "output": STORAGE / artifact[1], "outputSha256": artifact[2],
-                "source": STORAGE / "quarantine" / f"{quarantine_object}.bin", "sourceSha256": source_hash}
+                "source": STORAGE / "quarantine" / f"{quarantine_object}.bin", "sourceSha256": source_hash, "profile": profile_of(scan_id)}
 
 
 def write_report(scan_id: str, attempt: int, report: dict) -> tuple[str, int]:
@@ -156,6 +156,15 @@ def persist(scan_id: str, job: dict, report: dict) -> None:
                       "slowestMs": max((item["durationMs"] or 0 for item in checks), default=0)}), flush=True)
 
 
+def profile_of(scan_id: str) -> str:
+    """Asked of the database, never of the file: only a scan that asked for shapes and got them is checked as shapes."""
+    with database() as connection, connection.cursor() as cursor:
+        cursor.execute("""SELECT 1 FROM cdr_results c JOIN scan_jobs s ON s.id=c.scan_id
+                           WHERE c.scan_id=%s AND c.status='SUCCEEDED' AND s.cdr_mode='SHAPES' AND c.evidence->>'rebuildMode'='SHAPES'
+                           ORDER BY c.attempt DESC LIMIT 1""", (scan_id,))
+        return "shapes" if cursor.fetchone() else "raster"
+
+
 def validate(job: dict) -> dict:
     """Run final validation on the job's exact output bytes; any doubt is not a PASS."""
     try:
@@ -170,7 +179,8 @@ def validate(job: dict) -> dict:
         report.update(verdict="FAIL", detection="SUSPICIOUS", outputSha256=None)
         return report
     result = subprocess.run(["python3", "/opt/pdf-gateway/final_validate.py", str(job["output"]),
-                             "--expected-sha256", job["outputSha256"], "--source", str(job["source"])],
+                             "--expected-sha256", job["outputSha256"], "--source", str(job["source"]),
+                             "--profile", job["profile"]],
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600, check=False,
                             env=os.environ.copy())
     try:
@@ -213,7 +223,7 @@ def handle_revision(channel, method, _properties, body: bytes) -> None:
             channel.basic_ack(method.delivery_tag)
             return
         job = {"attempt": attempt, "artifactId": artifact_id, "output": STORAGE / row[0], "outputSha256": row[1],
-               "source": STORAGE / "quarantine" / f"{row[3]}.bin", "sourceSha256": row[2]}
+               "source": STORAGE / "quarantine" / f"{row[3]}.bin", "sourceSha256": row[2], "profile": profile_of(scan_id)}
         report = validate(job)
         verdict = report["verdict"] if report.get("verdict") != "PASS" or report.get("outputSha256") == job["outputSha256"] else "FAIL"
         report_hash, report_bytes = write_report(scan_id, attempt, report)

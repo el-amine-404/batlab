@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 import re
+import resource
 import shlex
 import shutil
 import signal
@@ -42,6 +43,8 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$")
 CONTAINER_NAME = re.compile(r"--name[= ](dangerzone-doc-to-pixels-[A-Za-z0-9_-]+)")
 IMAGE = "ghcr.io/freedomofpress/dangerzone/v1"
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+SHAPES_IMAGE = re.compile(r"^sha256:[0-9a-f]{64}$")
+SHAPES_MAX_LIST = 1024 * 1024 * 1024
 TOOL_ENV_KEYS = ("HOME", "USER", "LOGNAME", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "CONTAINERS_CONF")
 
 
@@ -205,6 +208,57 @@ def convert(source: Path, workdir: Path, args: argparse.Namespace, image_digest:
     return output, {"durationMs": duration_ms, "isolation": evidence}
 
 
+def writer_limits() -> None:
+    resource.setrlimit(resource.RLIMIT_AS, (2 * 1024 ** 3, 2 * 1024 ** 3))
+    resource.setrlimit(resource.RLIMIT_CPU, (300, 300))
+    resource.setrlimit(resource.RLIMIT_NOFILE, (32, 32))
+
+
+def convert_shapes(source: Path, workdir: Path, args: argparse.Namespace, job_id: str) -> tuple[Path, dict]:
+    """The hostile file goes into gVisor by stdin and only a list comes out; our own writer makes the PDF from it."""
+    image = args.shapes_image
+    if not image:
+        raise Failure("SHAPES_UNAVAILABLE", "no shapes image configured")
+    run_tool(["/usr/bin/podman", "image", "exists", image])
+    frames, output = workdir / "shapes.frames", workdir / "shapes.pdf"
+    name = f"pdf-shapes-{job_id[5:].lower()}"
+    argv = ["/usr/bin/podman", "--runtime", "/usr/bin/runsc", "--runtime-flag", "ignore-cgroups", "--runtime-flag", "network=none",
+            "run", "--rm", "-i", "--name", name, "--network=none", "--cap-drop=all", "--security-opt", "no-new-privileges", "--read-only",
+            "--tmpfs", "/tmp:rw,size=1g,mode=1777", "-u", "1000:1000", image]
+    started = time.monotonic()
+    with source.open("rb") as stdin, frames.open("xb") as stdout:
+        process = subprocess.Popen(argv, stdin=stdin, stdout=stdout, stderr=subprocess.DEVNULL, cwd=workdir, env=tool_env(), start_new_session=True)
+        failure = None
+        while process.poll() is None:
+            if time.monotonic() - started > args.shapes_timeout:
+                failure = Failure("SHAPES_TIMEOUT", f"exceeded {args.shapes_timeout}s")
+            elif frames.stat().st_size > SHAPES_MAX_LIST:
+                failure = Failure("SHAPES_TOO_LARGE", "the list exceeded its bound")
+            if failure:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+                subprocess.run(["/usr/bin/podman", "rm", "-f", name], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, timeout=30, check=False, env=tool_env())
+                raise failure
+            time.sleep(0.1)
+    if process.returncode != 0:
+        raise Failure("SHAPES_FAILED", f"sandbox exited {process.returncode}")
+    try:
+        result = subprocess.run(["/usr/bin/python3", "-I", str(Path(__file__).with_name("shape_writer.py")), str(frames), str(output), str(args.max_output_bytes)],
+                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=args.shapes_timeout,
+                                check=False, env=tool_env(), preexec_fn=writer_limits)
+    except subprocess.TimeoutExpired as error:
+        raise Failure("SHAPES_TIMEOUT", "writer ran out of time") from error
+    if result.returncode != 0:
+        raise Failure("SHAPES_REFUSED", result.stdout.decode("utf-8", "replace")[:200])
+    frames.unlink()
+    return output, {"durationMs": int((time.monotonic() - started) * 1000), "rebuildMode": "SHAPES", "shapes": json.loads(result.stdout),
+                    "isolation": {"outerNetwork": "none", "outerCapabilities": "all-dropped", "noNewPrivileges": True, "hostMounts": "none",
+                                  "innerSandbox": "gVisor runsc", "innerNetwork": "none", "sourceTransfer": "stdin", "imageReference": image,
+                                  "writer": "shape_writer.py, outside the sandbox"},
+            }
+
+
 def read_line(conn: socket.socket) -> dict:
     data = bytearray()
     while not data.endswith(b"\n"):
@@ -246,9 +300,11 @@ def handle(conn: socket.socket, args: argparse.Namespace) -> None:
         job_id = request.get("jobId")
         expected_hash = request.get("sha256")
         length = request.get("bytes")
+        mode = request.get("mode", "RASTER")
         if (request.get("protocol") != PROTOCOL or not isinstance(job_id, str) or not JOB_ID.match(job_id)
                 or not isinstance(expected_hash, str) or not SHA256.match(expected_hash)
-                or not isinstance(length, int) or isinstance(length, bool) or not 0 < length <= MAX_INPUT):
+                or not isinstance(length, int) or isinstance(length, bool) or not 0 < length <= MAX_INPUT
+                or mode not in ("SHAPES", "RASTER", "RASTER_WITH_OCR")):
             raise Failure("INPUT_INVALID", "request header failed validation")
         source = workdir / "input.pdf"
         digest = hashlib.sha256()
@@ -266,8 +322,22 @@ def handle(conn: socket.socket, args: argparse.Namespace) -> None:
             raise Failure("INPUT_INVALID", "source SHA-256 mismatch")
         log("conversion_started", jobId=job_id, bytes=length)
         conn.settimeout(None)
-        caps = capability(args.expected_image_digest)
-        output, details = convert(source, workdir, args, caps["imageDigest"])
+        shapes_failure = None
+        output = None
+        if mode == "SHAPES":
+            try:
+                output, details = convert_shapes(source, workdir, args, job_id)
+                caps = {"dangerzoneVersion": "shapes-1", "imageDigest": args.shapes_image, "outerRuntime": "runsc"}
+            except (Failure, OSError, ValueError) as failure:
+                # Pixels are always a safe answer: the page is still rebuilt, and said to be.
+                shapes_failure = getattr(failure, "code", type(failure).__name__)
+                log("shapes_failed", jobId=job_id, code=shapes_failure, detail=getattr(failure, "detail", ""))
+        if output is None:
+            caps = capability(args.expected_image_digest)
+            output, details = convert(source, workdir, args, caps["imageDigest"])
+            details["rebuildMode"] = "RASTER"
+            if shapes_failure:
+                details["shapesFailure"] = shapes_failure
         size = output.stat().st_size
         out_digest = hashlib.sha256()
         with output.open("rb") as handle:
@@ -307,9 +377,14 @@ def main() -> int:
     parser.add_argument("--expected-image-digest", default=None)
     # One Tesseract language (Dangerzone takes one); empty for image-only output.
     parser.add_argument("--ocr-language", default="")
+    # The shapes sandbox, by image id; without it a request for shapes gets the image rebuild.
+    parser.add_argument("--shapes-image", default="")
+    parser.add_argument("--shapes-timeout", type=int, default=300)
     args = parser.parse_args()
     if args.ocr_language and not re.fullmatch(r"[a-z]{3}(_[a-z]{2,4})?", args.ocr_language):
         parser.error("--ocr-language must be one Tesseract language code such as fra or eng")
+    if args.shapes_image and not SHAPES_IMAGE.match(args.shapes_image):
+        parser.error("--shapes-image must be sha256:<64 hex>, the image's id")
     if args.expected_image_digest and not DIGEST.match(args.expected_image_digest):
         parser.error("--expected-image-digest must be sha256:<64 hex>")
     os.umask(0o077)

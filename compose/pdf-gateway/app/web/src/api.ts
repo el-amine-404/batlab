@@ -38,6 +38,7 @@ export const Scan = z.object({
   sourceSha256: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  cdrMode: z.string().nullish(),
 });
 export type Scan = z.infer<typeof Scan>;
 export const ScanPage = z.object({ items: z.array(Scan), nextCursor: z.string().nullable() });
@@ -51,6 +52,7 @@ export const Findings = z.object({
     engines: z.array(z.object({ engine: z.string().nullish(), status: z.string().nullish(), version: z.string().nullish(),
       databaseVersion: z.string().nullish(), databaseDate: z.string().nullish(), durationMs: z.number().nullish() })),
     findings: z.array(Finding),
+    fonts: z.object({ byType: z.record(z.string(), z.number()).nullish() }).nullish(),
     textExtraction: z.object({ status: z.string().nullish(), pages: z.number().nullish(), characters: z.number().nullish() }),
   }).nullable(),
   signature: z.object({
@@ -61,7 +63,8 @@ export const Findings = z.object({
     limitations: z.array(z.string()),
   }).nullable(),
   cdr: z.array(z.object({ attempt: z.number(), status: z.string(), failureCode: z.string().nullish(),
-    durationMs: z.number().nullish(), dangerzoneVersion: z.string().nullish() })),
+    durationMs: z.number().nullish(), dangerzoneVersion: z.string().nullish(), rebuildMode: z.string().nullish(),
+    shapes: z.object({ pages: z.number().nullish(), pixelPages: z.number().nullish() }).nullish(), shapesFailure: z.string().nullish(), outputBytes: z.number().nullish() })),
   validation: z.array(z.object({ attempt: z.number(), artifact: z.string().nullish(), verdict: z.string(),
     failureCodes: z.array(z.string()), policyVersion: z.string(), outputBytes: z.number().nullish(), createdAt: z.string().nullish(),
     checks: z.array(Check).nullish(), findings: z.array(Finding).nullish() })),
@@ -261,7 +264,7 @@ export const api = {
 };
 
 /** Upload with progress (fetch has no upload progress). The original is never read back by the UI. */
-export function upload(file: File, intent: string, onProgress: (fraction: number) => void): Promise<{ scanId: string }> {
+export function upload(file: File, intent: string, cdrMode: "SHAPES" | "RASTER", onProgress: (fraction: number) => void): Promise<{ scanId: string }> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/v1/scans");
@@ -280,7 +283,7 @@ export function upload(file: File, intent: string, onProgress: (fraction: number
     const form = new FormData();
     form.append("file", file, file.name);
     form.append("intent", intent);
-    form.append("cdrMode", "RASTER");
+    form.append("cdrMode", cdrMode);
     xhr.send(form);
   });
 }

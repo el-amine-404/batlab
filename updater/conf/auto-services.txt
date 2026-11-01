@@ -28,3 +28,5 @@ subfeed
 videodrop
 musicguard
 tv-remote
+# The PDF gateway's scanner. Its own images are built by update_pdf_gateway in update.sh; its database and broker stay manual.
+clamav

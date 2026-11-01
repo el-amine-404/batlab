@@ -41,10 +41,18 @@ CIDFONT_KEYS = {"/Type", "/Subtype", "/BaseFont", "/CIDSystemInfo", "/FontDescri
 DESCRIPTOR_KEYS = {"/Type", "/FontName", "/Flags", "/FontBBox", "/ItalicAngle", "/Ascent", "/Descent", "/CapHeight",
                    "/StemV", "/FontFile2"}
 MAX_FONT_STREAM = 256 * 1024
+MAX_BYTES_JPEG = 64 * 1024 * 1024
 # Document information may carry only these keys (string values; checked below).
 INFO_KEYS = {"/Title", "/Subject", "/Keywords", "/Author", "/Creator", "/Producer", "/CreationDate", "/ModDate"}
 FORBIDDEN_VALUES = {"/JavaScript", "/Launch", "/URI", "/SubmitForm", "/ImportData", "/GoToR", "/GoToE",
                     "/RichMedia", "/Movie", "/Sound", "/EmbeddedFile", "/Form", "/PS"}
+# A shapes rebuild: pages are plain paths, images and the invisible text layer, drawn by operators from
+# this list alone, with names of the writer's own form and no literal strings or inline images.
+SHAPE_OPERATORS = {b"q", b"Q", b"cm", b"m", b"l", b"c", b"h", b"f", b"f*", b"B", b"B*", b"S", b"n", b"W", b"W*", b"w", b"J", b"j", b"M", b"d",
+                   b"rg", b"RG", b"gs", b"Do", b"BT", b"ET", b"Tr", b"Tf", b"Tz", b"Tm", b"Tj"}
+SHAPE_TOKEN = re.compile(rb"[-+]?(?:\d+\.?\d*|\.\d+)(?![^\s\[\]<>/])|/[GIF]\d{1,7}(?![^\s\[\]<>/])|<[0-9a-f]*>|\[|\]|[A-Za-z]+\*?(?![^\s\[\]<>/])")
+SHAPE_IMAGE_KEYS = {"/Type", "/Subtype", "/Width", "/Height", "/BitsPerComponent", "/ColorSpace", "/Filter", "/DecodeParms", "/SMask", "/Length"}
+MAX_SHAPE_CONTENT = 256 * 1024 * 1024
 
 
 def sha256(path: Path) -> str:
@@ -72,7 +80,118 @@ def walk(value, findings: list[dict], where: str) -> None:
         fail(findings, "structure", "FORBIDDEN_STRUCTURE", "Output references a forbidden PDF type", name=value, object=where)
 
 
-def structure(path: Path, findings: list[dict]) -> tuple[dict, list[list[float]]]:
+def check_shape_content(content: bytes) -> bytes | None:
+    """The first token or operator outside the list, or None; walks every token, leaving nothing unread."""
+    at, end = 0, len(content)
+    while at < end:
+        while at < end and content[at] in b" \t\r\n":
+            at += 1
+        if at >= end:
+            break
+        match = SHAPE_TOKEN.match(content, at)
+        if not match:
+            return content[at:at + 20]
+        token = match.group()
+        if token[:1].isalpha() and token not in SHAPE_OPERATORS:
+            return token[:20]
+        at = match.end()
+    return None
+
+
+def check_jpeg(data: bytes) -> str | None:
+    """What's wrong with a JPEG, or None: only the markers jpegtran writes, one baseline frame, entropy data, one EOI."""
+    if data[:2] != b"\xff\xd8" or data[-2:] != b"\xff\xd9":
+        return "not a whole JPEG"
+    at, frames = 2, 0
+    while at + 4 <= len(data) and data[at] == 0xFF:
+        marker, length = data[at + 1], int.from_bytes(data[at + 2:at + 4], "big")
+        if marker == 0xDA:
+            if frames != 1:
+                return "scan without one frame"
+            body = data[at + 2 + length:-2]
+            found = body.find(b"\xff")
+            while found != -1 and found + 1 < len(body):
+                if body[found + 1] != 0 and not 0xD0 <= body[found + 1] <= 0xD7:
+                    return "marker after the scan"
+                found = body.find(b"\xff", found + 2)
+            return None
+        if marker == 0xC0:
+            frames += 1
+        elif marker == 0xE0:
+            if data[at + 4:at + 9] != b"JFIF\0" or length != 16:
+                return "APP0 is not plain JFIF"
+        elif marker not in (0xDB, 0xC4):
+            return f"marker {marker:02x} not allowed"
+        at += 2 + length
+    return "broken marker structure"
+
+
+def raw_stream(path: Path, ref: str, limit: int) -> bytes | None:
+    """One object's stream as stored (a JPEG stays a JPEG); None when it can't be read."""
+    match = re.fullmatch(r"obj:(\d+) (\d+) R", ref)
+    if not match:
+        return None
+    try:
+        result = subprocess.run(["qpdf", f"--show-object={match.group(1)},{match.group(2)}", "--raw-stream-data", str(path)],
+                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=30,
+                                check=False, env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "HOME": "/nonexistent"},
+                                preexec_fn=scan.bounded_preexec)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return result.stdout if result.returncode == 0 and len(result.stdout) <= limit else None
+
+
+def check_shapes(path: Path, objects: dict, findings: list[dict]) -> dict:
+    """The stricter half of a shapes rebuild's check: what its pages may draw and what its images may be."""
+    def bad(code, message, **evidence):
+        fail(findings, "structure", code, message, **evidence)
+
+    def deref(ref):
+        entry = objects.get(f"obj:{ref}") if isinstance(ref, str) else None
+        return entry.get("value") if isinstance(entry, dict) else ref
+
+    images = shapes_pages = 0
+    total = 0
+    for name, entry in objects.items():
+        if not isinstance(entry, dict):
+            continue
+        stream = entry.get("stream", {}).get("dict")
+        if isinstance(stream, dict) and stream.get("/Subtype") == "/Image":
+            images += 1
+            if set(stream) - SHAPE_IMAGE_KEYS or stream.get("/ColorSpace") not in ("/DeviceRGB", "/DeviceGray") \
+                    or stream.get("/Filter") not in ("/DCTDecode", "/FlateDecode"):
+                bad("IMAGE_NOT_ALLOWED", "An image isn't in the plain form the rebuild writes", object=name, keys=sorted(set(stream) - SHAPE_IMAGE_KEYS)[:10])
+            elif stream.get("/Filter") == "/DCTDecode":
+                data = raw_stream(path, name, MAX_BYTES_JPEG)
+                problem = "unreadable" if data is None else check_jpeg(data)
+                if problem:
+                    bad("IMAGE_NOT_ALLOWED", "A JPEG isn't in the plain form the rebuild writes", object=name, problem=problem)
+        value = entry.get("value")
+        if not isinstance(value, dict) or value.get("/Type") != "/Page":
+            continue
+        shapes_pages += 1
+        resources = value.get("/Resources")
+        states = deref(resources.get("/ExtGState")) if isinstance(resources, dict) else None
+        if states is not None:
+            for state in (states.values() if isinstance(states, dict) else [None]):
+                state = deref(state)
+                if not isinstance(state, dict) or set(state) - {"/ca", "/CA", "/Type"} or not all(isinstance(state.get(key, 0), (int, float)) for key in ("/ca", "/CA")):
+                    bad("GRAPHICS_STATE_NOT_ALLOWED", "A page's graphics state does more than set opacity", object=name)
+                    break
+        contents = value.get("/Contents")
+        for ref in contents if isinstance(contents, list) else [contents]:
+            data = stream_bytes(path, ref, MAX_SHAPE_CONTENT)
+            if data is None:
+                bad("CONTENT_UNREADABLE", "Page content could not be read", object=name)
+                continue
+            total += len(data)
+            unexpected = check_shape_content(data)
+            if unexpected is not None:
+                bad("CONTENT_NOT_ALLOWED", "A page draws with something outside the allowed list", object=name, token=repr(unexpected)[:40])
+    return {"engine": "shape-content", "status": "OK", "pages": shapes_pages, "images": images, "contentBytes": total}
+
+
+def structure(path: Path, findings: list[dict], shapes: bool = False) -> tuple[dict, list[list[float]]]:
     """Decode the object graph with qpdf, so object streams cannot hide names."""
     # scan.command keeps 64 KiB of output; the decoded graph needs a larger bound.
     try:
@@ -105,6 +224,7 @@ def structure(path: Path, findings: list[dict]) -> tuple[dict, list[list[float]]
         else:
             walk(value, findings, name)
         walk(stream, findings, name)
+        # Forms are never allowed; the writer draws everything on the page itself.
         if isinstance(stream, dict) and stream.get("/Type") == "/XObject" and stream.get("/Subtype") != "/Image":
             fail(findings, "structure", "NON_IMAGE_XOBJECT", "Output page uses a non-image XObject", object=name)
         if isinstance(value, dict) and value.get("/Type") == "/Page":
@@ -114,7 +234,7 @@ def structure(path: Path, findings: list[dict]) -> tuple[dict, list[list[float]]
                 fail(findings, "structure", "PAGE_BOX_INVALID", "Output page lacks a MediaBox", object=name)
                 continue
             pages.append([float(item) for item in box])
-            if not isinstance(resources, dict) or set(resources) - {"/XObject", "/ProcSet", "/Font"}:
+            if not isinstance(resources, dict) or set(resources) - ({"/XObject", "/ProcSet", "/Font", "/ExtGState"} if shapes else {"/XObject", "/ProcSet", "/Font"}):
                 fail(findings, "structure", "PAGE_RESOURCES_UNEXPECTED", "Output page has non-image resources",
                      object=name, keys=sorted(resources) if isinstance(resources, dict) else None)
     # Info dictionaries (trailer, and MuPDF's catalog-level copy) hold strings
@@ -139,6 +259,7 @@ def structure(path: Path, findings: list[dict]) -> tuple[dict, list[list[float]]
     engine["pages"] = len(pages)
     engine["infoDictionaries"] = len(info_refs)
     engine["textLayerFonts"] = fonts(path, objects, findings)
+    engine["shapes"] = check_shapes(path, objects, findings) if shapes else None
     return engine, pages
 
 
@@ -282,6 +403,7 @@ def main() -> int:
     parser.add_argument("--clamd-timeout", type=int, default=30)
     parser.add_argument("--max-definition-age-hours", type=int, default=48)
     parser.add_argument("--rules", type=Path, default=Path("/opt/pdf-gateway/rules/pdf-risk.yar"))
+    parser.add_argument("--profile", choices=("raster", "shapes"), default="raster", help="what the rebuild was: pages of images, or of shapes")
     args = parser.parse_args()
 
     findings: list[dict] = []
@@ -320,7 +442,7 @@ def main() -> int:
         item = dict(item, severity="ERROR") if item["severity"] != "ERROR" else item
         findings.append(item)
 
-    decoded, boxes = structure(path, findings)
+    decoded, boxes = structure(path, findings, args.profile == "shapes")
     engines.append(decoded)
     output_pages = page_count(path)
     source_pages = page_count(args.source.resolve(strict=True))
@@ -344,14 +466,14 @@ def main() -> int:
     if any(item["code"] == "MALWARE_DETECTED" for item in denials):
         verdict, detection, decision = "FAIL", "MALICIOUS", "BLOCK"
     elif any(item["code"] in {"CLAMAV_UNAVAILABLE", "CLAMAV_DATABASE_STALE", "CLAMAV_SCAN_ERROR", "ENGINE_FAILED",
-                              "STRUCTURE_UNREADABLE", "PAGE_COUNT_UNKNOWN", "RENDER_FAILED"} for item in denials):
+                              "STRUCTURE_UNREADABLE", "PAGE_COUNT_UNKNOWN", "RENDER_FAILED", "CONTENT_UNREADABLE"} for item in denials):
         verdict, detection, decision = "UNKNOWN", "UNKNOWN", "REVIEW_REQUIRED"
     elif denials:
         verdict, detection, decision = "FAIL", "SUSPICIOUS", "REVIEW_REQUIRED"
     else:
         verdict, detection, decision = "PASS", "NO_THREATS_DETECTED", "ALLOW_SANITIZED"
 
-    report = {"schemaVersion": REPORT_VERSION, "policyVersion": POLICY_VERSION,
+    report = {"schemaVersion": REPORT_VERSION, "policyVersion": POLICY_VERSION, "profile": args.profile,
               "rulesetVersion": scan.RULESET_VERSION, "outputSha256": initial, "outputBytes": size,
               "verdict": verdict, "detection": detection, "policyDecision": decision,
               "failureCodes": sorted({item["code"] for item in denials}),

@@ -348,6 +348,16 @@ build-pdf-gateway:
 		contexts=""; [ "$$extra" = "-" ] || for item in $$(echo "$$extra" | tr , " "); do contexts="$$contexts --build-context $$item"; done; \
 		docker build --network host $$contexts -t "$$image" -f "$$context/$$dockerfile" "$$context" || exit 1; \
 	done
+	@# The shapes sandbox runs under the provider's podman, pinned by image id.
+	@docker build -q --network host -t local/pdf-shapes-sandbox compose/pdf-gateway/app/shapes-sandbox >/dev/null
+	@id="$$(docker image inspect --format '{{.Id}}' local/pdf-shapes-sandbox)"; dir="$$HOME/.config/pdf-cdr-provider"; \
+	if [ -f "$$dir/provider.env" ] && [ "$$(cat "$$dir/shapes-image.built" 2>/dev/null)" != "$$id" ]; then \
+		docker save local/pdf-shapes-sandbox | podman load -q >/dev/null || exit 1; \
+		loaded="$$(podman image inspect --format '{{.Id}}' docker.io/local/pdf-shapes-sandbox:latest)" || exit 1; \
+		sed -i "s|^PDF_CDR_SHAPES_IMAGE=.*|PDF_CDR_SHAPES_IMAGE=sha256:$${loaded#sha256:}|" "$$dir/provider.env"; \
+		echo "$$id" >"$$dir/shapes-image.built"; \
+		echo "==> shapes sandbox sha256:$${loaded#sha256:}; restarting the provider"; systemctl --user restart pdf-cdr-provider; \
+	fi
 
 build-scanloom:
 	@echo "==> build Scanloom server and PWA (serially)"

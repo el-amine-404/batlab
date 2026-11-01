@@ -4,7 +4,11 @@
     "config:recommended"
   ],
   "enabledManagers": [
-    "custom.regex"
+    "custom.regex",
+    "dockerfile",
+    "npm",
+    "maven",
+    "pip_requirements"
   ],
   "customManagers": [
     {
@@ -40,6 +44,19 @@
         "CRATE_[A-Z0-9_]+=(?<depName>[^\\s]+)\\nVERSION_[A-Z0-9_]+=(?<currentValue>[^\\s]+)"
       ],
       "datasourceTemplate": "crate"
+    },
+    {
+      "customType": "regex",
+      "description": "The pdfid and pdf-parser commit the gateway's analysis image pins",
+      "managerFilePatterns": [
+        "/^compose/pdf-gateway/app/analysis-worker/Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG DIDIER_STEVENS_COMMIT=(?<currentDigest>[a-f0-9]{40})"
+      ],
+      "currentValueTemplate": "master",
+      "depNameTemplate": "https://github.com/DidierStevens/DidierStevensSuite.git",
+      "datasourceTemplate": "git-refs"
     }
   ],
   "dependencyDashboard": true,
@@ -52,6 +69,19 @@
   "prConcurrentLimit": 0,
   "prHourlyLimit": 0,
   "packageRules": [
+    {
+      "description": "Dockerfiles, npm, Maven and pip are read for the PDF gateway alone: it parses hostile files, so what it's built from has to keep moving. Other apps stay on versions.env",
+      "matchManagers": [
+        "dockerfile",
+        "npm",
+        "maven",
+        "pip_requirements"
+      ],
+      "matchFileNames": [
+        "!compose/pdf-gateway/**"
+      ],
+      "enabled": false
+    },
     {
       "description": "Commit and PR titles: the exact tag written to versions.env, no added v prefix; placed in a rule so it overrides the docker preset",
       "matchDatasources": [
@@ -223,6 +253,46 @@
       "matchPackageNames": [
         "yt-dlp"
       ],
+      "minimumReleaseAge": "1 day"
+    },
+    {
+      "description": "The gateway's parsers and base images: it reads hostile files, so fixes don't wait for a person or the weekly group. The updater rebuilds it, checks health and rolls back; majors stay manual",
+      "matchFileNames": [
+        "compose/pdf-gateway/**"
+      ],
+      "minimumReleaseAge": "1 day",
+      "labels": [
+        "dependencies",
+        "pdf-gateway"
+      ],
+      "groupName": "pdf gateway",
+      "schedule": [
+        "at any time"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest",
+        "pin",
+        "pinDigest"
+      ],
+      "automerge": true,
+      "automergeType": "branch",
+      "ignoreTests": true
+    },
+    {
+      "description": "ClamAV, the gateway's scanner: same reasoning",
+      "matchPackageNames": [
+        "clamav/clamav"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ],
+      "automerge": true,
+      "automergeType": "branch",
+      "ignoreTests": true,
       "minimumReleaseAge": "1 day"
     }
   ]

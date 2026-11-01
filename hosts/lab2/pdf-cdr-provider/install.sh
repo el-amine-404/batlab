@@ -12,6 +12,7 @@ fi
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 install -d -m 0700 "$HOME/.local/lib/pdf-cdr-provider" "$HOME/.config/pdf-cdr-provider" "$HOME/.config/systemd/user"
 install -m 0600 "$here/provider.py" "$HOME/.local/lib/pdf-cdr-provider/provider.py"
+install -m 0600 "$here/shape_writer.py" "$here/glyphless-font.json" "$HOME/.local/lib/pdf-cdr-provider/"
 install -m 0644 "$here/pdf-cdr-provider.service" "$HOME/.config/systemd/user/pdf-cdr-provider.service"
 env_file="$HOME/.config/pdf-cdr-provider/provider.env"
 if [[ ! -f $env_file ]]; then
@@ -25,6 +26,8 @@ if [[ ! -f $env_file ]]; then
 fi
 # Added after the first install: a searchable text layer (one language).
 grep -q '^PDF_CDR_OCR_LANGUAGE=' "$env_file" || echo 'PDF_CDR_OCR_LANGUAGE=fra' >>"$env_file"
+# Added with the shapes rebuild; set by `make build-pdf-gateway` once its image is loaded.
+grep -q '^PDF_CDR_SHAPES_IMAGE=' "$env_file" || echo 'PDF_CDR_SHAPES_IMAGE=' >>"$env_file"
 systemctl --user daemon-reload
 echo "Installed. Not enabled. Review $env_file, then: systemctl --user enable --now pdf-cdr-provider"
 echo "A persistent user service also requires: loginctl enable-linger $USER"

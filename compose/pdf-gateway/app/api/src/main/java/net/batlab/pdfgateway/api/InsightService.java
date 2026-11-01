@@ -37,7 +37,7 @@ public class InsightService {
                   'scanId', s.id,
                   'analysis', (SELECT jsonb_build_object(
                       'detection', d->'detection', 'policyDecision', d->'policyDecision', 'policyVersion', d->'policyVersion',
-                      'rulesetVersion', d->'rulesetVersion',
+                      'rulesetVersion', d->'rulesetVersion', 'fonts', d->'fonts',
                       'engines', COALESCE((SELECT jsonb_agg(jsonb_build_object('engine', e->'engine', 'status', e->'status', 'version', e->'version',
                                                                                'databaseVersion', e->'databaseVersion', 'databaseDate', e->'databaseDate',
                                                                                'durationMs', e->'durationMs'))
@@ -62,7 +62,8 @@ public class InsightService {
                     FROM signature_verifications v WHERE v.scan_id=s.id ORDER BY v.attempt DESC LIMIT 1),
                   'cdr', COALESCE((SELECT jsonb_agg(jsonb_build_object('attempt', c.attempt, 'status', c.status, 'failureCode', c.failure_code,
                                     'retryable', c.retryable, 'durationMs', c.duration_ms, 'dangerzoneVersion', c.dangerzone_version,
-                                    'imageDigest', c.image_digest, 'isolation', c.evidence->'isolation') ORDER BY c.attempt)
+                                    'imageDigest', c.image_digest, 'isolation', c.evidence->'isolation',
+                                    'rebuildMode', c.evidence->'rebuildMode', 'shapes', c.evidence->'shapes', 'shapesFailure', c.evidence->'shapesFailure', 'outputBytes', c.output_bytes) ORDER BY c.attempt)
                                    FROM cdr_results c WHERE c.scan_id=s.id), '[]'::jsonb),
                   'validation', COALESCE((SELECT jsonb_agg(jsonb_build_object('attempt', f.attempt, 'artifact',
                                     (SELECT kind FROM artifacts WHERE id=f.artifact_id), 'verdict', f.verdict, 'detection', f.detection,

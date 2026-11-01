@@ -307,3 +307,19 @@ Slices, each tested on Lab2 with real engines, committed, merged:
 
 Never skip a milestone gate or substitute mocked security verdicts for actual
 engine execution.
+
+## Shapes rebuild (default since 2026-11-01)
+
+`cdrMode=SHAPES`: `shapes-sandbox/extract.py` parses the hostile PDF under gVisor (podman + runsc, no network, no
+capabilities, read-only, stdin only) and prints a list of shapes and pixels; `hosts/lab2/pdf-cdr-provider/shape_writer.py`,
+outside the sandbox and standard library only, checks that list and writes the new PDF. Nothing crosses as PDF syntax.
+JPEGs are rewritten by jpegtran (same pixels, no metadata, baseline markers only); other images go through pixels; a page the
+list can't express becomes pixels at 200 DPI; hidden text is dropped and image pages without text are OCRed.
+Any failure falls back to Dangerzone (`rebuildMode`, `shapesFailure` in `cdr_results.evidence`). `cdrMode=RASTER` remains
+the stricter choice on the upload page. Final validation's `--profile shapes` is chosen from the database, never from the file,
+and adds an operator allowlist, image key allowlist and JPEG marker check.
+It is less strict than pixels: viewers process path operators and JPEGs derived from the source.
+`make build-pdf-gateway` builds the sandbox image, loads it into the provider's podman, pins its id in `provider.env` and
+restarts the provider. Provider files themselves need `hosts/lab2/pdf-cdr-provider/install.sh`.
+Tests: `tests/shape_writer_test.py` (hostile lists), `tests/shapes_profile_test.py` (in the analysis image).
+Not yet run with this: the m3/m4/m8 suites, whose default upload mode changed to SHAPES.

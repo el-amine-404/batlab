@@ -28,7 +28,7 @@ public class ScanController {
             @RequestHeader("Idempotency-Key") String idempotencyKey,
             @RequestPart("file") MultipartFile file,
             @RequestParam String intent,
-            @RequestParam(defaultValue = "RASTER") String cdrMode,
+            @RequestParam(defaultValue = "SHAPES") String cdrMode,
             HttpServletRequest request) throws IOException {
         String trace = request.getHeader("X-Request-ID");
         if (trace == null || trace.isBlank() || trace.length() > 80) trace = Ulid.next("req-");

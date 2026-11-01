@@ -24,7 +24,7 @@ paths:
               properties:
                 file: {type: string, format: binary}
                 intent: {enum: [SCAN_ONLY, ARCHIVE, ARCHIVE_AND_IMPORT]}
-                cdrMode: {enum: [RASTER, RASTER_WITH_OCR], default: RASTER}
+                cdrMode: {enum: [SHAPES, RASTER, RASTER_WITH_OCR], default: SHAPES}
       responses:
         '202': {$ref: '#/components/responses/ScanAccepted'}
         '400': {$ref: '#/components/responses/Problem'}

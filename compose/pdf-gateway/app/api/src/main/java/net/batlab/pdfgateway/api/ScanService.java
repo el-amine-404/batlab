@@ -41,7 +41,7 @@ public class ScanService {
             throw new ApiException(400, "INVALID_IDEMPOTENCY_KEY", "Idempotency-Key must contain 16 to 128 characters");
         if (!List.of("SCAN_ONLY", "ARCHIVE", "ARCHIVE_AND_IMPORT").contains(intent))
             throw new ApiException(400, "INVALID_INTENT", "Unknown scan intent");
-        if (!List.of("RASTER", "RASTER_WITH_OCR").contains(cdrMode))
+        if (!List.of("SHAPES", "RASTER", "RASTER_WITH_OCR").contains(cdrMode))
             throw new ApiException(400, "INVALID_CDR_MODE", "Unknown CDR mode");
         if (upload.isEmpty()) throw new ApiException(400, "EMPTY_UPLOAD", "The PDF is empty");
         if (upload.getSize() > properties.maxUploadBytes()) throw new ApiException(413, "UPLOAD_TOO_LARGE", "Upload exceeds configured byte limit");
@@ -131,14 +131,14 @@ public class ScanService {
     }
 
     private static final String VIEW_COLUMNS =
-            "id,display_name,status,detection,policy,artifact_state,original_retention,import_status,source_bytes,source_sha256,created_at,updated_at";
+            "id,display_name,status,detection,policy,artifact_state,original_retention,import_status,source_bytes,source_sha256,created_at,updated_at,cdr_mode";
 
     private static ScanView view(java.sql.ResultSet rs) throws java.sql.SQLException {
         return new ScanView(rs.getString(1), rs.getString(2), ScanContract.status(rs.getString(3)),
                 ScanContract.stage(rs.getString(3)), ScanContract.detection(rs.getString(4)),
                 ScanContract.policy(rs.getString(5)), ScanContract.artifact(rs.getString(6)),
                 ScanContract.retention(rs.getString(7)), rs.getString(8), rs.getLong(9), rs.getString(10),
-                rs.getObject(11, OffsetDateTime.class), rs.getObject(12, OffsetDateTime.class));
+                rs.getObject(11, OffsetDateTime.class), rs.getObject(12, OffsetDateTime.class), rs.getString(13));
     }
 
     public ScanView get(GatewayPrincipal principal, String scanId) {
