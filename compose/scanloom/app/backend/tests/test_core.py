@@ -36,6 +36,20 @@ class ImagingTest(unittest.TestCase):
         self.assertTrue(np.array_equal(found, segmented))
         self.assertEqual((confidence, method), (.81, "GrabCut foreground fallback"))
 
+    def test_a_sliver_is_not_a_page(self):
+        image = np.full((1000, 1400, 3), 90, np.uint8)
+        for bad in ([[460, 250], [1180, 270], [1184, 329], [456, 304]],  # a stray line in a photo
+                    [[0, 24], [770, 62], [770, 62], [0, 73]]):           # two corners on one point
+            quad = np.array(bad, np.float32)
+            with mock.patch("scanloom.imaging._neural_boundary", return_value=(quad, .9)):
+                found, confidence, method = detect(image)
+            self.assertEqual(method, "no document found: whole photo")
+            self.assertLess(confidence, .72)
+            self.assertEqual(found[2].tolist(), [1399, 999])
+        receipt = np.array([[600, 50], [760, 50], [760, 950], [600, 950]], np.float32)
+        with mock.patch("scanloom.imaging._neural_boundary", return_value=(receipt, .9)):
+            self.assertEqual(detect(image)[2], "DocAligner neural boundary")
+
     def test_orientation_changes_only_with_strong_text_evidence(self):
         image = np.full((300, 500, 3), 220, np.uint8)
         header = b"level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n"
@@ -201,8 +215,8 @@ class ContainerTest(unittest.TestCase):
 class SettingsTest(unittest.TestCase):
     def test_defaults_and_limits(self):
         self.assertEqual(validate({}), DEFAULTS)
-        with self.assertRaisesRegex(ValueError, "retention_hours"):
-            validate({"retention_hours": 0})
+        with self.assertRaisesRegex(ValueError, "retention_days"):
+            validate({"retention_days": -1})
         with self.assertRaisesRegex(ValueError, "Unknown"):
             validate({"surprise": True})
 

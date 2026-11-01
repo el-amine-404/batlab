@@ -1,80 +1,89 @@
 # Scanloom
 
-Scanloom turns photographs of paper, cards, and receipts into clean document
-pages. It is independent of the PDF gateway: a person may download corrected
-images, an ordered ZIP, or a PDF, and may send that PDF anywhere they choose.
+Scanloom turns photographs of paper, cards and receipts into clean document
+pages, on the home network at `https://scanloom.homelab.lan`.
 
-## Product contract
+## What it promises
 
-- Uploading starts automatic processing immediately. The upload order is the
-  initial page order; no margins, paper size, or ordering questions interrupt it.
-- Every page is malware-scanned before an image decoder sees it, decoded with
-  strict size/type limits, normalized to a new metadata-free raster, detected,
-  perspective-corrected, and quality-scored.
-- The automatic lossless PNG is the primary result; a smaller JPEG, ordered ZIP,
-  and PDF are optional. Fine-tuning corners, rounded-card transparency, rotation,
-  appearance, order, or page membership creates a new result.
-- Originals and derivatives are temporary. A project and all of its capability
-  links expire; cleanup is automatic. There is no account or API authentication
-  in the first release, so Caddy restricts the app to the trusted LAN.
-- Processing never uses generative reconstruction. A blur, glare, clipped-edge,
-  or low-resolution warning asks for a better capture rather than inventing data.
-- "Integrity" means file integrity: exact JPEG/PNG/WebP parsing, rejection of
-  appended/polyglot payloads, malware scanning, decompression limits, and a
-  fresh metadata-free raster. Scanloom does not claim that it can reliably
-  determine whether the pictured document was created or altered by AI; that
-  is a different forensic problem and automated detectors are not a sound
-  authenticity control.
+- **Scanning starts as soon as photos arrive.** Dropped files or camera pictures
+  go up one at a time, in order; the screen shows each step and the time left.
+- **Scans are kept until deleted**, and are the same on every device: one live
+  stream tells each open page what changed. `retention_days` in the settings can
+  turn on automatic deletion for new scans.
+- **A file is never scanned twice.** The same file in the same scan isn't added;
+  the same file in another scan of the same owner reuses the earlier work (a hard
+  link to the clean copy, the same corners) and only makes the page.
+- **Every page is checked before a decoder sees it**: ClamAV, exact container
+  checks, decode limits, then a new metadata-free raster. The upload itself is
+  deleted once that copy exists.
+- **Nothing is invented.** Blur, glare and low resolution become notes on the page.
+  With no plausible page in a photo, the whole photo is kept and flagged.
+- **A failed page doesn't hold the others back**: the rest can be downloaded, and
+  the failed one tried again.
 
-## Services and trust boundaries
+## Who may use it
 
-| Service | Rights | Responsibility |
+Accounts as in batlab's other apps (`lib/batlab-common`): user name and password,
+a setup code in the log until the first admin exists, then roles.
+
+```
+docker exec scanloom-api admin setup-code
+docker exec -it scanloom-api admin reset-password <user name>
+docker exec scanloom-api admin add-key <name> --can scan
+```
+
+`scan`: make scans and manage one's own. `everyone`: see everybody's. `settings`:
+limits and the activity log. `admin`: all, and people and keys. Scans made before
+accounts belong to nobody: admins see them. Only `/api/v1/health` and the counts of
+`/api/v1/system/status` (Homepage) are open.
+
+## Services
+
+| Service | Rights | Does |
 | --- | --- | --- |
-| `web` | no storage | Static PWA and same-origin proxy |
-| `api` | incoming RW; derivatives RO | REST API, streaming upload, settings, downloads |
-| `worker` | incoming + work + exports | ClamAV gate, decoding, detection, correction, exports |
-| `postgres` | database only | Projects, page metadata, settings, leases, events |
-| `clamav` | definitions only | Malware signatures and bounded stream scanning |
+| `web` (container `scanloom`) | none | The page, and the same-origin proxy |
+| `api` | incoming and state RW; finished files RO | REST API, uploads straight to disk, downloads, live events; never decodes an image |
+| `worker` | incoming, work, exports | Security check, decoding, detection, correction, exports, cleanup |
+| `db` | its data | Scans, pages, settings, the queue, events |
+| `clamav` | definitions | Signature scanning, by stream |
 
-The API never decodes images. The worker claims durable PostgreSQL jobs with
-`FOR UPDATE SKIP LOCKED`, so another worker can be added without introducing a
-second queue. Jobs have expiring leases and bounded retries. Paths never cross
-the API: records carry opaque IDs and every filesystem lookup is derived from an
-ID below a configured root.
+The queue is PostgreSQL (`FOR UPDATE SKIP LOCKED`), with leases that a heartbeat
+extends and a limit on how often a job that kills its worker is retried; a worker
+more needs no other change. New jobs and events go through `NOTIFY`, so nothing
+polls. Downloads first, then edits, then new pages, then back-filling.
 
-## API outline
+Each page has its finished PNG and four smaller forms: JPEG, `preview` (WebP 1800),
+`thumb` (WebP 480) and `source` (the photo, WebP 2200, for the crop editor). An
+image's address carries the page's version and is cached for good, so lists load
+small files once.
 
-- `POST /api/v1/projects` — multipart images; returns the project immediately.
-- `GET /api/v1/projects/{id}` and `/events` — state and live progress.
-- `PATCH /api/v1/projects/{id}` — title, profile, and page order.
-- `PATCH /api/v1/projects/{id}/pages/{pageId}` — corners, rounded radius, rotation, appearance.
-- `POST /api/v1/projects/{id}/render` — rerender after optional edits.
-- `POST /api/v1/projects/{id}/exports` — image, ZIP, or PDF expiring link.
-- `GET/PUT /api/v1/settings` — every operational/product setting.
-- `GET /api/v1/system/status` and `/health` — Homepage and health checks.
+## The live camera
 
-OpenAPI at `/docs` is the authoritative request/response reference.
+`frontend/src/scanner`: the DocAligner model in a worker, on a 256-pixel frame, the
+next frame only once the last is answered. `tracker.ts` (tested, no browser in it)
+decides over time, in milliseconds: an outline held through short drop-outs, a
+shutter that fires once per page after 700 ms of stillness and waits for the page
+to change. Only framing holds the shutter back; white paper reads as glare and a
+small frame can't judge focus, so those are notes on the finished page. The full
+photo comes from `ImageCapture` where there is one, else the video frame, whose
+outline goes along as a hint for when the server's own detection is unsure.
 
-The PWA is served at `https://scanloom.homelab.lan`; trusted HTTPS is required
-by browsers for direct camera access and service-worker installation. The local
-CA certificate is available at `http://scanloom.homelab.lan/ca.crt`. Recent
-projects are remembered only in that browser, not exposed through a server-wide
-listing while the app has no user authentication.
+## The API
 
-## Data lifecycle
+OpenAPI at `/docs`. One photo is one request, its body the file:
 
-Incoming files are write-only to the API and read-only to a worker. Successful
-normalization removes embedded profiles and metadata. Default project retention
-is 24 hours and default download-link life is one hour. Deleting a project or
-expiry removes every file and database row. PostgreSQL is backed up; transient
-image and export directories are excluded from Restic because their contract is
-automatic expiry, not durable storage.
+```
+curl -H "X-Api-Key: sl_…" -H "Content-Type: application/json" -d '{"title":"Invoices"}' https://scanloom.homelab.lan/api/v1/projects
+curl -H "X-Api-Key: sl_…" --data-binary @photo.heic "https://scanloom.homelab.lan/api/v1/projects/<id>/pages?name=photo.heic"
+```
 
-## Verification
+## Data
 
-The image unit suite covers signatures, polyglot/trailing payload refusal,
-limits, corner ordering, perspective output, and quality warnings. Release
-verification additionally runs a real photograph through ClamAV, correction,
-image/ZIP/PDF exports, expiring downloads, settings, disguised-file refusal,
-and worker-owned deletion. Browser verification covers desktop, iPhone-sized,
-and Android-sized upload/result/edit/settings/export flows plus PWA registration.
+`work/` (finished scans) and `state/accounts.db` are backed up by Restic, and the
+database is dumped. `incoming/`, `exports/` (made again at will, removed after
+`export_ttl_minutes`) and the ClamAV definitions aren't.
+
+## Tests
+
+The image build runs `backend/tests` and `frontend/src/__tests__`. `test_flow.py`
+needs a PostgreSQL: set `SCANLOOM_TEST_DATABASE_URL`.

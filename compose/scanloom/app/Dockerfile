@@ -13,7 +13,10 @@ RUN apt-get update \
  && cp /usr/share/common-licenses/Apache-2.0 /model/LICENSE.DocAligner
 
 FROM ${NODE_IMAGE} AS frontend
-WORKDIR /src
+# Where the page is in the repo, beside lib/batlab-ui (the context "ui"), so its
+# relative path to the shared frame holds here too.
+WORKDIR /batlab/compose/scanloom/app/frontend
+COPY --from=ui . /batlab/lib/batlab-ui
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund --loglevel=error
 COPY frontend/ ./
@@ -33,9 +36,13 @@ COPY backend/requirements.txt ./
 RUN python -m venv .venv && .venv/bin/pip install --require-hashes -r requirements.txt
 COPY backend/scanloom ./scanloom
 COPY backend/migrations ./migrations
-COPY --from=frontend /src/dist ./static
-RUN .venv/bin/python -m compileall -q scanloom
-ENV PYTHONPATH=/opt/scanloom PATH=/opt/scanloom/.venv/bin:$PATH SCANLOOM_STATIC=/opt/scanloom/static
+COPY --from=common batlab_common /opt/batlab-common/batlab_common
+COPY --from=frontend /batlab/compose/scanloom/app/frontend/dist/api-docs ./static/api-docs
+RUN .venv/bin/python -m compileall -q scanloom /opt/batlab-common
+ENV PYTHONPATH=/opt/scanloom:/opt/batlab-common PATH=/opt/scanloom/.venv/bin:$PATH SCANLOOM_STATIC=/opt/scanloom/static
+# `docker exec scanloom-api admin …`: its people and API keys from the shell.
+RUN printf '#!/bin/sh\nexec env PYTHONPATH=/opt/scanloom:/opt/batlab-common /opt/scanloom/.venv/bin/python -m scanloom.admin "$@"\n' \
+      > /usr/local/bin/admin && chmod 755 /usr/local/bin/admin
 USER 11000:11000
 EXPOSE 8850
 ENTRYPOINT ["python", "-m", "scanloom"]
@@ -43,7 +50,7 @@ ENTRYPOINT ["python", "-m", "scanloom"]
 FROM app AS tested
 USER root
 COPY backend/tests /tmp/tests
-RUN python -m unittest discover -s /tmp/tests -v && touch /tmp/tests-passed
+RUN pip install -q --no-cache-dir "httpx==0.28.1" "pillow==12.1.1" && python -W ignore -m unittest discover -s /tmp/tests -v && touch /tmp/tests-passed
 USER 11000:11000
 
 FROM app AS server
@@ -56,6 +63,6 @@ USER root
 # capability dropped and no-new-privileges enabled.
 RUN cp /usr/bin/caddy /usr/local/bin/caddy
 COPY frontend/Caddyfile /etc/caddy/Caddyfile
-COPY --from=frontend /src/dist /srv
+COPY --from=frontend /batlab/compose/scanloom/app/frontend/dist /srv
 USER 11001:11001
 EXPOSE 8080

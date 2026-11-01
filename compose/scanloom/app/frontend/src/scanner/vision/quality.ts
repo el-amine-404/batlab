@@ -1,4 +1,4 @@
-import type { Point, Quad, QualityMetrics } from "../types";
+import type { Quad, QualityMetrics } from "../types";
 import { areAnglesAcceptable, distSq, isConvexQuad, isWithinMargins, quadArea } from "../geometry";
 
 /**

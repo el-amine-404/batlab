@@ -2,8 +2,8 @@ https://scanloom.homelab.lan {
   tls internal
   import localSubnets
   request_body {
-    # 30 files × the default 25 MiB limit, plus multipart overhead.
-    max_size 800MB
+    # One photo a request; the app's largest allowed is 100 MB.
+    max_size 110MB
   }
   reverse_proxy @localSubnets http://scanloom:8080 {
     flush_interval -1

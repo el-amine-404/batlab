@@ -1,0 +1,141 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+@source "../../../../../lib/batlab-ui/src";
+
+/* One accent, and every pair of colours used together passes WCAG AA, hover included
+   (tests in the release check: scripts in docs/scanloom.md). Dark only, as batlab's apps are. */
+:root {
+  --radius: 0.75rem;
+  --background: oklch(0.155 0.008 200);
+  --foreground: oklch(0.96 0.004 200);
+  --card: oklch(0.2 0.009 200);
+  --card-foreground: var(--foreground);
+  --popover: oklch(0.22 0.01 200);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.8 0.12 178);
+  --primary-hover: oklch(0.86 0.1 178);
+  --primary-foreground: oklch(0.2 0.04 190);
+  --secondary: oklch(0.26 0.01 200);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(0.24 0.008 200);
+  --muted-foreground: oklch(0.74 0.012 200);
+  --accent: oklch(0.31 0.012 200);
+  --accent-foreground: var(--foreground);
+  --destructive: oklch(0.72 0.17 22);
+  --success: oklch(0.8 0.14 155);
+  --warning: oklch(0.84 0.13 85);
+  --border: oklch(1 0 0 / 0.11);
+  --input: oklch(1 0 0 / 0.16);
+  --ring: oklch(0.8 0.12 178 / 0.65);
+  --tile: oklch(0.26 0.006 200);
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-tile: var(--tile);
+  --radius-sm: calc(var(--radius) - 6px);
+  --radius-md: calc(var(--radius) - 3px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    background: var(--background);
+    scrollbar-color: oklch(1 0 0 / 0.2) var(--background);
+  }
+  body {
+    color-scheme: dark;
+    @apply min-h-dvh font-sans text-foreground antialiased;
+  }
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  label[for] {
+    cursor: pointer;
+  }
+}
+
+/* batlab-ui's frame asks for this: plain, so the scans are what has colour. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: var(--background);
+}
+
+.aurora {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--background);
+}
+.aurora > span {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.22;
+}
+.aurora > span:nth-child(1) {
+  width: 55vmax;
+  height: 45vmax;
+  left: -15vmax;
+  top: -20vmax;
+  background: oklch(0.6 0.11 178);
+}
+.aurora > span:nth-child(2) {
+  width: 45vmax;
+  height: 40vmax;
+  right: -12vmax;
+  top: 10vmax;
+  background: oklch(0.5 0.08 220);
+}
+.aurora > span:nth-child(3) {
+  display: none;
+}
+
+.shake {
+  animation: shake 0.42s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+@keyframes shake {
+  20%, 60% { transform: translateX(-7px); }
+  40%, 80% { transform: translateX(7px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+@keyframes shot {
+  from { opacity: 0.85; }
+  to { opacity: 0; }
+}

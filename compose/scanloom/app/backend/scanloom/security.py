@@ -10,6 +10,13 @@ class Refused(ValueError):
     pass
 
 
+def looks_like_image(head: bytes) -> bool:
+    """A first look at an upload's first bytes, without decoding anything, so a
+    wrong file is refused at once; the worker's inspection is the real check."""
+    return (head.startswith(b"\x89PNG\r\n\x1a\n") or head[:2] == b"\xff\xd8"
+            or (head[:4] == b"RIFF" and head[8:12] == b"WEBP") or head[4:8] == b"ftyp")
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:

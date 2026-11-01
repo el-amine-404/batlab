@@ -7,60 +7,98 @@ from pathlib import Path
 
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 
-from .settings import DEFAULTS
-
+from .settings import DEFAULTS, known
 
 psycopg2.extras.register_uuid()
 
+_GONE = (psycopg2.OperationalError, psycopg2.InterfaceError)
+
 
 class Database:
-    def __init__(self, url: str, migrations: Path | None = None):
+    """A bounded pool. A connection the server dropped (a database restart) is
+    thrown away, and a single statement outside a transaction tried once more,
+    so a restart of PostgreSQL never leaves a request hanging or failing for good."""
+
+    def __init__(self, url: str, migrations: Path | None = None, size: int = 12):
         self.url = url
         self.migrations = migrations or Path(__file__).parent.parent / "migrations"
-        self._local = threading.local()
+        self.size = size
+        self._pool: psycopg2.pool.ThreadedConnectionPool | None = None
+        self._slots = threading.BoundedSemaphore(size)
+        self._lock = threading.Lock()
 
     def connect(self):
-        connection = psycopg2.connect(self.url, connect_timeout=5)
+        connection = psycopg2.connect(self.url, connect_timeout=5, application_name="scanloom",
+                                      keepalives=1, keepalives_idle=30, keepalives_interval=10)
         connection.autocommit = True
         return connection
 
-    def connection(self):
-        connection = getattr(self._local, "connection", None)
-        if connection is None or connection.closed:
-            connection = self.connect()
-            self._local.connection = connection
-        return connection
+    def _get_pool(self):
+        with self._lock:
+            if self._pool is None:
+                self._pool = psycopg2.pool.ThreadedConnectionPool(
+                    0, self.size, self.url, connect_timeout=5, application_name="scanloom")
+            return self._pool
+
+    @contextmanager
+    def _connection(self):
+        pool = self._get_pool()
+        if not self._slots.acquire(timeout=30):
+            raise TimeoutError("The database is busy")
+        connection = None
+        broken = False
+        try:
+            connection = pool.getconn()
+            connection.autocommit = True
+            yield connection
+        except _GONE:
+            broken = True
+            raise
+        finally:
+            if connection is not None:
+                pool.putconn(connection, close=broken or bool(connection.closed))
+            self._slots.release()
 
     @contextmanager
     def transaction(self):
-        connection = self.connection()
-        previous = connection.autocommit
-        connection.autocommit = False
-        try:
-            with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
-                yield cursor
-            connection.commit()
-        except BaseException:
-            connection.rollback()
-            raise
-        finally:
-            connection.autocommit = previous
+        with self._connection() as connection:
+            connection.autocommit = False
+            try:
+                with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+                    yield cursor
+                connection.commit()
+            except BaseException:
+                if not connection.closed:
+                    connection.rollback()
+                raise
+            finally:
+                if not connection.closed:
+                    connection.autocommit = True
+
+    def _run(self, method, sql: str, params):
+        for attempt in (1, 2):
+            try:
+                with self._connection() as connection:
+                    with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+                        cursor.execute(sql, params)
+                        return method(cursor)
+            except _GONE:
+                if attempt == 2:
+                    raise
 
     def one(self, sql: str, params=()):
-        with self.connection().cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
-            cursor.execute(sql, params)
-            return cursor.fetchone()
+        return self._run(lambda cursor: cursor.fetchone(), sql, params)
 
     def all(self, sql: str, params=()):
-        with self.connection().cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
-            cursor.execute(sql, params)
-            return cursor.fetchall()
+        return self._run(lambda cursor: cursor.fetchall(), sql, params)
 
     def execute(self, sql: str, params=()) -> int:
-        with self.connection().cursor() as cursor:
-            cursor.execute(sql, params)
-            return cursor.rowcount
+        return self._run(lambda cursor: cursor.rowcount, sql, params)
+
+    def settings(self) -> dict:
+        return known(dict(self.one("SELECT values FROM settings WHERE singleton=true")["values"]))
 
     def migrate(self):
         connection = self.connect()

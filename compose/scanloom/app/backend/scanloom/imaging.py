@@ -56,7 +56,7 @@ def normalize(source: Path, destination: Path, maximum_pixels: int) -> tuple[int
     elif image.bands != 3:
         image = image[:3]
     destination.parent.mkdir(parents=True, exist_ok=True)
-    image.write_to_file(str(destination), strip=True, compression=6, interlace=False)
+    image.write_to_file(str(destination), strip=True, compression=1, interlace=False)
     return image.width, image.height
 
 
@@ -397,7 +397,29 @@ def _detect_classical(image: np.ndarray) -> tuple[np.ndarray, float, str]:
     return quad, float(confidence), method
 
 
+def _plausible(quad: np.ndarray, width: int, height: int) -> bool:
+    """Whether four corners could be a sheet of something: not a sliver, not a point.
+    The longest receipts are about 6:1; a stray edge in a photo of no document is far thinner."""
+    sides = [float(np.linalg.norm(quad[(i + 1) % 4] - quad[i])) for i in range(4)]
+    long_side, short_side = max(sides[0], sides[2]), max(sides[1], sides[3])
+    if min(sides) < 16 or not cv2.isContourConvex(np.int32(quad).reshape(-1, 1, 2)):
+        return False
+    area = abs(cv2.contourArea(quad)) / max(1, width * height)
+    return area >= .01 and max(long_side, short_side) / max(1.0, min(long_side, short_side)) <= 8
+
+
 def detect(image: np.ndarray) -> tuple[np.ndarray, float, str]:
+    """The page's corners; when nothing plausible is found, the whole photo, which
+    the page then reports as uncertain, rather than a crop of some stray lines."""
+    found = _detect(image)
+    if _plausible(found[0], image.shape[1], image.shape[0]):
+        return found
+    height, width = image.shape[:2]
+    whole = np.array([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]], np.float32)
+    return whole, .3, "no document found: whole photo"
+
+
+def _detect(image: np.ndarray) -> tuple[np.ndarray, float, str]:
     """Detect the page with neural corners, then deterministic local fallbacks."""
     neural = _neural_boundary(image)
     if neural is not None:
@@ -424,6 +446,10 @@ def detect(image: np.ndarray) -> tuple[np.ndarray, float, str]:
                 return edge_quad, edge_confidence, "quadrilateral edge fallback"
         return quad, confidence, "GrabCut foreground fallback"
     return classical
+
+
+# An upright reading this strong (about 15 long, confident words) needs no other.
+UPRIGHT_ENOUGH = 8000.0
 
 
 def detect_orientation(image: np.ndarray) -> tuple[int, float]:
@@ -463,6 +489,8 @@ def detect_orientation(image: np.ndarray) -> tuple[int, float]:
             if confidence >= 45 and len(text) >= 2:
                 score += confidence * min(12, len(text))
         scores.append(score)
+        if len(scores) == 1 and score >= UPRIGHT_ENOUGH:
+            return 0, 0.0
     ranking = sorted(range(4), key=lambda index: scores[index], reverse=True)
     best, runner_up = ranking[:2]
     ratio = scores[best] / max(1, scores[runner_up])
@@ -549,12 +577,44 @@ def quality(image: np.ndarray, confidence: float) -> dict:
     if min(image.shape[:2]) < 700:
         warnings.append("The corrected page has limited resolution.")
     if confidence < 0.72:
-        warnings.append("Edge detection was uncertain; review the crop if needed.")
+        warnings.append("The page's edges weren't clear: check the crop.")
     return {"blur_score": round(blur, 2), "glare_fraction": round(glare, 5),
             "width": image.shape[1], "height": image.shape[0], "warnings": warnings}
 
 
-def write_png(image: np.ndarray, path: Path) -> None:
+def _write(path: Path, image: np.ndarray, params: list[int]) -> None:
+    """All or nothing: nobody ever reads a half-written object, and a hard link
+    to an earlier copy (a reused page) is replaced, never written through."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    if not cv2.imwrite(str(path), image, [cv2.IMWRITE_PNG_COMPRESSION, 6]):
+    partial = path.with_name(f".partial-{path.name}")
+    if not cv2.imwrite(str(partial), image, params):
+        partial.unlink(missing_ok=True)
         raise ImageProblem("Could not write corrected image")
+    os.replace(partial, path)
+
+
+def write_png(image: np.ndarray, path: Path) -> None:
+    _write(path, image, [cv2.IMWRITE_PNG_COMPRESSION, 3])
+
+
+def on_white(image: np.ndarray) -> np.ndarray:
+    """Without transparency: what a JPEG or a PDF page can hold."""
+    if image.ndim == 3 and image.shape[2] == 4:
+        alpha = image[:, :, 3:4].astype(np.float32) / 255
+        return (image[:, :, :3] * alpha + 255 * (1 - alpha)).astype(np.uint8)
+    return image
+
+
+def fitted(image: np.ndarray, long_edge: int) -> np.ndarray:
+    scale = long_edge / max(image.shape[:2])
+    if scale >= 1:
+        return image
+    return cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+
+
+def write_webp(image: np.ndarray, path: Path, long_edge: int, webp_quality: int) -> None:
+    _write(path, fitted(on_white(image), long_edge), [cv2.IMWRITE_WEBP_QUALITY, webp_quality])
+
+
+def write_jpeg(image: np.ndarray, path: Path, jpeg_quality: int) -> None:
+    _write(path, on_white(image), [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality, cv2.IMWRITE_JPEG_OPTIMIZE, 1])

@@ -38,9 +38,12 @@ services:
     pids_limit: 128
 
   api:
-    image: local/batlab-scanloom:0.1.0
+    image: local/batlab-scanloom:2.0.0
     build:
       context: ./app
+      additional_contexts:
+        common: ../../lib/batlab-common
+        ui: ../../lib/batlab-ui
       target: server
       network: host
       args:
@@ -54,7 +57,6 @@ services:
       SCANLOOM_DATABASE_URL: postgresql://scanloom:${SCANLOOM_DATABASE_PASSWORD}@db:5432/scanloom
       SCANLOOM_STORAGE: /var/lib/scanloom
       SCANLOOM_CLAMD_HOST: clamav
-      SCANLOOM_PUBLIC_URL: https://scanloom.homelab.lan
       SCANLOOM_PORT: 8850
       TZ: ${TZ}
     depends_on:
@@ -64,6 +66,7 @@ services:
       - ${VOLUMES_ROOT}/scanloom/work:/var/lib/scanloom/work:ro
       - ${VOLUMES_ROOT}/scanloom/exports:/var/lib/scanloom/exports:ro
       - ${VOLUMES_ROOT}/scanloom/logs:/var/lib/scanloom/logs
+      - ${VOLUMES_ROOT}/scanloom/state:/var/lib/scanloom/state
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
@@ -82,7 +85,7 @@ services:
     pids_limit: 96
 
   worker:
-    image: local/batlab-scanloom:0.1.0
+    image: local/batlab-scanloom:2.0.0
     pull_policy: never
     container_name: scanloom-worker
     command: ["worker"]
@@ -120,9 +123,12 @@ services:
     pids_limit: 128
 
   web:
-    image: local/batlab-scanloom-web:0.1.0
+    image: local/batlab-scanloom-web:2.0.0
     build:
       context: ./app
+      additional_contexts:
+        common: ../../lib/batlab-common
+        ui: ../../lib/batlab-ui
       target: web
       network: host
       args:

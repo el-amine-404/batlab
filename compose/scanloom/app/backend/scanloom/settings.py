@@ -1,29 +1,30 @@
 from __future__ import annotations
 
 DEFAULTS = {
-    "retention_hours": 24,
-    "link_ttl_minutes": 60,
-    "max_files_per_project": 30,
-    "max_upload_bytes": 25 * 1024 * 1024,
-    "max_pixels": 40_000_000,
-    "preview_long_edge": 1600,
+    "retention_days": 0,  # 0: scans stay until someone deletes them
+    "export_ttl_minutes": 1440,
+    "max_files_per_project": 500,
+    "max_upload_bytes": 50 * 1024 * 1024,
+    "max_pixels": 60_000_000,
     "jpeg_quality": 92,
     "default_profile": "faithful",
-    "auto_accept_confidence": 0.82,
     "worker_max_attempts": 3,
 }
 
 LIMITS = {
-    "retention_hours": (1, 168),
-    "link_ttl_minutes": (5, 1440),
-    "max_files_per_project": (1, 100),
+    "retention_days": (0, 3650),
+    "export_ttl_minutes": (5, 10080),
+    "max_files_per_project": (1, 1000),
     "max_upload_bytes": (1_048_576, 104_857_600),
     "max_pixels": (1_000_000, 100_000_000),
-    "preview_long_edge": (640, 3000),
     "jpeg_quality": (70, 100),
-    "auto_accept_confidence": (0.5, 0.99),
     "worker_max_attempts": (1, 8),
 }
+
+
+def known(values: dict) -> dict:
+    """What is stored, without settings of older releases, over the defaults."""
+    return DEFAULTS | {key: value for key, value in values.items() if key in DEFAULTS}
 
 
 def validate(values: dict) -> dict:
@@ -35,8 +36,6 @@ def validate(values: dict) -> dict:
         raise ValueError("default_profile must be faithful, paper, or mono")
     for key, (low, high) in LIMITS.items():
         value = merged[key]
-        if isinstance(DEFAULTS[key], int) and isinstance(value, bool):
-            raise ValueError(f"{key} must be a number")
-        if not isinstance(value, (int, float)) or not low <= value <= high:
-            raise ValueError(f"{key} must be between {low} and {high}")
+        if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+            raise ValueError(f"{key} must be a whole number between {low} and {high}")
     return merged

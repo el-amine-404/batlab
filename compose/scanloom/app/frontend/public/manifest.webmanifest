@@ -4,8 +4,8 @@
   "description": "Turn document photos into clean images and PDFs.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#081513",
-  "theme_color": "#081513",
+  "background_color": "#121818",
+  "theme_color": "#121818",
   "icons": [
     {"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"},
     {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},

@@ -12,11 +12,11 @@ class Config:
     work: Path
     exports: Path
     logs: Path
+    state: Path
     static: Path
     port: int
     clamd_host: str
     clamd_port: int
-    public_url: str
 
 
 def load() -> Config:
@@ -27,9 +27,9 @@ def load() -> Config:
         work=Path(os.getenv("SCANLOOM_WORK", root / "work")),
         exports=Path(os.getenv("SCANLOOM_EXPORTS", root / "exports")),
         logs=Path(os.getenv("SCANLOOM_LOGS", root / "logs")),
+        state=Path(os.getenv("SCANLOOM_STATE", root / "state")),
         static=Path(os.getenv("SCANLOOM_STATIC", "/opt/scanloom/static")),
         port=int(os.getenv("SCANLOOM_PORT", "8850")),
         clamd_host=os.getenv("SCANLOOM_CLAMD_HOST", "clamav"),
         clamd_port=int(os.getenv("SCANLOOM_CLAMD_PORT", "3310")),
-        public_url=os.getenv("SCANLOOM_PUBLIC_URL", "https://scanloom.homelab.lan").rstrip("/"),
     )

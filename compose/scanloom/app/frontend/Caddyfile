@@ -4,19 +4,32 @@
 }
 :8080 {
   root * /srv
-  encode zstd gzip
+  # Not the live stream: a compressor would hold its small messages back.
+  @compressible not path /api/v1/events
+  encode @compressible zstd gzip
   header {
     X-Content-Type-Options nosniff
     X-Frame-Options DENY
     Referrer-Policy no-referrer
     Permissions-Policy "camera=(self), microphone=(), geolocation=()"
-    Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' blob:; worker-src 'self' blob:; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'"
+    # Isolated, the scanner's detector can use several threads. Everything here is same-origin.
+    Cross-Origin-Opener-Policy same-origin
+    Cross-Origin-Embedder-Policy require-corp
+    Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' blob: data:; media-src 'self' blob:; worker-src 'self' blob:; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'"
   }
-  @assets path /assets/* /icon.svg /icon-192.png /icon-512.png /manifest.webmanifest /sw.js /models/* /vendor/*
-  header @assets Cache-Control "public, max-age=86400"
+  # Named by their content: these never change.
+  @hashed path /assets/*
+  header @hashed Cache-Control "public, max-age=31536000, immutable"
+  @static path /icon.svg /icon-192.png /icon-512.png /manifest.webmanifest /models/* /vendor/*
+  header @static Cache-Control "public, max-age=604800"
+  # Always asked afresh, so a new release is simply there.
+  @page path / /index.html /sw.js
+  header @page Cache-Control "no-cache"
   route {
     @backend path /api/* /docs /api-docs/*
     reverse_proxy @backend {
+      # The API sets its own Content-Security-Policy, and no two may apply.
+      header_down -Content-Security-Policy
       dynamic a {
         name api
         port 8850
@@ -25,6 +38,7 @@
       }
       flush_interval -1
     }
+    header Cache-Control "no-cache"
     try_files {path} /index.html
     file_server
   }

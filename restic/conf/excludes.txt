@@ -21,11 +21,10 @@
 /mnt/docker-volumes/pdf-gateway/storage/multipart/**
 /mnt/docker-volumes/pdf-gateway/cdr-socket/**
 
-# Scanloom projects are explicitly temporary; PostgreSQL has a consistent dump,
-# while image work, exports, uploads and virus definitions are regenerated/expired.
+# Scanloom's finished scans (work/) and accounts (state/) are kept, so they are
+# backed up. Uploads, downloads and virus definitions are transient or regenerated.
 /mnt/docker-volumes/scanloom/clamav/**
 /mnt/docker-volumes/scanloom/incoming/**
-/mnt/docker-volumes/scanloom/work/**
 /mnt/docker-volumes/scanloom/exports/**
 
 # Redis is transient queue/cache state; Paperless rebuilds it.

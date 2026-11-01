@@ -372,6 +372,7 @@ build-scanloom:
 		echo "==> build Scanloom $$service"; \
 		docker build --network host --target "$$target" \
 			--build-arg "$$arg_one" --build-arg "$$arg_two" --build-arg "$$arg_three" \
+			--build-context common=lib/batlab-common --build-context ui=lib/batlab-ui \
 			-t "$$image" -f "$$context/$$dockerfile" "$$context" || exit 1; \
 	done
 
@@ -383,7 +384,8 @@ setup-scanloom:
 		$(VOLUMES_ROOT)/scanloom/incoming \
 		$(VOLUMES_ROOT)/scanloom/work \
 		$(VOLUMES_ROOT)/scanloom/exports \
-		$(VOLUMES_ROOT)/scanloom/logs
+		$(VOLUMES_ROOT)/scanloom/logs \
+		$(VOLUMES_ROOT)/scanloom/state
 
 # Only the gateway's folders (also part of setup).
 setup-pdf-gateway:
