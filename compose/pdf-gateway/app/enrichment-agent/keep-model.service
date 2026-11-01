@@ -1,0 +1,7 @@
+[Unit]
+Description=Keep the PDF gateway's model loaded in LM Studio, on the CPU
+
+[Service]
+Type=oneshot
+ExecStart=%h/batlab/compose/pdf-gateway/app/enrichment-agent/keep-model.sh
+TimeoutStartSec=600

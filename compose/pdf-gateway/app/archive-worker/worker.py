@@ -185,55 +185,6 @@ def layer_text(path: Path) -> str:
     return enrichment.clean(text).strip()
 
 
-def agent_ready(cursor) -> bool:
-    """An agent is there and able to answer (heartbeat, model, breaker)."""
-    cursor.execute("""SELECT EXISTS (SELECT 1 FROM ai_agents WHERE last_seen_at > now() - interval '3 minutes'
-                        AND (breaker_open_until IS NULL OR breaker_open_until < now())
-                        AND report->'llm'->>'service' = 'UP' AND (report->'llm'->>'modelInstalled')::boolean)""")
-    return cursor.fetchone()[0]
-
-
-def ai_job(job: dict, kind: str, context: dict | None) -> tuple[str, dict | None]:
-    """Whether to wait for, use, or go without the laptop's answer to a job made before
-    publication: ('WAIT'|'APPLY'|'SKIP', checked answer). Creates the job the first time."""
-    with database() as connection, connection.cursor() as cursor:
-        cursor.execute("SELECT status, applied, deadline_at > now() FROM enrichment_jobs WHERE scan_id=%s AND kind=%s FOR UPDATE",
-                       (job["scanId"], kind))
-        row = cursor.fetchone()
-        if row is None:
-            ready = agent_ready(cursor)
-            cursor.execute("""INSERT INTO enrichment_jobs(id,scan_id,artifact_sha256,kind,context,deadline_at)
-                              VALUES (%s,%s,%s,%s,%s::jsonb,now()+make_interval(secs=>%s))""",
-                           (str(uuid.uuid4()), job["scanId"], job["sha256"], kind, json.dumps(context) if context else None,
-                            AI_WAIT_SECONDS if ready else 0))
-            audit(cursor, job["scanId"], f"AI_{kind}_REQUESTED", "SUCCESS", {"waiting": ready})
-            return ("WAIT", None) if ready else ("SKIP", None)
-        status, applied, waiting = row
-        if status == "COMPLETED" and applied:
-            return "APPLY", applied
-        if status in ("WAITING_FOR_AI", "LEASED", "SUBMITTED") and waiting:
-            return "WAIT", None
-        return "SKIP", None
-
-
-def known_correspondents() -> list[str]:
-    """Correspondents already in the archive, so the AI writes them the same way."""
-    with database() as connection, connection.cursor() as cursor:
-        cursor.execute("""SELECT sidecar->'issuer'->>'value' AS name, max(category) FROM archive_documents
-                           WHERE sidecar->'issuer'->>'value' IS NOT NULL GROUP BY 1 ORDER BY 1 LIMIT 300""")
-        return [f"{name} ({section})" for name, section in cursor.fetchall()]
-
-
-def ai_filing(job: dict, text: str, sidecar: dict, taxonomy: dict) -> tuple[str, dict | None]:
-    """The AI files what the rules did not recognise (see ai_job)."""
-    if not enrichment.ENABLED or sidecar["organization"]["reviewState"] not in ("FALLBACK", "REVIEW_REQUIRED") or not text.strip():
-        return "SKIP", None
-    context = {"text": text[:CONTEXT_CHARS], "truncated": len(text) > CONTEXT_CHARS,
-               "types": sorted(enrichment.TYPES), "sections": enrichment.SECTIONS, "correspondents": known_correspondents(),
-               "tags": [tag["id"] for tag in taxonomy.get("tags", []) if not tag.get("blocked") and not tag.get("private")]}
-    return ai_job(job, "SUGGEST", context)
-
-
 def defer(job: dict) -> None:
     """Undo this claim without counting an attempt, and look again shortly."""
     with database() as connection, connection.cursor() as cursor:
@@ -251,16 +202,14 @@ def defer(job: dict) -> None:
 MIN_NATIVE_TEXT = int(os.getenv("PDF_GATEWAY_MIN_NATIVE_TEXT", "200"))
 
 
-def filing_text(job: dict, wait: bool = True) -> str:
+def filing_text(job: dict) -> str:
     """The text the rules, the AI and the hidden text file use: the original's own text; for a scan (little
-    or no text of its own) the laptop's multi-language OCR of the clean copy, waiting for it while
-    the laptop is there (raises Deferred); else the clean copy's own OCR layer."""
+    or no text of its own) an earlier OCR by the laptop if there is one, else the clean copy's own OCR layer."""
     text = verified_inputs(job)
     if len(text.strip()) >= MIN_NATIVE_TEXT or not enrichment.ENABLED:
         return text or layer_text(job["output"])
-    decision, applied = ai_job(job, "OCR", None) if wait else ("SKIP", ocr_applied(job["scanId"]))
-    if decision == "WAIT":
-        raise Deferred()
+    # Saved without waiting: the laptop's reading can take an hour, and queue_initial asks for it right after.
+    applied = ocr_applied(job["scanId"])
     # OCR wins only when it found clearly more than the original's own text (a real short text beats guesses).
     if applied and len(applied.get("text", "").strip()) > 1.5 * len(text.strip()):
         job["extraction"] = dict(applied["meta"], status="OK")
@@ -281,16 +230,8 @@ def ocr_applied(scan_id: str) -> dict | None:
 
 
 def organised(job: dict, text: str) -> tuple[dict, dict]:
-    """The sidecar: filed by the rules, else by the AI's checked answer (raises Deferred to wait for it)."""
-    sidecar, evidence = build_sidecar(job, text)
-    _rules, taxonomy = manifests()
-    decision, fields = ai_filing(job, text, sidecar, taxonomy)
-    if decision == "WAIT":
-        raise Deferred()
-    if decision == "APPLY":
-        sidecar.update(enrichment.sidecar_changes(fields, sidecar))
-        evidence["ai"] = {"fields": sorted(fields)}
-    return sidecar, evidence
+    """The sidecar as the rules file it; the laptop's reading and filing follow after it is saved (queue_initial)."""
+    return build_sidecar(job, text)
 
 
 def embed(job: dict) -> tuple[Path, dict, dict, dict]:
@@ -333,7 +274,7 @@ def commit_embed(job: dict, target: Path, sidecar: dict, evidence: dict, values:
 
 def publish(job: dict) -> tuple[Path, dict, dict]:
     # The same text the embed phase filed it with (a scan's OCR is not waited for twice).
-    text = filing_text(job, wait=job["kind"] != "EMBEDDED_METADATA")
+    text = filing_text(job)
     if job["kind"] == "EMBEDDED_METADATA":
         # Publish the organisation recorded when the metadata was written, so the
         # sidecar and the embedded values cannot disagree.
@@ -637,6 +578,10 @@ def handle_enrichment(channel, method, _properties, body: bytes) -> None:
                             current = document.read()
                             base = {**current, "tags": []} if forced else current  # asked again: its tags, not old ones
                             changes = enrichment.sidecar_changes(fields, base) if fields else {}
+                            if forced:
+                                # Asked again: an old answer the new reading doesn't repeat goes too.
+                                for key in ("issuer", "author", "subject", "holder", "reference", "amount"):
+                                    changes.setdefault(key, None)
                             if zone:
                                 # An identity document's machine-readable zone (check digits) beats any reading of it.
                                 changes.update(identity.refiled(zone))

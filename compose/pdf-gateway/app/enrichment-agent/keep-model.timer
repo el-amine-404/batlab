@@ -1,0 +1,9 @@
+[Unit]
+Description=Check every 5 minutes that the PDF gateway's model is loaded
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=5min
+
+[Install]
+WantedBy=timers.target

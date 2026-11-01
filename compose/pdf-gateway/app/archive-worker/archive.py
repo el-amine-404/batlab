@@ -433,7 +433,7 @@ class Archive:
     # ------------------------------------------------------------ re-filing
 
     REORGANISE_FIELDS = {"title", "titleSource", "organization", "documentType", "documentDate", "issuer", "tags",
-                         "reference", "amount", "language", "holder", "validUntil"}
+                         "reference", "amount", "language", "holder", "validUntil", "author", "subject"}
 
     def reorganise(self, document_id: str, expected_revision: int, changes: dict,
                    text: str | None = None, text_extraction: dict | None = None) -> dict:

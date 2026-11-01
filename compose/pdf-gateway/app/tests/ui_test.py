@@ -197,8 +197,8 @@ try:
     download = driver.find_element(By.CSS_SELECTOR, "[data-testid=download-pdf]")
     check("download is an attachment link to the archive file", download.get_attribute("download") is not None
           and download.get_attribute("href").endswith("/file") and "/quarantine" not in download.get_attribute("href"))
-    text_present(driver, "Final check 1")
-    check("technical details keep the final check", "PASS" in driver.find_element(By.CSS_SELECTOR, "[data-testid=checks]").text)
+    driver.find_element(By.XPATH, "//summary[contains(., 'Technical details')]").click()
+    check("technical details keep the final check", "passed" in driver.find_element(By.CSS_SELECTOR, "[data-testid=checks]").text)
     driver.save_screenshot(str(SHOTS / "desktop-document.png"))
 
     # Archived without Paperless: add it from the page (no adapter in this stack: it stays on its way).

@@ -37,18 +37,21 @@ def clean(value: str, limit: int) -> str:
 def fields_for(sidecar_fields: dict) -> dict[str, str]:
     """The allowlisted embedded values derived from the document's organisation.
 
-    Author is the correspondent that issued the document (as PDF readers and
-    Paperless use it), and only when its value was checked against the text.
+    Author is who wrote the document when it names them, or else the correspondent
+    that issued it, and only when its value was checked against the text.
     Untrusted source metadata is never copied."""
     values = {"/Title": clean(sidecar_fields["title"], 200)}
     issuer = (sidecar_fields.get("issuer") or {}).get("value")
-    if issuer:
-        values["/Author"] = clean(issuer, 120)
+    author = (sidecar_fields.get("author") or {}).get("value") or issuer
+    if author:
+        values["/Author"] = clean(author, 200)
     kind = sidecar_fields.get("documentType")
     subject = [TYPE_LABEL.get(kind, kind.replace("_", " ").capitalize()) if kind else None, issuer,
                (sidecar_fields.get("documentDate") or {}).get("value"),
                f"no. {sidecar_fields['reference']['value']}" if sidecar_fields.get("reference") else None]
-    if any(subject):
+    if sidecar_fields.get("subject"):
+        values["/Subject"] = clean(sidecar_fields["subject"], 200)
+    elif any(subject):
         values["/Subject"] = clean(" - ".join(part for part in subject if part), 200)
     if sidecar_fields.get("tags"):
         values["/Keywords"] = clean(", ".join(sidecar_fields["tags"]), 500)

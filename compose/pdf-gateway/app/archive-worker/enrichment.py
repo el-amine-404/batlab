@@ -10,6 +10,7 @@ keywords). Nothing here can touch a security verdict.
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import re
@@ -44,7 +45,9 @@ def queue_initial(cursor, document_id: str, sha256: str, review_state: str, has_
     """Queue enrichment for documents filed for review. Returns the job kind or None."""
     if not ENABLED or review_state not in ("FALLBACK", "REVIEW_REQUIRED"):
         return None
-    return queue(cursor, document_id, sha256, "SUGGEST" if has_text else "OCR")
+    # Always read first, even when the PDF has text: a PDF's text is often wrong (fonts that map "fl" to "1").
+    # The document is already saved; this only makes it better, however long the laptop takes.
+    return queue(cursor, document_id, sha256, "OCR", {"force": True})
 
 
 def queue(cursor, document_id: str, sha256: str, kind: str, context: dict | None = None) -> str | None:
@@ -96,6 +99,9 @@ NAME_STOPWORDS = {"the", "and", "les", "des", "sarl", "ltd", "inc"}
 GENERIC_NAME_WORDS = {"sports", "sport", "telecom", "telecoms", "bank", "banque", "group", "groupe", "company", "societe",
                       "maroc", "morocco", "france", "international", "services", "service", "online", "store", "shop"}
 TAG = re.compile(r"^[a-z0-9][a-z0-9-]{1,30}$")
+MAX_TAGS = 6
+# A credit line, or a full address to somewhere's page (a bare "www.acme.example" in a letterhead is the sender's).
+CITED_SOURCE = re.compile(r"(?im)^.*(?:\b(?:source|sources|bibliographie|références)\s*:|(?:https?://|www\.)\S+/\S).*$")
 
 
 def letters(text: str) -> str:
@@ -119,6 +125,19 @@ def title_named_in_text(title: str, haystack: str) -> bool:
         if named and len(folded) >= 2 and folded not in MONTHS and f" {folded} " not in haystack:
             return False
     return True
+
+
+def snapped_to_text(name: str, text: str) -> str:
+    """A name with its words as the document prints them: a model copying "HOUJJAJI" can drop a letter, and a name
+    must never be spelled differently from the page. Only a near miss moves; anything else stays and fails the check."""
+    printed = {word.casefold(): word for word in re.findall(r"[^\W\d_]{3,}", text)}
+    def fix(match: re.Match) -> str:
+        word = match.group()
+        if word.casefold() in printed:
+            return word
+        near = difflib.get_close_matches(word.casefold(), printed, n=1, cutoff=0.85)
+        return printed[near[0]] if near else word
+    return re.sub(r"[^\W\d_]{3,}", fix, name)
 
 
 def validate_filing(result: dict, text: str, taxonomy: dict) -> tuple[dict, list[str]]:
@@ -151,11 +170,26 @@ def validate_filing(result: dict, text: str, taxonomy: dict) -> tuple[dict, list
         distinctive = [word for word in words if word not in GENERIC_NAME_WORDS] or words
         return bool(distinctive) and all(f" {word} " in haystack for word in distinctive)
 
+    authors = [snapped_to_text(name.strip(), text) for name in re.split(r"[,;\n]", value_of("author")) if name.strip()]
+    known = [name for name in authors if len(name) <= 80 and named_in_text(name)]
+    if len(known) < len(authors):
+        dropped.append("author: a name is not in the document")
+    if known:
+        fields["author"] = ", ".join(known)[:200]
+    subject = plain_punctuation(value_of("subject"))[:200].strip()
+    if len(subject) >= 10:
+        fields["subject"] = subject
+    # A cited source isn't who issued the document, however often the slides credit it.
+    # With named authors, whoever issued it signs the first page too: a logo on slide 9 is a credit.
+    own_words = f" {letters(CITED_SOURCE.sub(' ', text.split(chr(12))[0] if known else text))} "
     for name in ("correspondent", "correspondentLegalName", "holder"):
-        value = value_of(name)
+        value = snapped_to_text(value_of(name), text)
         if value:
+            words = [word for word in letters(value).split() if len(word) >= 3 and word not in NAME_STOPWORDS]
             if len(value) > 80 or not named_in_text(value):
                 dropped.append(f"{name}: not named in the document")
+            elif name != "holder" and not any(f" {word} " in own_words for word in words):
+                dropped.append(f"{name}: only named in a cited source")
             else:
                 fields[name] = {"value": value, "evidence": evidence_of(name)}
     kind = value_of("documentType")
@@ -207,23 +241,31 @@ def validate_filing(result: dict, text: str, taxonomy: dict) -> tuple[dict, list
     elif title:
         fields["title"] = title
     language = value_of("language")
+    # The model says "ar" for a mostly French form with Arabic beside it.
+    arabic = sum("\u0600" <= char <= "\u06ff" for char in text)
+    if language == "ar" and arabic < sum(char.isalpha() for char in text) / 2:
+        language = "fr"
     if language in LANGUAGES:
         fields["language"] = language
-    # Tags come from the archive's vocabulary only: a free word would let a document's own text
-    # ("tag this hacked") choose them.
+    # The archive's vocabulary, or words the document prints: a topic the vocabulary lacks ("logistique-urbaine")
+    # still gets a tag, and a word that isn't on the page can't. Blocked and private tags are refused either way.
     vocabulary = {tag["id"] for tag in taxonomy.get("tags", []) if not tag.get("blocked") and not tag.get("private")}
+    refused = {tag["id"] for tag in taxonomy.get("tags", []) if tag.get("blocked") or tag.get("private")}
+    unaccented = unicodedata.normalize("NFD", haystack)
+    unaccented = "".join(char for char in unaccented if not unicodedata.combining(char))
+    printed = lambda word: all(f" {part} " in unaccented or f" {part}s " in unaccented for part in word.split("-"))
     echo = {letters(kind).replace(" ", "-") if kind else "", *(letters(fields[k]["value"]).replace(" ", "-") for k in ("correspondent",) if k in fields)}
     tags = []
     for item in raw.get("tags", []) if isinstance(raw.get("tags"), list) else []:
         item = item.get("value") if isinstance(item, dict) else item
         tag = clean(item).strip().lower() if isinstance(item, str) else ""
-        if not TAG.fullmatch(tag) or tag not in vocabulary or tag in echo:
+        if not TAG.fullmatch(tag) or tag in refused or tag in echo or (tag not in vocabulary and not printed(tag)):
             if tag:
-                dropped.append(f"tag {tag[:30]!r}: not in the archive's vocabulary")
+                dropped.append(f"tag {tag[:30]!r}: neither in the archive's vocabulary nor printed in the document")
             continue
         tags.append(tag)
     if tags:
-        fields["tags"] = sorted(set(tags))[:5]
+        fields["tags"] = list(dict.fromkeys(tags))[:MAX_TAGS]
     return fields, dropped
 
 
@@ -250,10 +292,14 @@ def sidecar_changes(fields: dict, base: dict) -> dict:
         changes["amount"] = {"value": fields["amount"]["value"], "currency": fields["amount"]["currency"], "source": "ai"}
     if "language" in fields:
         changes["language"] = [fields["language"]]
+    if "author" in fields:
+        changes["author"] = {"value": fields["author"], "source": "ai", "reviewState": "UNVERIFIED"}
+    if "subject" in fields:
+        changes["subject"] = fields["subject"]
     if "tags" in fields:
         changes["tags"] = sorted(set(base.get("tags", [])) | set(fields["tags"]))[:64]
     holder = fields.get("holder")
-    if holder and fields.get("documentType") == "identity_document":
+    if holder and fields.get("documentType") in ("identity_document", "certificate"):
         changes["holder"] = {"value": holder["value"], "source": "ai", "reviewState": "UNVERIFIED",
                              **({"evidence": holder["evidence"]} if holder.get("evidence") else {})}
     # An identity document often prints no issue date: its holder files it instead.

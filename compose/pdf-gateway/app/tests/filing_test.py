@@ -61,7 +61,8 @@ check("a type or section outside the lists is refused", "documentType" not in ba
 check("a date not printed in the document is refused", "documentDate" not in bad)
 check("a number or amount not printed is refused", "reference" not in bad and "amount" not in bad)
 check("a generic title is refused", "title" not in bad)
-check("only vocabulary tags survive (no injected tag)", bad.get("tags") == ["tv"], bad.get("tags"))
+# A tag is the vocabulary's or a word the document prints; "hacked" is printed here, and it's only a label.
+check("a tag must be in the vocabulary or printed", bad.get("tags") == ["hacked", "tv"], bad.get("tags"))
 check("an unknown language is ignored", "language" not in bad)
 check("without a checked date nothing is re-filed", "organization" not in enrichment.sidecar_changes(bad, {}))
 try:

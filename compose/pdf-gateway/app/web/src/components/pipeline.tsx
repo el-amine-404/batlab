@@ -1,10 +1,10 @@
-import { ChevronDown, ClipboardCopy, Fingerprint, ListChecks, ScanSearch, ScrollText } from "lucide-react";
-import { Collapsible, Tabs } from "radix-ui";
+import { ChevronDown, ClipboardCopy, Wrench } from "lucide-react";
+import { Collapsible } from "radix-ui";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import type { Findings, Scan } from "../api";
-import { CHECK_STATUS, ENGINE, STAGE_ABOUT, STAGE_NAME, stageDuration } from "../words";
-import { Badge, Button, CopyButton, Muted, StepMark, cx, formatBytes, formatDate, formatDuration, toClipboard, type StepState } from "./ui";
+import { CHECK_STATUS, ENGINE, STAGE_ABOUT, stageDuration } from "../words";
+import { Badge, Button, CopyButton, Details, Muted, StepMark, cx, formatBytes, formatDate, formatDuration, toClipboard, type StepState } from "./ui";
 
 export type PipelineStep = { key: string; label: ReactNode; detail?: ReactNode; state: StepState };
 
@@ -82,8 +82,6 @@ export function Pipeline({ items, findings }: { items: PipelineStep[]; findings:
   );
 }
 
-const TAB = "flex h-9 shrink-0 items-center gap-1.5 rounded-md px-3 text-sm text-muted-foreground transition outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=active]:bg-accent data-[state=active]:font-medium data-[state=active]:text-foreground [&_svg]:size-4";
-
 function Fact({ label, children, copy }: { label: string; children: ReactNode; copy?: string }) {
   return (
     <div className="flex items-start justify-between gap-2 py-2.5">
@@ -105,140 +103,57 @@ function stepMs(step: Findings["steps"][number]) {
   return step.startedAt && step.finishedAt ? new Date(step.finishedAt).getTime() - new Date(step.startedAt).getTime() : null;
 }
 
-/** For someone looking into it: every run of every check, the log, and the identifiers. */
+const PASSED = new Set(["OK", "CLEAN", "CLEAR"]);
+
+/** The essentials in plain words; each check's own result is in the pipeline, the rest in the copied log. */
 export function TechnicalDetails({ scan, findings, sidecar, documentId, doc }: {
-  scan: Scan; findings?: Findings; sidecar?: { metadataRevision: number; organization: { reason?: string } };
-  documentId: string | null; doc?: { sha256: string; publishedAt: string };
+  scan: Scan; findings?: Findings; sidecar?: { metadataRevision: number; organization: { reason?: string }; textExtraction?: { engine?: string | null; method?: string | null } | null };
+  documentId: string | null; doc?: { sha256: string; publishedAt: string; bytes?: number };
 }) {
   const f = findings;
+  const rebuild = f?.cdr.filter((item) => item.status === "SUCCEEDED").at(-1);
+  const last = f?.validation.at(-1);
+  const checks = last?.checks ?? [];
+  const failing = checks.filter((check) => !PASSED.has(check.status ?? ""));
+  const size = doc?.bytes ?? rebuild?.outputBytes;
   const copyLog = async () => {
-    const text = [`${scan.scanId}  ${scan.status}  ${scan.detection}  ${scan.policy}`, ...(f?.steps ?? []).map(logLine),
-      ...(f?.validation ?? []).flatMap((item) => (item.findings ?? []).map((one) => `final check ${item.attempt}: ${one.code} ${one.engine}: ${one.message}`))].join("\n");
+    const text = [`${scan.scanId}  ${scan.status}  ${scan.detection}  ${scan.policy}  source ${scan.sourceSha256}`,
+      ...(documentId ? [`${documentId}  ${doc?.sha256 ?? ""}`] : []),
+      ...(f?.steps ?? []).map(logLine),
+      ...(f?.cdr ?? []).map((item) => `rebuild try ${item.attempt}: ${item.status} ${item.rebuildMode ?? ""} ${item.outputBytes ?? ""} bytes ${item.failureCode ?? item.shapesFailure ?? ""}`),
+      ...(f?.analysis?.engines ?? []).map((engine) => `first scan ${engine.engine} ${engine.version ?? ""}: ${engine.status} ${engine.durationMs ?? ""} ms`),
+      ...(f?.analysis?.findings ?? []).map((one) => `first scan: ${one.severity} ${one.code} ${one.engine}: ${one.message}`),
+      ...(f?.validation ?? []).flatMap((item) => [`final check ${item.attempt}: ${item.verdict} ${item.failureCodes.join(",")} ${item.outputBytes ?? ""} bytes`,
+        ...(item.checks ?? []).map((check) => `  ${check.engine}: ${check.status} ${check.durationMs ?? ""} ms`),
+        ...(item.findings ?? []).map((one) => `  ${one.code} ${one.engine}: ${one.message}`)])].join("\n");
     try { await toClipboard(text); toast.success("Log copied."); } catch { toast.error("Couldn't copy the log."); }
   };
   return (
-    <section className="min-w-0 rounded-xl border border-border bg-card shadow-xl shadow-black/20 backdrop-blur-xl" data-testid="technical">
-      <h2 className="px-5 pt-5 text-base font-semibold tracking-tight sm:px-6">Technical details</h2>
-      <Tabs.Root defaultValue="checks">
-        <Tabs.List aria-label="Technical details" className="mx-5 mt-3 flex gap-1 overflow-x-auto rounded-lg border border-border bg-background/40 p-0.5 sm:mx-6">
-          <Tabs.Trigger className={TAB} value="checks"><ListChecks /> Runs</Tabs.Trigger>
-          <Tabs.Trigger className={TAB} value="scan"><ScanSearch /> First scan</Tabs.Trigger>
-          <Tabs.Trigger className={TAB} value="log"><ScrollText /> Log</Tabs.Trigger>
-          <Tabs.Trigger className={TAB} value="ids"><Fingerprint /> Identifiers</Tabs.Trigger>
-        </Tabs.List>
-
-        <Tabs.Content value="checks" className="space-y-3 px-5 py-4 outline-none sm:px-6" data-testid="checks">
-          {!f?.cdr.length && !f?.validation.length && <Muted>The file hasn't reached the rebuild yet.</Muted>}
-          {f?.cdr.map((item) => (
-            <div key={`c${item.attempt}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-background/40 px-3 py-2.5">
-              <span className="text-sm font-medium">Rebuild, try {item.attempt}{item.rebuildMode === "SHAPES" ? " (shapes)" : ""}</span>
-              <span className="flex items-center gap-2">
-                {item.outputBytes != null && <span className="text-xs text-muted-foreground tabular-nums">{formatBytes(item.outputBytes)}</span>}
-                {item.durationMs != null && <span className="text-xs text-muted-foreground tabular-nums">{formatDuration(item.durationMs)}</span>}
-                {item.failureCode && <code className="text-xs break-all">{item.failureCode}</code>}
-                <Badge tone={item.status === "SUCCEEDED" ? "good" : "warn"}>{item.status}</Badge>
-              </span>
-            </div>
-          ))}
-          {f?.validation.map((item) => (
-            <div key={`v${item.attempt}`} className="space-y-2 rounded-lg border border-border bg-background/40 p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-sm font-medium">Final check {item.attempt}{item.artifact === "EMBEDDED_METADATA" ? " (with metadata)" : ""}</span>
-                <Badge tone={item.verdict === "PASS" ? "good" : item.verdict === "FAIL" ? "bad" : "warn"}>{item.verdict}</Badge>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {item.outputBytes != null && `${formatBytes(item.outputBytes)} checked. `}{item.createdAt && formatDate(item.createdAt)}
-              </p>
-              {item.failureCodes.length > 0 && <p className="flex flex-wrap gap-1">{item.failureCodes.map((code) => <code key={code} className="rounded bg-muted px-1.5 py-0.5 text-xs break-all">{code}</code>)}</p>}
-              {item.checks && item !== f.validation.at(-1) && <CheckList checks={item.checks} />}
-            </div>
-          ))}
-        </Tabs.Content>
-
-        <Tabs.Content value="scan" className="space-y-4 px-5 py-4 outline-none sm:px-6">
-          {!f?.analysis ? <Muted>The first scan has no result yet.</Muted> : (
-            <>
-              <div className="flex flex-wrap gap-2 text-xs">
-                <Badge tone={f.analysis.detection === "CLEAN" ? "good" : f.analysis.detection === "MALICIOUS" ? "bad" : "warn"}>{f.analysis.detection}</Badge>
-                <Badge>{f.analysis.policyDecision}</Badge>
-              </div>
-              {f.analysis.findings.length === 0 ? <Muted>No check reported anything on the original.</Muted> : (
-                <ul className="space-y-2" data-testid="findings">
-                  {f.analysis.findings.map((item, index) => (
-                    <li key={index} className="flex flex-wrap items-center gap-2 text-sm">
-                      <Badge tone={item.severity === "CRITICAL" ? "bad" : item.severity === "ERROR" || item.severity === "HIGH" ? "warn" : "muted"}>{item.severity}</Badge>
-                      <code className="text-xs break-all">{item.code}</code>
-                      <span className="text-muted-foreground">{item.message}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <CheckList checks={f.analysis.engines} />
-              <dl className="divide-y divide-border">
-                {Object.keys(f.analysis.fonts?.byType ?? {}).length > 0 && (
-                  <Fact label="Fonts in the original (none reach the clean copy)">
-                    <span className="text-xs text-muted-foreground">{Object.entries(f.analysis.fonts?.byType ?? {}).map(([kind, count]) => `${count} ${kind}`).join(" · ")}</span>
-                  </Fact>
-                )}
-                <Fact label="Tool versions">
-                  <span className="text-xs text-muted-foreground">{f.analysis.engines.map((engine) => `${engine.engine ?? "?"} ${engine.version ?? ""}${engine.databaseVersion ? ` (db ${engine.databaseVersion})` : ""}`.trim()).join(" · ")}</span>
-                </Fact>
-              </dl>
-            </>
-          )}
-          {f?.signature && f.signature.signatureCount > 0 && (
-            <div>
-              <h3 className="mb-1 text-sm font-medium">Digital signatures: {f.signature.state}</h3>
-              <ul className="space-y-1 text-sm">
-                {f.signature.signatures.map((signature, index) => (
-                  <li key={index}>{signature.integrity} · {signature.cryptographicValidity} · {signature.trust} · {signature.revocation} · {signature.modificationLevel}
-                    {signature.signerSubject && <span className="block text-xs text-muted-foreground">Signer: {signature.signerSubject}</span>}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </Tabs.Content>
-
-        <Tabs.Content value="log" className="space-y-3 px-5 py-4 outline-none sm:px-6" data-testid="log">
-          <div className="flex items-center justify-between gap-2">
-            <Muted className="text-xs">Every step and retry, oldest first. Copy it to report a problem; it holds no document content.</Muted>
-            <Button type="button" size="sm" variant="secondary" onClick={() => void copyLog()}><ClipboardCopy /> Copy</Button>
-          </div>
-          <ol className="divide-y divide-border rounded-lg border border-border bg-background/40">
-            {f?.steps.map((step, index) => {
-              const ms = stepMs(step);
-              return (
-                <li key={index} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-2">
-                  <span className="min-w-0 text-sm">{STAGE_NAME[step.type] ?? step.type}{step.attempt > 1 ? `, try ${step.attempt}` : ""}
-                    <span className="block text-xs text-muted-foreground">{formatDate(step.startedAt)}</span></span>
-                  <span className="flex flex-wrap items-center gap-2">
-                    {ms != null && <span className="text-xs text-muted-foreground tabular-nums">{formatDuration(ms)}</span>}
-                    {step.errorCode && <code className="text-xs break-all text-warning">{step.errorCode}</code>}
-                    <Badge tone={step.status === "SUCCEEDED" ? "good" : step.status === "FAILED" ? "warn" : "info"}>{step.status}</Badge>
-                  </span>
-                </li>
-              );
-            })}
-          </ol>
-        </Tabs.Content>
-
-        <Tabs.Content value="ids" className="px-5 py-2 outline-none sm:px-6">
-          <dl className="divide-y divide-border">
-            <Fact label="Result">{scan.detection} · {scan.policy}</Fact>
-            <Fact label="Uploaded">{formatDate(scan.createdAt)}</Fact>
-            {doc && <Fact label="Archived">{formatDate(doc.publishedAt)}</Fact>}
-            {sidecar?.organization.reason && <Fact label="Filing">{sidecar.organization.reason}</Fact>}
-            {sidecar && <Fact label="Metadata revision">{sidecar.metadataRevision}</Fact>}
-            <Fact label="Scan ID" copy={scan.scanId}><code className="text-xs break-all">{scan.scanId}</code></Fact>
-            {documentId && <Fact label="Document ID" copy={documentId}><code className="text-xs break-all">{documentId}</code></Fact>}
-            <Fact label="SHA-256 of the original" copy={scan.sourceSha256}><code className="text-xs break-all">{scan.sourceSha256}</code></Fact>
-            {doc && <Fact label="SHA-256 of the clean copy" copy={doc.sha256}><code className="text-xs break-all">{doc.sha256}</code></Fact>}
-          </dl>
-          {f && <ul className="my-3 list-disc space-y-1 pl-5 text-xs text-muted-foreground">{f.limitations.map((text) => <li key={text}>{text}</li>)}</ul>}
-          {documentId && <a className="mb-3 inline-block text-xs text-primary underline-offset-4 hover:underline" href={`/api/v1/archive/${encodeURIComponent(documentId)}/sidecar`} download>Download the metadata file</a>}
-        </Tabs.Content>
-      </Tabs.Root>
-    </section>
+    <Details summary="Technical details" icon={<Wrench className="size-4" />}>
+      <dl className="divide-y divide-border" data-testid="technical">
+        {rebuild && (
+          <Fact label="Clean copy">
+            {rebuild.rebuildMode === "SHAPES" ? "Rebuilt as sharp shapes and images" : "Rebuilt as images"}{size != null && `, ${formatBytes(size)}`} (original {formatBytes(scan.sourceBytes)})
+          </Fact>
+        )}
+        {last && (
+          <Fact label="Final checks">
+            <span data-testid="checks">{last.verdict === "PASS" ? `All ${checks.length || ""} passed`.replace("  ", " ")
+              : failing.length ? `${failing.length} of ${checks.length} had no passing answer: ${failing.map((check) => ENGINE[check.engine ?? ""]?.name ?? check.engine).join(", ")}`
+              : "Didn't pass"}</span>
+          </Fact>
+        )}
+        {sidecar?.textExtraction?.engine && <Fact label="Text read by">{sidecar.textExtraction.engine}</Fact>}
+        {sidecar?.organization.reason && <Fact label="Filed because">{sidecar.organization.reason}</Fact>}
+        <Fact label="Uploaded">{formatDate(scan.createdAt)}</Fact>
+        {doc && <Fact label="Saved to the archive">{formatDate(doc.publishedAt)}</Fact>}
+        <Fact label="Fingerprint of the original" copy={scan.sourceSha256}><code className="text-xs break-all">{scan.sourceSha256}</code></Fact>
+      </dl>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Button type="button" size="sm" variant="secondary" onClick={() => void copyLog()} data-testid="copy-log"><ClipboardCopy /> Copy full log</Button>
+        {documentId && <a className="text-xs text-primary underline-offset-4 hover:underline" href={`/api/v1/archive/${encodeURIComponent(documentId)}/sidecar`} download>Download the metadata file</a>}
+      </div>
+      <Muted className="mt-3 text-xs">No scanner can prove a PDF is safe. Handwritten or drawn signatures aren't verified.</Muted>
+    </Details>
   );
 }
-

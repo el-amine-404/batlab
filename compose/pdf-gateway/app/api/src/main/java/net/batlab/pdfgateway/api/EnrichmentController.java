@@ -121,9 +121,21 @@ public class EnrichmentController {
                           'leaseUntil', j.lease_until,
                           'documentUrl', CASE WHEN j.document_id IS NOT NULL OR j.kind='OCR' THEN '/api/v1/enrichment/jobs/' || j.id || '/document' END,
                           'contextUrl', '/api/v1/enrichment/jobs/' || j.id || '/context',
+                          'renewUrl', '/api/v1/enrichment/jobs/' || j.id || '/renew',
                           'resultUrl', '/api/v1/enrichment/jobs/' || j.id || '/result')::text""",
                 (rs, row) -> rs.getString(1), wanted.toArray(String[]::new), agentId);
         return rows.isEmpty() ? ResponseEntity.noContent().build() : ResponseEntity.ok(rows.getFirst());
+    }
+
+    /** A long read (minutes a page) keeps its lease by finishing pages; a stopped laptop still loses it in 10 minutes. */
+    @PostMapping("/api/v1/enrichment/jobs/{jobId}/renew")
+    @PreAuthorize("hasRole('ENRICHMENT')")
+    public ResponseEntity<Void> renew(@AuthenticationPrincipal GatewayPrincipal principal, @PathVariable String jobId, @RequestParam String agentId) {
+        ownAgent(principal, agentId);
+        int updated = jdbc.update("UPDATE enrichment_jobs SET lease_until=now()+interval '30 minutes' WHERE id=? AND status='LEASED' AND lease_agent=? AND lease_until > now()",
+                parseJob(jobId), agentId);
+        if (updated == 0) throw new ApiException(409, "LEASE_NOT_HELD", "This agent does not hold a valid lease on the job");
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/api/v1/enrichment/jobs/{jobId}/document")
@@ -244,55 +256,22 @@ public class EnrichmentController {
         if (!Boolean.parseBoolean(System.getenv().getOrDefault("PDF_GATEWAY_ENRICHMENT_ENABLED", "false")))
             throw new ApiException(409, "AI_DISABLED", "OCR and AI are not set up");
         ArchiveService.Located located = archive.locate(principal, documentId);
-        Path text = located.directory().resolve("." + located.pdfFile() + ".txt");
-        String content = Files.isRegularFile(text, LinkOption.NOFOLLOW_LINKS) ? Files.readString(text, StandardCharsets.UTF_8) : "";
-        if (content.isBlank()) throw new ApiException(409, "NO_TEXT", "This document has no text for the AI to read");
-        if (content.length() > MAX_CONTEXT_CHARS) content = content.substring(0, MAX_CONTEXT_CHARS);
-        Path taxonomy = properties.archiveRoot().resolve("manifests").resolve("taxonomy.json");
-        String vocabulary = Files.isRegularFile(taxonomy, LinkOption.NOFOLLOW_LINKS) ? Files.readString(taxonomy, StandardCharsets.UTF_8) : "{}";
         String sha = located.view().sha256();
         Boolean moving = jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM enrichment_jobs WHERE document_id=? AND status IN ('WAITING_FOR_AI','LEASED','SUBMITTED'))",
                 Boolean.class, documentId);
         if (Boolean.TRUE.equals(moving)) throw new ApiException(409, "ALREADY_ASKED", "The AI is already on it");
-        // A scan (its text came from OCR: the sandbox's, one language, or an earlier reading on the laptop): the
-        // laptop reads the pages again first with its current OCR (French, English and Arabic, scattered text
-        // too, small pages enlarged), then files it.
-        Boolean ocrText = jdbc.queryForObject("SELECT sidecar->'textExtraction'->>'method' = 'ocr' FROM archive_documents WHERE document_id=?",
-                Boolean.class, documentId);
-        if (Boolean.TRUE.equals(ocrText)) {
-            int again = jdbc.update("""
-                    UPDATE enrichment_jobs SET status='WAITING_FOR_AI', context='{"force": true}'::jsonb, artifact_sha256=?, result=NULL, applied=NULL,
-                           lease_agent=NULL, lease_until=NULL, attempts=0, error_code=NULL, completed_at=NULL, deadline_at=NULL,
-                           expires_at=now()+interval '30 days'
-                     WHERE id=(SELECT id FROM enrichment_jobs WHERE document_id=? AND kind='OCR' ORDER BY created_at DESC LIMIT 1)""", sha, documentId);
-            if (again == 0)
-                jdbc.update("INSERT INTO enrichment_jobs(id,document_id,artifact_sha256,kind,context) VALUES (?,?,?,'OCR','{\"force\": true}'::jsonb)",
-                        UUID.randomUUID(), documentId, sha);
-            jdbc.update("INSERT INTO audit_events(actor_id,action,resource_type,resource_id,outcome,trace_id) VALUES (?,'AI_REFILE_REQUESTED','DOCUMENT',?,'SUCCESS',?)",
-                    principal.userId(), documentId, UUID.randomUUID().toString());
-            return ResponseEntity.accepted().body("{\"status\":\"WAITING_FOR_AI\",\"reading\":true}");
-        }
-        String context = jdbc.queryForObject("""
-                SELECT jsonb_build_object('text', ?::text, 'truncated', ?, 'force', true,
-                       'types', ?::jsonb, 'sections', ?::jsonb,
-                       'tags', COALESCE((SELECT jsonb_agg(t->>'id') FROM jsonb_array_elements(?::jsonb->'tags') t
-                                          WHERE NOT (t->>'blocked')::boolean AND NOT (t->>'private')::boolean), '[]'::jsonb),
-                       'correspondents', COALESCE((SELECT jsonb_agg(DISTINCT sidecar->'issuer'->>'value') FROM archive_documents
-                                                    WHERE sidecar->'issuer'->>'value' IS NOT NULL), '[]'::jsonb))::text""",
-                String.class, content, content.length() >= MAX_CONTEXT_CHARS, ArchiveService.json(ArchiveService.TYPES),
-                ArchiveService.json(ArchiveService.SECTIONS.subList(0, ArchiveService.SECTIONS.size() - 1)), vocabulary);
-        int reused = jdbc.update("""
-                UPDATE enrichment_jobs SET status='WAITING_FOR_AI', context=?::jsonb, artifact_sha256=?, result=NULL, applied=NULL,
+        // The laptop reads the pages again first, whatever text the PDF has, then the AI files it from that reading.
+        int again = jdbc.update("""
+                UPDATE enrichment_jobs SET status='WAITING_FOR_AI', context='{"force": true}'::jsonb, artifact_sha256=?, result=NULL, applied=NULL,
                        lease_agent=NULL, lease_until=NULL, attempts=0, error_code=NULL, completed_at=NULL, deadline_at=NULL,
                        expires_at=now()+interval '30 days'
-                 WHERE id=(SELECT id FROM enrichment_jobs WHERE document_id=? AND kind='SUGGEST' ORDER BY created_at DESC LIMIT 1)""",
-                context, sha, documentId);
-        if (reused == 0)
-            jdbc.update("INSERT INTO enrichment_jobs(id,document_id,artifact_sha256,kind,context) VALUES (?,?,?,'SUGGEST',?::jsonb)",
-                    UUID.randomUUID(), documentId, sha, context);
+                 WHERE id=(SELECT id FROM enrichment_jobs WHERE document_id=? AND kind='OCR' ORDER BY created_at DESC LIMIT 1)""", sha, documentId);
+        if (again == 0)
+            jdbc.update("INSERT INTO enrichment_jobs(id,document_id,artifact_sha256,kind,context) VALUES (?,?,?,'OCR','{\"force\": true}'::jsonb)",
+                    UUID.randomUUID(), documentId, sha);
         jdbc.update("INSERT INTO audit_events(actor_id,action,resource_type,resource_id,outcome,trace_id) VALUES (?,'AI_REFILE_REQUESTED','DOCUMENT',?,'SUCCESS',?)",
                 principal.userId(), documentId, UUID.randomUUID().toString());
-        return ResponseEntity.accepted().body("{\"status\":\"WAITING_FOR_AI\"}");
+        return ResponseEntity.accepted().body("{\"status\":\"WAITING_FOR_AI\",\"reading\":true}");
     }
 
     /** A scan's AI job before (and after) its document is published, for its page. */
