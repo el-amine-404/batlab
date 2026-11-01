@@ -207,6 +207,8 @@ function CopyCard({ documentId, doc, sidecar, etag, paperless, canEdit, onSaved,
   type Row = [string, ReactNode, InlineSpec | null];
   const rows: Row[] = [
     ["Title", sidecar.title, { key: "title", value: sidecar.title, required: true }],
+    ...(sidecar.subject ? [["About", sidecar.subject, null] as Row] : []),
+    ...(sidecar.author ? [["Author", sidecar.author.value, null] as Row] : []),
     ["From", sidecar.issuer?.value, { key: "issuer", value: sidecar.issuer?.value ?? "" }],
     ...(identity ? [["Holder", sidecar.holder?.value, { key: "holder", value: sidecar.holder?.value ?? "" }] as Row,
       ["Valid until", sidecar.validUntil?.value, { key: "validUntil", value: sidecar.validUntil?.value ?? "", type: "date" }] as Row] : []),
@@ -302,7 +304,9 @@ function CopyCard({ documentId, doc, sidecar, etag, paperless, canEdit, onSaved,
             <dl className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-4 gap-y-0.5 text-sm" data-testid="copy-fields">
               {rows.filter(([, value, spec]) => (value !== undefined && value !== "") || (canEdit && spec)).map(([label, value, spec]) => (
                 <div key={label} className="contents">
-                  <dt className="py-1.5 text-muted-foreground">{label}</dt>
+                  <dt className="py-1.5 text-muted-foreground">{label}
+                    {needsLook(sidecar, label) && <span className="mt-0.5 block" data-testid="check-this" title="Only one reader saw this on the page. Compare it with the document."><Badge tone="warn">Check this</Badge></span>}
+                  </dt>
                   <dd className="min-w-0 break-words">
                     {canEdit && spec
                       ? <InlineField label={label} display={value} spec={spec} documentId={documentId} etag={etag} onSaved={saved} />
@@ -335,6 +339,15 @@ function CopyCard({ documentId, doc, sidecar, etag, paperless, canEdit, onSaved,
       </div>
     </section>
   );
+}
+
+const CHECKED_FIELD: Record<string, "issuer" | "holder" | "reference" | "author" | "documentDate" | "amount"> = {
+  From: "issuer", Holder: "holder", Number: "reference", Author: "author", Date: "documentDate", Amount: "amount" };
+
+/** A value from the AI that the second reader of the page didn't see; correcting it (no longer the AI's) ends that. */
+function needsLook(sidecar: SidecarData, label: string) {
+  const key = CHECKED_FIELD[label];
+  return !!key && sidecar.fieldChecks?.[key] === "CHECK" && sidecar[key]?.source === "ai";
 }
 
 /** A saved change not yet in the PDF itself (its new version is being written and checked). */

@@ -173,6 +173,10 @@ def validate_filing(result: dict, text: str, taxonomy: dict) -> tuple[dict, list
         # "Acme Sports" passes on "Acme" (in "www.acme.example"); "Northwind Maroc" fails on a text that
         # only says "Maroc" in an address.
         words = [word for word in letters(name).split() if len(word) >= 3 and word not in NAME_STOPWORDS]
+        if not words:
+            # A name in another script: letters() can't see it.
+            printed = set(tokens(text))
+            return bool(tokens(name)) and all(word in printed for word in tokens(name))
         distinctive = [word for word in words if word not in GENERIC_NAME_WORDS] or words
         return bool(distinctive) and all(f" {word} " in haystack for word in distinctive)
 
@@ -273,6 +277,37 @@ def validate_filing(result: dict, text: str, taxonomy: dict) -> tuple[dict, list
     if tags:
         fields["tags"] = list(dict.fromkeys(tags))[:MAX_TAGS]
     return fields, dropped
+
+
+def tokens(text: str) -> list[str]:
+    """Words in any script, unlike letters(), which keeps a-z and digits only: an Arabic name has to be comparable too."""
+    decomposed = unicodedata.normalize("NFKD", clean(text)).casefold()
+    return re.findall(r"[^\W_]{2,}", "".join(ch for ch in decomposed if not unicodedata.combining(ch)))
+
+
+def field_checks(fields: dict, second: str) -> dict:
+    """Which checked fields a second reader of the page also saw: "CONFIRMED", or "CHECK" for a person to look at.
+    Nothing here changes a value. Without a second reading nothing is claimed."""
+    if not second.strip():
+        return {}
+    seen = set(tokens(second))
+    def found(value: str) -> bool:
+        words = tokens(value)
+        return bool(words) and all(word in seen for word in words)
+    checks = {}
+    for name, key in (("correspondent", "issuer"), ("holder", "holder"), ("reference", "reference"), ("author", "author")):
+        item = fields.get(name)
+        value = item.get("value") if isinstance(item, dict) else item
+        if value:
+            checks[key] = "CONFIRMED" if found(value) else "CHECK"
+    if fields.get("documentDate"):
+        printed = {day.isoformat() for day, _offset, _labelled in find_dates(second)}
+        checks["documentDate"] = "CONFIRMED" if fields["documentDate"]["value"] in printed else "CHECK"
+    if fields.get("amount"):
+        number = fields["amount"]["value"]
+        printed = {match.replace(",", ".").replace(" ", "") for match in re.findall(r"\d[\d ]*[.,]\d{2}\b|\d+", second)}
+        checks["amount"] = "CONFIRMED" if number in printed else "CHECK"
+    return checks
 
 
 def sidecar_changes(fields: dict, base: dict) -> dict:

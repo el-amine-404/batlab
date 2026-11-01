@@ -11,6 +11,7 @@
     "artifactVersion": {"type": "integer", "minimum": 1},
     "metadataRevision": {"type": "integer", "minimum": 1},
     "subject": {"type": "string", "maxLength": 200},
+    "fieldChecks": {"type": "object", "maxProperties": 16, "additionalProperties": {"enum": ["CONFIRMED", "CHECK"]}},
     "title": {"type": "string", "minLength": 1, "maxLength": 200},
     "titleSource": {"$ref": "#/$defs/provenance"},
     "documentType": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},

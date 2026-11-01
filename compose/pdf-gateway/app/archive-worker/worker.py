@@ -578,6 +578,10 @@ def handle_enrichment(channel, method, _properties, body: bytes) -> None:
                             current = document.read()
                             base = {**current, "tags": []} if forced else current  # asked again: its tags, not old ones
                             changes = enrichment.sidecar_changes(fields, base) if fields else {}
+                            cursor.execute("SELECT result->>'second' FROM enrichment_jobs WHERE document_id=%s AND kind='OCR' AND status='COMPLETED' ORDER BY created_at DESC LIMIT 1", (document_id,))
+                            row_second = cursor.fetchone()
+                            checks = enrichment.field_checks(fields, (row_second[0] or "") if row_second else "")
+                            changes["fieldChecks"] = checks or None
                             if forced:
                                 # Asked again: an old answer the new reading doesn't repeat goes too.
                                 for key in ("issuer", "author", "subject", "holder", "reference", "amount"):

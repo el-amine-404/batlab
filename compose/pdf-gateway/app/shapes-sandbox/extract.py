@@ -332,6 +332,28 @@ def words(page: pymupdf.Page) -> list:
     return out
 
 
+def trust_stored(stored: list, read: list) -> bool:
+    """Whether a PDF's stored words are what the page shows: fonts can make them wrong ("e$cace", "plani,cation")."""
+    def fold(items: list) -> list[str]:
+        return [item[4].strip(".,;:!?()[]«»\"'’").casefold() for item in items]
+    have, seen = [word for word in fold(stored) if len(word) >= 2], set(fold(read))
+    if len(have) < 5:
+        return False
+    if any(re.search(r"[^\W\d_][\W\d_]+[^\W\d_]", word) and "-" not in word and "'" not in word and "’" not in word and word not in seen for word in have):
+        return False
+    return sum(word in seen for word in have) / len(have) >= 0.8
+
+
+def upright(page: pymupdf.Page) -> None:
+    """A scan on its side is turned, for reading and for whoever opens the copy; no pixel changes."""
+    pixmap = page.get_pixmap(dpi=OCR_DPI, colorspace=pymupdf.csGRAY, alpha=False)
+    found = subprocess.run(["tesseract", "stdin", "stdout", "--psm", "0"], input=pixmap.tobytes("png"),
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120, check=False).stdout.decode("utf-8", "replace")
+    rotate, confidence = re.search(r"Rotate:\s*(\d+)", found), re.search(r"Orientation confidence:\s*([\d.]+)", found)
+    if rotate and confidence and int(rotate.group(1)) and float(confidence.group(1)) >= 3:
+        page.set_rotation((page.rotation + int(rotate.group(1))) % 360)
+
+
 def ocr(page: pymupdf.Page) -> list:
     """Invisible text for a page that has none: the reader's search and copy, never what's drawn."""
     pixmap = page.get_pixmap(dpi=OCR_DPI, colorspace=pymupdf.csGRAY, alpha=False)
@@ -364,6 +386,11 @@ def main() -> int:
         pages = []
         ocr_left = MAX_OCR_PAGES
         for page in document:
+            # Only a page with no text of its own: a designed page may well be sideways on purpose.
+            native = words(page)
+            if not native and page.get_images() and ocr_left > 0:
+                upright(page)
+                native = words(page)
             rect = page.rect
             record: dict = {"w": rect.width, "h": rect.height}
             try:
@@ -377,10 +404,13 @@ def main() -> int:
                 record["ops"] = [["image", index, [rect.width, 0, 0, -rect.height, 0, rect.height]]]
                 record["mode"] = "pixels"
                 record["reason"] = str(error)[:60] or type(error).__name__
-            record["words"] = words(page)
-            if not record["words"] and page.get_images() and ocr_left > 0:
+            # The search layer: the page's own words when a reader confirms them, else what the reader sees.
+            record["words"] = native
+            if ocr_left > 0 and (native or page.get_images()):
                 ocr_left -= 1
-                record["words"] = ocr(page)
+                read = ocr(page)
+                if read and not trust_stored(native, read):
+                    record["words"] = read
             pages.append(record)
         ordered = sorted(glyphs.values(), key=lambda item: item[0])
         manifest = {"format": "shapes-1", "pages": pages, "glyphs": [path for _index, path in ordered], "images": images.entries}

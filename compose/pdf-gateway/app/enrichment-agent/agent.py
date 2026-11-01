@@ -59,6 +59,10 @@ FAST_LANGUAGES = os.getenv("PDF_GATEWAY_OCR_FAST_LANGUAGES", "fra+eng")
 SURE_CONFIDENCE = float(os.getenv("PDF_GATEWAY_OCR_SURE_CONFIDENCE", "70"))
 # Words of Arabic Tesseract is 80% sure of: 59 on a bilingual certificate, at most 5 on any page of a French deck.
 ARABIC_WORDS = int(os.getenv("PDF_GATEWAY_OCR_ARABIC_WORDS", "10"))
+# A document this short is read by the vision model whole: IDs, certificates and invoices, where every word counts.
+SHORT_DOCUMENT = int(os.getenv("PDF_GATEWAY_VISION_SHORT_DOCUMENT", "2"))
+# How many of a PDF's stored words a reader must also see on the page for the stored text to be kept.
+TRUST_SHARE = float(os.getenv("PDF_GATEWAY_OCR_TRUST_SHARE", "0.8"))
 # The long side of the page the model sees. Scored 2026-11-01: 1100 px reads French as well as 1600 in a third of
 # the time (13/13 in 77 s, 13/13 in 219 s); Arabic loses words below 1600 (18/20 against 19-20); 768 loses names.
 VISION_PIXELS = int(os.getenv("PDF_GATEWAY_VISION_PIXELS", "1100"))
@@ -256,18 +260,35 @@ def fast_reading(image: Path) -> tuple[str, float, int, list[str]]:
     return "\n".join(texts), sum(confidences) / max(1, len(confidences)), len(confidences), zones
 
 
-def has_arabic(image: Path) -> bool:
-    """Arabic words Tesseract is fairly sure of: its Arabic alone isn't good enough, so the page goes to the vision model."""
+def arabic_reading(image: Path) -> tuple[bool, str]:
+    """Whether Tesseract is fairly sure of enough Arabic words (its Arabic alone isn't good enough, so the page goes to the
+    vision model), and those words, a second opinion on the Arabic the model reads."""
     tsv = subprocess.run(["tesseract", str(image), "-", "-l", "ara", "--psm", "3", "tsv"], capture_output=True, text=True, timeout=180).stdout
     sure = 0
+    found = []
     for row in csv.DictReader(io.StringIO(tsv), delimiter="\t", quoting=csv.QUOTE_NONE):
-        word = row.get("text") or ""
+        word = BIDI.sub("", row.get("text") or "")
         try:
             if row.get("level") == "5" and sum("\u0600" <= char <= "\u06ff" for char in word) >= 3 and float(row["conf"]) >= 80:
                 sure += 1
+                found.append(word)
         except (TypeError, ValueError):
             pass
-    return sure >= ARABIC_WORDS
+    return sure >= ARABIC_WORDS, " ".join(found)
+
+
+def trust_stored(stored: str, read: str) -> bool:
+    """Whether a PDF's stored text is what the page shows: exact when it is, and fonts can make it wrong ("e$cace",
+    "plani,cation", "flux" as "ux"). Stored words must be found by a reader looking at the page; a word broken by a
+    symbol or a digit that the reader doesn't confirm rejects the page outright."""
+    def words(text: str) -> list[str]:
+        return [word.strip(".,;:!?()[]«»\"'’").casefold() for word in text.split()]
+    have, seen = [word for word in words(stored) if len(word) >= 2], set(words(read))
+    if len(have) < 5:
+        return False
+    if any(re.search(r"[^\W\d_][\W\d_]+[^\W\d_]", word) and "-" not in word and "'" not in word and "’" not in word and word not in seen for word in have):
+        return False
+    return sum(word in seen for word in have) / len(have) >= TRUST_SHARE
 
 
 def reading(image: Path, psm: str) -> tuple[str, float]:
@@ -370,10 +391,20 @@ def ocr(job: dict, engine: str) -> dict:
         texts = []
         upright = [turned(page, directory) for page in pages]
         quick = [fast_reading(page) for page in upright]
-        arabic = [index for index, page in enumerate(upright) if has_arabic(page)]
-        must = ([0] + [index for index in arabic if index != 0])[:VISION_PAGES]
+        arabic_read = [arabic_reading(page) for page in upright]
+        arabic = [index for index, (found, _text) in enumerate(arabic_read) if found]
+        stored = [BIDI.sub("", subprocess.run(["pdftotext", "-f", str(index + 1), "-l", str(index + 1), str(source), "-"],
+                                              capture_output=True, text=True, timeout=60).stdout) for index in range(len(upright))]
+        trusted = {index for index, text in enumerate(stored) if trust_stored(text, quick[index][0])}
+        # The first page with something on it (a cover can be blank), unless its stored text is already exact.
+        opening = next((index for index, reading_ in enumerate(quick) if reading_[2] >= 5), 0)
+        if len(upright) <= SHORT_DOCUMENT:
+            must = list(range(len(upright)))
+        else:
+            must = ([] if opening in trusted else [opening]) + [index for index in arabic if index != opening]
+        must = must[:VISION_PAGES]
         # The least sure first.
-        doubtful = sorted((index for index, reading_ in enumerate(quick) if index not in must
+        doubtful = sorted((index for index, reading_ in enumerate(quick) if index not in must and index not in trusted
                            and reading_[2] >= 5 and reading_[1] < SURE_CONFIDENCE), key=lambda index: quick[index][1])
         wanted = [(index, MUST_SECONDS) for index in must] + [(index, DOUBTFUL_SECONDS) for index in doubtful][:min(DOUBTFUL_PAGES, VISION_PAGES - len(must))]
         readings: dict[int, tuple[str, str]] = {}
@@ -391,7 +422,15 @@ def ocr(job: dict, engine: str) -> dict:
                 gateway("POST", f"{job['renewUrl']}?agentId={AGENT}")
             log("page_read", page=index + 1, model=name, done=done, of=len(wanted))
         asked = {index for index, _seconds in wanted}
+        # Whatever wasn't used for the text is the second reader: the gateway marks fields only one of them saw.
+        second = []
         for index, page in enumerate(upright):
+            second.append("\n".join(part for part in [quick[index][0] if index in trusted or index in readings else stored[index], arabic_read[index][1]] if part))
+            # The PDF's own characters are exact when a reader confirms them; Arabic isn't confirmed by this reader.
+            if index in trusted and index not in arabic:
+                read_by.add("pdf text")
+                texts.append({"page": index + 1, "text": stored[index][:200_000]})
+                continue
             if index in readings:
                 read_by.add(readings[index][1].rsplit("/", 1)[-1])
                 # The gateway checks a zone's check digits: Tesseract's copy of it goes along.
@@ -403,7 +442,8 @@ def ocr(job: dict, engine: str) -> dict:
             texts.append({"page": index + 1, "text": text[:200_000]})
         truncated = len(pages) >= MAX_PAGES
         engine = " + ".join(sorted(read_by))
-    return {"kind": "OCR", "engine": engine[:80], "languages": LANGUAGES.split("+"), "pages": texts, "truncated": truncated}
+    return {"kind": "OCR", "engine": engine[:80], "languages": LANGUAGES.split("+"), "pages": texts, "truncated": truncated,
+            "second": "\n\f\n".join(second)[:1_000_000]}
 
 
 def suggest(job: dict) -> dict:
