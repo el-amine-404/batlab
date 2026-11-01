@@ -86,6 +86,21 @@ sync_repository() {
   fi
 }
 
+# What this run's pull brought to a stack: Renovate's and your commit titles, and
+# the pins it builds from or runs. For the #updates card.
+changes_since_pull() {
+  local stack="$1" pin value
+  [[ -n "$PULLED_FROM" && "$PULLED_FROM" != "$(git rev-parse HEAD)" ]] || return 0
+  {
+    git log --format=%s "$PULLED_FROM..HEAD" -- "compose/$stack" lib/batlab-common lib/batlab-ui
+    git diff -U0 "$PULLED_FROM" HEAD -- compose/versions.env |
+      sed -nE 's/^\+((TAG|VERSION)_[A-Z0-9_]+)=(.*)$/\1 \3/p' |
+      while read -r pin value; do
+        grep -qF "\${$pin" "compose/$stack/docker-compose.yml" && echo "$pin ${value%%@*}"
+      done
+  } | head -8
+}
+
 # A file bind-mounted from the checkout keeps the inode it had when its
 # container started, and git replaces a file it changes: the container goes on
 # reading the old copy until it is recreated. Netdata sent its old cards for
@@ -231,6 +246,80 @@ update_pdf_gateway() {
   return 1
 }
 
+# Scanloom is one unit too: api, worker and notifier share an image that only api
+# builds, and its name carries the version, so the services must move together.
+scanloom_fingerprint() {
+  {
+    git rev-parse HEAD:compose/scanloom HEAD:lib/batlab-ui HEAD:lib/batlab-common
+    grep -E '^(IMAGE|TAG)_(SCANLOOM_|CADDY)' compose/versions.env
+  } | sha256sum | cut -c1-16
+}
+
+scanloom_healthy() {
+  local container
+  for container in $(docker ps -a --filter label=com.docker.compose.project=scanloom --format '{{.Names}}'); do
+    wait_until_healthy "$container" >/dev/null || { echo "$container"; return 1; }
+  done
+}
+
+update_scanloom() {
+  grep -vE '^\s*(#|$)' "hosts/$HOST_PROFILE_NAME/stacks.txt" 2>/dev/null | grep -qxF scanloom || return 0
+  local fingerprint recorded reason="" changes override container service image
+  fingerprint="$(scanloom_fingerprint)"
+  recorded="$(built_from scanloom)"
+  [[ -n "$recorded" ]] || { record_build scanloom "$fingerprint"; return 0; }
+  [[ "$recorded" == "$fingerprint" ]] && return 0
+  if seen "scanloom $fingerprint" failed; then
+    echo "Skipping scanloom: $fingerprint already failed once"
+    return 0
+  fi
+  echo "Updating scanloom: $recorded -> $fingerprint"
+  [[ "$DRY_RUN" == "1" ]] && return 0
+
+  # The new version has a new image name, so the rollback names each service's
+  # old image rather than retagging it.
+  override="$(mktemp --suffix=.yml)"
+  echo 'services:' >"$override"
+  for container in $(docker ps --filter label=com.docker.compose.project=scanloom --format '{{.Names}}'); do
+    image="$(docker inspect -f '{{.Config.Image}}' "$container")"
+    [[ "$image" == local/* ]] || continue
+    service="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$container")"
+    docker tag "$(docker inspect -f '{{.Image}}' "$container")" "local/batlab-rollback:scanloom-$service"
+    printf '  %s:\n    image: %s\n    pull_policy: missing\n' "$service" "local/batlab-rollback:scanloom-$service" >>"$override"
+  done
+
+  changes="$(changes_since_pull scanloom)"
+  if make up STACK=scanloom && reason="$(scanloom_healthy)"; then
+    rm -f "$override"
+    record_build scanloom "$fingerprint"
+    notify updates "Updated scanloom" success "Changes" "${changes:-$fingerprint}" "Previous" "$recorded"
+    return 0
+  fi
+
+  echo "Update of scanloom failed (${reason:-build or start}); rolling back" >&2
+  local rollback="rolled back"
+  docker compose "${ENV_ARGS[@]}" -f compose/scanloom/docker-compose.yml -f "$override" up -d --no-build &&
+    scanloom_healthy >/dev/null || rollback="ROLLBACK FAILED, check it now"
+  rm -f "$override"
+  remember "scanloom $fingerprint" failed
+  notify alerts "Update failed: scanloom" failure "Tried" "${changes:-$fingerprint}" \
+    "Reason" "${reason:-build or start failed}" "Result" "$rollback" \
+    "Logs" "journalctl -u batlab-updater -n 100"
+  return 1
+}
+
+# A Renovate branch whose build or tests failed never reaches main, so nothing
+# else would say that dependency is stuck. Once per commit of the branch.
+report_stuck_updates() {
+  local branch sha link
+  while IFS=$'\t' read -r branch sha link; do
+    seen "stuck $branch $sha" pending && continue
+    remember "stuck $branch $sha" pending
+    notify updates "Update not merged: $branch" info \
+      "Why" "Its build or tests failed" "Details" "$link"
+  done < <(python3 -I "$SCRIPT_DIR/stuck_updates.py")
+}
+
 update_service() {
   local stack="$1" service="$2" container="$3" old_image="$4" new_image="$5" built="$6" key="$7"
   local compose_file="compose/$stack/docker-compose.yml" reason override old_id new_id
@@ -265,8 +354,11 @@ update_service() {
     new_id="$(docker image inspect -f '{{.Id}}' "$new_image" 2>/dev/null || true)"
     if docker compose "${ENV_ARGS[@]}" -f "$compose_file" "${start[@]}" "$service" &&
       reason="$(wait_until_healthy "$container")"; then
+      local changes
+      changes="$(changes_since_pull "$stack")"
       notify updates "Updated $service" success \
-        "Image" "$new_image${new_id:+ (${new_id:7:12})}" "Previous" "$previous"
+        "Image" "$new_image${new_id:+ (${new_id:7:12})}" "Previous" "$previous" \
+        ${changes:+"Changes" "$changes"}
       # The old image stays, to roll back to without a download; docker prune
       # (dockerprune/) keeps that one previous version and removes older ones.
       return 0
@@ -348,6 +440,8 @@ main() {
       checked=$((checked + 1))
       # update_pdf_gateway builds these together.
       [[ "$stack" == "pdf-gateway" && "$built" == "yes" ]] && continue
+      # update_scanloom moves the whole stack.
+      [[ "$stack" == "scanloom" ]] && continue
       key="$service $desired"
       if [[ "$built" == "yes" ]]; then
         # Built here: the same image name may hide new pins (a base image's
@@ -386,6 +480,8 @@ main() {
   done
 
   update_pdf_gateway || failures=$((failures + 1))
+  update_scanloom || failures=$((failures + 1))
+  [[ "$DRY_RUN" == "1" ]] || report_stuck_updates
 
   echo "Checked $checked running service(s): $changed differ from the checkout, $failures failed."
   ((failures == 0))

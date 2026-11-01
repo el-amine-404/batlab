@@ -28,5 +28,27 @@ subfeed
 videodrop
 musicguard
 tv-remote
+stanzarr
+nodecast
 # The PDF gateway's scanner. Its own images are built by update_pdf_gateway in update.sh; its database and broker stay manual.
 clamav
+
+# Third-party apps: minor and patch updates only, Renovate holds their majors.
+# Not here, so they wait for a person: DNS, proxy and VPN (adguardhome, unbound,
+# caddy, gluetun), databases and brokers, and apps whose upgrades migrate data
+# that a rollback can't undo (immich, frigate, paperless).
+ollama
+paperless-gpt
+apprise
+dispatcharr
+slskd
+soularr
+aurral
+diun
+feishin
+frigate-notify
+gotenberg
+netdata
+open-webui
+portainer-ce
+adguardhome-sync

@@ -6,9 +6,11 @@
   "enabledManagers": [
     "custom.regex",
     "dockerfile",
+    "docker-compose",
     "npm",
     "maven",
-    "pip_requirements"
+    "pip_requirements",
+    "pip-compile"
   ],
   "customManagers": [
     {
@@ -70,15 +72,17 @@
   "prHourlyLimit": 0,
   "packageRules": [
     {
-      "description": "Dockerfiles, npm, Maven and pip are read for the PDF gateway alone: it parses hostile files, so what it's built from has to keep moving. Other apps stay on versions.env",
+      "description": "Dockerfiles, npm, Maven, pip and Compose files are read only for the apps built here. Other services stay on versions.env",
       "matchManagers": [
         "dockerfile",
+        "docker-compose",
         "npm",
         "maven",
-        "pip_requirements"
+        "pip_requirements",
+        "pip-compile"
       ],
       "matchFileNames": [
-        "!compose/pdf-gateway/**"
+        "!compose/{pdf-gateway,scanloom,clipseerr,subfeed,videodrop,songdrop,stanzarr,musicguard,tv-remote,nodecast,untrunc,speed_test}/**"
       ],
       "enabled": false
     },
@@ -121,7 +125,7 @@
       "enabled": false
     },
     {
-      "description": "Every other minor and patch update arrives as one weekly PR instead of one per image",
+      "description": "Every other minor and patch update arrives as one weekly commit, merged by itself; the nightly updater deploys those in auto-services.txt, with health check and rollback",
       "matchUpdateTypes": [
         "minor",
         "patch"
@@ -151,9 +155,43 @@
         "!rust",
         "!node",
         "!ytmusicapi",
-        "!songrec"
+        "!songrec",
+        "!denoland/deno",
+        "!ghcr.io/technomancer702/nodecast-tv"
       ],
       "groupName": "weekly minor and patch updates",
+      "schedule": [
+        "before 6am on monday"
+      ],
+      "automerge": true,
+      "automergeType": "branch",
+      "ignoreTests": true
+    },
+    {
+      "description": "DNS, proxy, VPN, databases and apps whose upgrades migrate data: minor and patch updates wait in one weekly PR",
+      "matchPackageNames": [
+        "adguard/adguardhome",
+        "mvance/unbound",
+        "caddy",
+        "qmcgaw/gluetun",
+        "postgres",
+        "rabbitmq",
+        "ghcr.io/immich-app/**",
+        "docker.io/valkey/valkey",
+        "ghcr.io/blakeblackshear/frigate",
+        "eclipse-mosquitto",
+        "ghcr.io/paperless-ngx/paperless-ngx",
+        "docker.io/apache/tika"
+      ],
+      "matchFileNames": [
+        "compose/versions.env"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "automerge": false,
+      "groupName": "infrastructure minor and patch updates",
       "schedule": [
         "before 6am on monday"
       ]
@@ -191,36 +229,6 @@
       "ignoreTests": true
     },
     {
-      "description": "What the apps built here (clipseerr, subfeed, videodrop, musicguard, tv-remote, songdrop) are made of: the build stages' Rust and Node, and the Python libraries and crates they pin, merge their minor and patch updates straight into main; the nightly updater rebuilds the apps from them, its health check and rollback the test",
-      "matchPackageNames": [
-        "rust",
-        "node",
-        "ytmusicapi",
-        "songrec"
-      ],
-      "matchUpdateTypes": [
-        "minor",
-        "patch",
-        "digest"
-      ],
-      "automerge": true,
-      "automergeType": "branch",
-      "ignoreTests": true
-    },
-    {
-      "description": "The apps' Python base image: a new digest (Debian's security fixes, ffmpeg's among them) or patch release merges on its own; a new Python minor (3.13 to 3.14) waits for a human, since the apps run on it",
-      "matchPackageNames": [
-        "python"
-      ],
-      "matchUpdateTypes": [
-        "patch",
-        "digest"
-      ],
-      "automerge": true,
-      "automergeType": "branch",
-      "ignoreTests": true
-    },
-    {
       "description": "Major updates always need a human, whatever the image",
       "matchUpdateTypes": [
         "major"
@@ -230,6 +238,235 @@
         "dependencies",
         "major"
       ]
+    },
+    {
+      "description": "Compose files are only read for Scanloom, the one app that pins its images there",
+      "matchManagers": [
+        "docker-compose"
+      ],
+      "matchFileNames": [
+        "!compose/scanloom/**"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "pip_requirements can't regenerate hashes, pip-compile does; it keeps only the gateway's sandbox, which has no lock file",
+      "matchManagers": [
+        "pip_requirements"
+      ],
+      "matchFileNames": [
+        "!compose/pdf-gateway/app/shapes-sandbox/**"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Everything the apps built here are made of merges by itself, majors included, once deps-gate has built the app and run its tests. The updater then rebuilds and deploys it, with health check and rollback",
+      "matchFileNames": [
+        "compose/{pdf-gateway,scanloom,clipseerr,subfeed,videodrop,songdrop,stanzarr,musicguard,tv-remote,nodecast,untrunc,speed_test}/**"
+      ],
+      "minimumReleaseAge": "1 day",
+      "schedule": [
+        "at any time"
+      ],
+      "automerge": true,
+      "automergeType": "branch",
+      "ignoreTests": false
+    },
+    {
+      "description": "The same for what they take from versions.env: Python, Node, Rust, Deno, their libraries and Nodecast's base",
+      "matchPackageNames": [
+        "python",
+        "node",
+        "rust",
+        "denoland/deno",
+        "ytmusicapi",
+        "songrec",
+        "ghcr.io/technomancer702/nodecast-tv"
+      ],
+      "minimumReleaseAge": "1 day",
+      "schedule": [
+        "at any time"
+      ],
+      "automerge": true,
+      "automergeType": "branch",
+      "ignoreTests": false
+    },
+    {
+      "description": "pdf-gateway: minor and patch updates share a branch, so a broken one in another app holds nothing up; each major keeps its own",
+      "matchFileNames": [
+        "compose/pdf-gateway/**"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest",
+        "pin",
+        "pinDigest"
+      ],
+      "groupName": "pdf-gateway dependencies"
+    },
+    {
+      "description": "scanloom: minor and patch updates share a branch, so a broken one in another app holds nothing up; each major keeps its own",
+      "matchFileNames": [
+        "compose/scanloom/**"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest",
+        "pin",
+        "pinDigest"
+      ],
+      "groupName": "scanloom dependencies"
+    },
+    {
+      "description": "clipseerr: minor and patch updates share a branch, so a broken one in another app holds nothing up; each major keeps its own",
+      "matchFileNames": [
+        "compose/clipseerr/**"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest",
+        "pin",
+        "pinDigest"
+      ],
+      "groupName": "clipseerr dependencies"
+    },
+    {
+      "description": "subfeed: minor and patch updates share a branch, so a broken one in another app holds nothing up; each major keeps its own",
+      "matchFileNames": [
+        "compose/subfeed/**"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest",
+        "pin",
+        "pinDigest"
+      ],
+      "groupName": "subfeed dependencies"
+    },
+    {
+      "description": "videodrop: minor and patch updates share a branch, so a broken one in another app holds nothing up; each major keeps its own",
+      "matchFileNames": [
+        "compose/videodrop/**"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest",
+        "pin",
+        "pinDigest"
+      ],
+      "groupName": "videodrop dependencies"
+    },
+    {
+      "description": "songdrop: minor and patch updates share a branch, so a broken one in another app holds nothing up; each major keeps its own",
+      "matchFileNames": [
+        "compose/songdrop/**"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest",
+        "pin",
+        "pinDigest"
+      ],
+      "groupName": "songdrop dependencies"
+    },
+    {
+      "description": "stanzarr: minor and patch updates share a branch, so a broken one in another app holds nothing up; each major keeps its own",
+      "matchFileNames": [
+        "compose/stanzarr/**"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest",
+        "pin",
+        "pinDigest"
+      ],
+      "groupName": "stanzarr dependencies"
+    },
+    {
+      "description": "musicguard: minor and patch updates share a branch, so a broken one in another app holds nothing up; each major keeps its own",
+      "matchFileNames": [
+        "compose/musicguard/**"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest",
+        "pin",
+        "pinDigest"
+      ],
+      "groupName": "musicguard dependencies"
+    },
+    {
+      "description": "tv-remote: minor and patch updates share a branch, so a broken one in another app holds nothing up; each major keeps its own",
+      "matchFileNames": [
+        "compose/tv-remote/**"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest",
+        "pin",
+        "pinDigest"
+      ],
+      "groupName": "tv-remote dependencies"
+    },
+    {
+      "description": "nodecast: minor and patch updates share a branch, so a broken one in another app holds nothing up; each major keeps its own",
+      "matchFileNames": [
+        "compose/nodecast/**"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest",
+        "pin",
+        "pinDigest"
+      ],
+      "groupName": "nodecast dependencies"
+    },
+    {
+      "description": "untrunc: minor and patch updates share a branch, so a broken one in another app holds nothing up; each major keeps its own",
+      "matchFileNames": [
+        "compose/untrunc/**"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest",
+        "pin",
+        "pinDigest"
+      ],
+      "groupName": "untrunc dependencies"
+    },
+    {
+      "description": "speed_test: minor and patch updates share a branch, so a broken one in another app holds nothing up; each major keeps its own",
+      "matchFileNames": [
+        "compose/speed_test/**"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest",
+        "pin",
+        "pinDigest"
+      ],
+      "groupName": "speed_test dependencies"
+    },
+    {
+      "description": "The weekly lock file refresh brings the indirect dependencies up to date, through the same gate",
+      "matchUpdateTypes": [
+        "lockFileMaintenance"
+      ],
+      "automerge": true,
+      "automergeType": "branch",
+      "ignoreTests": false
     },
     {
       "description": "yt-dlp numbers releases by date (2026.10.09), so January's first release looks like a major; merge those too",
@@ -256,44 +493,32 @@
       "minimumReleaseAge": "1 day"
     },
     {
-      "description": "The gateway's parsers and base images: it reads hostile files, so fixes don't wait for a person or the weekly group. The updater rebuilds it, checks health and rolls back; majors stay manual",
-      "matchFileNames": [
-        "compose/pdf-gateway/**"
+      "description": "A database can't start on a new major's data, so these majors wait for a person even inside an app built here",
+      "matchPackageNames": [
+        "postgres",
+        "rabbitmq"
       ],
-      "minimumReleaseAge": "1 day",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "automerge": false,
       "labels": [
         "dependencies",
-        "pdf-gateway"
-      ],
-      "groupName": "pdf gateway",
-      "schedule": [
-        "at any time"
-      ],
-      "matchUpdateTypes": [
-        "minor",
-        "patch",
-        "digest",
-        "pin",
-        "pinDigest"
-      ],
-      "automerge": true,
-      "automergeType": "branch",
-      "ignoreTests": true
-    },
-    {
-      "description": "ClamAV, the gateway's scanner: same reasoning",
-      "matchPackageNames": [
-        "clamav/clamav"
-      ],
-      "matchUpdateTypes": [
-        "minor",
-        "patch",
-        "digest"
-      ],
-      "automerge": true,
-      "automergeType": "branch",
-      "ignoreTests": true,
-      "minimumReleaseAge": "1 day"
+        "major"
+      ]
     }
-  ]
+  ],
+  "pip-compile": {
+    "managerFilePatterns": [
+      "/^compose/(clipseerr|subfeed|videodrop|songdrop|stanzarr|scanloom)/app/backend/requirements\\.txt$/",
+      "/^compose/(musicguard|tv-remote)/requirements\\.txt$/",
+      "/^compose/pdf-gateway/app/(archive-worker|paperless-adapter|signature-worker)/requirements\\.txt$/"
+    ]
+  },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "before 6am on monday"
+    ]
+  }
 }

@@ -1,0 +1,29 @@
+# Renovate merges the updates of the apps built here, majors too, only when this
+# passes: each app's image builds, and its Dockerfile runs its tests and typecheck
+# (renovate.json, ignoreTests: false). It runs on every Renovate branch, because
+# Renovate never merges a gated branch that has no check. A failure leaves the
+# branch unmerged, and the updater reports it in #updates.
+name: deps-gate
+
+on:
+  push:
+    branches: ["renovate/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deps-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: git fetch --quiet origin main
+      - run: python3 updater/scripts/ci_build.py origin/main

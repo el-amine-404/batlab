@@ -37,8 +37,19 @@ Renovate ─── automerge? ──▶ main ── nightly git pull ──▶ r
                                                             └─ not listed: one #updates note, you run make up
 ```
 
-Automerge commits to `main` without waiting for CI, which this repository does
-not have (`ignoreTests`); the updater's health check and rollback are the test.
+Third-party images automerge without CI (`ignoreTests`); the updater's health
+check and rollback are their test.
+
+**Apps built here** (clipseerr, subfeed, videodrop, songdrop, stanzarr, scanloom,
+the PDF gateway, musicguard, tv-remote, nodecast) take every update on their own,
+majors included: pip, npm, Maven, base images, and a weekly lock file refresh for
+indirect dependencies. Each Renovate branch must pass `deps-gate`
+(`.github/workflows/deps-gate.yml`, `scripts/ci_build.py`), which builds the app
+on GitHub's machines; its Dockerfile runs its tests and typecheck. A pass merges
+to `main`, and that night the updater deploys it and posts it in `#updates`. A
+failure stays on its branch and the updater posts "Update not merged" once per
+commit, with a link to the failed run. A database major (postgres, RabbitMQ)
+never merges alone: it can't start on the old major's data.
 Pull-request automerge left eligible PRs open for two weeks here (2026-09).
 
 Stopped containers are never started, so services the data disk guard or you
@@ -48,8 +59,9 @@ lands. The updater refuses to pull over local changes and says so in `#alerts`.
 The PDF gateway is built as one unit (`update_pdf_gateway`): when its code, pins
 or the provider's files change, the updater runs its `install.sh` and
 `make up STACK=pdf-gateway`, waits for every container to be healthy, and otherwise
-restores the previous images. Renovate automerges its Dockerfile, npm, Maven, pip
-and pdfid updates (not majors), and ClamAV's image.
+restores the previous images. Scanloom is a unit in the same way
+(`update_scanloom`): api, worker and notifier share one image, whose name carries
+the version.
 
 ## Choosing what updates itself
 
@@ -60,7 +72,8 @@ A service updates itself only when it appears in **both** places:
 2. `conf/auto-services.txt` (by compose service name).
 
 Leave DNS, the reverse proxy, the VPN, databases, and anything with schema
-migrations out of both. Majors never automerge regardless of the list.
+migrations out of both. A third-party major never automerges, whatever the list
+says.
 
 ## One-time installation on the server
 
