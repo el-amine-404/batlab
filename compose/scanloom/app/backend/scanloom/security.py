@@ -48,8 +48,51 @@ def inspect_container(path: Path) -> tuple[str, dict]:
             # ZIP/PDF/script payloads cannot be hidden after a valid photograph.
             with path.open("rb") as whole:
                 data = whole.read()
-            if len(data) < 4 or not data.endswith(b"\xff\xd9"):
+            if len(data) < 4:
                 raise Refused("JPEG is incomplete or has data after its image end")
+            eoi_idx = data.rfind(b"\xff\xd9")
+            if eoi_idx == -1:
+                raise Refused("JPEG is incomplete or has data after its image end")
+
+            trailing = data[eoi_idx + 2:]
+            if trailing:
+                # Check for disguised archives, executables, or script payloads
+                forbidden_signatures = (
+                    b"PK",      # ZIP archive / Office / APK
+                    b"%PDF",    # PDF document
+                    b"\x7fELF", # Linux binary
+                    b"MZ",      # Windows executable
+                    b"\x1f\x8b",# GZIP
+                    b"7z\xbc",  # 7-Zip
+                    b"BZh",     # BZip2
+                    b"Rar!",    # RAR archive
+                    b"#!",      # Shell script
+                    b"<?php",   # PHP script
+                    b"<script", # HTML script
+                    b"<html",   # HTML document
+                )
+                if any(sig in trailing for sig in forbidden_signatures):
+                    raise Refused("JPEG has data after its image end")
+
+                # Recognize benign smartphone camera trailers or trailing byte padding:
+                # - Samsung SEFT (Samsung Extension Format Trailer, e.g. Samsung_Capture_Info, SEFT)
+                # - Google/Android Motion Photo / GCamera trailers
+                # - Null / 0xFF boundary padding
+                is_samsung = (
+                    trailing.endswith(b"SEFT")
+                    or b"Samsung_Capture_Info" in trailing
+                    or b"SEFH" in trailing
+                )
+                is_gcamera = b"GCamera" in trailing or b"MotionPhoto" in trailing
+                is_padding = trailing.strip(b"\x00\xff\r\n ") == b""
+
+                if not (is_samsung or is_gcamera or is_padding):
+                    raise Refused("JPEG is incomplete or has data after its image end")
+
+                # Strip harmless camera trailer so the file on disk ends cleanly at \xff\xd9
+                path.write_bytes(data[:eoi_idx + 2])
+                return "image/jpeg", {"container": "jpeg", "trailing_bytes": len(trailing)}
+
             return "image/jpeg", {"container": "jpeg", "trailing_bytes": 0}
         if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
             declared = struct.unpack("<I", head[4:8])[0] + 8

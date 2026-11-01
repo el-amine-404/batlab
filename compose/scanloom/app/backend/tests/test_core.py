@@ -148,11 +148,35 @@ class ContainerTest(unittest.TestCase):
             path = Path(folder) / "photo.jpg"
             ok, encoded = cv2.imencode(".jpg", np.full((100, 100, 3), 200, np.uint8))
             self.assertTrue(ok)
-            path.write_bytes(encoded.tobytes())
+            clean_bytes = encoded.tobytes()
+            path.write_bytes(clean_bytes)
             self.assertEqual(inspect_container(path)[0], "image/jpeg")
-            path.write_bytes(path.read_bytes() + b"PK\x03\x04hidden")
+
+            # Trailing ZIP payload must be rejected
+            path.write_bytes(clean_bytes + b"PK\x03\x04hidden")
             with self.assertRaisesRegex(Refused, "after"):
                 inspect_container(path)
+
+            # Trailing PDF payload must be rejected
+            path.write_bytes(clean_bytes + b"%PDF-1.4malicious")
+            with self.assertRaisesRegex(Refused, "after"):
+                inspect_container(path)
+
+            # Samsung SEFT camera trailer must be accepted and sanitized
+            samsung_trailer = b"\x00\x00\x01\nSamsung_Capture_Info\x00\x00SEFT"
+            path.write_bytes(clean_bytes + samsung_trailer)
+            mime, report = inspect_container(path)
+            self.assertEqual(mime, "image/jpeg")
+            self.assertEqual(report["trailing_bytes"], len(samsung_trailer))
+            self.assertTrue(path.read_bytes().endswith(b"\xff\xd9"))
+
+            # Null byte padding must be accepted and sanitized
+            null_padding = b"\x00" * 64
+            path.write_bytes(clean_bytes + null_padding)
+            mime, report = inspect_container(path)
+            self.assertEqual(mime, "image/jpeg")
+            self.assertEqual(report["trailing_bytes"], len(null_padding))
+            self.assertTrue(path.read_bytes().endswith(b"\xff\xd9"))
 
     def test_png_exact_end(self):
         with tempfile.TemporaryDirectory() as folder:
