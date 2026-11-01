@@ -406,6 +406,8 @@ def ocr(job: dict, engine: str) -> dict:
 def suggest(job: dict) -> dict:
     context = gateway("GET", job["contextUrl"])
     text = context.get("text", "")[:PROMPT_CHARS]
+    if not text.strip():
+        raise ValueError("no text to file")  # it would answer "other" from nothing, and that would be filed
     ensure_loaded()
     tags = [tag for tag in context.get("tags", []) if isinstance(tag, str)][:300]
     known = [name for name in context.get("correspondents", []) if isinstance(name, str)][:300]

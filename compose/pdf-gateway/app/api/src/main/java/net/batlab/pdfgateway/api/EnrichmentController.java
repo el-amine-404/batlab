@@ -155,7 +155,7 @@ public class EnrichmentController {
         // A job made before publication carries the text it may read (written by the archive worker).
         List<String> carried = jdbc.query("""
                 SELECT context::text FROM enrichment_jobs
-                 WHERE id=? AND status='LEASED' AND lease_agent=? AND lease_until > now() AND context IS NOT NULL""",
+                 WHERE id=? AND status='LEASED' AND lease_agent=? AND lease_until > now() AND context->>'text' IS NOT NULL""",
                 (rs, row) -> rs.getString(1), parseJob(jobId), agentId);
         if (!carried.isEmpty()) return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store").body(carried.getFirst());
         Path pdf = leasedDocument(principal, jobId, agentId);
