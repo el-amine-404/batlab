@@ -90,6 +90,16 @@ CASES = {
     "down 3 times": ("key", "times", 3),
     "channel 5": ("channel", "number", "5"),
     "restart": ("media", "action", "restart"),
+    # sleep timer
+    "Turn off in 30 minutes.": ("sleep", "minutes", 30),
+    "turn off the TV in 45 minutes": ("sleep", "minutes", 45),
+    "sleep in thirty minutes": ("sleep", "minutes", 30),
+    "turn off in an hour": ("sleep", "minutes", 60),
+    "sleep timer 20": ("sleep", "minutes", 20),
+    "Éteins la télé dans 30 minutes": ("sleep", "minutes", 30),
+    "طفي التلفزيون من بعد 30 دقيقة": ("sleep", "minutes", 30),
+    "turn off in 2 hours": ("sleep", "minutes", 120),
+    "cancel the sleep timer": ("sleep_cancel", "type", "sleep_cancel"),
     # free form keeps the words as spoken
     "Play Interstellar trailer.": ("play", "query", "Interstellar trailer"),
     "Mets Interstellar sur YouTube": ("play", "query", "Interstellar"),

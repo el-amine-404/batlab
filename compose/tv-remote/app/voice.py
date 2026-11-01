@@ -107,6 +107,9 @@ _GROUPS: list[tuple[dict, str]] = [
      "picture settings|image settings|parametres image|reglages image|parametres de l image|اعدادات الصوره"),
     ({"type": "settings_hint", "label": "Settings", "where": "Sound is near the top of the list"},
      "sound settings|audio settings|parametres son|reglages son|parametres du son|اعدادات الصوت"),
+    ({"type": "sleep_cancel", "label": "Cancel sleep timer"},
+     "cancel sleep timer|cancel the sleep timer|cancel the timer|cancel timer|stop the timer|stop the sleep timer|"
+     "annule la minuterie|annuler la minuterie|annule le minuteur|الغاء المؤقت|لغي المؤقت"),
     (_key("KEY_EXIT", "Exit"), "exit|close|quitter|quitte|ferme|خروج|سد"),
     (_media("restart", "From the start"), "restart|start over|from the beginning|recommence|depuis le debut|من الاول|من البدايه"),
     ({"type": "input_next", "label": "Next HDMI"},
@@ -195,6 +198,17 @@ _VOLUME_BY = re.compile(
 _REPEAT = re.compile(r"^(?:go )?(up|down|left|right|haut|bas|gauche|droite|فوق|تحت|يسار|يمين)(?: by)? (\d)(?: times?| fois| مرات| مره)?$")
 _REPEAT_KEYS = {"up": "KEY_UP", "haut": "KEY_UP", "فوق": "KEY_UP", "down": "KEY_DOWN", "bas": "KEY_DOWN", "تحت": "KEY_DOWN",
                 "left": "KEY_LEFT", "gauche": "KEY_LEFT", "يسار": "KEY_LEFT", "right": "KEY_RIGHT", "droite": "KEY_RIGHT", "يمين": "KEY_RIGHT"}
+_SLEEP_VERB = (
+    r"(?:turn (?:it |the tv )?off|turn off the tv|switch off(?: the tv)?|power off|shut down(?: the tv)?|sleep|"
+    r"sleep timer|set (?:a |the )?sleep timer(?: for| to)?|"
+    r"eteins(?: la tele| le televiseur)?|eteindre(?: la tele)?|mets en veille|minuterie|veille|"
+    r"طفي(?: التلفزيون| التلفزه| التلفاز)?|اطفي(?: التلفزيون| التلفزه| التلفاز)?)"
+)
+_SLEEP_IN = r"(?: (?:in|after|for|dans|apres|de|من بعد|بعد|في|فى))?"
+_SLEEP = re.compile(rf"^{_SLEEP_VERB}{_SLEEP_IN} (\d{{1,3}}|\w+) (min|mins|minute|minutes|دقيقه|دقايق|دقائق|h|hour|hours|heure|heures|ساعه|ساعات)$")
+_SLEEP_ONE_HOUR = re.compile(rf"^{_SLEEP_VERB}{_SLEEP_IN} (?:an hour|one hour|une heure|ساعه)$")
+_SLEEP_BARE = re.compile(r"^(?:sleep timer|set (?:a |the )?sleep timer(?: for| to)?|minuterie(?: de)?) (\d{1,3})$")
+_HOUR_UNITS = ("h", "hour", "hours", "heure", "heures", "ساعه", "ساعات")
 _CHANNEL = re.compile(r"^(?:go to |switch to |mets |passe sur |va sur )?(?:channel|chaine|la chaine|القناه) (\d{1,4})$")
 _UNIT = r"(?: (sec|secs|second|seconds|seconde|secondes|ثانيه|ثواني|min|mins|minute|minutes|دقيقه|دقايق|دقائق))?"
 _SEEK_FWD = re.compile(
@@ -296,6 +310,13 @@ def parse(raw: str, inputs=()) -> dict | None:
     if _SEEK_BACK_PLAIN.match(text):
         return {"type": "media", "action": "rel", "value": -10, "label": "Back 10s"}
 
+    if _SLEEP_ONE_HOUR.match(text):
+        return {"type": "sleep", "minutes": 60, "label": "Sleep in 60 min"}
+    if m := _SLEEP_BARE.match(text):
+        return {"type": "sleep", "minutes": int(m.group(1)), "label": f"Sleep in {m.group(1)} min"}
+    if (m := _SLEEP.match(text)) and (m.group(1).isdigit() or m.group(1) in _TENS):
+        minutes = _number(m.group(1)) * (60 if m.group(2) in _HOUR_UNITS else 1)
+        return {"type": "sleep", "minutes": minutes, "label": f"Sleep in {minutes} min"}
     if m := _REPEAT.match(text):
         return {"type": "key", "key": _REPEAT_KEYS[m.group(1)], "times": int(m.group(2)), "label": m.group(1).capitalize()}
     if m := _CHANNEL.match(text):

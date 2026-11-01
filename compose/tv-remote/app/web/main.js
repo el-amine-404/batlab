@@ -17,6 +17,16 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   bindVoice();
   bindInputs();
+  bindSleep();
+  $("#offline-retry").addEventListener("click", () => { setOffline(false); start(); });
+  $("#logout-all").addEventListener("click", async (e) => {
+    e.preventDefault();
+    if (!confirm("Log out every phone and computer using this remote?")) return;
+    await api("/api/logout-all", {}).catch(() => {});
+    showLogin();
+  });
+  // Fails harmlessly where the certificate is not trusted; the page just loads normally.
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 
   $("#yt").addEventListener("submit", sendYoutube);
   $("#yt-text").addEventListener("input", syncClear);

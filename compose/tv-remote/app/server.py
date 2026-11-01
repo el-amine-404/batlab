@@ -9,10 +9,18 @@ import sys
 from http.server import ThreadingHTTPServer
 
 import auth
+import sleeptimer
+import tvcontrol
 from config import DATA_DIR, LISTEN_ADDR, PORT, TOKENS_DIR, TV_SUBNET, VERSION
 from http_api import Handler
 
 log = logging.getLogger("tv-remote")
+
+
+def _turn_off(mac: str) -> None:
+    tv = tvcontrol.control(mac)
+    if tv.status().get("power") == "on":
+        tv.toggle_power()
 
 
 def main() -> None:
@@ -28,6 +36,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     TOKENS_DIR.mkdir(parents=True, exist_ok=True)
     os.chmod(TOKENS_DIR, 0o700)
+    sleeptimer.start(_turn_off)
     server = ThreadingHTTPServer((LISTEN_ADDR, PORT), Handler)
     server.daemon_threads = True
     log.info("tv-remote %s listening on %s:%d, scanning %s", VERSION, LISTEN_ADDR, PORT, TV_SUBNET)

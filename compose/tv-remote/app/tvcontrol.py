@@ -12,6 +12,7 @@ from typing import Protocol
 
 import playback
 import samsung
+import sleeptimer
 import tvstate
 import youtube
 from profiles import profile_for
@@ -23,6 +24,9 @@ HOME_SETTLE = 2.5
 LIST_SETTLE = 1.5
 # Two walks at once would mix their keys and select the wrong thing.
 _walking = threading.Lock()
+# What the remote last selected, per TV. Only that: nothing reports the real
+# input, and the TV's own remote can change it, so the page says "last selected".
+_last_input: dict[str, str] = {}
 
 
 class TvControl(Protocol):
@@ -38,6 +42,8 @@ class TvControl(Protocol):
     def media_action(self, action: str, value: float = 0) -> None: ...
     def play_video(self, video_id: str) -> None: ...
     def select_input(self, input_id: str) -> str | None: ...
+    def sleep_in(self, minutes: int) -> None: ...
+    def cancel_sleep(self) -> bool: ...
 
 
 class SamsungTv:
@@ -54,7 +60,12 @@ class SamsungTv:
         return profile_for(self.mac, load_tvs()[self.mac].get("model", ""))["inputs"]
 
     def status(self) -> dict:
-        return tvstate.status(self.mac)
+        st = tvstate.status(self.mac)
+        if at := sleeptimer.when(self.mac):
+            st["sleep_at"] = at
+        if st.get("power") == "on" and self.mac in _last_input:
+            st["last_input"] = _last_input[self.mac]
+        return st
 
     def media(self) -> dict | None:
         return playback.media(self.mac)
@@ -63,9 +74,12 @@ class SamsungTv:
         return tvstate.power(self.mac)
 
     def press(self, key: str) -> None:
+        if key in ("KEY_HDMI", "KEY_SOURCE"):
+            _last_input.pop(self.mac, None)
         samsung.remote(self.mac).run(lambda tv: tv.send_key(key))
 
     def open_app(self, app_id: str) -> None:
+        _last_input.pop(self.mac, None)
         try:
             samsung.rest(self._ip, f"applications/{app_id}", "POST", timeout=6)
         except (OSError, urllib.error.URLError) as err:
@@ -115,7 +129,14 @@ class SamsungTv:
             self._walk("KEY_ENTER", 0.2)
         finally:
             _walking.release()
+        _last_input[self.mac] = target["id"]
         return target["name"]
+
+    def sleep_in(self, minutes: int) -> None:
+        sleeptimer.set_timer(self.mac, minutes)
+
+    def cancel_sleep(self) -> bool:
+        return sleeptimer.cancel(self.mac)
 
     def _walk(self, key: str, wait: float = KEY_GAP) -> None:
         self.press(key)

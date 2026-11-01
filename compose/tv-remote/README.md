@@ -13,6 +13,8 @@ A web remote and voice control for Samsung Tizen TVs. Served at `https://tv.home
 | `app/samsung.py` | The TV's protocols: discovery, control socket, REST, UPnP, Wake-on-LAN. |
 | `app/youtube.py`, `jellyfin.py`, `playback.py` | What plays and how to control it. |
 | `app/tvstate.py` | A TV's overall state; power. |
+| `app/livestate.py` | One shared reader per TV; pushes changes to open pages. |
+| `app/sleeptimer.py` | Turns a TV off later; survives a restart. |
 | `app/speech.py` | Recording to words and a command; lowers the TV while listening. |
 | `app/http_api.py` | Routes. Actions are listed in `ACTIONS` and `READS`. |
 | `app/auth.py`, `config.py`, `store.py`, `server.py` | Login, environment, paired TVs, start-up. |

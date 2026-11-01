@@ -8,9 +8,10 @@
 // offer no speech recognition of their own.
 
 const SAMPLE_RATE = 16000;
-const VOICE = { minSpeech: 0.2, endSilence: 0.8, noSpeech: 6, maxLength: 10 }; // seconds
+// Seconds. A command is short, so its pause can be too; dictation needs room to think.
+const VOICE = { minSpeech: 0.2, endSilence: { command: 0.6, dictate: 1.0 }, noSpeech: 6, maxLength: 10 };
 const EXAMPLES = {
-  en: ["Switch to HDMI 1", "Turn the volume down by 5", "Go to homepage", "Go to settings", "Open YouTube", "Pause"],
+  en: ["Switch to HDMI 1", "Turn the volume down by 5", "Go to homepage", "Turn off in 30 minutes", "Open YouTube", "Pause"],
   fr: ["Passe en HDMI 1", "Baisse le volume de 5", "Accueil", "Ouvre les paramètres", "Ouvre Netflix", "Mets en pause"],
   ar: ["افتح يوتيوب", "ارفع الصوت", "وقف", "طفي التلفزيون", "شغل قرآن"],
 };
@@ -136,7 +137,8 @@ function listenStep(c, rms, seconds) {
   if (speaking) { c.voiced += seconds; c.quiet = 0; } else { c.quiet += seconds; }
   $("#voice-orb").style.setProperty("--level", Math.min(1, rms * 9).toFixed(3));
   const elapsed = c.samples / SAMPLE_RATE;
-  if (c.voiced >= VOICE.minSpeech && c.quiet >= VOICE.endSilence) return finishCapture();
+  const pause = voiceTarget === "command" ? VOICE.endSilence.command : VOICE.endSilence.dictate;
+  if (c.voiced >= VOICE.minSpeech && c.quiet >= pause) return finishCapture();
   if (elapsed >= VOICE.maxLength) return finishCapture();
   if (c.voiced < VOICE.minSpeech && elapsed >= VOICE.noSpeech) {
     stopCapture();

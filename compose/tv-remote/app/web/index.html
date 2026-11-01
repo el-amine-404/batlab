@@ -22,6 +22,7 @@
   <script src="touch.js" defer></script>
   <script src="voice-ui.js" defer></script>
   <script src="inputs.js" defer></script>
+  <script src="sleep.js" defer></script>
   <script src="main.js" defer></script>
 </head>
 <body>
@@ -54,8 +55,14 @@
     <symbol id="i-swap" viewBox="0 0 24 24"><path d="M7 4 3 8l4 4"/><path d="M3 8h13"/><path d="m17 12 4 4-4 4"/><path d="M21 16H8"/></symbol>
     <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3M8 22h8"/></symbol>
     <symbol id="i-mic-off" viewBox="0 0 24 24"><path d="m2 2 20 20"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><path d="M12 19v3M8 22h8"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
     <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4 20-7z"/></symbol>
   </svg>
+
+  <div id="offline" class="offline" role="alert" hidden>
+    <span>Can't reach the remote's server.</span>
+    <button type="button" id="offline-retry" class="btn btn-ghost">Retry</button>
+  </div>
 
   <main class="app">
     <!-- Login -->
@@ -65,6 +72,7 @@
         <input id="login-pass" type="password" placeholder="Password" autocomplete="current-password" required>
         <button class="btn btn-primary btn-wide" type="submit">Log in</button>
       </form>
+      <p class="muted small center">Browser warns about the connection? <a class="foot-link" href="http://tv.homelab.lan/ca.crt">Install the certificate</a> on this device.</p>
       <p id="login-setup" class="muted small" hidden>No password is set yet. On lab2 run:<br><code>docker exec -it tv-remote python /app/server.py set-password</code></p>
     </section>
 
@@ -88,11 +96,12 @@
           <span id="status-dot" class="dot" title="checking"></span>
           <div>
             <h1 id="tv-name">TV</h1>
-            <p id="tv-model" class="muted small"></p>
+            <button type="button" id="sleep-chip" class="sleep-chip" aria-label="Sleep timer" hidden></button>
             <p id="tv-now" class="small now" hidden></p>
           </div>
         </div>
         <div class="bar-actions">
+          <button id="sleep-open" class="btn btn-ghost btn-icon" aria-label="Sleep timer" title="Sleep timer"><svg class="ic"><use href="#i-moon"/></svg></button>
           <button id="switch" class="btn btn-ghost btn-icon" aria-label="Switch TV" title="Switch TV"><svg class="ic"><use href="#i-swap"/></svg></button>
           <button class="btn btn-power btn-icon" id="power" aria-label="Power" title="Power"><svg class="ic"><use href="#i-power"/></svg></button>
         </div>
@@ -135,10 +144,10 @@
       </div>
 
       <div id="dpad" class="dpad" role="group" aria-label="Navigation">
-        <button class="dpad-btn up" data-key="KEY_UP" aria-label="Up"><svg class="ic"><use href="#i-up"/></svg></button>
-        <button class="dpad-btn right" data-key="KEY_RIGHT" aria-label="Right"><svg class="ic"><use href="#i-up"/></svg></button>
-        <button class="dpad-btn down" data-key="KEY_DOWN" aria-label="Down"><svg class="ic"><use href="#i-up"/></svg></button>
-        <button class="dpad-btn left" data-key="KEY_LEFT" aria-label="Left"><svg class="ic"><use href="#i-up"/></svg></button>
+        <button class="dpad-btn up" data-key="KEY_UP" data-repeat aria-label="Up"><svg class="ic"><use href="#i-up"/></svg></button>
+        <button class="dpad-btn right" data-key="KEY_RIGHT" data-repeat aria-label="Right"><svg class="ic"><use href="#i-up"/></svg></button>
+        <button class="dpad-btn down" data-key="KEY_DOWN" data-repeat aria-label="Down"><svg class="ic"><use href="#i-up"/></svg></button>
+        <button class="dpad-btn left" data-key="KEY_LEFT" data-repeat aria-label="Left"><svg class="ic"><use href="#i-up"/></svg></button>
         <button class="dpad-ok" data-key="KEY_ENTER" aria-label="OK">OK</button>
       </div>
       </div>
@@ -146,7 +155,7 @@
       <div class="row five">
         <button class="btn btn-key" data-key="KEY_RETURN" aria-label="Back"><svg class="ic"><use href="#i-back"/></svg><span>Back</span></button>
         <button class="btn btn-key" data-key="KEY_HOME" aria-label="Home"><svg class="ic"><use href="#i-home"/></svg><span>Home</span></button>
-        <button class="btn btn-key" id="input-open" aria-label="Choose input"><svg class="ic"><use href="#i-source"/></svg><span>Input</span></button>
+        <button class="btn btn-key" id="input-open" aria-label="Choose input"><svg class="ic"><use href="#i-source"/></svg><span id="input-label">Input</span></button>
         <button class="btn btn-key" data-key="KEY_MENU" aria-label="Settings menu"><svg class="ic"><use href="#i-menu"/></svg><span>Menu</span></button>
         <button class="btn btn-key" id="kb-toggle" aria-label="Keyboard: type into the TV"><svg class="ic"><use href="#i-keyboard"/></svg><span>Type</span></button>
       </div>
@@ -214,7 +223,8 @@
   </main>
 
   <footer class="foot muted small center">
-    <span id="version"></span> · <a href="/reload" class="foot-link">Reload</a><span id="logout-wrap" hidden> · <a href="#" id="logout" class="foot-link">Log out</a></span>
+    <p id="tv-model"></p>
+    <span id="version"></span> · <a href="/reload" class="foot-link">Reload</a><span id="logout-wrap" hidden> · <a href="#" id="logout" class="foot-link">Log out</a> · <a href="#" id="logout-all" class="foot-link">Log out everywhere</a></span>
   </footer>
 
   <dialog id="pairing" class="card">
@@ -267,6 +277,22 @@
       <button type="button" id="input-next" class="btn">Next HDMI</button>
       <button type="button" id="input-list-tv" class="btn" data-key="KEY_SOURCE">List on TV</button>
     </div>
+  </dialog>
+
+  <dialog id="sleep" class="voice-sheet input-sheet" aria-labelledby="sleep-title">
+    <div class="voice-top">
+      <h2 id="sleep-title">Turn the TV off in</h2>
+      <button type="button" id="sleep-close" class="btn btn-ghost btn-icon" aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="sleep-grid">
+      <button type="button" class="btn" data-minutes="15">15 min</button>
+      <button type="button" class="btn" data-minutes="30">30 min</button>
+      <button type="button" class="btn" data-minutes="45">45 min</button>
+      <button type="button" class="btn" data-minutes="60">1 hour</button>
+      <button type="button" class="btn" data-minutes="90">1h 30</button>
+      <button type="button" class="btn" data-minutes="120">2 hours</button>
+    </div>
+    <button type="button" id="sleep-cancel" class="btn btn-wide" hidden>Cancel the timer</button>
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>

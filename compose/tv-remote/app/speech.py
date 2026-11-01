@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -15,6 +16,34 @@ log = logging.getLogger("tv-remote")
 
 VOICE_MAX_BYTES = 16000 * 2 * 30  # 30 s of 16 kHz mono 16-bit
 VOICE_LANGUAGES = ("en", "fr", "ar")
+
+
+# Each recording costs seconds of CPU: at most one at a time and a sensible number
+# a minute, so nobody can keep lab2 busy (and hot) with requests.
+PER_MINUTE = 30
+_in_progress = threading.Semaphore(1)
+_recent: dict[str, list[float]] = {}
+_recent_lock = threading.Lock()
+
+
+def admit(who: str) -> str | None:
+    """Why this recording cannot be heard now; None if it can. On None, the caller
+    must call done()."""
+    now = time.monotonic()
+    with _recent_lock:
+        times = [t for t in _recent.get(who, []) if now - t < 60]
+        if len(times) >= PER_MINUTE:
+            _recent[who] = times
+            return "too many voice commands; wait a minute"
+        if not _in_progress.acquire(blocking=False):
+            return "still working on the last command"
+        times.append(now)
+        _recent[who] = times
+    return None
+
+
+def done() -> None:
+    _in_progress.release()
 
 
 def hear(pcm: bytes, language: str) -> dict:

@@ -19,7 +19,7 @@ KEY_REPEAT_GAP = 0.25
 Handler = Callable[[TvControl, dict], dict]
 _HANDLERS: dict[str, Handler] = {}
 WAKES_THE_TV = {"app", "play", "input"}  # others are refused, or need no TV
-NEEDS_TV_ON = {"input_next", "input_list", "settings_hint", "channel", "volume", "volume_set", "mute", "media", "key"}
+NEEDS_TV_ON = {"sleep", "input_next", "input_list", "settings_hint", "channel", "volume", "volume_set", "mute", "media", "key"}
 
 
 def handles(kind: str) -> Callable[[Handler], Handler]:
@@ -97,6 +97,17 @@ def _input_list(tv: TvControl, intent: dict) -> dict:
 def _settings_hint(tv: TvControl, intent: dict) -> dict:
     tv.press("KEY_MENU")
     return {"say": "Settings open", "detail": intent["where"]}
+
+
+@handles("sleep")
+def _sleep(tv: TvControl, intent: dict) -> dict:
+    tv.sleep_in(intent["minutes"])
+    return {"say": f"Turning off in {intent['minutes']} minutes"}
+
+
+@handles("sleep_cancel")
+def _sleep_cancel(tv: TvControl, intent: dict) -> dict:
+    return {"say": "Sleep timer cancelled" if tv.cancel_sleep() else "No sleep timer is set"}
 
 
 @handles("channel")

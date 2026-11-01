@@ -6,7 +6,8 @@ const $ = (sel) => document.querySelector(sel);
 const STORE_KEY = "tv-remote:current";
 
 let current = null; // { mac, name, model, ip }
-let statusTimer = null;
+let statusStream = null; // the live connection to lab2
+let statusRetry = null;
 
 // ------------------------------------------------------------------ helpers
 
@@ -23,7 +24,14 @@ async function api(path, body) {
     headers: { "Content-Type": "application/json", "X-Remote": "1" },
     body: JSON.stringify(body),
   };
-  const res = await fetch(path, opts);
+  let res;
+  try {
+    res = await fetch(path, opts);
+  } catch {
+    setOffline(true);
+    throw new Error("can't reach the remote's server");
+  }
+  setOffline(false);
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && path !== "/api/login") {
     showLogin(); // the session ran out, or was logged out elsewhere
@@ -34,14 +42,26 @@ async function api(path, body) {
 }
 
 let toastTimer;
-function toast(msg, error = false) {
+function toast(msg, error = false, ms = 2600) {
   const t = $("#toast");
   t.textContent = msg;
   t.classList.toggle("error", error);
   t.classList.add("show");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
+  toastTimer = setTimeout(() => t.classList.remove("show"), ms);
 }
+
+function setOffline(offline) {
+  $("#offline").hidden = !offline;
+}
+
+// iPhones have no vibration and show :active late, so a press lights up at once.
+document.addEventListener("pointerdown", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  b.classList.add("tap");
+  setTimeout(() => b.classList.remove("tap"), 160);
+});
 
 function buzz(pattern = 8) {
   if (navigator.vibrate) navigator.vibrate(pattern);

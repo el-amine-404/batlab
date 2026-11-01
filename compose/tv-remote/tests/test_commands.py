@@ -41,6 +41,12 @@ class FakeTv:
     def set_mute(self, mute):
         self.mute = mute
 
+    def sleep_in(self, minutes):
+        self.sleeping = minutes
+
+    def cancel_sleep(self):
+        return False
+
     def select_input(self, input_id):
         return next((i["name"] for i in self.inputs() if i["id"] == input_id), None)
 
@@ -69,6 +75,9 @@ class Commands(unittest.TestCase):
         tv = FakeTv(power="off")
         run(tv, type="power", action="off", label="")
         self.assertEqual(tv.toggles, 0)
+
+    def test_sleep_needs_the_tv_on(self):
+        self.assertTrue(run(FakeTv(power="off"), type="sleep", minutes=5, label="")["failed"])
 
     def test_unknown_input_is_said_not_pressed(self):
         self.assertTrue(run(FakeTv(), type="input", id="hdmi3", label="HDMI 3")["failed"])

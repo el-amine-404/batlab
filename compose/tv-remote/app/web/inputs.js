@@ -1,31 +1,47 @@
 "use strict";
 
-// The input sheet.
+// The input sheet. The TV cannot say which input is showing, so the page shows
+// the one last selected here, and calls it that.
 
-// ------------------------------------------------------------------- inputs
+let inputList = [];
 
-async function openInputs() {
+async function loadInputs() {
+  inputList = await api(`/api/tv/${current.mac}/inputs`).catch(() => []);
+  renderInputLabel();
+}
+
+function renderInputLabel() {
+  const chosen = state.power === "on" && !state.app && inputList.find((i) => i.id === state.last_input);
+  $("#input-label").textContent = chosen ? chosen.name : "Input";
+}
+
+function openInputs() {
   buzz();
-  const dlg = $("#inputs");
-  if (!dlg.open) dlg.showModal();
-  const inputs = await api(`/api/tv/${current.mac}/inputs`).catch(() => []);
-  $("#inputs-list").replaceChildren(...inputs.map((input) =>
-    el("button", { type: "button", class: "btn input-choice", onclick: () => chooseInput({ id: input.id }, input.name) },
+  $("#inputs-list").replaceChildren(...inputList.map((input) => {
+    const last = input.id === state.last_input && !state.app;
+    const detail = [input.detail, last && "last selected"].filter(Boolean).join(" · ");
+    return el("button", { type: "button", class: "btn input-choice", onclick: () => chooseInput({ id: input.id }, input.name) },
       icon(input.id === "tv" ? "tv" : "source"),
-      el("span", {}, input.name, ...(input.detail ? [el("small", {}, input.detail)] : [])),
-    )));
+      el("span", {}, input.name, ...(detail ? [el("small", {}, detail)] : [])),
+    );
+  }));
+  $("#inputs").showModal();
 }
 
 async function chooseInput(body, name) {
   buzz();
   $("#inputs").close();
-  toast(name ? `Switching to ${name}…` : "Next HDMI");
+  const btn = $("#input-open");
+  btn.classList.add("working");
+  toast(name ? `Switching to ${name}…` : "Next HDMI", false, 12000);
   try {
     await api(`/api/tv/${current.mac}/input`, body);
-    if (name) toast(`Sent: ${name}`);
-    refreshSoon(1500);
+    toast(name ? `Sent: ${name}` : "Next HDMI");
+    refreshSoon(300);
   } catch (err) {
     toast(err.message, true);
+  } finally {
+    btn.classList.remove("working");
   }
 }
 

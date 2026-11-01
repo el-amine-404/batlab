@@ -374,6 +374,66 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(2px); }
 .input-choice small { color: var(--muted); font-weight: 400; }
 .input-more { width: 100%; }
 
+/* Lost connection */
+.offline {
+  position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: center; gap: 12px;
+  padding: max(6px, env(safe-area-inset-top)) 16px 6px; background: var(--danger); color: #fff; font-size: 14px;
+}
+.offline .btn { min-height: 34px; color: #fff; border: 1px solid rgba(255, 255, 255, 0.6); }
+
+/* A press answers at once */
+.tap { filter: brightness(0.86); }
+@media (prefers-color-scheme: dark) { .tap { filter: brightness(1.35); } }
+.dpad-btn.tap, .dpad-ok.tap { background: var(--key-press); }
+.dpad-btn { touch-action: none; }
+#input-open.working .ic { animation: pulse 1s ease-in-out infinite; }
+
+/* Sleep timer */
+.sleep-chip {
+  appearance: none; border: 0; background: transparent; padding: 2px 0; font: inherit; font-size: 13px; font-weight: 500;
+  color: var(--accent); cursor: pointer; display: block;
+}
+#sleep-open.active { color: var(--accent); }
+.sleep-grid { width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+
+/* Other screens */
+/* Small phones: the d-pad gives way so the controls fit. */
+@media (max-height: 680px) and (orientation: portrait) {
+  .stage { height: clamp(170px, 30dvh, 220px); }
+  .btn-mic { width: 88px; height: 88px; }
+  .deck { grid-template-columns: 1fr 96px 1fr; }
+  .rocker .btn { min-height: 44px; }
+}
+/* A phone on its side: d-pad on the left, everything else on the right. */
+@media (orientation: landscape) and (max-height: 560px) {
+  .app { max-width: none; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); padding-top: 8px; }
+  #view-remote { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); column-gap: 20px; row-gap: 10px; align-items: start; background: none; border: 0; padding: 0; box-shadow: none; }
+  #view-remote > * { grid-column: 2; }
+  #view-remote > .bar, #view-remote > .seg, #view-remote > .stage { grid-column: 1; }
+  #view-remote > .bar { grid-row: 1; padding: 0; }
+  #view-remote > .seg { grid-row: 2; }
+  #view-remote > .stage { grid-row: 3 / span 8; height: calc(100dvh - 165px); min-height: 150px; }
+  #view-remote > .card, #view-remote > .apps { margin: 0; }
+  .deck { position: static; margin: 0; padding: 0; background: none; grid-template-columns: 1fr 88px 1fr; }
+  .btn-mic { width: 84px; height: 84px; }
+  .rocker .btn { min-height: 40px; }
+  .row.five .btn { min-height: 48px; }
+  .apps { padding: 2px 0; }
+}
+/* Tablets and computers: the same two sides, with room. */
+@media (min-width: 900px) and (min-height: 561px) {
+  .app { max-width: 920px; }
+  #view-remote { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 32px; row-gap: 14px; align-items: start; }
+  #view-remote > * { grid-column: 2; }
+  #view-remote > .bar { grid-column: 1 / -1; }
+  #view-remote > .seg, #view-remote > .stage { grid-column: 1; }
+  #view-remote > .seg { grid-row: 2; }
+  #view-remote > .stage { grid-row: 3 / span 8; height: auto; aspect-ratio: 1; max-height: 60dvh; }
+  .deck { position: static; margin: 0; padding: 0; background: none; }
+  .apps { margin: 0; padding: 2px 0; flex-wrap: wrap; }
+  #view-login, #view-tvs { max-width: 420px; margin: 0 auto; }
+}
+
 .foot { padding: 12px 16px max(12px, env(safe-area-inset-bottom)); }
 .foot-link { color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }
 code { font-size: 12px; background: var(--key); padding: 2px 6px; border-radius: 6px; word-break: break-all; }

@@ -8,11 +8,12 @@ function openRemote(tv) {
   current = tv;
   remember(tv.mac);
   $("#tv-name").textContent = tv.name;
-  $("#tv-model").textContent = [tv.model, tv.ip].filter(Boolean).join(" · ");
+  $("#tv-model").textContent = [tv.name, tv.model, tv.ip].filter(Boolean).join(" · ");
   $("#kb").hidden = true;
   show("remote");
   startStatus();
   loadApps();
+  loadInputs();
 }
 
 // The TV's state as last read: power on/standby/off, mute, volume, app in front.
@@ -41,23 +42,27 @@ function render() {
   slider.disabled = !known;
   if (known && !sliding) slider.value = state.volume;
   $("#power").classList.toggle("is-on", on);
+  renderSleep();
+  renderInputLabel();
   $("#power").setAttribute("aria-label", on ? "Turn off the TV" : "Turn on the TV");
   renderMedia();
   $("#tv-now").hidden = !(on && state.app);
   $("#tv-now").textContent = state.app ? `Now: ${state.app}` : "";
 }
 
-async function refreshStatus() {
+function applyStatus(s) {
   if (!current || busy || volHeld || sliding) return;
-  try {
-    const s = await api(`/api/tv/${current.mac}/status`);
-    const m = s.media;
-    state = s;
-    mergeMedia(m);
-  } catch {
-    state = {};
-  }
+  const m = s.media;
+  state = s;
+  mergeMedia(m);
   render();
+}
+
+async function refreshStatus() {
+  if (!current) return;
+  try {
+    applyStatus(await api(`/api/tv/${current.mac}/status`));
+  } catch {} // the offline banner says so; the last state stays on screen
 }
 // ------------------------------------------------------------- now playing
 
@@ -105,17 +110,6 @@ function renderMedia() {
   $("#media-dur").textContent = clock(m.duration);
 }
 
-// While a card shows, its media is read every second (a light call), so play,
-// pause and seeks show up at once; the full status stays at every 4 s.
-setInterval(async () => {
-  if (!current || document.hidden || !state.media || seeking || busy) return;
-  try {
-    const r = await api(`/api/tv/${current.mac}/media`);
-    mergeMedia(r.media);
-    renderMedia();
-  } catch {}
-}, 1000);
-
 // Between polls the position advances on the page, one second at a time.
 setInterval(() => {
   const m = state.media;
@@ -156,16 +150,34 @@ function refreshSoon(ms = 700) {
   clearTimeout(soonTimer);
   soonTimer = setTimeout(refreshStatus, ms);
 }
+// lab2 tells the page when the TV changes; nothing is asked for on a timer.
 function startStatus() {
   stopStatus();
-  refreshStatus();
-  statusTimer = setInterval(() => { if (!document.hidden) refreshStatus(); }, 4000);
+  if (!current) return;
+  const stream = statusStream = new EventSource(`/api/tv/${current.mac}/events`);
+  stream.onopen = () => setOffline(false);
+  stream.onmessage = (e) => { setOffline(false); applyStatus(JSON.parse(e.data)); };
+  stream.onerror = () => {
+    if (stream !== statusStream) return;
+    setOffline(true);
+    // A browser retries by itself unless the answer was an error, such as a
+    // session that has ended: then ask, which shows the login if it has.
+    if (stream.readyState === EventSource.CLOSED) {
+      api("/api/me").catch(() => {});
+      clearTimeout(statusRetry);
+      statusRetry = setTimeout(() => { if (current && $("#view-login").hidden) startStatus(); }, 5000);
+    }
+  };
 }
 function stopStatus() {
-  clearInterval(statusTimer);
-  statusTimer = null;
+  clearTimeout(statusRetry);
+  if (statusStream) statusStream.close();
+  statusStream = null;
 }
-document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshStatus(); });
+document.addEventListener("visibilitychange", () => {
+  if (!current || !$("#view-login").hidden) return;
+  if (document.hidden) stopStatus(); else startStatus();
+});
 
 async function loadApps() {
   const box = $("#apps");
@@ -230,12 +242,16 @@ async function power() {
 
 async function toggleMute() {
   buzz();
+  const was = state.mute;
+  state.mute = !was; // at once; the answer corrects it if needed
+  render();
   try {
     Object.assign(state, await api(`/api/tv/${current.mac}/mute`, {}));
-    render();
   } catch (e) {
+    state.mute = was;
     toast(e.message, true);
   }
+  render();
 }
 
 // ------------------------------------------------------------ volume slider

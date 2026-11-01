@@ -17,6 +17,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler
 
 import auth
+import livestate
 import samsung
 import speech
 import tvcontrol
@@ -128,6 +129,8 @@ def _click(tv, body, mac):
 
 
 def _forget(tv, body, mac):
+    if body.get("confirm") is not True:  # pairing again needs someone at the TV
+        return 400, {"error": "confirm is required"}
     with store_lock:
         tvs = load_tvs()
         tvs.pop(mac, None)
@@ -145,6 +148,14 @@ def _command(tv, body, mac):
     return 200, out
 
 
+def _sleep(tv, body, mac):
+    minutes = int(body.get("minutes", 0))
+    if minutes <= 0:
+        tv.cancel_sleep()
+    else:
+        tv.sleep_in(minutes)
+
+
 def _listening(tv, body, mac):
     if body.get("on"):
         speech.duck.lower(mac, tv)
@@ -156,17 +167,25 @@ def _listening(tv, body, mac):
 ACTIONS = {
     "key": _key, "text": _text, "enter-text": _enter_text, "app": _app, "input": _input, "power": _power,
     "mute": _mute, "volume": _volume, "media": _media, "youtube": _youtube, "cursor": _cursor, "click": _click,
-    "forget": _forget, "command": _command, "listening": _listening,
+    "forget": _forget, "command": _command, "sleep": _sleep, "listening": _listening,
 }
 
 
+def _live(mac: str):
+    return livestate.live(mac, lambda: tvcontrol.control(mac))
+
+
 def _status(tv, mac):
-    st = tv.status()
+    st = _live(mac).current()
     r = samsung.remote(mac)
     if st["power"] == "on" and r.tv is None and not r.lock.locked():
         # The page is open: connect now, so the first press is quick.
         threading.Thread(target=r.run, args=(lambda t: None,), daemon=True).start()
     return st
+
+
+MAX_STREAMS = 16
+_streams = threading.BoundedSemaphore(MAX_STREAMS)
 
 
 # GET /api/tv/<mac>/<what>. "media" is light: polled every second while a card shows.
@@ -236,7 +255,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/me":
             if not auth.password_is_set():
                 return self._json(503, {"error": "no password set", "setup": True})
-            return self._json(200 if self._authed() else 401, {"ok": self._authed()})
+            if not self._authed():
+                return self._json(401, {"ok": False})
+            cookie = self.headers.get("Cookie")
+            renewed = auth.renew_session(cookie)
+            return self._json(200, {"ok": True}, self._session_cookie(auth.session_cookie_value(cookie)) if renewed else None)
         if path == "/reload":
             # Clear-Site-Data drops this site's cache (Chrome, Firefox, Safari 17+),
             # then the page loads fresh; for phones where clearing is hard.
@@ -245,6 +268,9 @@ class Handler(BaseHTTPRequestHandler):
                               b"<title>Reloading</title><p>Reloading...</p>", "text/html; charset=utf-8")
         if path.startswith("/api/") and not self._authed():
             return self._json(401, {"error": "log in"})
+        m = re.fullmatch(r"/api/tv/([0-9a-f:]{17})/events", path)
+        if m:
+            return self._events(m.group(1))
         if path == "/api/tvs":
             return self._json(200, [{"mac": m, **t} for m, t in load_tvs().items()])
         if path == "/api/youtube/search":
@@ -278,23 +304,64 @@ class Handler(BaseHTTPRequestHandler):
                 # so no browser can mix an old script with new HTML.
                 body = re.sub(rb'(href|src)="([\w-]+\.(?:css|js))"',
                               lambda m: m.group(1) + b'="' + m.group(2) + b"?v=" + VERSION.encode() + b'"', body)
-            return self._send(200, body, STATIC_TYPES[file.suffix], "no-cache")
+            # A versioned URL never changes; everything else asks each time.
+            versioned = "?v=" in self.path and file.suffix in (".js", ".css")
+            return self._send(200, body, STATIC_TYPES[file.suffix],
+                              "public, max-age=31536000, immutable" if versioned else "no-cache")
         self._json(404, {"error": "not found"})
+
+    def _events(self, mac: str) -> None:
+        """The TV's state as it changes (server-sent events)."""
+        if mac not in load_tvs():
+            return self._json(404, {"error": "unknown TV"})
+        if not _streams.acquire(blocking=False):
+            return self._json(503, {"error": "too many open pages"})
+        life = _live(mac)
+        life.watch()
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            seen, state = -1, life.current()
+            seen = life.version
+            self.wfile.write(f"data: {json.dumps(state)}\n\n".encode())
+            self.wfile.flush()
+            while self._authed():  # logging out ends the stream
+                version, state = life.wait(seen, 15)
+                # A comment when nothing changed notices a page that has gone.
+                line = f"data: {json.dumps(state)}\n\n" if version != seen else ": still here\n\n"
+                seen = version
+                self.wfile.write(line.encode())
+                self.wfile.flush()
+        except OSError:
+            pass  # the page went away
+        finally:
+            life.unwatch()
+            _streams.release()
 
     def _voice(self, mac: str) -> None:
         """Audio in; the words, the command, and what it did out."""
-        length = int(self.headers.get("Content-Length") or 0)
         if self.headers.get("X-Remote") != "1" or self.headers.get("Content-Type") != "audio/l16":
             return self._json(403, {"error": "forbidden"})
+        # Before reading a byte of the recording.
+        if not self._authed():
+            return self._json(401, {"error": "log in"})
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
         if not 0 < length <= speech.VOICE_MAX_BYTES or length % 2:
             return self._json(400, {"error": "that recording is too long"})
         pcm = self.rfile.read(length)
-        if not self._authed():
-            return self._json(401, {"error": "log in"})
         try:
             tv = tvcontrol.control(mac)
         except KeyError:
             return self._json(404, {"error": "unknown TV"})
+        refused = speech.admit(self._client())
+        if refused:
+            speech.duck.restore(mac)
+            return self._json(429, {"error": refused})
         q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
         language = q.get("language", ["auto"])[0]
         recent = q.get("recent", ["en"])[0]
@@ -311,7 +378,9 @@ class Handler(BaseHTTPRequestHandler):
             out = {"text": said["text"], "language": said.get("language"), "intent": said["intent"]}
             if said["intent"]:
                 out.update(run_intent(tv, said["intent"]))
-            log.info("%s: voice %r (%s, %s ms) -> %s", mac, said["text"], said.get("language"), said.get("ms"),
+                _live(mac).poke()
+            # What was said stays out of the logs: it can be anything.
+            log.info("%s: voice (%s, %s ms) -> %s", mac, said.get("language"), said.get("ms"),
                      said["intent"]["type"] if said["intent"] else "no command")
             return self._json(200, out)
         except ConnectionError as err:
@@ -321,6 +390,12 @@ class Handler(BaseHTTPRequestHandler):
             speech.duck.restore(mac)
             log.exception("voice request failed")
             return self._json(500, {"error": "something went wrong"})
+        finally:
+            speech.done()
+
+    def _session_cookie(self, token: str) -> str:
+        sec = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
+        return f"tvr={token}; Max-Age={auth.SESSION_DAYS * 86400}; Path=/; HttpOnly; SameSite=Lax{sec}"
 
     def _login(self, body: dict) -> None:
         who = self._client()
@@ -333,9 +408,7 @@ class Handler(BaseHTTPRequestHandler):
             time.sleep(1)
             return self._json(401, {"error": "wrong password"})
         auth.clear_failures(who)
-        sec = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
-        cookie = f"tvr={auth.make_session()}; Max-Age={auth.SESSION_DAYS * 86400}; Path=/; HttpOnly; SameSite=Lax{sec}"
-        return self._json(200, {"ok": True}, cookie)
+        return self._json(200, {"ok": True}, self._session_cookie(auth.make_session()))
 
     # POST: everything that does something
     def do_POST(self) -> None:
@@ -352,10 +425,15 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/login":
             return self._login(body)
         if path == "/api/logout":
+            auth.end_session(self.headers.get("Cookie"))
             sec = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
             return self._json(200, {"ok": True}, f"tvr=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax{sec}")
         if not self._authed():
             return self._json(401, {"error": "log in"})
+        if path == "/api/logout-all":
+            auth.log_out_everywhere()
+            sec = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
+            return self._json(200, {"ok": True}, f"tvr=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax{sec}")
         try:
             if path == "/api/discover":
                 paired = load_tvs()
@@ -371,6 +449,8 @@ class Handler(BaseHTTPRequestHandler):
             mac, action = m.groups()
             result = ACTIONS[action](tvcontrol.control(mac), body, mac)
             status, answer = result if result else (200, {"ok": True})
+            if action != "forget":
+                _live(mac).poke()  # the page should see this at once
             return self._json(status, answer)
         except KeyError:
             return self._json(404, {"error": "unknown TV"})

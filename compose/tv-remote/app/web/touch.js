@@ -112,19 +112,20 @@ function bindKeys(root) {
       b.addEventListener("click", () => send(key));
       return;
     }
-    let timer = null;
+    // Volume repeats quickly; moves wait first, so one tap is one step.
+    const isVolume = key.startsWith("KEY_VOL");
+    let timer = null, delay = null;
     const stop = () => {
-      if (!timer) return;
-      clearInterval(timer); timer = null; b.classList.remove("pressed");
-      volHeld = false;
-      refreshSoon(1200);
+      if (!timer && !delay) return;
+      clearTimeout(delay); clearInterval(timer); timer = delay = null; b.classList.remove("pressed");
+      if (isVolume) { volHeld = false; refreshSoon(1200); }
     };
     b.addEventListener("pointerdown", (e) => {
       e.preventDefault();
-      volHeld = true;
+      if (isVolume) volHeld = true;
       b.classList.add("pressed");
       send(key);
-      timer = setInterval(() => send(key), 250);
+      delay = setTimeout(() => { timer = setInterval(() => send(key), isVolume ? 250 : 180); delay = null; }, isVolume ? 250 : 400);
     });
     ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => b.addEventListener(ev, stop));
     b.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") send(key); });

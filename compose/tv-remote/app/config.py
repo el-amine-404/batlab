@@ -20,3 +20,4 @@ VERSION = Path(__file__).with_name("VERSION").read_text().strip()
 TVS_FILE = DATA_DIR / "tvs.json"
 TOKENS_DIR = DATA_DIR / "tokens"
 AUTH_FILE = DATA_DIR / "auth.json"
+SESSIONS_FILE = DATA_DIR / "sessions.json"
