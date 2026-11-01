@@ -56,8 +56,14 @@ def queue(cursor, document_id: str, sha256: str, kind: str, context: dict | None
         cursor.execute("INSERT INTO audit_events(action,resource_type,resource_id,outcome,trace_id,details) VALUES ('ENRICHMENT_SKIPPED','DOCUMENT',%s,'FAILURE',%s,'{\"code\":\"BACKLOG_FULL\"}'::jsonb)",
                        (document_id, str(uuid.uuid4())))
         return None
-    cursor.execute("INSERT INTO enrichment_jobs(id,document_id,artifact_sha256,kind,context) VALUES (%s,%s,%s,%s,%s::jsonb) ON CONFLICT DO NOTHING",
-                   (str(uuid.uuid4()), document_id, sha256, kind, json.dumps(context) if context else None))
+    # Asked again for the same bytes: the job that answered last time goes back in the queue.
+    forced = bool(context and context.get("force"))
+    cursor.execute("""INSERT INTO enrichment_jobs(id,document_id,artifact_sha256,kind,context) VALUES (%s,%s,%s,%s,%s::jsonb)
+                      ON CONFLICT (document_id,kind,artifact_sha256) DO UPDATE SET status='WAITING_FOR_AI', context=EXCLUDED.context,
+                             result=NULL, applied=NULL, lease_agent=NULL, lease_until=NULL, attempts=0, error_code=NULL,
+                             completed_at=NULL, deadline_at=NULL, expires_at=now()+interval '30 days'
+                       WHERE %s AND enrichment_jobs.status NOT IN ('WAITING_FOR_AI','LEASED','SUBMITTED')""",
+                   (str(uuid.uuid4()), document_id, sha256, kind, json.dumps(context) if context else None, forced))
     return kind
 
 
