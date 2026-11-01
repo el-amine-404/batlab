@@ -521,6 +521,17 @@
       ],
       "automerge": false,
       "groupName": "pdf gateway python"
+    },
+    {
+      "description": "The gateway's web npm updates wait for a person: Renovate left package-lock.json behind (the shared UI lives outside the app), and npm ci then fails the whole build, 2026-11-01",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchFileNames": [
+        "compose/pdf-gateway/**"
+      ],
+      "automerge": false,
+      "groupName": "pdf gateway web"
     }
   ],
   "pip-compile": {
