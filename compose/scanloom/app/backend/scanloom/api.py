@@ -7,6 +7,7 @@ import logging
 import re
 import secrets
 import shutil
+import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -15,11 +16,11 @@ from typing import Annotated, Literal
 
 from batlab_common.accounts import Principal
 from batlab_common.web import BodyLimit, Gate, RequestLog, api_not_found, set_threads
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.datastructures import MutableHeaders
 from starlette.requests import ClientDisconnect
 
@@ -29,6 +30,7 @@ from .config import Config, load
 from .db import Database
 from .events import Broker
 from .logs import RECENT
+from .notifier import clean_settings, load_settings
 from .pagespec import parse_pages
 from .security import looks_like_image
 from .settings import known, validate
@@ -96,9 +98,134 @@ class ExportRequest(BaseModel):
 
 
 class BatchExport(BaseModel):
-    project_ids: list[str] = Field(min_length=1, max_length=200)
+    scan_ids: list[str] = Field(min_length=1, max_length=200)
     format: Literal["pdf", "images"] = "pdf"
     quality: Literal["lossless", "balanced", "small"] = "balanced"
+
+
+class NotifySettingsIn(BaseModel):
+    enabled: bool | None = None
+    url: str | None = Field(None, description="Apprise's /notify/<key> address")
+    tag: str | None = Field(None, description="The Apprise channel")
+    on_requested: bool | None = None
+    on_finished: bool | None = None
+    previews: Literal["off", "safe", "readable"] | None = Field(None, description="safe: small and blurred, recognisable but not readable")
+    link: str | None = Field(None, description="This app's address, for the link in a message")
+
+
+class NotifySettings(BaseModel):
+    enabled: bool
+    url: str
+    tag: str
+    on_requested: bool
+    on_finished: bool
+    previews: Literal["off", "safe", "readable"]
+    link: str
+
+
+class NotificationOut(BaseModel):
+    id: int
+    kind: Literal["requested", "finished", "test"]
+    status: Literal["queued", "sent", "failed", "skipped"]
+    title: str | None
+    error: str | None
+    created_at: str
+    sent_at: str | None
+    scan: str | None
+    scan_id: str | None
+
+
+class NotificationsOut(BaseModel):
+    settings: NotifySettings
+    recent: list[NotificationOut]
+
+
+class Documented(BaseModel):
+    """Described for the API's reference; anything further in an answer still goes through."""
+    model_config = ConfigDict(extra="allow")
+
+
+def expect(if_match: str | None, current: int, what: str) -> None:
+    """When an If-Match is given, the change is only for what its sender saw."""
+    if if_match is None:
+        return
+    wanted = if_match.strip().removeprefix("W/").strip('"')
+    if wanted != "*" and wanted != str(current):
+        raise HTTPException(412, f"Someone else changed this {what} meanwhile: reload it, then try again")
+
+
+class PageOut(Documented):
+    id: str
+    rev: int = Field(description="Raised by each edit; send as If-Match to edit only what you saw")
+    position: int = Field(description="From 0; the page number is this plus one")
+    original_name: str
+    status: Literal["held", "queued", "scanning", "decoding", "detecting", "rendering", "ready", "blocked", "failed"]
+    error: str | None
+    version: int
+    hold: bool = Field(description="Waiting to be asked for: see POST /scans/{id}/start")
+    width: int | None
+    height: int | None
+    corners: list[list[float]] | None
+    rotation: int
+    warnings: list[str]
+    thumb_url: str | None
+    preview_url: str | None
+    source_url: str | None
+    png_url: str | None
+    jpeg_url: str | None
+
+
+class PageListOut(BaseModel):
+    items: list[PageOut]
+    total: int
+    counts: dict[str, int]
+    limit: int
+    offset: int
+
+
+class ExportOut(Documented):
+    id: str
+    kind: Literal["zip", "pdf"]
+    status: Literal["queued", "building", "ready", "failed"]
+    filename: str | None
+    bytes: int | None
+    error: str | None
+    page_count: int
+    download_url: str | None
+
+
+class ProjectOut(Documented):
+    id: str = Field(description="The scan's id in every address")
+    rev: int = Field(description="Raised by each edit; send as If-Match to edit only what you saw")
+    title: str
+    profile: Profile
+    status: Literal["empty", "draft", "queued", "processing", "ready", "failed"]
+    page_count: int
+    completed_count: int
+    failed_count: int
+    warning_count: int
+    held_count: int
+    expires_at: str | None = Field(description="Empty: kept until deleted")
+    created_at: str
+    progress: dict | None = Field(description="While working: stages, pages remaining, eta_seconds")
+    exports: list[ExportOut]
+
+
+class ProjectListItem(Documented):
+    id: str
+    title: str
+    status: str
+    page_count: int
+    thumbnail_url: str | None
+    eta_seconds: int | None
+    expires_at: str | None
+
+
+class ProjectListOut(BaseModel):
+    items: list[ProjectListItem]
+    total: int
+    limit: int
+    offset: int
 
 
 class SettingsEdit(BaseModel):
@@ -128,7 +255,7 @@ def jsonable(value):
 
 
 def page_view(public_id: str, row: dict) -> dict:
-    base = f"/api/v1/projects/{public_id}/pages/{row['id']}"
+    base = f"/api/v2/scans/{public_id}/pages/{row['id']}"
     version = row["version"]
     has_result = bool(row["result_object"])
 
@@ -139,7 +266,7 @@ def page_view(public_id: str, row: dict) -> dict:
 
     quality = row["quality"] or {}
     answer = {
-        "id": str(row["id"]), "position": row["position"], "original_name": row["original_name"],
+        "id": str(row["id"]), "rev": row["edit_rev"], "position": row["position"], "original_name": row["original_name"],
         "status": row["status"], "error": row["error"], "version": version,
         "width": quality.get("width") or row["width"], "height": quality.get("height") or row["height"],
         "corners": row["corners"], "rotation": row["rotation"], "appearance": row["appearance"],
@@ -157,7 +284,7 @@ def page_view(public_id: str, row: dict) -> dict:
         "jpeg_url": f"{base}/image/jpeg?v={version}&download=1" if row["jpeg_object"] else None,
     }
     if row.get("reused_public_id"):
-        answer["reused_from"] = {"project": row["reused_public_id"], "title": row["reused_title"], "page": row["reused_position"] + 1,
+        answer["reused_from"] = {"scan": row["reused_public_id"], "title": row["reused_title"], "page": row["reused_position"] + 1,
                                 # A scan of this photo alone: scanning it again would only make a copy of that scan.
                                 "alone": row["reused_page_count"] == 1 and row["reused_public_id"] != public_id}
     return answer
@@ -198,7 +325,7 @@ class Limits:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] == "http" and scope["method"] == "POST" and re.fullmatch(r"/api/v1/projects/[^/]+/pages", scope["path"]):
+        if scope["type"] == "http" and scope["method"] == "POST" and re.fullmatch(r"/api/v2/scans/[^/]+/pages", scope["path"]):
             return await self.app(scope, receive, send)
         return await self.limited(scope, receive, send)
 
@@ -220,25 +347,29 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
         broker.stop()
 
     app = FastAPI(title="Scanloom API", version=__version__, docs_url=None, redoc_url=None,
-                  openapi_url="/api/v1/openapi.json", lifespan=lifespan,
+                  openapi_url="/api/v2/openapi.json", lifespan=lifespan,
                   description="Photographs in, clean document pages out. Sign in on the page, or send an API key (X-Api-Key).")
     gate.install(app, accounts)
     app.add_middleware(Limits)
     app.add_middleware(RequestLog, name="scanloom")
     app.add_middleware(SecurityHeaders)
 
-    public = APIRouter(prefix="/api/v1")
-    api = APIRouter(prefix="/api/v1", dependencies=[Depends(gate.principal)])
+    public = APIRouter(prefix="/api/v2")
+    # What Homepage and the shared page frame read, at the first version's addresses too.
+    legacy = APIRouter(prefix="/api/v1", include_in_schema=False)
+    api = APIRouter(prefix="/api/v2", dependencies=[Depends(gate.principal)])
     public.include_router(gate.public)
     api.include_router(gate.router)
 
     # ---- system ----------------------------------------------------------------------------
 
+    @legacy.get("/health")
     @public.get("/health", tags=["System"])
     def health():
         db.one("SELECT 1 AS ok")
         return {"ok": True, "status": "ok", "version": __version__}
 
+    @legacy.get("/system/status")
     @public.get("/system/status", tags=["System"], summary="Counts only, for Homepage")
     def status():
         row = db.one("""SELECT count(*) FILTER (WHERE status='processing') AS processing,
@@ -269,6 +400,40 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
         if not row:
             raise HTTPException(409, "Settings changed; reload before saving")
         return jsonable(dict(row))
+
+    # ---- notifications --------------------------------------------------------------------
+
+    def notify_view() -> dict:
+        recent = db.all("""SELECT n.id,n.kind,n.status,n.title,n.error,n.created_at,n.sent_at,p.title AS scan,p.public_id AS scan_id FROM notifications n
+                           LEFT JOIN projects p ON p.id=n.project_id ORDER BY n.id DESC LIMIT 15""")
+        return {"settings": load_settings(db), "recent": [jsonable(dict(row)) for row in recent]}
+
+    @api.get("/notifications", tags=["Notifications"], dependencies=[gate.need("settings")], response_model=NotificationsOut,
+             summary="Where notifications go, and the latest sent")
+    def get_notifications():
+        return notify_view()
+
+    @api.put("/notifications", tags=["Notifications"], dependencies=[gate.need("settings")], response_model=NotificationsOut,
+             summary="Set where notifications go; fields left out keep their value")
+    def put_notifications(body: NotifySettingsIn):
+        try:
+            values = clean_settings(load_settings(db) | body.model_dump(exclude_unset=True))
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        db.execute("""INSERT INTO notify_settings(singleton,values) VALUES (true,%s::jsonb)
+                      ON CONFLICT (singleton) DO UPDATE SET values=EXCLUDED.values,updated_at=now()""", (json.dumps(values),))
+        return notify_view()
+
+    @api.post("/notifications/test", tags=["Notifications"], dependencies=[gate.need("settings")],
+              summary="Send a test now, and say whether it arrived")
+    def test_notification():
+        row = db.one("INSERT INTO notifications(kind) VALUES ('test') RETURNING id")
+        for _ in range(100):
+            found = db.one("SELECT status,error FROM notifications WHERE id=%s", (row["id"],))
+            if found["status"] != "queued":
+                return {"sent": found["status"] == "sent", "error": found["error"]}
+            time.sleep(.2)
+        return {"sent": False, "error": "The notifier didn't answer: is the scanloom-notifier container running?"}
 
     # ---- whose scans --------------------------------------------------------------------------
 
@@ -330,19 +495,20 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
                 "current": jsonable(dict(current)) if current else None}
 
     def project_view(project: dict) -> dict:
-        answer = jsonable({key: value for key, value in project.items() if key != "id"})
+        answer = jsonable({key: value for key, value in project.items() if key not in {"id", "public_id", "version", "scan_pending"}})
+        answer["id"] = project["public_id"]
         answer["progress"] = progress(project)
         answer["page_seconds"] = round(page_seconds()[1], 1)
         sizes = db.one("SELECT COALESCE(sum(result_bytes),0)::bigint AS result_bytes FROM pages WHERE project_id=%s", (project["id"],))
         answer["bytes"] = sizes["result_bytes"]
-        answer["exports"] = [jsonable(dict(row)) | {"download_url": f"/api/v1/projects/{project['public_id']}/exports/{row['id']}/download" if row["status"] == "ready" else None}
+        answer["exports"] = [jsonable(dict(row)) | {"download_url": f"/api/v2/scans/{project['public_id']}/exports/{row['id']}/download" if row["status"] == "ready" else None}
                              for row in db.all("""SELECT id,kind,status,filename,bytes,error,expires_at,created_at,ready_at,page_count
                                                   FROM exports WHERE project_id=%s AND expires_at>now() ORDER BY created_at DESC LIMIT 20""", (project["id"],))]
         return answer
 
     # ---- scans --------------------------------------------------------------------------------
 
-    @api.post("/projects", status_code=201, tags=["Scans"], summary="A new scan, empty until pages are added to it")
+    @api.post("/scans", status_code=201, tags=["Scans"], response_model=ProjectOut, summary="A new scan, empty until pages are added to it")
     def create_project(body: ProjectIn, who: Scanner):
         settings = db.settings()
         public_id = secrets.token_urlsafe(18).replace("-", "A").replace("_", "B")
@@ -350,15 +516,15 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
         expires = datetime.now(timezone.utc) + timedelta(days=days) if days else None
         title = (body.title or "").strip() or default_title()
         with db.transaction() as cursor:
-            cursor.execute("""INSERT INTO projects(public_id,title,profile,status,expires_at,owner)
-                              VALUES (%s,%s,%s,'empty',%s,%s) RETURNING *""",
-                           (public_id, title, body.profile or settings["default_profile"], expires, who.owner))
+            cursor.execute("""INSERT INTO projects(public_id,title,profile,status,expires_at,owner,owner_name)
+                              VALUES (%s,%s,%s,'empty',%s,%s,%s) RETURNING *""",
+                           (public_id, title, body.profile or settings["default_profile"], expires, who.owner, who.name[:160]))
             project = dict(cursor.fetchone())
             event(cursor, project, "project_created")
         logger.info("Created scan %s for %s", public_id, who.name)
         return project_view(project)
 
-    @api.get("/projects", tags=["Scans"])
+    @api.get("/scans", tags=["Scans"], response_model=ProjectListOut)
     def list_projects(who: Who, limit: int = Query(24, ge=1, le=1000), offset: int = Query(0, ge=0),
                       q: str | None = Query(None, max_length=160), status: Literal["processing", "ready", "failed", "draft"] | None = None):
         where, params = ["pr.status<>'deleting'", "(pr.page_count>0 OR pr.created_at>now()-interval '1 hour')"], []
@@ -377,7 +543,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
         condition = " AND ".join(where)
         total = db.one(f"SELECT count(*)::int AS n FROM projects pr WHERE {condition}", tuple(params))["n"]
         rows = db.all(f"""SELECT pr.public_id,pr.title,pr.profile,pr.status,pr.page_count,pr.completed_count,pr.failed_count,
-                                 pr.warning_count,pr.held_count,pr.expires_at,pr.created_at,pr.updated_at,pr.owner,
+                                 pr.warning_count,pr.held_count,pr.rev,pr.expires_at,pr.created_at,pr.updated_at,pr.owner,
                                  first_page.id AS page_id,first_page.version AS page_version,first_page.thumb_object,first_page.result_object
                           FROM projects pr LEFT JOIN LATERAL (
                               SELECT p.id,p.version,p.thumb_object,p.result_object FROM pages p
@@ -387,26 +553,32 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
         seconds = page_seconds()[1]
         for row in rows:
             item = jsonable(dict(row))
+            item["id"] = item.pop("public_id")
             left = row["page_count"] - row["completed_count"] - row["failed_count"]
             item["eta_seconds"] = max(1, round((left - row["held_count"]) * seconds)) if row["status"] == "processing" and left > row["held_count"] else None
             page_id, version = item.pop("page_id"), item.pop("page_version")
             form = "thumb" if item.pop("thumb_object") else "png" if item.pop("result_object", None) else None
             item.pop("result_object", None)
-            item["thumbnail_url"] = f"/api/v1/projects/{row['public_id']}/pages/{page_id}/image/{form}?v={version}" if page_id and form else None
+            item["thumbnail_url"] = f"/api/v2/scans/{row['public_id']}/pages/{page_id}/image/{form}?v={version}" if page_id and form else None
             items.append(item)
         return {"items": items, "total": total, "limit": limit, "offset": offset}
 
-    @api.get("/projects/{public_id}", tags=["Scans"])
-    def get_project(public_id: str, who: Who):
-        return project_view(find(public_id, who))
+    @api.get("/scans/{public_id}", tags=["Scans"], response_model=ProjectOut)
+    def get_project(public_id: str, who: Who, response: Response):
+        project = find(public_id, who)
+        response.headers["ETag"] = f'"{project["rev"]}"'
+        return project_view(project)
 
-    @api.patch("/projects/{public_id}", tags=["Scans"], summary="Rename, change the finish, or reorder")
-    def edit_project(public_id: str, edit: ProjectEdit, who: Scanner):
+    @api.patch("/scans/{public_id}", tags=["Scans"], response_model=ProjectOut, summary="Rename, change the finish, or reorder")
+    def edit_project(public_id: str, edit: ProjectEdit, who: Scanner, response: Response, if_match: Annotated[str | None, Header()] = None):
         project = find(public_id, who)
         title = edit.title.strip() if edit.title is not None else None
         if edit.title is not None and not title:
             raise HTTPException(422, "A scan's name can't be empty")
         with db.transaction() as cursor:
+            cursor.execute("SELECT rev FROM projects WHERE id=%s FOR UPDATE", (project["id"],))
+            expect(if_match, cursor.fetchone()["rev"], "scan")
+            cursor.execute("UPDATE projects SET rev=rev+1 WHERE id=%s", (project["id"],))
             if title is not None and title != project["title"]:
                 cursor.execute("UPDATE projects SET title=%s,version=version+1 WHERE id=%s", (title, project["id"]))
                 event(cursor, project, "project_renamed")
@@ -429,11 +601,14 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
                 cursor.execute("""UPDATE pages p SET position=o.place-1 FROM unnest(%s::uuid[]) WITH ORDINALITY o(id,place)
                                   WHERE p.id=o.id""", (edit.page_order,))
                 event(cursor, project, "pages_reordered")
-        return project_view(find(public_id, who))
+        changed = find(public_id, who)
+        response.headers["ETag"] = f'"{changed["rev"]}"'
+        return project_view(changed)
 
-    @api.delete("/projects/{public_id}", status_code=204, tags=["Scans"], summary="Delete a scan and all its files")
-    def delete_project(public_id: str, who: Scanner):
+    @api.delete("/scans/{public_id}", status_code=204, tags=["Scans"], summary="Delete a scan and all its files")
+    def delete_project(public_id: str, who: Scanner, if_match: Annotated[str | None, Header()] = None):
         project = find(public_id, who)
+        expect(if_match, project["rev"], "scan")
         # The API can't touch finished files (it mounts them read-only): the worker erases them.
         with db.transaction() as cursor:
             cursor.execute("UPDATE projects SET status='deleting' WHERE id=%s", (project["id"],))
@@ -442,7 +617,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
 
     # ---- pages --------------------------------------------------------------------------------
 
-    @api.get("/projects/{public_id}/pages", tags=["Pages"], summary="A scan's pages, a stretch at a time")
+    @api.get("/scans/{public_id}/pages", tags=["Pages"], response_model=PageListOut, summary="A scan's pages, a stretch at a time")
     def list_pages(public_id: str, who: Who, limit: int = Query(48, ge=1, le=1000), offset: int = Query(0, ge=0),
                    only: Literal["review", "failed", "held"] | None = None):
         project = find(public_id, who)
@@ -481,12 +656,14 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
             kind = "prepare_page" if hold else "process_page"
             cursor.execute("INSERT INTO jobs(project_id,page_id,kind,priority) VALUES (%s,%s,%s,%s)",
                            (project["id"], page_id, kind, PRIORITY[kind]))
+            if not hold:
+                cursor.execute("UPDATE projects SET scan_pending=true WHERE id=%s", (project["id"],))
             cursor.execute("SELECT project_refresh(%s)", (project["id"],))
             event(cursor, project, "page_added", {"page_id": str(page_id)})
             cursor.execute(f"{PAGE_ROWS} WHERE p.id=%s", (page_id,))
             return {"duplicate": False, "page": page_view(project["public_id"], cursor.fetchone())}
 
-    @api.post("/projects/{public_id}/pages", status_code=201, tags=["Pages"],
+    @api.post("/scans/{public_id}/pages", status_code=201, tags=["Pages"],
               summary="Add one photo: the file itself is the request's body",
               description="`curl --data-binary @photo.heic -H 'X-Api-Key: …' '…/pages?name=photo.heic'`. "
                           "A file this scan already has isn't added (`duplicate: true`); one you scanned in another scan is not processed again (the hash of each original is kept).")
@@ -539,18 +716,20 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
         if len(corners) != 4 or any(len(point) != 2 or any(not -.05 <= float(value) <= 1.05 for value in point) for point in corners):
             raise ValueError("Corners are four [x, y] points no more than 5% outside the image")
 
-    def edit_pages(project: dict, page_ids: list[uuid.UUID], edit: PageEdit) -> None:
+    def edit_pages(project: dict, page_ids: list[uuid.UUID], edit: PageEdit, if_match: str | None = None) -> None:
         if edit.corners is not None:
             try:
                 check_corners(edit.corners)
             except (ValueError, TypeError) as error:
                 raise HTTPException(422, str(error)) from error
         with db.transaction() as cursor:
-            cursor.execute("SELECT id,status,normalized_object FROM pages WHERE project_id=%s AND id=ANY(%s::uuid[]) FOR UPDATE",
+            cursor.execute("SELECT id,status,normalized_object,edit_rev FROM pages WHERE project_id=%s AND id=ANY(%s::uuid[]) FOR UPDATE",
                            (project["id"], page_ids))
             rows = cursor.fetchall()
             if len(rows) != len(set(page_ids)):
                 raise HTTPException(404, "That page doesn't exist, or was deleted")
+            if if_match is not None:
+                expect(if_match, rows[0]["edit_rev"], "page")
             cursor.execute("SELECT count(*) AS n FROM pages WHERE id=ANY(%s::uuid[]) AND hold", (page_ids,))
             if cursor.fetchone()["n"]:
                 raise HTTPException(409, "That photo hasn't been scanned yet")
@@ -578,19 +757,21 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
                 event(cursor, project, "page_edit_queued", {"page_id": str(page_id)})
             cursor.execute("SELECT project_refresh(%s)", (project["id"],))
 
-    @api.patch("/projects/{public_id}/pages", status_code=202, tags=["Pages"], summary="Change several pages at once")
+    @api.patch("/scans/{public_id}/pages", status_code=202, tags=["Pages"], summary="Change several pages at once")
     def edit_many(public_id: str, edit: ManyPagesEdit, who: Scanner):
         project = find(public_id, who)
         edit_pages(project, edit.page_ids, edit)
         return project_view(find(public_id, who))
 
-    @api.patch("/projects/{public_id}/pages/{page_id}", status_code=202, tags=["Pages"], summary="Change a page's crop, rotation or look")
-    def edit_page(public_id: str, page_id: uuid.UUID, edit: PageEdit, who: Scanner):
+    @api.patch("/scans/{public_id}/pages/{page_id}", status_code=202, tags=["Pages"], response_model=PageOut, summary="Change a page's crop, rotation or look")
+    def edit_page(public_id: str, page_id: uuid.UUID, edit: PageEdit, who: Scanner, response: Response, if_match: Annotated[str | None, Header()] = None):
         project = find(public_id, who)
-        edit_pages(project, [page_id], edit)
-        return project_view(find(public_id, who))
+        edit_pages(project, [page_id], edit, if_match)
+        row = db.one(f"{PAGE_ROWS} WHERE p.id=%s", (page_id,))
+        response.headers["ETag"] = f'"{row["edit_rev"]}"'
+        return page_view(public_id, row)
 
-    @api.post("/projects/{public_id}/start", status_code=202, tags=["Scans"], summary="Scan the photos waiting for review")
+    @api.post("/scans/{public_id}/start", status_code=202, tags=["Scans"], response_model=ProjectOut, summary="Scan the photos waiting for review")
     def start_scan(public_id: str, who: Scanner):
         project = find(public_id, who)
         with db.transaction() as cursor:
@@ -614,11 +795,13 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
                 if row["status"] == "queued":
                     cursor.execute("INSERT INTO jobs(project_id,page_id,kind,priority) VALUES (%s,%s,'process_page',%s) ON CONFLICT DO NOTHING",
                                    (project["id"], row["id"], PRIORITY["process_page"]))
+            cursor.execute("UPDATE projects SET scan_pending=true WHERE id=%s", (project["id"],))
+            cursor.execute("INSERT INTO notifications(project_id,kind) VALUES (%s,'requested')", (project["id"],))
             cursor.execute("SELECT project_refresh(%s)", (project["id"],))
             event(cursor, project, "project_started")
         return project_view(find(public_id, who))
 
-    @api.post("/projects/{public_id}/pages/retry", status_code=202, tags=["Pages"], summary="Try failed pages again")
+    @api.post("/scans/{public_id}/pages/retry", status_code=202, tags=["Pages"], summary="Try failed pages again")
     def retry_pages(public_id: str, body: ManyPages, who: Scanner):
         project = find(public_id, who)
         with db.transaction() as cursor:
@@ -628,18 +811,15 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
                 cursor.execute("INSERT INTO jobs(project_id,page_id,kind,priority) VALUES (%s,%s,'process_page',%s) ON CONFLICT DO NOTHING",
                                (project["id"], row["id"], PRIORITY["process_page"]))
                 event(cursor, project, "page_edit_queued", {"page_id": str(row["id"])})
-            cursor.execute("UPDATE projects SET error=NULL WHERE id=%s", (project["id"],))
+            cursor.execute("UPDATE projects SET error=NULL,scan_pending=true WHERE id=%s", (project["id"],))
             cursor.execute("SELECT project_refresh(%s)", (project["id"],))
         return project_view(find(public_id, who))
 
-    @api.post("/projects/{public_id}/pages/delete", tags=["Pages"], summary="Delete pages from a scan")
-    def delete_pages(public_id: str, body: ManyPages, who: Scanner):
+    def remove_pages(public_id: str, page_ids: list[uuid.UUID], who) -> dict:
         project = find(public_id, who)
-        if not body.page_ids:
-            raise HTTPException(422, "Say which pages to delete")
         with db.transaction() as cursor:
             cursor.execute("SELECT id FROM projects WHERE id=%s FOR UPDATE", (project["id"],))
-            cursor.execute("DELETE FROM pages WHERE project_id=%s AND id=ANY(%s::uuid[]) RETURNING *", (project["id"], body.page_ids))
+            cursor.execute("DELETE FROM pages WHERE project_id=%s AND id=ANY(%s::uuid[]) RETURNING *", (project["id"], page_ids))
             gone = cursor.fetchall()
             objects = [row[column] for row in gone for column in (*FORMS.values(), "normalized_object") if row[column]]
             if objects or gone:
@@ -655,7 +835,26 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
             event(cursor, project, "pages_deleted", {"count": len(gone)})
         return project_view(find(public_id, who))
 
-    @api.get("/projects/{public_id}/pages/{page_id}/image/{form}", tags=["Pages"],
+    @api.delete("/scans/{public_id}/pages/{page_id}", tags=["Pages"], response_model=ProjectOut, summary="Delete a page")
+    def delete_page(public_id: str, page_id: uuid.UUID, who: Scanner):
+        return remove_pages(public_id, [page_id], who)
+
+    @api.delete("/scans/{public_id}/pages", tags=["Pages"], response_model=ProjectOut, summary="Delete several pages: page_ids in the body")
+    def delete_pages(public_id: str, body: ManyPages, who: Scanner):
+        if not body.page_ids:
+            raise HTTPException(422, "Say which pages to delete")
+        return remove_pages(public_id, body.page_ids, who)
+
+    @api.get("/scans/{public_id}/pages/{page_id}", tags=["Pages"], response_model=PageOut, summary="One page")
+    def get_page(public_id: str, page_id: uuid.UUID, who: Who, response: Response):
+        project = find(public_id, who)
+        row = db.one(f"{PAGE_ROWS} WHERE p.project_id=%s AND p.id=%s", (project["id"], page_id))
+        if not row:
+            raise HTTPException(404, "That page doesn't exist, or was deleted")
+        response.headers["ETag"] = f'"{row["edit_rev"]}"'
+        return page_view(public_id, row)
+
+    @api.get("/scans/{public_id}/pages/{page_id}/image/{form}", tags=["Pages"],
              summary="A page's image: thumb, preview, source (the photo), png or jpeg")
     def page_image(public_id: str, page_id: uuid.UUID, form: Literal["thumb", "preview", "source", "png", "jpeg"], who: Who,
                    download: bool = False):
@@ -680,7 +879,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
 
     # ---- exports ------------------------------------------------------------------------------
 
-    @api.post("/projects/{public_id}/exports", status_code=202, tags=["Exports"], summary="Make a ZIP or a PDF of a scan's pages")
+    @api.post("/scans/{public_id}/exports", status_code=202, tags=["Exports"], summary="Make a ZIP or a PDF of a scan's pages")
     def create_export(public_id: str, request: ExportRequest, who: Scanner):
         if request.page_ids is not None and request.pages is not None:
             raise HTTPException(422, "Use page_ids or pages, not both")
@@ -732,29 +931,58 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
                                 json.dumps({"export_id": str(export_id), "page_ids": [str(row["id"]) for row in chosen], "quality": request.quality, "options": options})))
                 event(cursor, project, "export_queued", {"export_id": str(export_id), "kind": request.kind})
         return {"id": str(export_id), "kind": request.kind, "status": export_status, "page_count": len(chosen), "quality": request.quality,
-                "download_url": f"/api/v1/projects/{public_id}/exports/{export_id}/download"}
+                "download_url": f"/api/v2/scans/{public_id}/exports/{export_id}/download"}
 
-    @api.post("/exports/batch", status_code=202, tags=["Exports"], summary="One ZIP of several scans")
+    def batch_row(export_id: uuid.UUID, who) -> dict:
+        row = db.one("SELECT * FROM exports WHERE id=%s AND project_id IS NULL AND expires_at>now()", (export_id,))
+        scope = scope_of(who)
+        if not row or (scope is not None and row["owner"] != scope):
+            raise HTTPException(404, "That download expired: make it again")
+        return row
+
+    def batch_view(row: dict) -> dict:
+        return {"id": str(row["id"]), "kind": "zip", "status": row["status"], "filename": row["filename"], "bytes": row["bytes"],
+                "error": row["error"], "page_count": row["page_count"],
+                "download_url": f"/api/v2/batch-exports/{row['id']}/download" if row["status"] == "ready" else None}
+
+    @api.post("/batch-exports", status_code=202, tags=["Exports"], response_model=ExportOut,
+              summary="One ZIP of several scans. It stands alone: deleting one of them afterwards leaves it")
     def batch_export(body: BatchExport, who: Scanner):
-        scans = [find(public_id, who) for public_id in dict.fromkeys(body.project_ids)]
+        scans = [find(public_id, who) for public_id in dict.fromkeys(body.scan_ids)]
         pages = sum(scan["completed_count"] for scan in scans)
         if not pages:
             raise HTTPException(409, "None of those scans has finished pages yet")
         settings = db.settings()
         expires = datetime.now(timezone.utc) + timedelta(minutes=int(settings["export_ttl_minutes"]))
-        first = scans[0]
         with db.transaction() as cursor:
-            cursor.execute("INSERT INTO exports(project_id,kind,filename,expires_at,page_count) VALUES (%s,'zip',%s,%s,%s) RETURNING id",
-                           (first["id"], f"Scanloom {len(scans)} scans.zip", expires, pages))
-            export_id = cursor.fetchone()["id"]
-            cursor.execute("INSERT INTO jobs(project_id,kind,priority,payload) VALUES (%s,'build_export',%s,%s::jsonb)",
-                           (first["id"], PRIORITY["build_export"],
-                            json.dumps({"export_id": str(export_id), "batch": [str(scan["id"]) for scan in scans], "format": body.format, "quality": body.quality})))
-            event(cursor, first, "export_queued", {"export_id": str(export_id), "kind": "zip"})
-        return {"id": str(export_id), "project": first["public_id"], "page_count": pages,
-                "download_url": f"/api/v1/projects/{first['public_id']}/exports/{export_id}/download"}
+            cursor.execute("INSERT INTO exports(kind,filename,expires_at,page_count,owner) VALUES ('zip',%s,%s,%s,%s) RETURNING *",
+                           (f"Scanloom {len(scans)} scans.zip", expires, pages, who.owner))
+            row = dict(cursor.fetchone())
+            cursor.execute("INSERT INTO jobs(kind,priority,payload) VALUES ('build_export',%s,%s::jsonb)",
+                           (PRIORITY["build_export"], json.dumps({"export_id": str(row["id"]), "batch": [str(scan["id"]) for scan in scans], "format": body.format, "quality": body.quality})))
+        return batch_view(row)
 
-    @api.get("/projects/{public_id}/exports/{export_id}/download", tags=["Exports"])
+    @api.get("/batch-exports/{export_id}", tags=["Exports"], response_model=ExportOut)
+    def get_batch(export_id: uuid.UUID, who: Who):
+        return batch_view(batch_row(export_id, who))
+
+    @api.get("/batch-exports/{export_id}/download", tags=["Exports"])
+    def download_batch(export_id: uuid.UUID, who: Who):
+        row = batch_row(export_id, who)
+        if row["status"] != "ready":
+            raise HTTPException(409, "That download is still being made")
+        return FileResponse(object_path(config.exports, row["object_name"]), media_type="application/zip", filename=row["filename"])
+
+    @api.get("/scans/{public_id}/exports/{export_id}", tags=["Exports"], response_model=ExportOut, summary="How an export is getting on")
+    def get_export(public_id: str, export_id: uuid.UUID, who: Who):
+        project = find(public_id, who)
+        row = db.one("""SELECT id,kind,status,filename,bytes,error,expires_at,created_at,ready_at,page_count FROM exports
+                        WHERE id=%s AND project_id=%s AND expires_at>now()""", (export_id, project["id"]))
+        if not row:
+            raise HTTPException(404, "That download expired: make it again")
+        return jsonable(dict(row)) | {"download_url": f"/api/v2/scans/{public_id}/exports/{export_id}/download" if row["status"] == "ready" else None}
+
+    @api.get("/scans/{public_id}/exports/{export_id}/download", tags=["Exports"])
     def download_export(public_id: str, export_id: uuid.UUID, who: Who):
         project = find(public_id, who)
         item = db.one("SELECT * FROM exports WHERE id=%s AND project_id=%s AND expires_at>now()", (export_id, project["id"]))
@@ -788,7 +1016,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
                         yield ": keepalive\n\n"
                         continue
                     if scope is None or message.get("owner") == scope or message.get("event") == "resync":
-                        public = {key: message.get(key) for key in ("project", "event", "page")}
+                        public = {"scan": message.get("project"), "event": message.get("event"), "page": message.get("page")}
                         yield f"event: change\ndata: {json.dumps(public)}\n\n"
             finally:
                 broker.unsubscribe(queue)
@@ -796,6 +1024,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
         return StreamingResponse(stream(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
 
+    app.include_router(legacy)
     app.include_router(public)
     app.include_router(api)
 
@@ -803,9 +1032,9 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Fast
 
     @app.get("/docs", include_in_schema=False)
     def docs():
-        return HTMLResponse("""<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width'><title>Scanloom API</title></head><body><script id=api-reference data-url=/api/v1/openapi.json></script><script src=/api-docs/scalar.js></script></body></html>""")
+        return HTMLResponse("""<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width'><title>Scanloom API</title></head><body><script id=api-reference data-url=/api/v2/openapi.json></script><script src=/api-docs/scalar.js></script></body></html>""")
 
     if config.static.joinpath("api-docs").is_dir():
         app.mount("/api-docs", StaticFiles(directory=config.static / "api-docs"), name="api-docs")
-    api_not_found(app, docs="/docs")
+    api_not_found(app, docs="/docs", base="/api/v2")
     return app

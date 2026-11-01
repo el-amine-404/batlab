@@ -17,7 +17,7 @@ import { eta, formatBytes, plural } from "@/lib/utils";
 export function Review({ project, onAdd }: { project: Project; onAdd: () => void }) {
   const client = useQueryClient();
   const navigate = useNavigate();
-  const id = project.public_id;
+  const id = project.id;
   const [cancelling, setCancelling] = useState(false);
   const [look, setLook] = useState<Page | null>(null);
   const list = useQuery({
@@ -84,7 +84,7 @@ export function Review({ project, onAdd }: { project: Project; onAdd: () => void
               {page.error ? <p className="mt-0.5 line-clamp-2 text-xs text-destructive">{page.error}</p>
                 : page.reused_from?.alone ? (
                   <p className="mt-0.5 flex items-start gap-1 text-xs text-warning"><CheckCircle2 className="mt-px size-3.5 shrink-0" />
-                    <span>Already scanned: <Link className="underline underline-offset-2" to={`/scans/${page.reused_from.project}`}>{page.reused_from.title}</Link></span></p>
+                    <span>Already scanned: <Link className="underline underline-offset-2" to={`/scans/${page.reused_from.scan}`}>{page.reused_from.title}</Link></span></p>
                 ) : <p className="mt-0.5 text-xs text-muted-foreground">{page.width && page.height ? `${page.width} × ${page.height} · ` : ""}{formatBytes(page.source_bytes)}</p>}
             </div>
           </li>

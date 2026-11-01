@@ -39,8 +39,8 @@ docker exec scanloom-api admin add-key <name> --can scan
 
 `scan`: make scans and manage one's own. `everyone`: see everybody's. `settings`:
 limits and the activity log. `admin`: all, and people and keys. Scans made before
-accounts belong to nobody: admins see them. Only `/api/v1/health` and the counts of
-`/api/v1/system/status` (Homepage) are open.
+accounts belong to nobody: admins see them. Only `/health` and the counts of `/system/status` (Homepage) are open, under
+`/api/v2` and still `/api/v1`, which holds nothing else.
 
 ## Services
 
@@ -49,6 +49,7 @@ accounts belong to nobody: admins see them. Only `/api/v1/health` and the counts
 | `web` (container `scanloom`) | none | The page, and the same-origin proxy |
 | `api` | incoming and state RW; finished files RO | REST API, uploads straight to disk, downloads, live events; never decodes an image |
 | `worker` | incoming, work, exports | Security check, decoding, detection, correction, exports, cleanup |
+| `notifier` | finished files RO; network to Apprise | Sends what the outbox holds |
 | `db` | its data | Scans, pages, settings, the queue, events |
 | `clamav` | definitions | Signature scanning, by stream |
 
@@ -90,13 +91,35 @@ small frame can't judge focus, so those are notes on the finished page. The full
 photo comes from `ImageCapture` where there is one, else the video frame, whose
 outline goes along as a hint for when the server's own detection is unsure.
 
+## Notifications
+
+Settings → Notifications, or `GET`/`PUT /api/v2/notifications` and `POST .../test`, all
+needing the `settings` permission. A message when a scan is asked for and when it
+finishes (with what failed and why); an edit's render isn't a scan and says nothing.
+Previews are up to four pages: `safe` (default; small and blurred, not readable, since
+the channel may be Discord and scans are often IDs), `readable`, or `off`. Scanning by
+the API without `hold` tells only the end.
+
+`notifier` is the only service that can reach beyond Scanloom's private network. It
+reads finished thumbnails and an outbox table, retries while Apprise is away, and the
+worker that decodes uploads stays cut off. The latest messages and their fate are on
+the settings page.
+
 ## The API
 
-OpenAPI at `/docs`. One photo is one request, its body the file:
+Version 2, at `/api/v2`; OpenAPI at `/docs`. Scans are `/scans/{id}`, their pages
+`/scans/{id}/pages[/{id}]`, deleted with `DELETE`, and a ZIP of several scans a
+`/batch-exports/{id}` of its own, which outlives them.
+
+To edit only what you saw, send `If-Match` with a scan's or page's `rev` (also its
+`ETag`): someone else's edit in between answers `412`. Without the header the change
+goes through, as a simple script's would. Pages finishing don't raise `rev`, only edits.
+
+One photo is one request, its body the file:
 
 ```
-curl -H "X-Api-Key: sl_…" -H "Content-Type: application/json" -d '{"title":"Invoices"}' https://scanloom.homelab.lan/api/v1/projects
-curl -H "X-Api-Key: sl_…" --data-binary @photo.heic "https://scanloom.homelab.lan/api/v1/projects/<id>/pages?name=photo.heic"
+curl -H "X-Api-Key: sl_…" -H "Content-Type: application/json" -d '{"title":"Invoices"}' https://scanloom.homelab.lan/api/v2/scans
+curl -H "X-Api-Key: sl_…" --data-binary @photo.heic "https://scanloom.homelab.lan/api/v2/scans/<id>/pages?name=photo.heic"
 ```
 
 ## Data

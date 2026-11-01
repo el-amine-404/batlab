@@ -17,6 +17,14 @@ def main():
         database.migrate()
         loop(config, database)
         return
+    if len(sys.argv) > 1 and sys.argv[1] == "notifier":
+        from .notifier import loop
+
+        setup_logs(component="notifier", logs_dir=None)
+        database = Database(config.database_url, size=3, idle=1)
+        database.migrate()
+        loop(config, database)
+        return
     setup_logs(component="api", logs_dir=config.logs)
     uvicorn.run("scanloom.api:create_app", factory=True, host="0.0.0.0", port=config.port,
                 workers=1, loop="uvloop", http="httptools", proxy_headers=True,

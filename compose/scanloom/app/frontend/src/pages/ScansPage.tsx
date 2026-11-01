@@ -22,27 +22,27 @@ function Skeleton() {
 
 function BatchDownload({ ids, onClose }: { ids: string[]; onClose: () => void }) {
   const [format, setFormat] = useState<"pdf" | "images">("pdf");
-  const [job, setJob] = useState<{ id: string; project: string; url: string } | null>(null);
+  const [job, setJob] = useState<{ id: string } | null>(null);
   const started = useRef(false);
   const make = useMutation({
-    mutationFn: () => api.batchExport({ project_ids: ids, format, quality: "balanced" }),
-    onSuccess: (answer) => setJob({ id: answer.id, project: answer.project, url: answer.download_url }),
+    mutationFn: () => api.batchExport({ scan_ids: ids, format, quality: "balanced" }),
+    onSuccess: (answer) => setJob({ id: answer.id }),
   });
   const holder = useQuery({
-    queryKey: ["project", job?.project], queryFn: () => api.project(job!.project), enabled: Boolean(job),
-    refetchInterval: (query) => { const item = query.state.data?.exports.find((value) => value.id === job?.id); return item?.status === "ready" || item?.status === "failed" ? false : 1500; },
+    queryKey: ["batch", job?.id], queryFn: () => api.batch(job!.id), enabled: Boolean(job),
+    refetchInterval: (query) => (query.state.data?.status === "ready" || query.state.data?.status === "failed" ? false : 1500),
   });
-  const current = holder.data?.exports.find((item) => item.id === job?.id);
+  const current = holder.data;
   useEffect(() => {
-    if (current?.status !== "ready" || !job || started.current) return;
+    if (current?.status !== "ready" || !current.download_url || started.current) return;
     started.current = true;
     const link = document.createElement("a");
-    link.href = job.url;
+    link.href = current.download_url;
     link.download = "";
     document.body.append(link);
     link.click();
     link.remove();
-  }, [current?.status, job]);
+  }, [current?.status, current?.download_url]);
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent>
@@ -74,7 +74,7 @@ function BatchDownload({ ids, onClose }: { ids: string[]; onClose: () => void })
               <p className="text-sm text-muted-foreground">{current?.status === "failed" ? current.error : current?.status === "ready" ? `${current.filename}${current.bytes ? ` · ${formatBytes(current.bytes)}` : ""}` : "It downloads by itself when it is ready."}</p>
             </DialogBody>
             <DialogFooter className="justify-end">
-              {current?.status === "ready" && <Button variant="secondary" asChild><a href={job.url} download><Download /> Download again</a></Button>}
+              {current?.download_url && <Button variant="secondary" asChild><a href={current.download_url} download><Download /> Download again</a></Button>}
               <Button onClick={onClose}>Close</Button>
             </DialogFooter>
           </>
@@ -110,10 +110,10 @@ export function ScansPage() {
   const clear = () => setSelected([]);
   const everything = useMutation({
     mutationFn: () => api.projects({ limit: 1000, offset: 0, q: q || undefined, status: status === "all" ? undefined : status }),
-    onSuccess: (answer) => setSelected([...new Set([...selected, ...answer.items.map((scan) => scan.public_id)])]),
+    onSuccess: (answer) => setSelected([...new Set([...selected, ...answer.items.map((scan) => scan.id)])]),
     onError: (error) => toast.error(errorText(error)),
   });
-  const allHere = items.length > 0 && items.every((scan) => selected.includes(scan.public_id));
+  const allHere = items.length > 0 && items.every((scan) => selected.includes(scan.id));
   const remove = useMutation({
     mutationFn: async (ids: string[]) => { for (const id of ids) await api.deleteProject(id); },
     onSuccess: (_answer, ids) => { void client.invalidateQueries({ queryKey: ["projects"] }); toast.success(`${plural(ids.length, "scan")} deleted`); clear(); },
@@ -148,7 +148,7 @@ export function ScansPage() {
         {selected.length > 0 && (
           <div className="flex w-full flex-wrap items-center gap-2 rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5" role="region" aria-label="Selected scans">
             <span className="flex items-center gap-1.5 text-sm font-medium tabular-nums" aria-live="polite"><Check className="size-4 text-primary" /> {plural(selected.length, "scan")} selected</span>
-            <Button variant="ghost" size="sm" onClick={() => setSelected(allHere ? selected.filter((id) => !items.some((scan) => scan.public_id === id)) : [...new Set([...selected, ...items.map((scan) => scan.public_id)])])}>{allHere ? "None on this page" : "All on this page"}</Button>
+            <Button variant="ghost" size="sm" onClick={() => setSelected(allHere ? selected.filter((id) => !items.some((scan) => scan.id === id)) : [...new Set([...selected, ...items.map((scan) => scan.id)])])}>{allHere ? "None on this page" : "All on this page"}</Button>
             {total > items.length && selected.length < total && <Button variant="ghost" size="sm" disabled={everything.isPending} onClick={() => everything.mutate()}>All {total}</Button>}
             <Button variant="ghost" size="sm" onClick={clear}><X /> Clear</Button>
             <div className="ml-auto flex gap-2">
@@ -164,11 +164,11 @@ export function ScansPage() {
         </Empty>
       ) : view === "grid" ? (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-          {items.map((scan) => <ScanCard key={scan.public_id} scan={scan} selected={selected.includes(scan.public_id)} onSelect={() => toggle(scan.public_id)} />)}
+          {items.map((scan) => <ScanCard key={scan.id} scan={scan} selected={selected.includes(scan.id)} onSelect={() => toggle(scan.id)} />)}
         </div>
       ) : (
         <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
-          {items.map((scan) => <ScanCard key={scan.public_id} row scan={scan} selected={selected.includes(scan.public_id)} onSelect={() => toggle(scan.public_id)} />)}
+          {items.map((scan) => <ScanCard key={scan.id} row scan={scan} selected={selected.includes(scan.id)} onSelect={() => toggle(scan.id)} />)}
         </ul>
       )}
       <Pagination total={total} size={window_.size} sizes={[24, 48, 96]} offset={window_.offset} noun="scans" onChange={(next) => { setWindow(next); window.scrollTo({ top: 0 }); }} />

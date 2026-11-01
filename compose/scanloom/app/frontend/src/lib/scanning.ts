@@ -16,7 +16,7 @@ export function useNewScan() {
   const navigate = useNavigate();
   const scan = useRef<Promise<string> | null>(null);
 
-  const ensure = useCallback(() => (scan.current ??= api.createProject({ title: scanName(), profile: savedProfile() }).then((project) => project.public_id)), []);
+  const ensure = useCallback(() => (scan.current ??= api.createProject({ title: scanName(), profile: savedProfile() }).then((project) => project.id)), []);
 
   const fromFiles = useCallback(async (files: File[]) => {
     if (!files.length) return;

@@ -187,7 +187,7 @@ class Problem(BaseModel):
     detail: str = Field(description="What went wrong, as a sentence a person can read.")
 
 
-def api_not_found(app: FastAPI, docs: str = "/docs") -> None:
+def api_not_found(app: FastAPI, docs: str = "/docs", base: str = "/api/v1") -> None:
     """The last route under /api/: a path the API doesn't have is a 404, and
     a path it has, asked with a method it doesn't take, a 405 with Allow
     (it was a 404 too). Registered after every API route."""
@@ -219,7 +219,7 @@ def api_not_found(app: FastAPI, docs: str = "/docs") -> None:
         if methods:
             return JSONResponse({"detail": f"{request.method} isn't how this is asked: {', '.join(sorted(methods))}."},
                                 status_code=405, headers={"Allow": ", ".join(sorted(methods))})
-        return JSONResponse({"detail": f"Not found. The API is under /api/v1/ (see {docs})."}, status_code=404)
+        return JSONResponse({"detail": f"Not found. The API is under {base}/ (see {docs})."}, status_code=404)
 
 
 def plain_errors(app: FastAPI) -> None:

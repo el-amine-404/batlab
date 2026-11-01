@@ -19,8 +19,8 @@ export function ScanCard({ scan, selected = false, onSelect, row = false }: { sc
   const [deleting, setDeleting] = useState(false);
   const [draft, setDraft] = useState(scan.title);
   const refresh = () => void client.invalidateQueries({ queryKey: ["projects"] });
-  const rename = useMutation({ mutationFn: (title: string) => api.editProject(scan.public_id, { title }), onSuccess: () => { refresh(); setRenaming(false); }, onError: (error) => toast.error(errorText(error)) });
-  const remove = useMutation({ mutationFn: () => api.deleteProject(scan.public_id), onSuccess: () => { refresh(); toast.success(`${scan.title} deleted`); }, onError: (error) => toast.error(errorText(error)) });
+  const rename = useMutation({ mutationFn: (title: string) => api.editProject(scan.id, { title }), onSuccess: () => { refresh(); setRenaming(false); }, onError: (error) => toast.error(errorText(error)) });
+  const remove = useMutation({ mutationFn: () => api.deleteProject(scan.id), onSuccess: () => { refresh(); toast.success(`${scan.title} deleted`); }, onError: (error) => toast.error(errorText(error)) });
   const active = scan.status === "processing";
   const percent = scan.page_count ? Math.round(((scan.completed_count + scan.failed_count) / scan.page_count) * 100) : 0;
   const submit = (event: FormEvent) => {
@@ -40,7 +40,7 @@ export function ScanCard({ scan, selected = false, onSelect, row = false }: { sc
       {!scan.failed_count && scan.warning_count > 0 && <span className="flex items-center gap-1 text-warning" title={`${plural(scan.warning_count, "page")} to review`}><TriangleAlert className="size-3" /> {scan.warning_count}</span>}
     </>
   );
-  const name = <Link to={`/scans/${scan.public_id}`} className="outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:after:ring-[3px] focus-visible:after:ring-ring focus-visible:after:ring-inset">{scan.title}</Link>;
+  const name = <Link to={`/scans/${scan.id}`} className="outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:after:ring-[3px] focus-visible:after:ring-ring focus-visible:after:ring-inset">{scan.title}</Link>;
   const tick = onSelect && <Tick checked={selected} label={`Select ${scan.title}`} onToggle={onSelect} className={row ? "[&>span]:border-muted-foreground" : "absolute top-1 left-1"} />;
   const menu = (
     <Menu>

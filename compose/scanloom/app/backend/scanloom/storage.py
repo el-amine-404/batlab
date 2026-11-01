@@ -15,3 +15,10 @@ def object_path(root: Path, name: str) -> Path:
     if not name or "/" in name or "\\" in name or name.startswith("."):
         raise ValueError("Invalid storage object")
     return root / name
+
+
+def scan_ended(cursor, project_id) -> None:
+    """After a page's end: when that was the last of a scan someone asked for, it is told, once."""
+    cursor.execute("""UPDATE projects SET scan_pending=false WHERE id=%s AND scan_pending AND status IN ('ready','failed') RETURNING id""", (project_id,))
+    if cursor.fetchone():
+        cursor.execute("INSERT INTO notifications(project_id,kind) VALUES (%s,'finished')", (project_id,))

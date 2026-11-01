@@ -87,7 +87,7 @@ function next(): void {
   changed();
   const query = new URLSearchParams({ name: item.file.name || "photo.jpg", hold: "true" });
   if (item.hint) query.set("hint", JSON.stringify(item.hint));
-  xhr.open("POST", `/api/v1/projects/${encodeURIComponent(item.project)}/pages?${query}`);
+  xhr.open("POST", `/api/v2/scans/${encodeURIComponent(item.project)}/pages?${query}`);
   xhr.setRequestHeader(PAGE_HEADER, "1");
   xhr.upload.onprogress = (event) => {
     item.sent = event.lengthComputable ? event.loaded / event.total : 0;

@@ -1,6 +1,6 @@
 import { SettingsLayout, Shell, Sidebar, useConnection } from "@batlab/ui";
 import { useQuery } from "@tanstack/react-query";
-import { Braces, CloudUpload, History, KeyRound, type LucideIcon, ScanLine, ScrollText, SlidersHorizontal, UserRound, Users } from "lucide-react";
+import { Bell, Braces, CloudUpload, History, KeyRound, type LucideIcon, ScanLine, ScrollText, SlidersHorizontal, UserRound, Users } from "lucide-react";
 import { lazy, useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
 
@@ -17,11 +17,13 @@ const AccountPage = lazy(() => import("@/pages/settings/AccountPage"));
 const PeoplePage = lazy(() => import("@/pages/settings/PeoplePage"));
 const KeysPage = lazy(() => import("@/pages/settings/KeysPage"));
 const GeneralPage = lazy(() => import("@/pages/settings/GeneralPage"));
+const NotificationsPage = lazy(() => import("@/pages/settings/NotificationsPage"));
 const ActivityPage = lazy(() => import("@/pages/settings/ActivityPage"));
 
 export const SETTINGS: { path: string; label: string; icon: LucideIcon; element: React.ReactNode; need?: Permission }[] = [
   { path: "/settings/account", label: "Your account", icon: UserRound, element: <AccountPage /> },
   { path: "/settings/general", label: "General", icon: SlidersHorizontal, element: <GeneralPage />, need: "settings" },
+  { path: "/settings/notifications", label: "Notifications", icon: Bell, element: <NotificationsPage />, need: "settings" },
   { path: "/settings/activity", label: "Activity", icon: ScrollText, element: <ActivityPage />, need: "settings" },
   { path: "/settings/people", label: "People", icon: Users, element: <PeoplePage />, need: "admin" },
   { path: "/settings/keys", label: "API keys", icon: KeyRound, element: <KeysPage />, need: "admin" },
@@ -43,7 +45,7 @@ function UploadsNotice() {
 
 export function Layout() {
   useLiveUpdates();
-  const live = useConnection();
+  const live = useConnection("/api/v2/health");
   const me = useMe();
   const [version, setVersion] = useState<string>();
   useEffect(() => { api.health().then((health) => setVersion(health.version), () => setVersion(undefined)); }, []);

@@ -82,6 +82,11 @@ export function ProjectPage() {
   const failure = (error: unknown) => toast.error(errorText(error));
 
   const edit = useMutation({ mutationFn: ({ ids, body }: { ids: string[]; body: PageEdit }) => api.editPages(id, ids, body), onSuccess: refresh, onError: failure });
+  const crop_ = useMutation({
+    mutationFn: ({ page, body }: { page: Page; body: PageEdit }) => api.editPage(id, page.id, body, page.rev),
+    onSuccess: refresh,
+    onError: (error) => { failure(error); refresh(); },
+  });
   const remove = useMutation({
     mutationFn: (ids: string[]) => api.deletePages(id, ids),
     onSuccess: (_answer, ids) => { refresh(); setSelected([]); toast.success(`${plural(ids.length, "page")} deleted`); },
@@ -141,7 +146,7 @@ export function ProjectPage() {
       <Link to="/scans" className="mb-2 inline-flex min-h-8 items-center gap-1.5 rounded text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring"><ArrowLeft className="size-4" /> All scans</Link>
       <header className="mb-5 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
         <div className="min-w-0 flex-1 basis-72">
-          <ScanTitle id={id} title={data.title} />
+          <ScanTitle id={id} title={data.title} rev={data.rev} />
           <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground [&_svg]:size-3.5">
             <span className="flex items-center gap-1.5"><Layers /> {plural(data.page_count, "page")}</span>
             {data.bytes > 0 && <span className="flex items-center gap-1.5"><HardDrive /> {formatBytes(data.bytes)}</span>}
@@ -251,7 +256,7 @@ export function ProjectPage() {
                     onGo={(index) => setParams({ page: viewerPages[index].id }, true)} onClose={() => setParams({ page: null })}
                     onEdit={(page, body) => edit.mutate({ ids: [page.id], body })} onCrop={setCrop} onRemove={actions.remove} onRetry={(page) => retry.mutate([page.id])} />
       )}
-      {crop && <CropEditor page={crop} onClose={() => setCrop(null)} onSave={(body) => { edit.mutate({ ids: [crop.id], body }); setCrop(null); }} />}
+      {crop && <CropEditor page={crop} onClose={() => setCrop(null)} onSave={(body) => { crop_.mutate({ page: crop, body }); setCrop(null); }} />}
       {look && <LookDialog project={data} sample={items.find((page) => page.thumb_url)?.thumb_url ?? null} onClose={() => setLook(false)} onChanged={refresh} />}
       {exporting && <ExportDialog project={data} initial={exporting} selected={selected} onClose={() => setExporting(null)} />}
       {camera && (

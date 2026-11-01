@@ -5,7 +5,7 @@
 :8080 {
   root * /srv
   # Not the live stream: a compressor would hold its small messages back.
-  @compressible not path /api/v1/events
+  @compressible not path /api/v2/events
   encode @compressible zstd gzip
   header {
     X-Content-Type-Options nosniff

@@ -8,7 +8,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 
-type Change = { project?: string | null; event?: string };
+type Change = { scan?: string | null; event?: string };
 
 const LISTS = new Set(["project_created", "project_deleted", "project_renamed", "project_ready", "page_added", "pages_deleted", "failed", "resync"]);
 const THROTTLE_MS = 700;
@@ -41,14 +41,14 @@ export function useLiveUpdates(): void {
     const onChange = (raw: MessageEvent<string>) => {
       const change = JSON.parse(raw.data) as Change;
       if (change.event === "resync") return everything();
-      if (change.project) pending.add(change.project);
+      if (change.scan) pending.add(change.scan);
       if (change.event && LISTS.has(change.event)) lists = true;
       if (timer === undefined) timer = window.setTimeout(flush, THROTTLE_MS);
     };
 
     const open = () => {
       stream?.close();
-      stream = new EventSource("/api/v1/events");
+      stream = new EventSource("/api/v2/events");
       stream.addEventListener("change", onChange as EventListener);
       // A browser gives up on a stream that was refused: try again later, not never.
       stream.onerror = () => {

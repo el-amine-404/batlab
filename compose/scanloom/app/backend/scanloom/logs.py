@@ -3,7 +3,7 @@
 Features:
 - Standard stream logging to sys.stderr with UTC timestamps (visible in docker logs and Dozzle).
 - Self-rotating file handler (logging.handlers.RotatingFileHandler) with bounded size and backup count.
-- In-memory ring buffer of recent logs for query via the API (GET /api/v1/system/logs).
+- In-memory ring buffer of recent logs for query via the API (GET /api/v2/system/logs).
 """
 from __future__ import annotations
 

@@ -23,7 +23,7 @@ from .db import Database
 from .imaging import (appearance, detect, detect_orientation, fitted, normalize, normalized_corners, on_white,
                       pixel_corners, quality, warp, write_jpeg, write_png, write_webp)
 from .security import Refused, clamav, inspect_container, sha256
-from .storage import event, object_path
+from .storage import event, object_path, scan_ended
 
 logger = logging.getLogger("scanloom.worker")
 
@@ -102,7 +102,7 @@ class Processor:
         logger.info("Finished job %d [kind=%s, project=%s]", job["id"], job["kind"], job["project_id"])
 
     def _project(self, project_id) -> dict | None:
-        return self.db.one("SELECT id,public_id,owner FROM projects WHERE id=%s", (project_id,))
+        return None if project_id is None else self.db.one("SELECT id,public_id,owner FROM projects WHERE id=%s", (project_id,))
 
     def fail(self, job, error: Exception):
         maximum = int(self.db.settings()["worker_max_attempts"])
@@ -118,7 +118,12 @@ class Processor:
         with self.db.transaction() as cursor:
             cursor.execute("UPDATE jobs SET status=%s,error=%s,available_at=now()+(%s*interval '1 second'),lease_until=NULL,finished_at=CASE WHEN %s THEN now() END WHERE id=%s",
                            (status, message, delay, not retry, job["id"]))
-            if retry or not project:
+            if retry:
+                return
+            if not project:
+                export_id = dict(job["payload"]).get("export_id")
+                if export_id:  # a batch export belongs to no scan
+                    cursor.execute("UPDATE exports SET status='failed',error=%s WHERE id=%s", (message, export_id))
                 return
             if job["page_id"]:
                 page_status = "blocked" if refused else "failed"
@@ -127,6 +132,7 @@ class Processor:
                                   WHERE id=%s""", (page_status, message, job["page_id"]))
                 cursor.execute("UPDATE projects SET error=%s WHERE id=%s", (message, job["project_id"]))
                 cursor.execute("SELECT project_refresh(%s)", (job["project_id"],))
+                scan_ended(cursor, job["project_id"])
             else:
                 export_id = dict(job["payload"]).get("export_id")
                 if export_id:
@@ -371,6 +377,7 @@ class Processor:
             cursor.execute("SELECT status FROM projects WHERE id=%s", (page["project_id"],))
             if cursor.fetchone()["status"] == "ready":
                 event(cursor, project, "project_ready")
+            scan_ended(cursor, page["project_id"])
 
     def _write_forms(self, corrected, project_dir: Path, page_id, settings) -> dict:
         names = {"result": f"{page_id}-result.png", "jpeg": f"{page_id}-result.jpg",
@@ -453,10 +460,7 @@ class Processor:
 
     def _build_batch(self, job, payload: dict, export: dict) -> None:
         """One ZIP of several scans: a PDF each, or a folder of images each."""
-        project = self._project(job["project_id"])
-        with self.db.transaction() as cursor:
-            cursor.execute("UPDATE exports SET status='building' WHERE id=%s", (export["id"],))
-            event(cursor, project, "export_building", {"export_id": str(export["id"])})
+        self.db.execute("UPDATE exports SET status='building' WHERE id=%s", (export["id"],))
         options = {"quality": payload.get("quality", "balanced")}
         destination_name = f"{export['id']}.zip"
         destination = object_path(self.config.exports, destination_name)
@@ -493,11 +497,8 @@ class Processor:
             os.replace(partial, destination)
         finally:
             partial.unlink(missing_ok=True)
-        digest = sha256(destination)
-        with self.db.transaction() as cursor:
-            cursor.execute("UPDATE exports SET status='ready',object_name=%s,bytes=%s,sha256=%s,ready_at=now() WHERE id=%s",
-                           (destination_name, destination.stat().st_size, digest, export["id"]))
-            event(cursor, project, "export_ready", {"export_id": str(export["id"]), "kind": "zip"})
+        self.db.execute("UPDATE exports SET status='ready',object_name=%s,bytes=%s,sha256=%s,ready_at=now() WHERE id=%s",
+                        (destination_name, destination.stat().st_size, sha256(destination), export["id"]))
 
     @staticmethod
     def _shaped(image, options: dict):

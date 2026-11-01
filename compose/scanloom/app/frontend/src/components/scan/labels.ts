@@ -10,8 +10,8 @@ export const STEPS: { stage: Stage; label: string }[] = [
 ];
 export const PROFILES: { id: Profile; label: string; hint: string; filter: string }[] = [
   { id: "faithful", label: "Color", hint: "As photographed. For cards, IDs, anything with photos.", filter: "none" },
-  { id: "paper", label: "Clean paper", hint: "Grey on white, the shadows and creases evened out. For letters, forms, receipts.", filter: "grayscale(1) contrast(1.35) brightness(1.1)" },
-  { id: "mono", label: "Black & white", hint: "Pure black on white, no greys. For text-only pages; the smallest files.", filter: "grayscale(1) contrast(6) brightness(1.15)" },
+  { id: "paper", label: "Clean paper", hint: "White background, shadows gone. For letters, forms, receipts.", filter: "grayscale(1) contrast(1.35) brightness(1.1)" },
+  { id: "mono", label: "Black & white", hint: "Pure black on white. For text-only pages; smallest files.", filter: "grayscale(1) contrast(6) brightness(1.15)" },
 ];
 export const APPEARANCES: { id: Appearance; label: string }[] = [
   { id: "auto", label: "Same as the scan" }, { id: "color", label: "Color" }, { id: "gray", label: "Grayscale" }, { id: "mono", label: "Black & white" },

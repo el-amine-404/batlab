@@ -14,7 +14,7 @@ import { PROFILES } from "./labels";
 export function LookDialog({ project, sample, onClose, onChanged }: { project: Project; sample: string | null; onClose: () => void; onChanged: () => void }) {
   const [chosen, setChosen] = useState<Profile>(project.profile);
   const apply = useMutation({
-    mutationFn: () => api.editProject(project.public_id, { profile: chosen }),
+    mutationFn: () => api.editProject(project.id, { profile: chosen }, project.rev),
     onSuccess: () => {
       onChanged();
       toast.success(`Updating ${plural(project.completed_count, "page")}: the progress is on this page`);

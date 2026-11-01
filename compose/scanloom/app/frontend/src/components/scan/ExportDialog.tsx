@@ -76,7 +76,7 @@ export function ExportDialog({ project, initial, selected, onClose }: { project:
     : (kind === "pdf" && paper !== "fit" && !(numbers.margin >= 0 && numbers.margin <= 50)) ? "The margin is 0 to 50 mm." : null;
 
   const make = useMutation({
-    mutationFn: () => api.createExport(project.public_id, {
+    mutationFn: () => api.createExport(project.id, {
       kind, quality, filename: filename.trim() || undefined, color,
       ...(longEdge ? { long_edge: numbers.longEdge } : {}),
       ...(jpegQuality && !lossless ? { jpeg_quality: numbers.jpeg } : {}),
@@ -86,16 +86,16 @@ export function ExportDialog({ project, initial, selected, onClose }: { project:
     onSuccess: (answer) => {
       setJob({ id: answer.id, url: answer.download_url, count: answer.page_count });
       started.current = false;
-      void client.invalidateQueries({ queryKey: ["project", project.public_id] });
+      void client.invalidateQueries({ queryKey: ["project", project.id] });
     },
   });
 
   // While it is being made, the stream says when it is ready; this is in case the stream can't.
   useEffect(() => {
     if (!job || status === "ready" || status === "failed") return;
-    const timer = window.setInterval(() => void client.invalidateQueries({ queryKey: ["project", project.public_id] }), 2000);
+    const timer = window.setInterval(() => void client.invalidateQueries({ queryKey: ["project", project.id] }), 2000);
     return () => window.clearInterval(timer);
-  }, [job, status, client, project.public_id]);
+  }, [job, status, client, project.id]);
 
   useEffect(() => {
     if (status !== "ready" || !job || started.current) return;

@@ -62,6 +62,8 @@ export function ArrangePage() {
   const [position, setPosition] = useState("");
   const timer = useRef<number>(undefined);
   const latest = useRef<string[] | null>(null);
+  const rev = useRef<number | undefined>(undefined);
+  if (rev.current === undefined && project.data) rev.current = project.data.rev;
 
   useEffect(() => {
     if (pages.data && !order) setOrder(pages.data.items.map((page) => page.id));
@@ -74,20 +76,24 @@ export function ArrangePage() {
     const sent = latest.current;
     latest.current = null;
     try {
-      await api.editProject(id, { page_order: sent });
+      rev.current = (await api.editProject(id, { page_order: sent }, rev.current)).rev;
       setSaving(latest.current ? "waiting" : "saved");
       void client.invalidateQueries({ queryKey: ["pages", id], predicate: (query) => query.queryKey[2] !== "all" });
     } catch (error) {
       toast.error(errorText(error));
       setSaving("idle");
       setOrder(null);
+      setPast([]);
+      setFuture([]);
+      rev.current = undefined;
+      void project.refetch();
       void pages.refetch();
     }
-  }, [client, id, pages]);
+  }, [client, id, pages, project]);
 
   // What was still to be saved goes when leaving too.
   useEffect(() => () => {
-    if (latest.current) void api.editProject(id, { page_order: latest.current }).then(() => client.invalidateQueries({ queryKey: ["pages", id] }));
+    if (latest.current) void api.editProject(id, { page_order: latest.current }, rev.current).then(() => client.invalidateQueries({ queryKey: ["pages", id] }));
     else void client.invalidateQueries({ queryKey: ["pages", id] });
   }, [client, id]);
 

@@ -38,7 +38,7 @@ services:
     pids_limit: 128
 
   api:
-    image: local/batlab-scanloom:2.3.0
+    image: local/batlab-scanloom:3.0.0
     build:
       context: ./app
       additional_contexts:
@@ -57,6 +57,9 @@ services:
       SCANLOOM_DATABASE_URL: postgresql://scanloom:${SCANLOOM_DATABASE_PASSWORD}@db:5432/scanloom
       SCANLOOM_STORAGE: /var/lib/scanloom
       SCANLOOM_CLAMD_HOST: clamav
+      SCANLOOM_APPRISE_URL: http://apprise:8000/notify/scanloom
+      SCANLOOM_APPRISE_TAG: requests
+      SCANLOOM_PUBLIC_URL: https://scanloom.homelab.lan
       SCANLOOM_PORT: 8850
       TZ: ${TZ}
     depends_on:
@@ -71,7 +74,7 @@ services:
     tmpfs:
       - /tmp:size=64m,mode=1777
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8850/api/v1/health',timeout=5)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8850/api/v2/health',timeout=5)"]
       interval: 20s
       timeout: 6s
       retries: 6
@@ -85,7 +88,7 @@ services:
     pids_limit: 96
 
   worker:
-    image: local/batlab-scanloom:2.3.0
+    image: local/batlab-scanloom:3.0.0
     pull_policy: never
     container_name: scanloom-worker
     command: ["worker"]
@@ -122,8 +125,43 @@ services:
     cpus: ${SCANLOOM_WORKER_CPUS:-1.5}
     pids_limit: 128
 
+  # The only part that can reach beyond the private network, and only to send
+  # messages through Apprise: the worker, which decodes uploads, stays cut off.
+  notifier:
+    image: local/batlab-scanloom:3.0.0
+    pull_policy: never
+    container_name: scanloom-notifier
+    command: ["notifier"]
+    user: "11000:11000"
+    environment:
+      SCANLOOM_DATABASE_URL: postgresql://scanloom:${SCANLOOM_DATABASE_PASSWORD}@db:5432/scanloom
+      SCANLOOM_STORAGE: /var/lib/scanloom
+      SCANLOOM_APPRISE_URL: http://apprise:8000/notify/scanloom
+      SCANLOOM_APPRISE_TAG: requests
+      SCANLOOM_PUBLIC_URL: https://scanloom.homelab.lan
+      TZ: ${TZ}
+    depends_on:
+      db: {condition: service_healthy}
+    volumes:
+      - ${VOLUMES_ROOT}/scanloom/work:/var/lib/scanloom/work:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.kill(1,0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks: [backend, home_server]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${SCANLOOM_NOTIFIER_MEM_LIMIT:-192m}
+    cpus: ${SCANLOOM_NOTIFIER_CPUS:-0.25}
+    pids_limit: 32
+
   web:
-    image: local/batlab-scanloom-web:2.3.0
+    image: local/batlab-scanloom-web:3.0.0
     build:
       context: ./app
       additional_contexts:

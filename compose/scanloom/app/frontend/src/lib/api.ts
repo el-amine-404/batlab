@@ -1,4 +1,4 @@
-/** The Scanloom API (/api/v1). */
+/** The Scanloom API (/api/v2). */
 export type Permission = "scan" | "everyone" | "settings" | "admin";
 export type Me = { kind: string; id: string; name: string; permissions: Permission[] };
 export type AuthState = { setup: boolean; me: Me | null; permissions: { id: Permission; label: string; description: string }[] };
@@ -16,11 +16,11 @@ export type Stage = "held" | "queued" | "scanning" | "decoding" | "detecting" | 
 export type Point = [number, number];
 
 export type Page = {
-  id: string; position: number; original_name: string; status: Stage; error: string | null; version: number;
+  id: string; rev: number; position: number; original_name: string; status: Stage; error: string | null; version: number;
   width: number | null; height: number | null; corners: Point[] | null; rotation: number; appearance: Appearance;
   confidence: number | null; warnings: string[]; timings: Record<string, number>;
   detection_method: string | null; stage_started_at: string | null; source_bytes: number; result_bytes: number | null;
-  jpeg_bytes: number | null; hold: boolean; reused_from: { project: string; title: string; page: number; alone: boolean } | null;
+  jpeg_bytes: number | null; hold: boolean; reused_from: { scan: string; title: string; page: number; alone: boolean } | null;
   thumb_url: string | null; preview_url: string | null; source_url: string | null; png_url: string | null; jpeg_url: string | null;
 };
 export type Progress = {
@@ -29,16 +29,19 @@ export type Progress = {
 };
 export type ExportJob = { id: string; kind: "zip" | "pdf"; status: "queued" | "building" | "ready" | "failed"; filename: string; bytes: number | null; error: string | null; page_count: number; download_url: string | null };
 export type Project = {
-  public_id: string; title: string; profile: Profile; status: "empty" | "draft" | "queued" | "processing" | "ready" | "failed";
+  id: string; rev: number; title: string; profile: Profile; status: "empty" | "draft" | "queued" | "processing" | "ready" | "failed";
   page_count: number; completed_count: number; failed_count: number; warning_count: number; held_count: number; error: string | null;
   expires_at: string | null; created_at: string; bytes: number; page_seconds: number; progress: Progress | null; exports: ExportJob[]; owner: string | null;
 };
-export type ProjectSummary = Pick<Project, "public_id" | "title" | "profile" | "status" | "page_count" | "completed_count" | "failed_count" | "warning_count" | "held_count" | "created_at" | "expires_at"> & { thumbnail_url: string | null; eta_seconds: number | null };
+export type ProjectSummary = Pick<Project, "id" | "title" | "profile" | "status" | "page_count" | "completed_count" | "failed_count" | "warning_count" | "held_count" | "created_at" | "expires_at"> & { thumbnail_url: string | null; eta_seconds: number | null };
 export type PageList = { items: Page[]; total: number; counts: { total: number; held: number; review: number; failed: number }; limit: number; offset: number };
 export type ExportRequest = { kind: "zip" | "pdf"; quality: "lossless" | "balanced" | "small"; page_ids?: string[]; pages?: string; filename?: string; color?: "keep" | "gray" | "mono"; long_edge?: number; jpeg_quality?: number; paper?: "fit" | "a4" | "a5" | "letter"; margin_mm?: number };
 export type Settings = { revision: number; values: { retention_days: number; export_ttl_minutes: number; max_files_per_project: number; max_upload_bytes: number; max_pixels: number; jpeg_quality: number; default_profile: Profile; worker_max_attempts: number } };
 export type LogLine = { seq: number; at: string; level: string; logger: string; message: string; detail: string | null };
 export type PageEdit = { corners?: Point[]; rotate_by?: number; appearance?: Appearance; redetect?: boolean };
+
+export type NotifySettings = { enabled: boolean; url: string; tag: string; on_requested: boolean; on_finished: boolean; previews: "off" | "safe" | "readable"; link: string };
+export type NotificationRow = { id: number; kind: "requested" | "finished" | "test"; status: "queued" | "sent" | "failed" | "skipped"; title: string | null; error: string | null; created_at: string; scan: string | null; scan_id: string | null };
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) {
@@ -53,7 +56,7 @@ export const PAGE_HEADER = "X-Scanloom-Page";
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`/api/v1${path}`, {
+    response = await fetch(`/api/v2${path}`, {
       ...init,
       credentials: "same-origin",
       headers: {
@@ -61,6 +64,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
         // The page's own changes say so: what another site's page can't (batlab_common/web.py).
         [PAGE_HEADER]: "1",
         ...(typeof init.body === "string" ? { "Content-Type": "application/json" } : {}),
+        ...(init.headers as Record<string, string> | undefined),
       },
     });
   } catch (error) {
@@ -82,7 +86,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
-const scan = (id: string) => `/projects/${encodeURIComponent(id)}`;
+const scan = (id: string) => `/scans/${encodeURIComponent(id)}`;
+const ifMatch = (rev?: number): RequestInit => (rev === undefined ? {} : { headers: { "If-Match": `"${rev}"` } });
 
 export const api = {
   health: () => request<{ ok: boolean; version: string }>("/health"),
@@ -90,22 +95,27 @@ export const api = {
     const query = new URLSearchParams({ limit: String(params.limit), offset: String(params.offset) });
     if (params.q) query.set("q", params.q);
     if (params.status) query.set("status", params.status);
-    return request<{ items: ProjectSummary[]; total: number }>(`/projects?${query}`);
+    return request<{ items: ProjectSummary[]; total: number }>(`/scans?${query}`);
   },
-  createProject: (body: { title?: string; profile?: Profile }) => request<Project>("/projects", json("POST", body)),
+  createProject: (body: { title?: string; profile?: Profile }) => request<Project>("/scans", json("POST", body)),
   project: (id: string) => request<Project>(scan(id)),
-  editProject: (id: string, body: { title?: string; profile?: Profile; page_order?: string[] }) => request<Project>(scan(id), json("PATCH", body)),
+  editProject: (id: string, body: { title?: string; profile?: Profile; page_order?: string[] }, rev?: number) => request<Project>(scan(id), { ...json("PATCH", body), ...ifMatch(rev) }),
   deleteProject: (id: string) => request<void>(scan(id), { method: "DELETE" }),
   pages: (id: string, limit: number, offset: number, only?: string) =>
     request<PageList>(`${scan(id)}/pages?limit=${limit}&offset=${offset}${only ? `&only=${only}` : ""}`),
   editPages: (id: string, pageIds: string[], body: PageEdit) => request<Project>(`${scan(id)}/pages`, json("PATCH", { page_ids: pageIds, ...body })),
-  deletePages: (id: string, pageIds: string[]) => request<Project>(`${scan(id)}/pages/delete`, json("POST", { page_ids: pageIds })),
+  editPage: (id: string, pageId: string, body: PageEdit, rev?: number) => request<Page>(`${scan(id)}/pages/${pageId}`, { ...json("PATCH", body), ...ifMatch(rev) }),
+  deletePages: (id: string, pageIds: string[]) => request<Project>(`${scan(id)}/pages`, json("DELETE", { page_ids: pageIds })),
   retryPages: (id: string, pageIds?: string[]) => request<Project>(`${scan(id)}/pages/retry`, json("POST", { page_ids: pageIds ?? null })),
   start: (id: string) => request<Project>(`${scan(id)}/start`, { method: "POST" }),
-  batchExport: (body: { project_ids: string[]; format: "pdf" | "images"; quality: ExportRequest["quality"] }) => request<{ id: string; project: string; page_count: number; download_url: string }>("/exports/batch", json("POST", body)),
+  batchExport: (body: { scan_ids: string[]; format: "pdf" | "images"; quality: ExportRequest["quality"] }) => request<ExportJob>("/batch-exports", json("POST", body)),
+  batch: (id: string) => request<ExportJob>(`/batch-exports/${id}`),
   createExport: (id: string, body: ExportRequest) => request<{ id: string; status: string; download_url: string; page_count: number }>(`${scan(id)}/exports`, json("POST", body)),
   settings: () => request<Settings>("/settings"),
   saveSettings: (values: Settings["values"], revision: number) => request<Settings>("/settings", json("PUT", { values, revision })),
+  notifications: () => request<{ settings: NotifySettings; recent: NotificationRow[] }>("/notifications"),
+  saveNotifications: (body: Partial<NotifySettings>) => request<{ settings: NotifySettings; recent: NotificationRow[] }>("/notifications", json("PUT", body)),
+  testNotification: () => request<{ sent: boolean; error: string | null }>("/notifications/test", { method: "POST" }),
   logs: () => request<{ lines: LogLine[] }>("/system/logs?limit=200"),
 
   authState: () => request<AuthState>("/auth/state"),

@@ -1,4 +1,4 @@
-import { ChevronDown, CloudUpload, FileImage, Loader2, RotateCcw, TriangleAlert, X } from "lucide-react";
+import { Check, CheckCircle2, ChevronDown, Clock, CloudUpload, FileImage, Image as ImageIcon, Loader2, type LucideIcon, RotateCcw, ScanSearch, ShieldCheck, TriangleAlert, Wand2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,42 @@ function useCountdown(seconds: number | undefined, measuredAt: number) {
   }, [counting]);
   if (seconds === undefined) return undefined;
   return Math.max(1, seconds - Math.max(0, (now - measuredAt) / 1000));
+}
+
+const capital = (text: string) => `${text[0].toUpperCase()}${text.slice(1)}`;
+
+const ICONS: Record<string, LucideIcon> = { queued: Clock, scanning: ShieldCheck, decoding: ImageIcon, detecting: ScanSearch, rendering: Wand2, ready: CheckCircle2 };
+
+/** The road of the page being worked on: steps it has passed, the one it is at, those to come. How many are waiting is said beside it. */
+function Steps({ project }: { project: Project }) {
+  const progress = project.progress!;
+  const steps = STEPS.filter(({ stage }) => stage !== "queued");
+  const at = steps.findIndex(({ stage }) => stage === progress.current?.status);
+  const stateOf = (index: number) => (at < 0 ? "later" : index < at ? "done" : index === at ? "now" : "later");
+  const waiting = progress.by_stage.queued ?? 0;
+  return (
+    <>
+      <ol className="mt-4 flex items-start" aria-label="Steps of this page">
+        {steps.map(({ stage, label }, index) => {
+          const Icon = ICONS[stage];
+          const state = stateOf(index);
+          return (
+            <li key={stage} className="relative flex flex-1 flex-col items-center gap-1.5 text-center" aria-current={state === "now" ? "step" : undefined}>
+              {index > 0 && <span aria-hidden className={cn("absolute top-[1.125rem] right-1/2 left-[-50%] h-0.5 -translate-y-1/2 rounded", state === "later" ? "bg-border" : "bg-primary")} />}
+              <span className={cn("relative z-10 flex size-9 items-center justify-center rounded-full border-2 bg-card transition-colors",
+                                  state === "now" && "border-primary text-primary shadow-[0_0_0_4px_color-mix(in_oklch,var(--primary)_18%,transparent)]",
+                                  state === "done" && "border-primary bg-primary text-primary-foreground",
+                                  state === "later" && "border-border text-muted-foreground")}>
+                {state === "done" ? <Check className="size-4" /> : <Icon className={cn("size-4", state === "now" && "animate-pulse")} />}
+              </span>
+              <span className={cn("text-xs", state === "later" ? "text-muted-foreground" : "font-medium text-foreground")}>{label}</span>
+            </li>
+          );
+        })}
+      </ol>
+      {waiting > 0 && <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-muted-foreground"><Clock className="size-3.5" /> {plural(waiting, "more page")} waiting {waiting === 1 ? "its" : "their"} turn</p>}
+    </>
+  );
 }
 
 function UploadRow({ item }: { item: Upload }) {
@@ -46,7 +82,7 @@ function UploadRow({ item }: { item: Upload }) {
 
 /** What is happening to this scan's photos, in words, step by step, and how long is left. */
 export function Pipeline({ project, measuredAt }: { project: Project; measuredAt: number }) {
-  const uploads = useUploads(project.public_id);
+  const uploads = useUploads(project.id);
   const progress = project.progress;
   // Photos still on their way count too: they will be pages to make, once there.
   const waiting = uploads.filter((item) => item.status !== "failed").length;
@@ -67,7 +103,7 @@ export function Pipeline({ project, measuredAt }: { project: Project; measuredAt
       <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
         <p className="flex min-w-0 items-center gap-2 text-lg font-semibold">
           {sending.length ? <CloudUpload className="size-5 shrink-0 self-center text-primary" /> : <Loader2 className="size-5 shrink-0 animate-spin self-center text-primary" />}
-          {(progress?.redoing ?? 0) > 0 && !sending.length ? `Updating ${plural(progress!.redoing, "page")}: ` : ""}{left !== undefined ? `${eta(left)} left` : "Checking your photos"}
+          {(progress?.redoing ?? 0) > 0 && !sending.length ? `Updating ${plural(progress!.redoing, "page")}: ${eta(left ?? 1)} left` : left !== undefined ? `${capital(eta(left))} left` : "Checking your photos"}
         </p>
         <p className="text-sm text-muted-foreground tabular-nums">
           {sending.length ? `Sending ${plural(sending.length, "photo")} · ` : ""}{done} of {plural(total, "page")} finished
@@ -83,23 +119,9 @@ export function Pipeline({ project, measuredAt }: { project: Project; measuredAt
           Page {current.position + 1}: <span className="text-foreground">{STAGE[current.status]}</span> · {current.original_name}
         </p>
       )}
-      {progress && (
-        <ol className="mt-3 flex flex-wrap gap-1.5">
-          {STEPS.map(({ stage, label }) => {
-            const count = stage === "ready" ? project.completed_count : progress.by_stage[stage] ?? 0;
-            return (
-              <li key={stage} className={cn("flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
-                                            count ? "border-primary/40 bg-primary/10 text-foreground" : "border-border text-muted-foreground")}>
-                {label}<span className="font-medium tabular-nums">{count}</span>
-              </li>
-            );
-          })}
-          {project.failed_count > 0 && (
-            <li className="flex items-center gap-1.5 rounded-full border border-destructive/40 bg-destructive/10 px-2.5 py-1 text-xs text-destructive">
-              <TriangleAlert className="size-3" /> Failed {project.failed_count}
-            </li>
-          )}
-        </ol>
+      {progress && <Steps project={project} />}
+      {project.failed_count > 0 && (
+        <p className="mt-2 flex items-center gap-1.5 text-sm text-destructive"><TriangleAlert className="size-4" /> {plural(project.failed_count, "page")} failed</p>
       )}
       {uploads.length > 0 && (
         <div className="mt-3 border-t border-border pt-2">

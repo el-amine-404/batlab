@@ -8,20 +8,20 @@ import { Input } from "@/components/ui/input";
 import { api, errorText } from "@/lib/api";
 
 /** A scan's name, renamed where it stands. */
-export function ScanTitle({ id, title }: { id: string; title: string }) {
+export function ScanTitle({ id, title, rev }: { id: string; title: string; rev: number }) {
   const client = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(title);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => { if (editing) input.current?.select(); }, [editing]);
   const save = useMutation({
-    mutationFn: (next: string) => api.editProject(id, { title: next }),
+    mutationFn: (next: string) => api.editProject(id, { title: next }, rev),
     onSuccess: (project) => {
       client.setQueryData(["project", id], project);
       void client.invalidateQueries({ queryKey: ["projects"] });
       setEditing(false);
     },
-    onError: (error) => toast.error(errorText(error)),
+    onError: (error) => { toast.error(errorText(error)); void client.invalidateQueries({ queryKey: ["project", id] }); },
   });
   const submit = () => {
     const next = draft.trim();
