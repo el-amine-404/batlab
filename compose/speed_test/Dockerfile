@@ -1,4 +1,4 @@
-FROM debian:12-slim AS builder
+FROM debian:13-slim AS builder
 ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates gnupg && \
@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
   apt-get install -y --no-install-recommends speedtest && \
   rm -rf /var/lib/apt/lists/*
 
-FROM debian:12-slim
+FROM debian:13-slim
 ARG USER_UID=1000
 ARG USER_GID=${USER_UID}
 ARG USERNAME=appuser
