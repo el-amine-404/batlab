@@ -51,9 +51,9 @@ propcache==0.5.4 \
     # via
     #   aiohttp
     #   yarl
-pyytlounge==3.4.0 \
-    --hash=sha256:2a506cf4f9debb31a5d5663ed1c128c78af64542ded440512ed0225b648c548a \
-    --hash=sha256:d97332b36d2c0ba47d687541149de97a539b826d34e8378c4ad21f907f4c4e3a
+pyytlounge==3.6.0 \
+    --hash=sha256:144ce7b51646b2791c82f5765cd73dae36317e92944132b969c6506d48b62580 \
+    --hash=sha256:77d9c17d47760c5f069ce249278573d13aafb20e5c2fca90367b56ff74a4fbea
     # via -r compose/tv-remote/requirements.in
 requests==2.34.2 \
     --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0 \
