@@ -1,7 +1,7 @@
 name: ${SCANLOOM_PROJECT_NAME:-scanloom}
 services:
   db:
-    image: postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
+    image: postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
     container_name: scanloom-db
     environment:
       POSTGRES_DB: scanloom
@@ -21,7 +21,7 @@ services:
     security_opt: [no-new-privileges:true]
 
   clamav:
-    image: clamav/clamav:1.4@sha256:3bba6dd5ac6663d55b80f86a3126e146612d93b593cc2617188d13f637d91260
+    image: clamav/clamav:1.5.4@sha256:6d87c712e3391e13c1ba6e05dfb074d4b1ddb5a6834b23bb9da990d2a4ef042a
     container_name: scanloom-clamav
     volumes:
       - ${VOLUMES_ROOT}/scanloom/clamav:/var/lib/clamav
