@@ -59,9 +59,9 @@ requests==2.34.2 \
     --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0 \
     --hash=sha256:f288924cae4e29463698d6d60bc6a4da69c89185ad1e0bcc4104f584e960b9ed
     # via samsungtvws
-samsungtvws==3.0.6 \
-    --hash=sha256:166111d8370443cd2021b74cdfac9495896dfc41e3a87ea023289f24f922bb91 \
-    --hash=sha256:6e3a1b23f928b3035570cc976b64b8c2a218b06022a333855fd7cd02dc74891d
+samsungtvws==3.0.7 \
+    --hash=sha256:3ab372cdd8fae8f097e9b580d28a653bbd42b8de9b6d32ccf55b8eaf86531001 \
+    --hash=sha256:979a61f64221f7ddf8cb3b254a41cabfc6eae1331182aaee941948b3b7d0b918
     # via -r compose/tv-remote/requirements.in
 urllib3==2.8.0 \
     --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3 \
