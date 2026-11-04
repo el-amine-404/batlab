@@ -1,5 +1,5 @@
 ARG PYTHON_IMAGE=python:3.15-slim-trixie
-ARG NODE_IMAGE=node:24-alpine
+ARG NODE_IMAGE=node:26-alpine
 ARG CADDY_IMAGE=caddy:2-alpine
 
 FROM ${PYTHON_IMAGE} AS boundary-model
