@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.28
-FROM node:24.22.2-alpine3.24@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS build
+FROM node:26.13.0-alpine3.24@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a7d4c8de6d94 AS build
 # Where the page is in the repo, beside lib/batlab-ui (the context "ui", the
 # frame shared by batlab's apps), so the relative paths hold in both.
 WORKDIR /batlab/compose/pdf-gateway/app/web
