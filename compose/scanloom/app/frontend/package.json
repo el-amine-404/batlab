@@ -14,11 +14,11 @@
     "@dnd-kit/sortable": "10.0.0",
     "@dnd-kit/utilities": "3.2.2",
     "@fontsource-variable/inter": "5.3.0",
-    "@scalar/api-reference": "1.76.4",
-    "@tanstack/react-query": "5.105.3",
+    "@scalar/api-reference": "1.77.0",
+    "@tanstack/react-query": "5.106.1",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
-    "lucide-react": "1.67.0",
+    "lucide-react": "1.69.0",
     "onnxruntime-web": "1.31.1",
     "radix-ui": "1.8.1",
     "react": "19.3.1",
@@ -34,6 +34,6 @@
     "@vitejs/plugin-react": "6.2.1",
     "tailwindcss": "4.3.4",
     "typescript": "7.0.2",
-    "vite": "8.3.5"
+    "vite": "8.3.6"
   }
 }
