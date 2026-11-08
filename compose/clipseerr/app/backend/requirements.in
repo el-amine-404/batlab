@@ -2,7 +2,7 @@
 # where Renovate follows it: YouTube changes, and its fixes must arrive quickly.
 # requests is ytmusicapi's one dependency, pinned here with the rest.
 # Regenerate requirements.txt after a change (docs/music.md, clipseerr).
-fastapi==0.162.0
+fastapi==0.162.2
 uvicorn[standard]==0.54.0
 httpx==0.28.1
 requests==2.34.2
