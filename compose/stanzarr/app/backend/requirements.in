@@ -1,5 +1,5 @@
 # The server. Regenerate requirements.txt after a change (docs/music.md, Stanzarr).
-fastapi==0.162.2
+fastapi==0.162.5
 uvicorn[standard]==0.54.0
 httpx==0.28.1
 # Tags and embedded lyrics.
