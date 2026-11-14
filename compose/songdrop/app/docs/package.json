@@ -9,7 +9,7 @@
     "openapi": "node scripts/openapi.mjs"
   },
   "devDependencies": {
-    "@scalar/api-reference": "1.78.0",
+    "@scalar/api-reference": "1.78.1",
     "vitepress": "1.6.4"
   }
 }
