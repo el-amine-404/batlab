@@ -1,12 +1,12 @@
-# syntax=docker/dockerfile:1.28
-FROM maven:3.10.0-eclipse-temurin-21@sha256:d49bca545509b98965a808175862337dfdd24e1a8a4b11005cc8ce0578e52e8c AS build
+# syntax=docker/dockerfile:1.29
+FROM maven:3.10.0-eclipse-temurin-21@sha256:851ccd76d49d5646915645e5fb51e9b00ef53ad3dc68b0e9a2a9846b9c56bde3 AS build
 WORKDIR /src
 COPY pom.xml ./
 RUN --mount=type=cache,target=/root/.m2 mvn -B -DskipTests dependency:go-offline
 COPY src ./src
 RUN --mount=type=cache,target=/root/.m2 mvn -B -DskipTests package
 
-FROM eclipse-temurin:25.0.5_8-jre-alpine@sha256:56f273059de6b13a6b49fe0ded691ed2d0399bbee76156a8f2d385f7524a3d43
+FROM eclipse-temurin:25.0.5_8-jre-alpine@sha256:e1898fd6a11fc965a994d8ace186fd3585aeb636cf8f05f47a723fcfee0b0918
 RUN addgroup -S -g 10001 gateway && adduser -S -D -H -u 10001 -G gateway gateway
 WORKDIR /app
 COPY --from=build --chown=10001:10001 /src/target/pdf-gateway-api-*.jar /app/api.jar

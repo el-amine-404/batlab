@@ -1,5 +1,5 @@
-# syntax=docker/dockerfile:1.28
-FROM debian:13.7-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4 AS tools
+# syntax=docker/dockerfile:1.29
+FROM debian:13.7-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2 AS tools
 ARG DIDIER_STEVENS_COMMIT=7d625d0b05c4638b981a2a2cc9a8481d7b73e56d
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates git \
@@ -7,7 +7,7 @@ RUN apt-get update \
  && git -C /suite checkout "$DIDIER_STEVENS_COMMIT" -- pdfid.py pdf-parser.py \
  && rm -rf /suite/.git /var/lib/apt/lists/*
 
-FROM debian:13.7-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4
+FROM debian:13.7-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 python3-pika python3-psycopg2 qpdf yara poppler-utils \
  && rm -rf /var/lib/apt/lists/* \
