@@ -832,9 +832,9 @@ oscrypto==1.3.0 \
     --hash=sha256:2b2f1d2d42ec152ca90ccb5682f3e051fb55986e1b170ebde472b133713e7085 \
     --hash=sha256:6f5fef59cb5b3708321db7cca56aed8ad7e662853351e7991fcf60ec606d47a4
     # via pyhanko-certvalidator
-pika==1.4.4 \
-    --hash=sha256:48de960c97a93b55db06b8be4c53eb977c9c8a2754c57cdae9097abcbd70ce04 \
-    --hash=sha256:8cfc8b33a5cb16e733bd60cffca9732c0d1d761ecd80a89f34ed7df2cd38d6d6
+pika==1.5.0 \
+    --hash=sha256:339afb9b2f55b31e03ebd1d96308e72e1d1d8e0e2c4ccea57d0f3d72fd10f333 \
+    --hash=sha256:bc474e3ffbfd8aeafa0ae05709e54b6d4bda13cb4cfeed8a8413df71e0f7f97a
     # via -r requirements.in
 propcache==0.5.4 \
     --hash=sha256:004e685b315646c410771836e72a44f143bbe624f29653a42687815069a303d5 \
@@ -1051,9 +1051,9 @@ pycparser==3.12 \
     --hash=sha256:a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e \
     --hash=sha256:f03387877eab82ce01bbdfd0ba7252ee55a90b1c708d5129e2ce915475cf1db6
     # via cffi
-pyhanko==0.38.0 \
-    --hash=sha256:267d6d3fa460b0f0e9c5362a2d7979dccbe1e6b1f8d89ba0818dd0c45b5f300e \
-    --hash=sha256:60abfdf6114e4ad64bb413491848af4a276231b563cb9f268e8dbfbcd47e586f
+pyhanko==0.38.2 \
+    --hash=sha256:041051105ddf3ace6571605ddccae0f3e444a6e99f0bd54ec88281684282ad41 \
+    --hash=sha256:2c18ab33367ee8df2df81637a2a321951d769ed7194d9c5aa04a5b5041c33d82
     # via -r requirements.in
 pyhanko-certvalidator==0.33.0 \
     --hash=sha256:72d3b830c0427a7aae45873ba7b4e34cb86caed451eff9dfb4394a69e93bb169 \
