@@ -21,7 +21,7 @@ services:
     security_opt: [no-new-privileges:true]
 
   clamav:
-    image: clamav/clamav:1.5.4@sha256:6d87c712e3391e13c1ba6e05dfb074d4b1ddb5a6834b23bb9da990d2a4ef042a
+    image: clamav/clamav:1.5.5@sha256:12177441d1b40cef3c47b44c4090d59d4babc4c67bedd5af0fa315e603aa6dd8
     container_name: scanloom-clamav
     volumes:
       - ${VOLUMES_ROOT}/scanloom/clamav:/var/lib/clamav
