@@ -1,7 +1,7 @@
 name: ${SCANLOOM_PROJECT_NAME:-scanloom}
 services:
   db:
-    image: postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
+    image: postgres:19-alpine@sha256:cac45fb483caee3668946088a1c0532db89d5285c28dbfeac889b4068296e06f
     container_name: scanloom-db
     environment:
       POSTGRES_DB: scanloom
