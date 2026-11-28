@@ -4,7 +4,7 @@
 # Regenerate requirements.txt after a change (docs/music.md, clipseerr).
 fastapi==0.165.0
 uvicorn[standard]==0.54.0
-httpx==0.28.1
+httpx==0.29.0
 requests==2.34.2
 # The language of a song's lyrics (catalog/language.py): small, pure Python, and plenty for a page of words.
 langdetect==1.0.9

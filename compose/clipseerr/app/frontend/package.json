@@ -14,7 +14,7 @@
     "@tanstack/react-query": "5.108.4",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
-    "lucide-react": "1.80.0",
+    "lucide-react": "1.81.0",
     "radix-ui": "1.8.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
@@ -23,13 +23,13 @@
     "tailwind-merge": "3.7.1"
   },
   "devDependencies": {
-    "@scalar/api-reference": "1.84.0",
+    "@scalar/api-reference": "1.85.0",
     "@tailwindcss/vite": "4.3.5",
     "@types/react": "19.3.3",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.3.0",
     "tailwindcss": "4.3.5",
     "typescript": "7.0.2",
-    "vite": "8.3.8"
+    "vite": "8.4.0"
   }
 }
